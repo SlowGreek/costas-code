@@ -17,6 +17,7 @@ import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { setSessionYolo } from '@/lib/yolo-session'
 import { openCommandPalettePage } from '@/store/command-palette'
 import { setComposerDraft } from '@/store/composer'
+import { refreshGoalStatus } from '@/store/composer-status'
 import { dismissNotification, notify, notifyError } from '@/store/notifications'
 import { setPetScale } from '@/store/pet-gallery'
 import { $petGenInput, openPetGenerate } from '@/store/pet-generate'
@@ -175,6 +176,10 @@ export function useSlashCommand(deps: SlashCommandDeps) {
         const handleDispatch = async (
           dispatch: NonNullable<ReturnType<typeof parseCommandDispatch>>
         ): Promise<void> => {
+          if (name === 'goal') {
+            await refreshGoalStatus(sessionId)
+          }
+
           if (dispatch.type === 'exec' || dispatch.type === 'plugin') {
             renderSlashOutput(dispatch.output ?? '(no output)')
 

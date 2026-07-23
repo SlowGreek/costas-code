@@ -122,6 +122,34 @@ def test_goal_set_returns_send_with_notice(server, session):
     assert mgr.state.status == "active"
 
 
+def test_goal_status_rpc_returns_structured_state(server, session):
+    sid, _, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship the release", session_id=sid)
+
+    r = _call(server, "goal.status", session_id=sid)
+
+    assert r["result"]["goal"] == {
+        "goal": "ship the release",
+        "status": "active",
+        "turns_used": 0,
+        "max_turns": 20,
+        "last_reason": None,
+        "paused_reason": None,
+        "blocked_reason": None,
+        "waiting_reason": None,
+    }
+
+
+def test_goal_status_rpc_returns_none_after_clear(server, session):
+    sid, _, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship the release", session_id=sid)
+    _call(server, "command.dispatch", name="goal", arg="clear", session_id=sid)
+
+    r = _call(server, "goal.status", session_id=sid)
+
+    assert r["result"]["goal"] is None
+
+
 def test_goal_pause_after_set(server, session):
     sid, session_key, _ = session
     _call(server, "command.dispatch", name="goal", arg="write a story", session_id=sid)
@@ -282,3 +310,199 @@ moa:
 
 def test_pending_input_commands_includes_moa(server):
     assert "moa" in server._PENDING_INPUT_COMMANDS
+
+
+# ── /subgoal on the TUI (R6) ──────────────────────────────────────────
+
+
+def test_pending_input_commands_includes_subgoal(server):
+    """Guard: /subgoal must route through _PENDING_INPUT_COMMANDS so slash.exec
+    dispatches it to command.dispatch (the slash worker has no _pending_input)."""
+    assert "subgoal" in server._PENDING_INPUT_COMMANDS
+
+
+def test_subgoal_requires_active_goal(server, session):
+    sid, _, _ = session
+    r = _call(server, "command.dispatch", name="subgoal", arg="write tests", session_id=sid)
+    assert r["result"]["type"] == "exec"
+    assert "No active goal" in r["result"]["output"]
+
+
+def test_subgoal_add_list_and_remove(server, session):
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship the feature", session_id=sid)
+
+    # Add
+    r = _call(server, "command.dispatch", name="subgoal", arg="write tests", session_id=sid)
+    assert "Added subgoal 1" in r["result"]["output"]
+
+    from hermes_cli.goals import GoalManager
+    assert GoalManager(session_key).state.subgoals == ["write tests"]
+
+    # List (bare)
+    r = _call(server, "command.dispatch", name="subgoal", arg="", session_id=sid)
+    assert "write tests" in r["result"]["output"]
+
+    # Remove
+    r = _call(server, "command.dispatch", name="subgoal", arg="remove 1", session_id=sid)
+    assert "Removed subgoal 1" in r["result"]["output"]
+    assert GoalManager(session_key).state.subgoals == []
+
+
+def test_subgoal_clear(server, session):
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship it", session_id=sid)
+    _call(server, "command.dispatch", name="subgoal", arg="a", session_id=sid)
+    _call(server, "command.dispatch", name="subgoal", arg="b", session_id=sid)
+    r = _call(server, "command.dispatch", name="subgoal", arg="clear", session_id=sid)
+    assert "Cleared 2" in r["result"]["output"]
+
+    from hermes_cli.goals import GoalManager
+    assert GoalManager(session_key).state.subgoals == []
+
+
+# ── mid-run goal-set guard (R6) ───────────────────────────────────────
+
+
+def test_goal_set_rejected_while_running(server, session):
+    """Setting a NEW goal during an active turn is rejected (gateway parity)."""
+    sid, session_key, s = session
+    s["running"] = True
+    r = _call(server, "command.dispatch", name="goal", arg="brand new goal", session_id=sid)
+    assert r["result"]["type"] == "exec"
+    assert "Agent is running" in r["result"]["output"]
+
+    # No goal was set.
+    from hermes_cli.goals import GoalManager
+    assert GoalManager(session_key).state is None
+
+
+def test_goal_control_verbs_allowed_while_running(server, session):
+    """Control verbs (status/pause/clear) stay allowed mid-run."""
+    sid, session_key, s = session
+    # Set a goal while idle, then flip to running.
+    _call(server, "command.dispatch", name="goal", arg="ongoing goal", session_id=sid)
+    s["running"] = True
+
+    r = _call(server, "command.dispatch", name="goal", arg="status", session_id=sid)
+    assert r["result"]["type"] == "exec"
+    assert "ongoing goal" in r["result"]["output"]
+
+    r = _call(server, "command.dispatch", name="goal", arg="pause", session_id=sid)
+    assert "paused" in r["result"]["output"].lower()
+
+
+# ── blocked status render (R1) ────────────────────────────────────────
+
+
+def test_goal_blocked_status_is_honest(server, session):
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="deploy prod", session_id=sid)
+
+    from hermes_cli.goals import GoalManager
+    GoalManager(session_key).mark_blocked("needs prod credentials")
+
+    r = _call(server, "command.dispatch", name="goal", arg="status", session_id=sid)
+    out = r["result"]["output"]
+    assert "blocked" in out.lower()
+    assert "achieved" not in out.lower()
+    assert "✓ Goal done" not in out
+
+
+# ── Fix 2: stale goal-continuation race (fresh fail-closed DB recheck) ──
+
+
+def test_goal_active_in_db_true_for_active(server, session):
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship it", session_id=sid)
+    assert server._goal_active_in_db(session_key) is True
+
+
+def test_stale_goal_continuation_suppressed_after_clear(server, session):
+    """Deterministic race regression: a goal_followup decided while the goal
+    was active must NOT fire if the user /goal clear persists an inactive state
+    before dispatch. The dispatch guard re-reads the DB (fail-closed)."""
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship it", session_id=sid)
+    # goal_followup would have been decided here (goal active).
+    assert server._goal_active_in_db(session_key) is True
+
+    # User clears the goal in the window before dispatch (persists status=cleared).
+    from hermes_cli.goals import GoalManager
+
+    GoalManager(session_key).clear()
+
+    # The fresh recheck the dispatch performs now returns False → stale
+    # continuation is suppressed.
+    assert server._goal_active_in_db(session_key) is False
+
+
+def test_stale_goal_continuation_suppressed_after_pause(server, session):
+    sid, session_key, _ = session
+    _call(server, "command.dispatch", name="goal", arg="ship it", session_id=sid)
+    from hermes_cli.goals import GoalManager
+
+    GoalManager(session_key).pause()
+    assert server._goal_active_in_db(session_key) is False
+
+
+def test_goal_active_in_db_fail_closed_on_bad_key(server):
+    assert server._goal_active_in_db("") is False
+    assert server._goal_active_in_db("no-such-session") is False
+
+
+# ── Fix 1: foreground tool evidence reaches the verifier (TUI source shape) ──
+
+
+def test_tui_result_tool_evidence_reaches_verifier(server, session, hermes_home):
+    """The TUI feeds real tool/test results from the turn's agent result
+    (``result["messages"]``) into the second-stage verifier. Proven at the
+    goals seam using the exact evidence source _run_prompt_submit uses (that
+    function drives a full turn and isn't unit-testable, so we assert the data
+    flow it now performs)."""
+    sid, session_key, _ = session
+    from hermes_cli.goals import GoalManager, GoalContract, extract_recent_tool_evidence
+
+    mgr = GoalManager(session_key)
+    mgr.set("ship it", contract=GoalContract(verification="pytest passes"))
+
+    # A TUI-shaped agent result — what _run_prompt_submit receives from the turn.
+    result = {
+        "final_response": "All green — done.",
+        "messages": [
+            {"role": "tool", "name": "terminal", "content": "17 passed, 0 failed"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+    evidence = extract_recent_tool_evidence(
+        result.get("messages") if isinstance(result, dict) else None
+    )
+    assert any("17 passed" in e for e in evidence)
+
+    captured = {}
+
+    def _verifier(**kwargs):
+        captured["user"] = " ".join(
+            m.get("content", "") for m in kwargs.get("messages", []) if m.get("role") == "user"
+        )
+
+        class _M:
+            content = '{"confirmed": true, "reason": "17 passed shown"}'
+
+        class _C:
+            message = _M()
+
+        class _R:
+            choices = [_C()]
+
+        return _R()
+
+    from hermes_cli import goals as _goals
+
+    with patch.object(_goals, "judge_goal", return_value=("done", "looks done", False, None, False)), patch(
+        "agent.auxiliary_client.call_llm", side_effect=_verifier
+    ):
+        decision = mgr.evaluate_after_turn(result["final_response"], recent_evidence=evidence)
+
+    assert "17 passed" in (captured.get("user") or ""), "tool evidence must reach the verifier"
+    assert decision["verdict"] == "done"

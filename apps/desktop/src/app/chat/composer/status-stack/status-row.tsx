@@ -25,6 +25,14 @@ const TODO_GLYPHS: Record<Exclude<TodoStatus, 'in_progress' | 'pending'>, { icon
 // Left slot: braille spinner while running, otherwise a small status dot
 // (green = done, red = failed) so the slot is always filled and rows align.
 function leadingGlyph(item: ComposerStatusItem, s: Translations['statusStack']): ReactNode {
+  if (item.goalStatus === 'blocked') {
+    return <Codicon className="text-destructive/80" name="warning" size="0.8rem" />
+  }
+
+  if (item.goalStatus === 'paused') {
+    return <Codicon className="text-amber-500/80" name="debug-pause" size="0.8rem" />
+  }
+
   if (item.todoStatus === 'pending') {
     return (
       <span
@@ -135,6 +143,11 @@ export const StatusItemRow = memo(function StatusItemRow({ item, onDismiss, onOp
         {item.type === 'subagent' && item.currentTool && (
           <span className="shrink-0 truncate text-[0.62rem] leading-4 text-muted-foreground/70">
             {toolLabel(item.currentTool)}
+          </span>
+        )}
+        {item.type === 'goal' && item.detail && (
+          <span className="min-w-0 shrink truncate text-[0.62rem] leading-4 text-muted-foreground/70">
+            {item.detail}
           </span>
         )}
         {failed && typeof item.exitCode === 'number' && item.exitCode !== 0 && (

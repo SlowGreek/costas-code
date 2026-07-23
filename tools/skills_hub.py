@@ -3787,6 +3787,17 @@ def _load_hermes_index() -> Optional[dict]:
     We cache it locally for HERMES_INDEX_TTL seconds to avoid repeated
     downloads within a session.
     """
+    try:
+        from hermes_cli.config import load_config
+
+        skills_config = (load_config() or {}).get("skills", {})
+        if isinstance(skills_config, dict) and skills_config.get(
+            "hermes_index_enabled"
+        ) is False:
+            return None
+    except Exception:
+        pass
+
     # Check local cache
     hermes_index_cache_file = _hermes_index_cache_file()
     if hermes_index_cache_file.exists():

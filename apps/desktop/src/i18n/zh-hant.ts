@@ -1776,6 +1776,7 @@ export const zhHant = defineLocale({
   statusStack: {
     agents: '代理',
     background: count => `${count} 個背景任務`,
+    goal: '長期目標',
     subagents: count => `${count} 個子代理`,
     todos: (done, total) => `任務 ${done}/${total}`,
     running: '執行中',

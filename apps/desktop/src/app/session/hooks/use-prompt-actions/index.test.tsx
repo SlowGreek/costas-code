@@ -1403,6 +1403,28 @@ describe('usePromptActions redirectPrompt', () => {
     })
   })
 
+  it('places a steering correction before the active assistant reply', async () => {
+    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const capturedStates: Record<string, unknown>[] = []
+    let handle: HarnessHandle | null = null
+
+    await actRender(
+      <Harness
+        onReady={h => (handle = h)}
+        onSeedState={state => capturedStates.push(state)}
+        refreshSessions={async () => undefined}
+        requestGateway={requestGateway}
+        seedMessages={[{ id: 'assistant-live', role: 'assistant', parts: [textPart('response already streaming')] }]}
+      />
+    )
+
+    expect(await handle!.redirectPrompt('new direction')).toBe(true)
+    expect((capturedStates.at(-1)?.messages as { role: string }[]).map(message => message.role)).toEqual([
+      'user',
+      'assistant'
+    ])
+  })
+
   it('reports rejection so the caller queues when the turn already ended', async () => {
     const requestGateway = vi.fn(async () => ({ status: 'rejected' }) as never)
 

@@ -30,14 +30,10 @@ export const normalizeStatusBar = (raw: unknown): StatusBarMode =>
 
 const BUSY_MODES = new Set<BusyInputMode>(['interrupt', 'queue', 'steer'])
 
-// TUI defaults to `queue` even though the framework default
-// (`hermes_cli/config.py`) is `interrupt`.  Rationale: in a full-screen
-// TUI you're typically authoring the next prompt while the agent is
-// still streaming, and an unintended interrupt loses work.  Set
-// `display.busy_input_mode: interrupt` (or `steer`) explicitly to
-// opt out per-config; CLI / messaging adapters keep their `interrupt`
-// default unchanged.
-const TUI_BUSY_DEFAULT: BusyInputMode = 'queue'
+// Costas Code treats a follow-up typed during an active turn as steering by
+// default. Users can opt into queue or interrupt semantics with /busy or
+// display.busy_input_mode.
+const TUI_BUSY_DEFAULT: BusyInputMode = 'steer'
 
 export const normalizeBusyInputMode = (raw: unknown): BusyInputMode => {
   if (typeof raw !== 'string') {

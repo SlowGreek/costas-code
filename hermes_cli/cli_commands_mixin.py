@@ -2620,7 +2620,7 @@ class CLICommandsMixin:
             /busy status        Show current busy input mode
             /busy queue         Queue input for the next turn instead of interrupting
             /busy steer         Inject Enter mid-run via /steer (after next tool call)
-            /busy interrupt     Redirect the current run on Enter (default)
+            /busy interrupt     Redirect the current run on Enter
         """
         from cli import _ACCENT, _DIM, _RST, _cprint, save_config_value
         parts = cmd.strip().split(maxsplit=1)

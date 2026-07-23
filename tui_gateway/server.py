@@ -435,7 +435,7 @@ def _load_busy_input_mode() -> str:
     if not isinstance(display, dict):
         display = {}
     raw = str(display.get("busy_input_mode", "") or "").strip().lower()
-    return raw if raw in {"queue", "steer", "interrupt"} else "interrupt"
+    return raw if raw in {"queue", "steer", "interrupt"} else "steer"
 
 
 def _load_interim_assistant_messages() -> bool:
@@ -9031,6 +9031,42 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"output": "\n".join(lines)})
 
 
+@method("goal.status")
+def _(rid, params: dict) -> dict:
+    """Return the session's native Goal state for structured clients."""
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+
+    assert session is not None
+    key = session.get("session_key") or params.get("session_id") or ""
+    try:
+        from hermes_cli.goals import GoalManager
+
+        manager = GoalManager(session_id=key)
+        state = manager.state if manager.has_goal() else None
+        if state is None:
+            return _ok(rid, {"goal": None})
+
+        return _ok(
+            rid,
+            {
+                "goal": {
+                    "goal": state.goal,
+                    "status": state.status,
+                    "turns_used": state.turns_used,
+                    "max_turns": state.max_turns,
+                    "last_reason": state.last_reason,
+                    "paused_reason": state.paused_reason,
+                    "blocked_reason": state.blocked_reason,
+                    "waiting_reason": state.waiting_reason,
+                }
+            },
+        )
+    except Exception as exc:
+        return _err(rid, 5030, f"goals unavailable: {exc}")
+
+
 @method("session.history")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
@@ -10333,6 +10369,28 @@ def _start_notification_poller(sid: str, session: dict) -> threading.Event:
     return stop
 
 
+def _goal_active_in_db(session_key: str) -> bool:
+    """Fresh, fail-closed check that a /goal is STILL active in the DB.
+
+    Mirrors ``gateway/run.py::_goal_still_active_for_session``. Used to suppress
+    a STALE goal continuation: between the moment ``_run_prompt_submit`` decides
+    a ``goal_followup`` and the moment it dispatches it, a user ``/goal
+    pause|clear`` can persist an inactive/terminal state to the DB while
+    ``session["running"]`` is still False — the running check alone would then
+    fire a continuation for a goal that no longer exists. Returns False on any
+    error or an empty key (fail-closed — never fire a continuation we can't
+    prove is still wanted).
+    """
+    if not session_key:
+        return False
+    try:
+        from hermes_cli.goals import GoalManager
+
+        return bool(GoalManager(session_id=session_key).is_active())
+    except Exception:
+        return False
+
+
 def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
     with session["history_lock"]:
         history = list(session["history"])
@@ -10677,13 +10735,31 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                         if goal_mgr.is_active():
                             try:
                                 from hermes_cli.goals import gather_background_processes as _gather_bg
-                                _bg_procs = _gather_bg()
+                                # Scope to THIS TUI session so the judge never
+                                # sees or WAITs on another session's background
+                                # jobs. TUI binds get_current_session_key() to
+                                # session["session_key"] for the turn, so its
+                                # background processes carry that key.
+                                _bg_procs = _gather_bg(session_key=sid_key)
                             except Exception:
                                 _bg_procs = None
+                            # Foreground tool/test results from this turn feed
+                            # the second-stage completion verifier — without
+                            # them a verified contract goal can loop/no-progress
+                            # because its passing tests are invisible.
+                            _goal_evidence = None
+                            try:
+                                from hermes_cli.goals import extract_recent_tool_evidence
+                                _goal_evidence = extract_recent_tool_evidence(
+                                    result.get("messages") if isinstance(result, dict) else None
+                                )
+                            except Exception:
+                                _goal_evidence = None
                             decision = goal_mgr.evaluate_after_turn(
                                 raw,
                                 user_initiated=True,
                                 background_processes=_bg_procs,
+                                recent_evidence=_goal_evidence,
                             )
                             verdict_msg = decision.get("message") or ""
                             if verdict_msg:
@@ -10700,6 +10776,33 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                     print(
                         f"[tui_gateway] goal continuation hook failed: "
                         f"{type(_goal_exc).__name__}: {_goal_exc}",
+                        file=sys.stderr,
+                    )
+
+            # Interrupted turn: PAUSE any active goal (the TUI analog of the CLI
+            # Ctrl+C guard and the gateway /stop handler) so a user-stopped turn
+            # is never judged/continued on partial output and the goal stays
+            # recoverable via /goal resume. A plain "error" status (transient API
+            # failure) is only skipped above — not paused — matching the gateway.
+            # Scoped to this session; best-effort.
+            if status == "interrupted":
+                try:
+                    from hermes_cli.goals import GoalManager as _GoalMgrPause
+
+                    _pause_sid = session.get("session_key") or ""
+                    if _pause_sid:
+                        _pause_mgr = _GoalMgrPause(session_id=_pause_sid)
+                        if _pause_mgr.has_goal():
+                            _pause_mgr.pause(reason="user-interrupted")
+                            _emit(
+                                "status.update",
+                                sid,
+                                {"kind": "goal", "text": _pause_mgr.status_line()},
+                            )
+                except Exception as _goal_pause_exc:
+                    print(
+                        f"[tui_gateway] goal interrupt-pause failed: "
+                        f"{type(_goal_pause_exc).__name__}: {_goal_pause_exc}",
                         file=sys.stderr,
                     )
 
@@ -10852,6 +10955,15 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
         # prompt.submit sets running=True under the history_lock and
         # we check that guard before re-firing.
         if goal_followup:
+            # Stale-continuation guard: between deciding goal_followup above and
+            # dispatching it here, a user /goal pause|clear can persist a
+            # terminal/inactive goal to the DB while session["running"] is
+            # False — the running check alone would then fire a continuation for
+            # a goal that no longer exists. Re-read the goal from the DB and
+            # only fire if it is STILL active (fail-closed; mirrors the
+            # gateway's _goal_still_active_for_session recheck).
+            if not _goal_active_in_db(session.get("session_key") or ""):
+                return
             with session["history_lock"]:
                 if session.get("running"):
                     # User already sent something — their turn wins,
@@ -13569,6 +13681,7 @@ _PENDING_INPUT_COMMANDS: frozenset[str] = frozenset(
         "steer",
         "plan",
         "goal",
+        "subgoal",
         "moa",
         "undo",
         "learn",
@@ -14077,6 +14190,21 @@ def _(rid, params: dict) -> dict:
             )
 
         # Otherwise — treat the remaining text as the new goal.
+        # Reject setting/replacing a goal DURING an active turn, with the same
+        # semantics as the messaging gateway: control verbs (status/pause/
+        # resume/clear/stop/done) already returned above and stay allowed
+        # mid-run; a new goal must not race the running turn's continuation.
+        if session.get("running"):
+            return _ok(
+                rid,
+                {
+                    "type": "exec",
+                    "output": (
+                        "Agent is running — use /goal status / pause / clear "
+                        "mid-run, or /stop before setting a new goal."
+                    ),
+                },
+            )
         try:
             state = mgr.set(arg)
         except ValueError as exc:
@@ -14095,6 +14223,61 @@ def _(rid, params: dict) -> dict:
             rid,
             {"type": "send", "notice": notice, "message": state.goal},
         )
+
+    if name == "subgoal":
+        # /subgoal — manage the active goal's extra criteria. Safe mid-run:
+        # it only mutates the subgoals list the judge reads at the next turn
+        # boundary. Mirrors the CLI + gateway handlers so the TUI/Desktop
+        # surface the command the registry advertises (it is neither cli_only
+        # nor gateway_only).
+        if not session:
+            return _err(rid, 4001, "no active session")
+        try:
+            from hermes_cli.goals import GoalManager
+        except Exception as exc:
+            return _err(rid, 5030, f"goals unavailable: {exc}")
+        sid_key = session.get("session_key") or ""
+        if not sid_key:
+            return _err(rid, 4001, "no session key")
+        mgr = GoalManager(session_id=sid_key)
+        if not mgr.has_goal():
+            return _ok(rid, {"type": "exec", "output": "No active goal. Set one with /goal <text>."})
+
+        sub_arg = arg.strip()
+        if not sub_arg:
+            return _ok(rid, {"type": "exec", "output": f"{mgr.status_line()}\n{mgr.render_subgoals()}"})
+
+        tokens = sub_arg.split(None, 1)
+        verb = tokens[0].lower()
+        rest = tokens[1].strip() if len(tokens) > 1 else ""
+
+        if verb == "remove":
+            if not rest:
+                return _ok(rid, {"type": "exec", "output": "usage: /subgoal remove <n>"})
+            try:
+                idx = int(rest.split()[0])
+            except ValueError:
+                return _ok(rid, {"type": "exec", "output": "/subgoal remove: <n> must be an integer (1-based index)."})
+            try:
+                removed = mgr.remove_subgoal(idx)
+            except (IndexError, RuntimeError) as exc:
+                return _ok(rid, {"type": "exec", "output": f"/subgoal remove: {exc}"})
+            return _ok(rid, {"type": "exec", "output": f"✓ Removed subgoal {idx}: {removed}"})
+
+        if verb == "clear":
+            try:
+                prev = mgr.clear_subgoals()
+            except RuntimeError as exc:
+                return _ok(rid, {"type": "exec", "output": f"/subgoal clear: {exc}"})
+            out = f"✓ Cleared {prev} subgoal{'s' if prev != 1 else ''}." if prev else "No subgoals to clear."
+            return _ok(rid, {"type": "exec", "output": out})
+
+        try:
+            text = mgr.add_subgoal(sub_arg)
+        except (ValueError, RuntimeError) as exc:
+            return _ok(rid, {"type": "exec", "output": f"/subgoal: {exc}"})
+        idx = len(mgr.state.subgoals) if mgr.state else 0
+        return _ok(rid, {"type": "exec", "output": f"✓ Added subgoal {idx}: {text}"})
 
     if name == "undo":
         # /undo [N]: back up N user turns (default 1), soft-delete the

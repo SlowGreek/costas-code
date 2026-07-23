@@ -219,3 +219,171 @@ async def test_goal_verdict_survives_adapter_without_send(hermes_home):
             final_response="whatever",
         )
         await asyncio.sleep(0.05)
+
+
+# ── R5: interrupted / partial turns must not be judged or continued ────
+
+
+class _AsyncSessionStore:
+    def __init__(self, session_entry, store):
+        self._entry = session_entry
+        self._store = store
+
+    async def get_or_create_session(self, source):
+        return self._entry
+
+
+def test_post_turn_goal_should_judge_skips_interrupted():
+    from gateway.run import GatewayRunner
+
+    # Interrupted turn with partial text → must NOT judge.
+    should, text = GatewayRunner._post_turn_goal_should_judge(
+        {"final_response": "partial work so far", "interrupted": True}
+    )
+    assert should is False
+    assert text == "partial work so far"
+
+
+def test_post_turn_goal_should_judge_skips_failed():
+    from gateway.run import GatewayRunner
+
+    should, _ = GatewayRunner._post_turn_goal_should_judge(
+        {"final_response": "boom", "failed": True}
+    )
+    assert should is False
+
+
+def test_post_turn_goal_should_judge_skips_empty():
+    from gateway.run import GatewayRunner
+
+    should, _ = GatewayRunner._post_turn_goal_should_judge({"final_response": "   "})
+    assert should is False
+
+
+def test_post_turn_goal_should_judge_runs_on_clean_turn():
+    from gateway.run import GatewayRunner
+
+    should, text = GatewayRunner._post_turn_goal_should_judge(
+        {"final_response": "here is the finished result"}
+    )
+    assert should is True
+    assert "finished" in text
+
+
+@pytest.mark.asyncio
+async def test_stop_pauses_active_goal(hermes_home):
+    """A user /stop must PAUSE the goal loop (recoverable), not keep going."""
+    runner, adapter, session_entry, src = _make_runner_with_adapter()
+    runner._async_session_store = _AsyncSessionStore(session_entry, runner.session_store)
+
+    from hermes_cli.goals import GoalManager
+
+    GoalManager(session_entry.session_id).set("keep grinding")
+
+    await runner._pause_goal_for_interrupt(src, reason="user-stopped (/stop)")
+
+    mgr = GoalManager(session_entry.session_id)
+    assert mgr.state.status == "paused"
+    assert "stop" in (mgr.state.paused_reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_pause_for_interrupt_noop_without_goal(hermes_home):
+    """No active goal → interrupt-pause is a harmless no-op."""
+    runner, adapter, session_entry, src = _make_runner_with_adapter()
+    runner._async_session_store = _AsyncSessionStore(session_entry, runner.session_store)
+
+    # Must not raise even though no goal exists.
+    await runner._pause_goal_for_interrupt(src, reason="user-stopped")
+
+    from hermes_cli.goals import GoalManager
+
+    assert GoalManager(session_entry.session_id).state is None
+
+
+@pytest.mark.asyncio
+async def test_post_turn_continuation_scopes_background_to_session(hermes_home, monkeypatch):
+    """The gateway must scope background-process gathering to this session's
+    key so the judge never sees another session's jobs (R4)."""
+    runner, adapter, session_entry, src = _make_runner_with_adapter()
+
+    from hermes_cli.goals import GoalManager
+
+    GoalManager(session_entry.session_id).set("ship it")
+
+    captured = {}
+
+    def _fake_gather(task_id=None, session_key=None):
+        captured["session_key"] = session_key
+        return []
+
+    monkeypatch.setattr("hermes_cli.goals.gather_background_processes", _fake_gather)
+
+    with patch("hermes_cli.goals.judge_goal", return_value=("continue", "more", False, None, False)):
+        await runner._post_turn_goal_continuation(
+            session_entry=session_entry,
+            source=src,
+            final_response="partial progress",
+        )
+        await asyncio.sleep(0.05)
+
+    from gateway.session import build_session_key
+
+    assert captured.get("session_key") == build_session_key(src)
+
+
+@pytest.mark.asyncio
+async def test_foreground_tool_evidence_reaches_verifier(hermes_home):
+    """Fix 1: the gateway must forward THIS turn's real tool/test results into
+    the second-stage completion verifier — otherwise a verified contract goal
+    loops because its passing tests are invisible."""
+    runner, adapter, session_entry, src = _make_runner_with_adapter()
+
+    from hermes_cli.goals import GoalManager, GoalContract, extract_recent_tool_evidence
+
+    GoalManager(session_entry.session_id).set(
+        "ship it", contract=GoalContract(verification="pytest passes")
+    )
+
+    # A real turn transcript (what run_conversation returns in _agent_result):
+    # a tool result proving the tests passed, plus the agent's prose claim.
+    messages = [
+        {"role": "user", "content": "run the tests"},
+        {"role": "tool", "name": "terminal", "content": "42 passed, 0 failed in 3.2s"},
+        {"role": "assistant", "content": "All tests pass — done."},
+    ]
+    evidence = extract_recent_tool_evidence(messages)
+    assert any("42 passed" in e for e in evidence)
+
+    captured = {}
+
+    def _verifier(**kwargs):
+        # judge is patched out, so the only call_llm here is the verifier.
+        captured["user"] = " ".join(
+            m.get("content", "") for m in kwargs.get("messages", []) if m.get("role") == "user"
+        )
+
+        class _M:
+            content = '{"confirmed": true, "reason": "42 passed shown"}'
+
+        class _C:
+            message = _M()
+
+        class _R:
+            choices = [_C()]
+
+        return _R()
+
+    with patch("hermes_cli.goals.judge_goal", return_value=("done", "looks done", False, None, False)), patch(
+        "agent.auxiliary_client.call_llm", side_effect=_verifier
+    ):
+        await runner._post_turn_goal_continuation(
+            session_entry=session_entry,
+            source=src,
+            final_response="All tests pass — done.",
+            recent_evidence=evidence,
+        )
+        await asyncio.sleep(0.05)
+
+    assert "42 passed" in (captured.get("user") or ""), "tool evidence must reach the verifier prompt"
+    assert GoalManager(session_entry.session_id).state.status == "done"

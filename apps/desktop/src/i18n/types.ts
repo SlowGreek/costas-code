@@ -1566,6 +1566,7 @@ export interface Translations {
   statusStack: {
     agents: string
     background: (count: number) => string
+    goal: string
     subagents: (count: number) => string
     todos: (done: number, total: number) => string
     running: string

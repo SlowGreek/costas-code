@@ -508,7 +508,7 @@ def load_cli_config() -> Dict[str, Any]:
             "show_reasoning": True,
             "reasoning_full": False,
             "streaming": True,
-            "busy_input_mode": "interrupt",
+            "busy_input_mode": "steer",
             "persistent_output": True,
             "persistent_output_max_lines": 200,
             # Print a one-line summary of resolved modal prompts (approval /
@@ -3819,7 +3819,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # busy_input_mode: "interrupt" (Enter redirects current run),
         # "queue" (Enter queues for next turn), or "steer" (Enter injects
         # mid-run via /steer, arriving after the next tool call).
-        _bim = str(CLI_CONFIG["display"].get("busy_input_mode", "interrupt")).strip().lower()
+        _bim = str(CLI_CONFIG["display"].get("busy_input_mode", "steer")).strip().lower()
         if _bim == "queue":
             self.busy_input_mode = "queue"
         elif _bim == "steer":
@@ -9742,14 +9742,23 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
         try:
             from hermes_cli.goals import gather_background_processes as _gather_bg
-            _bg_procs = _gather_bg()
+            # Scope to THIS CLI session so the judge never sees — or parks a
+            # WAIT on — background jobs belonging to another session. The CLI
+            # binds get_current_session_key() to self.session_id before each
+            # turn, so background processes it spawns carry that key.
+            _bg_procs = _gather_bg(session_key=getattr(self, "session_id", "") or "")
         except Exception:
             _bg_procs = None
+
+        # Recent real tool/command evidence for the second-stage completion
+        # verifier (actual results, not the agent's prose).
+        _recent_evidence = self._recent_goal_evidence()
 
         decision = mgr.evaluate_after_turn(
             last_response,
             user_initiated=True,
             background_processes=_bg_procs,
+            recent_evidence=_recent_evidence,
         )
         msg = decision.get("message") or ""
         if msg:
@@ -9762,6 +9771,44 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     self._pending_input.put(prompt)
                 except Exception as exc:
                     logging.debug("goal continuation enqueue failed: %s", exc)
+
+    def _recent_goal_evidence(self, max_items: int = 6, max_chars: int = 1500) -> list:
+        """Extract recent tool/command RESULTS from the live transcript.
+
+        Feeds the second-stage completion verifier with real artifacts (tool
+        outputs) rather than the agent's own prose. Delegates to the shared
+        ``extract_recent_tool_evidence`` helper so the CLI, gateway, and TUI
+        all build the same evidence packet. Best-effort and never raises.
+        """
+        try:
+            from hermes_cli.goals import extract_recent_tool_evidence
+            return extract_recent_tool_evidence(
+                self.conversation_history or [],
+                max_items=max_items,
+                max_chars=max_chars,
+            )
+        except Exception:
+            return []
+
+    def _maybe_wake_parked_goal(self) -> None:
+        """Autonomously wake a goal parked on a timed / bare-pid barrier.
+
+        Called from the CLI's existing idle drain loop (not a new poll loop):
+        once a wait barrier is satisfied — the pid exited, the deadline passed,
+        or the bounded max-park elapsed — enqueue the continuation prompt so the
+        goal advances without needing a user message. Session-backed waits wake
+        through the process-completion path; this is the backstop for timed /
+        bare-pid waits and the max-park ceiling. Never raises.
+        """
+        try:
+            mgr = self._get_goal_manager()
+            if mgr is None:
+                return
+            prompt = mgr.poll_wake()
+            if prompt:
+                self._pending_input.put(prompt)
+        except Exception as exc:
+            logging.debug("goal wake poll failed: %s", exc)
 
 
 
@@ -15263,6 +15310,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                             # and watch pattern matches) while agent is idle.
                             try:
                                 self._drain_process_notifications("cli-idle")
+                            except Exception:
+                                pass
+                            # Autonomously wake a goal parked on a timed / bare-pid
+                            # wait once its barrier (or the bounded max-park) clears.
+                            try:
+                                self._maybe_wake_parked_goal()
                             except Exception:
                                 pass
                         continue

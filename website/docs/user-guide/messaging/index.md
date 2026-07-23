@@ -363,14 +363,14 @@ Send a message while the agent is working to correct the active turn:
 
 ### Queue vs interrupt vs steer (busy-input mode)
 
-By default, messaging a busy agent redirects its active turn. Two other modes are available:
+By default, messaging a busy Costas Code agent steers its active turn. Queue and interrupt modes remain available:
 
 - `queue` — follow-up messages wait and run as the next turn after the current task finishes.
 - `steer` — follow-up messages are injected into the current run via `/steer`, arriving at the agent after the next tool call. No interrupt, no new turn. Falls back to `queue` behavior if the agent hasn't started yet.
 
 ```yaml
 display:
-  busy_input_mode: steer   # or queue, or interrupt (default)
+  busy_input_mode: steer   # Costas Code default; or queue / interrupt
   busy_ack_enabled: true   # set to false to suppress the ⚡/⏳/⏩ chat reply entirely
 ```
 

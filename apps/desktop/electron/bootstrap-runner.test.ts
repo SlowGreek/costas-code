@@ -12,6 +12,7 @@ import {
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,
+  installScriptUrl,
   isPinnedCommit,
   resolveInstallScript,
   resolveMarkerPinnedCommit,
@@ -20,6 +21,13 @@ import {
 
 const SCRIPT_NAME = process.platform === 'win32' ? 'install.ps1' : 'install.sh'
 const ZERO_COMMIT = '0000000000000000000000000000000000000000'
+
+test('packaged bootstrap downloads the Costas Code installer', () => {
+  assert.equal(
+    installScriptUrl('abc123', 'install.sh'),
+    'https://raw.githubusercontent.com/SlowGreek/costas-code/abc123/scripts/install.sh'
+  )
+})
 
 function mkTmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-bootstrap-test-'))

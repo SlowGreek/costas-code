@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $backgroundStatusBySession, dismissBackgroundProcess, reconcileBackgroundProcesses } from './composer-status'
+import {
+  $backgroundStatusBySession,
+  $goalStatusBySession,
+  $statusItemsBySession,
+  dismissBackgroundProcess,
+  groupStatusItems,
+  reconcileBackgroundProcesses,
+  reconcileGoalStatus
+} from './composer-status'
 
 const SID = 'sess-1'
 
@@ -149,5 +157,58 @@ describe('reconcileBackgroundProcesses', () => {
     vi.advanceTimersByTime(5_000)
 
     expect(itemsOf('sess-arm')).toEqual([])
+  })
+})
+
+describe('goal status integration', () => {
+  beforeEach(() => {
+    $goalStatusBySession.set({})
+  })
+
+  it('pins an active native Goal in the composer status stack', () => {
+    reconcileGoalStatus(SID, {
+      blocked_reason: null,
+      goal: 'Ship Costas Code',
+      last_reason: 'Packaging is still running',
+      max_turns: 20,
+      paused_reason: null,
+      status: 'active',
+      turns_used: 3,
+      waiting_reason: null
+    })
+
+    expect($statusItemsBySession.get()[SID]).toEqual([
+      expect.objectContaining({
+        detail: '3/20 · Packaging is still running',
+        goalStatus: 'active',
+        state: 'running',
+        title: 'Ship Costas Code',
+        type: 'goal'
+      })
+    ])
+    expect(groupStatusItems($statusItemsBySession.get()[SID] ?? []).map(group => group.type)).toEqual(['goal'])
+  })
+
+  it('renders blocked Goals as failed and clears absent Goals', () => {
+    reconcileGoalStatus(SID, {
+      blocked_reason: 'Needs signing credentials',
+      goal: 'Ship Costas Code',
+      last_reason: null,
+      max_turns: 20,
+      paused_reason: null,
+      status: 'blocked',
+      turns_used: 4,
+      waiting_reason: null
+    })
+
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      detail: '4/20 · Needs signing credentials',
+      goalStatus: 'blocked',
+      state: 'failed'
+    })
+
+    reconcileGoalStatus(SID, null)
+    expect($goalStatusBySession.get()).toEqual({})
+    expect($statusItemsBySession.get()[SID]).toBeUndefined()
   })
 })

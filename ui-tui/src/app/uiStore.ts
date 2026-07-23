@@ -12,7 +12,7 @@ const buildUiState = (): UiState => ({
   batteryStatus: null,
   bgTasks: new Set(),
   busy: false,
-  busyInputMode: 'queue',
+  busyInputMode: 'steer',
   compact: false,
   detailsMode: 'collapsed',
   detailsModeCommandOverride: false,

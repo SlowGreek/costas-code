@@ -33,7 +33,7 @@ What you'll see:
 2. **Turn 1 runs** — Hermes starts working as if you'd sent the goal as a normal message.
 3. **Judge runs** — after the turn, the judge model decides `done` or `continue`.
 4. **Loop fires if needed** — if `continue`, you'll see `↻ Continuing toward goal (1/20): <judge's reason>` and Hermes takes the next step automatically.
-5. **Terminates** — eventually you see either `✓ Goal achieved: <reason>` or `⏸ Goal paused — N/20 turns used`.
+5. **Terminates** — eventually you see `✓ Goal achieved: <reason>` (completion, after second-stage verification), `🚧 Goal blocked — needs you: <reason>` (it needs your input), or `⏸ Goal paused — N/20 turns used` (budget or no-progress).
 
 ## Commands
 
@@ -43,13 +43,15 @@ What you'll see:
 | `/goal draft <text>` | Draft a structured completion contract from a plain-language objective, then set it. See [Completion contracts](#completion-contracts). |
 | `/goal show` | Print the active goal's completion contract. |
 | `/goal` or `/goal status` | Show the current goal, its status, and turns used. |
-| `/goal pause` | Stop the auto-continuation loop without clearing the goal. |
-| `/goal resume` | Resume the loop (resets the turn counter back to zero). |
+| `/goal pause` | Stop the auto-continuation loop without clearing the goal. (Refused on a `done`/`cleared` goal.) |
+| `/goal resume` | Resume the loop from `paused` or `blocked` (resets the turn counter back to zero). Refused on a `done`/`cleared` goal — those are terminal. |
 | `/goal clear` | Drop the goal entirely. |
 | `/goal wait <pid> [reason]` | Park the loop on a background process — it stops re-poking the agent every turn while the process runs, and auto-resumes when it exits. |
 | `/goal unwait` | Drop the wait barrier and resume the loop immediately. |
 
 Works identically on the CLI and every gateway platform (Telegram, Discord, Slack, Matrix, Signal, WhatsApp, SMS, iMessage, Webhook, API server, and the web dashboard).
+
+In the desktop app, the active standing goal is also pinned in the composer status stack with its turn budget, latest judge reason, and active/paused/blocked state. The card is backed by the same native `GoalManager` state as `/goal status`; it is not a separate desktop-only goal implementation.
 
 ## Completion contracts
 
@@ -125,7 +127,7 @@ You don't type anything for this — it's the judge's decision, made from the pr
 | `/goal wait <pid> [reason]` | Manually park the loop until the process with that PID exits. |
 | `/goal unwait` | Clear any wait barrier (judge- or manually-set) and resume immediately. |
 
-The barrier (pid- or time-based) is persisted with the goal in `SessionDB.state_meta`, so it survives `/resume`. `/goal pause`, `/goal resume`, and `/goal clear` all drop it. If the PID is already dead when the barrier is set (or dies while parked), or the time deadline passes, the barrier clears on the next check — a stale barrier can never wedge the loop.
+The barrier (pid- or time-based) is persisted with the goal in `SessionDB.state_meta`, so it survives `/resume`. `/goal pause`, `/goal resume`, and `/goal clear` all drop it. If the PID is already dead when the barrier is set (or dies while parked), or the time deadline passes, the barrier clears on the next check — a stale barrier can never wedge the loop. Every wait also carries a **bounded max-park ceiling** (`goals.max_park_seconds`, default 30 min): even a pid that never exits or a watcher that never fires is force-released by then, and the goal wakes on its own. Timed and bare-pid waits wake **autonomously** through Hermes' existing idle/notification loop — you don't have to send a message to un-park them; where possible a bare-pid wait is upgraded to a session-backed wait so it wakes the instant the process signals.
 
 Typical flow: the agent pushes a PR, starts a CI watcher with `terminal(background=true, notify_on_complete=true)`, and reports "watching CI." The judge sees the watcher process still running, returns `wait` on its pid, and the loop goes quiet — then picks back up the instant CI finishes and judges the goal against the actual result.
 
@@ -136,10 +138,23 @@ Typical flow: the agent pushes a PR, starts a CI watcher with `terminal(backgrou
 After every turn, Hermes calls an auxiliary model with:
 
 - The standing goal text
-- The agent's most recent final response (last ~4 KB of text)
-- A system prompt telling the judge to reply with strict JSON: `{"done": <bool>, "reason": "<one-sentence rationale>"}`
+- The agent's most recent final response (last ~4 KB of text), **fenced as untrusted data** — the judge is explicitly told never to follow any instruction inside the response or background-process output, so a task can't prompt-inject the judge into a false "done".
+- Any live background processes, also fenced as untrusted.
+- A system prompt telling the judge to reply with strict JSON and one of four verdicts: `done`, `blocked`, `continue`, or `wait`. The legacy `{"done": <bool>, "reason": "…"}` shape is still accepted.
 
-The judge is deliberately conservative: it marks a goal `done` only when the response **explicitly** confirms the goal is complete, when the final deliverable is clearly produced, or when the goal is unachievable/blocked (treated as DONE with a block reason so we don't burn budget on impossible tasks).
+The judge is deliberately conservative: it marks a goal `done` only when the response shows **concrete evidence** the goal is complete (a command result, file contents, a test/benchmark output) — not a bare "looks done" claim. If the agent is stuck needing you (missing input, a decision, credentials) or the goal is unachievable, the judge returns **`blocked`** instead — an honest "not achieved, needs you" state, never dressed up as success. The judge is also given explicit **test-theater** guidance: it rejects hardcoded expectations, mocking the unit under test, assertions fitted to after-the-fact output, and skipped/ignored tests dressed up as passing (honest fakes at a real environment boundary are fine).
+
+### Blocked ≠ achieved
+
+A `blocked` goal is a durable, honest control state: the loop stops (like paused) but the UX is truthful — you'll see `🚧 Goal blocked — needs you: <reason>`, never `✓ Goal achieved`. Reply with what it needs, then `/goal resume` to unblock and continue. Blocked goals are recoverable; `done` and `cleared` goals are **terminal** — `/goal resume` and `/goal pause` refuse them, and a fresh session never resurrects a completed or cleared goal.
+
+### Second-stage completion verification
+
+A single "I'm done" from the model is not proof. When the first-stage judge returns `done`, Hermes runs a cheap, cache-safe **second-stage verifier** over the *actual* evidence available this session — recent tool/command results and background-process output — before accepting completion. It **fails closed**: if the evidence doesn't corroborate the claim (or the verifier itself can't run), the goal is **not** marked done and the loop keeps working. For a goal with a concrete `verification` requirement, unshown proof means "not done"; for a pure free-form/prose goal with nothing to independently check, the verifier steps aside (it never fabricates evidence that doesn't exist). Turn it off with `goals.verify_completion: false` to trust the first-stage judge alone.
+
+### No-progress detection
+
+If the judge returns `continue` with the *same gap* turn after turn — the agent is spinning, not closing the hole — Hermes auto-pauses and escalates instead of grinding the whole budget on one stuck step. The prior turn's gap is fed back into the next judge call so it can tell real progress from a reworded repeat, and repeats are matched by a normalized fingerprint (not a brittle exact-string compare). Tune the threshold with `goals.max_no_progress` (default 4).
 
 ### Fail-open semantics
 
@@ -181,6 +196,17 @@ goals:
   # /goal resume. Default 20. Lower this if you want tighter loops;
   # raise it for long-running refactors.
   max_turns: 20
+  # Run a cheap second-stage verifier over real tool/command evidence
+  # before accepting a "done" verdict (fails closed). Set false to trust
+  # the first-stage judge alone. Default true.
+  verify_completion: true
+  # Hard ceiling (seconds) on how long ANY /goal wait barrier parks the
+  # loop before it is force-released, so a wait that never fires can't
+  # wedge the goal. Default 1800 (30 min).
+  max_park_seconds: 1800
+  # Auto-pause after this many turns in a row with no observable progress
+  # on the same gap. Default 4.
+  max_no_progress: 4
 ```
 
 ### Choosing the judge model
@@ -238,7 +264,9 @@ No judge is perfect. Two failure modes to watch for:
 
 **False negative — judge says continue when the goal is actually done.** The turn budget catches this. You'll see `⏸ Goal paused` and can `/goal clear` or just send a new message.
 
-**False positive — judge says done when work remains.** You'll see `✓ Goal achieved` but you know better. Send a follow-up message to continue, or re-set the goal more precisely: `/goal <more specific text>`. The judge's system prompt is deliberately conservative to make false positives rarer than false negatives.
+**False positive — judge says done when work remains.** The second-stage verifier catches most of these before you ever see `✓ Goal achieved`: an uncorroborated "done" is downgraded back to `continue`. If one still slips through, send a follow-up message to continue, or re-set the goal more precisely: `/goal <more specific text>`. The judge's system prompt is deliberately conservative (and evidence-driven) to make false positives rarer than false negatives.
+
+**Needs-you — judge says blocked.** If Hermes stops with `🚧 Goal blocked`, it has decided it genuinely can't proceed without you (missing input, a decision, credentials, or an unachievable ask). Give it what it needs and `/goal resume`, or `/goal clear` if the objective no longer makes sense.
 
 If you find a judge verdict unconvincing, the reason text in the `↻ Continuing toward goal` or `✓ Goal achieved` line tells you exactly what the judge saw. That's usually enough to diagnose whether the goal text was ambiguous or the model's response was.
 

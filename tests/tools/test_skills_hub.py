@@ -2523,6 +2523,26 @@ class TestLoadHermesIndex:
             f"index fetch must not request Brotli, got Accept-Encoding={accept!r}"
         )
 
+    def test_disabled_index_never_reads_cache_or_network(self, monkeypatch, tmp_path):
+        """Privacy-strict users can disable the Nous-hosted index entirely."""
+        import hermes_cli.config as config
+        import tools.skills_hub as hub
+
+        cache_file = self._isolate_cache(monkeypatch, tmp_path)
+        cache_file.write_text(json.dumps({"skills": [{"name": "cached"}]}))
+        monkeypatch.setattr(
+            config,
+            "load_config",
+            lambda: {"skills": {"hermes_index_enabled": False}},
+        )
+
+        def fail_get(*args, **kwargs):
+            raise AssertionError("disabled index must not make a network request")
+
+        monkeypatch.setattr(hub.httpx, "get", fail_get)
+
+        assert hub._load_hermes_index() is None
+
     def test_decoding_error_retries_uncompressed(self, monkeypatch, tmp_path):
         """A DecodingError on the first attempt retries with identity, not a blank hub."""
         import tools.skills_hub as hub

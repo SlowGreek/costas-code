@@ -227,13 +227,19 @@ function cachedScriptPath(hermesHome, commit) {
   return path.join(bootstrapCacheDir(hermesHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
 
+const DISTRIBUTION_REPO = 'SlowGreek/costas-code'
+
+function installScriptUrl(ref, scriptName = installScriptName()) {
+  return `https://raw.githubusercontent.com/${DISTRIBUTION_REPO}/${ref}/scripts/${scriptName}`
+}
+
 function downloadInstallScript(ref, destPath) {
   // Fetch from GitHub raw at the install ref. Normal production builds pass a
   // pinned SHA (immutable). Non-git fallback builds pass an unpinned branch
   // ref so local builds can still bootstrap without pretending the all-zero
   // placeholder is a real GitHub commit.
   const scriptName = installScriptName()
-  const url = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${ref}/scripts/${scriptName}`
+  const url = installScriptUrl(ref, scriptName)
 
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
@@ -1026,6 +1032,7 @@ export {
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,
+  installScriptUrl,
   isPinnedCommit,
   // Exposed for testability
   parseStageResult,

@@ -218,3 +218,111 @@ class TestInterruptFlagLifecycle:
             "runs — otherwise a prior turn's interrupt state leaks into the "
             "next turn's goal hook decision."
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 1 — scoped background evidence, autonomous wake, queued-user
+# preemption (behavioral, on the real _maybe_continue_goal_after_turn).
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestScopedBackgroundEvidence:
+    def test_gather_scoped_to_session(self, hermes_home):
+        """The CLI must scope background-process gathering to its own session
+        so the judge never sees another session's jobs."""
+        import uuid as _uuid
+
+        sid = f"sid-scope-{_uuid.uuid4().hex}"
+        cli, mgr = _make_cli_with_goal(sid)
+        cli.conversation_history = [
+            {"role": "assistant", "content": "did some work, more to go"},
+        ]
+
+        captured = {}
+
+        def _fake_gather(task_id=None, session_key=None):
+            captured["session_key"] = session_key
+            return []
+
+        with patch("hermes_cli.goals.gather_background_processes", side_effect=_fake_gather), patch(
+            "hermes_cli.goals.judge_goal",
+            return_value=("continue", "keep going", False, None, False),
+        ):
+            cli._maybe_continue_goal_after_turn()
+
+        assert captured.get("session_key") == sid
+
+
+class TestAutonomousWakeCLI:
+    def test_idle_wake_enqueues_continuation_after_deadline(self, hermes_home):
+        import time
+        import uuid as _uuid
+
+        sid = f"sid-wake-{_uuid.uuid4().hex}"
+        cli, mgr = _make_cli_with_goal(sid, goal_text="finish the report")
+        mgr.wait_for_seconds(120, reason="backoff")
+        # Force the deadline into the past → idle wake should fire.
+        mgr.state.waiting_until = time.time() - 1
+
+        cli._maybe_wake_parked_goal()
+
+        assert not cli._pending_input.empty()
+        queued = cli._pending_input.get_nowait()
+        assert "finish the report" in queued
+
+    def test_idle_wake_noop_while_parked(self, hermes_home):
+        import uuid as _uuid
+
+        sid = f"sid-wake2-{_uuid.uuid4().hex}"
+        cli, mgr = _make_cli_with_goal(sid)
+        mgr.wait_for_seconds(120, reason="backoff")
+
+        cli._maybe_wake_parked_goal()
+        assert cli._pending_input.empty()  # still parked, nothing enqueued
+
+
+class TestQueuedUserPreemption:
+    def test_real_user_message_preempts_without_judging_or_consuming_turn(self, hermes_home):
+        """A queued real user message must preempt the continuation without
+        calling the judge or consuming a goal turn."""
+        import uuid as _uuid
+
+        sid = f"sid-preempt-{_uuid.uuid4().hex}"
+        cli, mgr = _make_cli_with_goal(sid)
+        cli.conversation_history = [
+            {"role": "assistant", "content": "did work"},
+        ]
+        cli._pending_input.put("actually, do this other thing")  # real user message
+
+        with patch(
+            "hermes_cli.goals.judge_goal",
+            side_effect=AssertionError("judge must not run when a real user message is queued"),
+        ):
+            cli._maybe_continue_goal_after_turn()
+
+        # The user's message is still queued (not displaced), no continuation
+        # stacked on top, and no goal turn consumed.
+        assert cli._pending_input.qsize() == 1
+        assert mgr.state.turns_used == 0
+        assert mgr.state.status == "active"
+
+    def test_queued_slash_command_does_not_preempt(self, hermes_home):
+        """A queued slash command is NOT a real user message — the goal loop
+        still judges and continues."""
+        import uuid as _uuid
+
+        sid = f"sid-preempt2-{_uuid.uuid4().hex}"
+        cli, mgr = _make_cli_with_goal(sid)
+        cli.conversation_history = [
+            {"role": "assistant", "content": "did work"},
+        ]
+        cli._pending_input.put("/subgoal add more tests")  # slash command, not real msg
+
+        with patch("hermes_cli.goals.gather_background_processes", return_value=[]), patch(
+            "hermes_cli.goals.judge_goal",
+            return_value=("continue", "keep going", False, None, False),
+        ):
+            cli._maybe_continue_goal_after_turn()
+
+        # Judge ran and a continuation was stacked after the slash command.
+        assert mgr.state.turns_used == 1

@@ -477,16 +477,16 @@ providers:
  */
 function resolvePackagedBinaryPath(): string {
   if (process.platform === 'win32') {
-    return path.join(RELEASE_ROOT, 'win-unpacked', 'Hermes.exe')
+    return path.join(RELEASE_ROOT, 'win-unpacked', 'Costas Code.exe')
   }
 
   if (process.platform === 'darwin') {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
 
-    return path.join(RELEASE_ROOT, `mac-${arch}`, 'Hermes.app', 'Contents', 'MacOS', 'Hermes')
+    return path.join(RELEASE_ROOT, `mac-${arch}`, 'Costas Code.app', 'Contents', 'MacOS', 'Costas Code')
   }
 
-  return path.join(RELEASE_ROOT, 'linux-unpacked', 'hermes')
+  return path.join(RELEASE_ROOT, 'linux-unpacked', 'Costas Code')
 }
 
 export const PACKAGED_BINARY_PATH = resolvePackagedBinaryPath()

@@ -42,9 +42,9 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-# Configuration
-REPO_URL_SSH="git@github.com:NousResearch/hermes-agent.git"
-REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"
+# Costas Code tracks the fork so packaged installers and self-updates resolve custom commits.
+REPO_URL_SSH="git@github.com:SlowGreek/costas-code.git"
+REPO_URL_HTTPS="https://github.com/SlowGreek/costas-code.git"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an

@@ -1897,6 +1897,7 @@ export const en: Translations = {
   statusStack: {
     agents: 'Agents',
     background: count => `${count} Background`,
+    goal: 'Standing goal',
     subagents: count => `${count} Subagent${count === 1 ? '' : 's'}`,
     todos: (done, total) => `Tasks ${done}/${total}`,
     running: 'Running',

@@ -1825,7 +1825,7 @@ DEFAULT_CONFIG = {
         # when an exchange was tool-heavy. Set False to restore the legacy
         # behavior of showing tool-call summaries inline.
         "resume_skip_tool_only": True,
-        "busy_input_mode": "interrupt",  # interrupt | queue | steer
+        "busy_input_mode": "steer",  # Costas Code default; interrupt | queue | steer
         # When busy_input_mode="steer", suppress only the visible
         # "Steered into current run" confirmation bubble by setting this false.
         # The mid-turn steering itself still happens.
@@ -2383,6 +2383,20 @@ DEFAULT_CONFIG = {
         # negatives (goal actually done but judge says continue) and
         # unbounded model spend on fuzzy / unachievable goals.
         "max_turns": 20,
+        # Second-stage completion verifier. When the first-stage judge returns
+        # DONE, Hermes runs one cheap, cache-safe corroboration pass over the
+        # actual tool/command evidence before accepting completion (fails
+        # closed on a broken verifier). Set false to trust the first-stage
+        # judge alone.
+        "verify_completion": True,
+        # Bounded max park (seconds): the hard ceiling on how long ANY /goal
+        # wait barrier (pid / session / time) parks the loop before it is
+        # force-released, so a wait that never fires can't wedge the goal.
+        "max_park_seconds": 1800,
+        # After this many turns in a row with no observable progress on the
+        # same gap (fingerprinted, not exact-string), Hermes auto-pauses the
+        # goal and escalates instead of spinning the whole budget.
+        "max_no_progress": 4,
     },
 
     # Mixture of Agents — named presets used by /moa. A preset is an execution
@@ -2417,6 +2431,8 @@ DEFAULT_CONFIG = {
     # always goes to ~/.hermes/skills/.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        # Disable to keep skill discovery local and avoid the Nous-hosted index.
+        "hermes_index_enabled": True,
         # Substitute ${HERMES_SKILL_DIR} and ${HERMES_SESSION_ID} in SKILL.md
         # content with the absolute skill directory and the active session id
         # before the agent sees it.  Lets skill authors reference bundled

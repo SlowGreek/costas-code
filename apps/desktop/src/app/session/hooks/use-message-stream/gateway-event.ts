@@ -17,7 +17,7 @@ import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { setSessionCompacting } from '@/store/compaction'
-import { refreshBackgroundProcesses } from '@/store/composer-status'
+import { refreshBackgroundProcesses, refreshGoalStatus } from '@/store/composer-status'
 import { $gateway } from '@/store/gateway'
 import { dispatchNativeNotification } from '@/store/native-notifications'
 import { notify } from '@/store/notifications'
@@ -770,6 +770,11 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           // The gateway's notification poller announces background process
           // completions / watch matches here — re-sync the status stack.
           void refreshBackgroundProcesses(sessionId)
+        } else if (sessionId && payload?.kind === 'goal') {
+          // GoalManager persists the authoritative lifecycle state. Pull that
+          // structured record into the composer status card whenever the judge
+          // advances, pauses, blocks, or completes the standing goal.
+          void refreshGoalStatus(sessionId)
         }
       } else if (event.type === 'review.summary') {
         // Self-improvement background review saved something to memory/skills

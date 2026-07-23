@@ -13,13 +13,29 @@ import { $todosBySession } from './todos'
 
 /** Composer status stack feed — merged todos, subagents, background per session. */
 export type StatusItemState = 'done' | 'failed' | 'running'
-export type StatusItemType = 'background' | 'subagent' | 'todo'
+export type StatusItemType = 'background' | 'goal' | 'subagent' | 'todo'
+export type GoalStatus = 'active' | 'blocked' | 'cleared' | 'done' | 'paused'
+
+export interface GatewayGoalStatus {
+  blocked_reason?: null | string
+  goal: string
+  last_reason?: null | string
+  max_turns: number
+  paused_reason?: null | string
+  status: GoalStatus
+  turns_used: number
+  waiting_reason?: null | string
+}
 
 export interface ComposerStatusItem {
   /** background: non-zero exit shown inline when failed. */
   exitCode?: number
   /** subagent: active tool label shown on the right. */
   currentTool?: string
+  /** Goal: compact progress / latest judge reason shown after the title. */
+  detail?: string
+  /** Goal: native GoalManager lifecycle state driving its glyph/tone. */
+  goalStatus?: GoalStatus
   id: string
   /** background process: captured stdout/stderr tail for the inline viewer. */
   output?: string
@@ -36,6 +52,7 @@ export interface ComposerStatusItem {
 // Writable source for background work, synced from the gateway's process
 // registry (`terminal(background=true)` spawns) via `process.list`.
 export const $backgroundStatusBySession = atom<Record<string, ComposerStatusItem[]>>({})
+export const $goalStatusBySession = atom<Record<string, GatewayGoalStatus>>({})
 
 // Stored session ids that have at least one RUNNING background process. The
 // sidebar row reads this for a pulsing gray dot — distinct from the accent
@@ -143,10 +160,24 @@ const todoToItem = (t: TodoItem): ComposerStatusItem => ({
   type: 'todo'
 })
 
+const goalToItem = (goal: GatewayGoalStatus): ComposerStatusItem => {
+  const reason = goal.waiting_reason || goal.blocked_reason || goal.paused_reason || goal.last_reason
+  const progress = `${goal.turns_used}/${goal.max_turns}`
+
+  return {
+    detail: reason ? `${progress} · ${reason}` : progress,
+    goalStatus: goal.status,
+    id: 'goal:standing',
+    state: goal.status === 'active' ? 'running' : goal.status === 'blocked' ? 'failed' : 'done',
+    title: goal.goal,
+    type: 'goal'
+  }
+}
+
 // The single thing the stack reads: a typed, merged item list per session.
 export const $statusItemsBySession = computed(
-  [$subagentsBySession, $backgroundStatusBySession, $todosBySession],
-  (subs, background, todos) => {
+  [$goalStatusBySession, $subagentsBySession, $backgroundStatusBySession, $todosBySession],
+  (goals, subs, background, todos) => {
     const out: Record<string, ComposerStatusItem[]> = {}
 
     const push = (sid: string, items: ComposerStatusItem[]) => {
@@ -157,6 +188,10 @@ export const $statusItemsBySession = computed(
 
     for (const [sid, list] of Object.entries(todos)) {
       push(sid, list.map(todoToItem))
+    }
+
+    for (const [sid, goal] of Object.entries(goals)) {
+      push(sid, [goalToItem(goal)])
     }
 
     for (const [sid, list] of Object.entries(subs)) {
@@ -172,7 +207,7 @@ export const $statusItemsBySession = computed(
 )
 
 // Fixed render order for the groups in the stack (top → bottom, above queue).
-const TYPE_ORDER: readonly StatusItemType[] = ['todo', 'subagent', 'background']
+const TYPE_ORDER: readonly StatusItemType[] = ['goal', 'todo', 'subagent', 'background']
 
 export interface StatusGroup {
   items: ComposerStatusItem[]
@@ -312,6 +347,40 @@ export function reconcileBackgroundProcesses(sid: string, procs: GatewayProcessE
   }
 
   writeBackground(sid, next)
+}
+
+export function reconcileGoalStatus(sid: string, goal: GatewayGoalStatus | null) {
+  if (!sid) {
+    return
+  }
+
+  const current = $goalStatusBySession.get()
+  const next = { ...current }
+
+  if (goal && goal.status !== 'cleared' && goal.status !== 'done') {
+    next[sid] = goal
+  } else {
+    delete next[sid]
+  }
+
+  $goalStatusBySession.set(next)
+}
+
+/** Pull the session's persisted native Goal state from the gateway. */
+export async function refreshGoalStatus(sid: string): Promise<void> {
+  const gateway = $gateway.get()
+
+  if (!sid || !gateway) {
+    return
+  }
+
+  try {
+    const result = await gateway.request<{ goal?: GatewayGoalStatus | null }>('goal.status', { session_id: sid })
+
+    reconcileGoalStatus(sid, result?.goal ?? null)
+  } catch {
+    // Older gateways do not expose goal.status; leave any event-fed row intact.
+  }
 }
 
 /** Pull the session's live process snapshot from the gateway. */

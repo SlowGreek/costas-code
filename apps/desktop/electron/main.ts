@@ -76,6 +76,7 @@ import {
   shouldRemoveAppBundle,
   uninstallArgsForMode
 } from './desktop-uninstall'
+import { blockedEgressDomains, isBlockedEgressUrl } from './egress-policy'
 import { installEmbedReferer } from './embed-referer'
 import { createEventDeduper } from './event-dedupe'
 import { readDirForIpc } from './fs-read-dir'
@@ -596,7 +597,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Hermes'
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Costas Code'
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
 
@@ -1197,6 +1198,12 @@ function openExternalUrl(rawUrl) {
   try {
     parsed = new URL(raw)
   } catch {
+    return false
+  }
+
+  if (isBlockedEgressUrl(parsed)) {
+    rememberLog(`[egress] blocked external URL: ${parsed.hostname}`)
+
     return false
   }
 
@@ -3114,6 +3121,9 @@ async function applyUpdatesPosixInApp(opts: any) {
   }
 
   const rebuiltApp = [
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Costas Code.app'),
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Costas Code.app'),
+    // Compatibility with an older build produced before the front-facing rename.
     path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Hermes.app'),
     path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Hermes.app')
   ].find(directoryExists)
@@ -3337,7 +3347,7 @@ function isPackagedInstallPath(dir) {
 
 function resolveHermesCwd() {
   // In a packaged build, `process.cwd()` resolves to the install root (e.g.
-  // `…/win-unpacked` on Windows or `/Applications/Hermes.app/Contents/...`
+  // `…/win-unpacked` on Windows or `/Applications/Costas Code.app/Contents/...`
   // on macOS). Sessions spawned there leave files inside the app bundle
   // and bewilder users when "where did my files go?" is the install dir.
   // The user-configurable default project directory wins over everything,
@@ -4146,16 +4156,13 @@ function fetchHtmlTitleWithCurl(rawUrl: string): Promise<string> {
   return new Promise(resolve => {
     const url = String(rawUrl || '').trim()
 
-    if (!url) {
+    if (!url || isBlockedEgressUrl(url)) {
       return resolve('')
     }
 
     const args = [
       '--silent',
       '--show-error',
-      '--location',
-      '--max-redirs',
-      String(TITLE_MAX_REDIRECTS),
       '--max-time',
       String(Math.max(2, Math.ceil(TITLE_TIMEOUT_MS / 1000))),
       '--connect-timeout',
@@ -4171,6 +4178,12 @@ function fetchHtmlTitleWithCurl(rawUrl: string): Promise<string> {
       '--raw',
       url
     ]
+
+    // Curl cannot apply our host policy to redirect targets. Let the hardened
+    // Electron renderer handle redirects whenever a blocklist is active.
+    if (blockedEgressDomains().length === 0) {
+      args.splice(2, 0, '--location', '--max-redirs', String(TITLE_MAX_REDIRECTS))
+    }
 
     const child = spawn('curl', args, hiddenWindowsChildOptions({ stdio: ['ignore', 'pipe', 'ignore'] }))
     const chunks = []
@@ -4206,7 +4219,9 @@ function getLinkTitleSession() {
 
   linkTitleSession = session.fromPartition('hermes:link-titles', { cache: false })
   linkTitleSession.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: RENDER_TITLE_BLOCKED_RESOURCES.has(details.resourceType) })
+    callback({
+      cancel: RENDER_TITLE_BLOCKED_RESOURCES.has(details.resourceType) || isBlockedEgressUrl(details.url)
+    })
   })
   guardLinkTitleSession(linkTitleSession)
 
@@ -4321,6 +4336,11 @@ function usableTitle(value: string): string {
 
 function fetchLinkTitle(rawUrl) {
   const url = String(rawUrl || '').trim()
+
+  if (isBlockedEgressUrl(url)) {
+    return Promise.resolve('')
+  }
+
   const key = canonicalTitleCacheKey(url)
 
   if (!key) {
@@ -5291,6 +5311,9 @@ function getOauthSession() {
   }
 
   oauthSession = session.fromPartition(OAUTH_SESSION_PARTITION)
+  oauthSession.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: isBlockedEgressUrl(details.url) })
+  })
 
   return oauthSession
 }
@@ -10661,6 +10684,9 @@ app.whenReady().then(() => {
   }
 
   installMediaPermissions()
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: isBlockedEgressUrl(details.url) })
+  })
   registerMediaProtocol()
   installEmbedReferer()
   registerDeepLinkProtocol()

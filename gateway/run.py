@@ -3101,7 +3101,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     # Class-level defaults so partial construction in tests doesn't
     # blow up on attribute access.
     _running_agents_ts: Dict[str, float] = {}
-    _busy_input_mode: str = "interrupt"
+    _busy_input_mode: str = "steer"
     _busy_text_mode: str = "interrupt"
     _restart_drain_timeout: float = DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT
     _exit_code: Optional[int] = None
@@ -5473,16 +5473,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             mode = str(cfg_get(cfg, "display", "busy_input_mode", default="") or "").strip().lower()
         if mode == "queue":
             return "queue"
-        if mode == "steer":
-            return "steer"
-        return "interrupt"
+        if mode == "interrupt":
+            return "interrupt"
+        return "steer"
 
     @staticmethod
     def _load_busy_text_mode() -> str:
         """Resolve normal busy TEXT follow-up behavior.
 
-        ``busy_input_mode`` is the single source of truth (default
-        ``interrupt``). The legacy ``busy_text_mode`` knob is honored only
+        ``busy_input_mode`` is the single source of truth (Costas Code defaults
+        to ``steer``). The legacy ``busy_text_mode`` knob is honored only
         when a user explicitly set it, so existing queue setups keep
         working; new installs follow ``busy_input_mode``. Returns one of
         ``interrupt`` | ``queue`` (``steer`` is handled upstream by
@@ -10707,6 +10707,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     interrupt_reason=_INTERRUPT_REASON_STOP,
                     invalidation_reason="stop_command",
                 )
+                # A user /stop must STOP the goal loop, not just the turn —
+                # pause any active goal and drop queued continuations so no
+                # further continuation fires. (The interrupted turn's post-turn
+                # hook also pauses; doing it here makes /stop authoritative and
+                # immediate.)
+                try:
+                    await self._pause_goal_for_interrupt(source, reason="user-stopped (/stop)")
+                except Exception as _stop_goal_exc:
+                    logger.debug("goal pause on /stop failed: %s", _stop_goal_exc)
                 logger.info("STOP for session %s — agent interrupted, session lock released", _quick_key)
                 return EphemeralReply(t("gateway.stop.stopped"))
 
@@ -11779,24 +11788,45 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # next turn makes more progress. Wrapped in try/except so a
             # broken judge never breaks normal message handling.
             try:
-                _final_text = ""
-                if isinstance(_agent_result, dict):
-                    _final_text = str(_agent_result.get("final_response") or "")
-                elif isinstance(_agent_result, str):
-                    _final_text = _agent_result
-                # Skip for empty responses (interrupted / errored) — the
-                # judge would almost always say "continue" and we'd loop
-                # on error. Let the user drive the next turn.
-                if _final_text.strip():
+                # Decide whether this turn's result should drive the /goal
+                # judge. An interrupted / failed / empty turn is NEVER judged or
+                # continued (R5): it produced only partial work, so judging it
+                # would almost always say "continue" and re-enqueue a
+                # continuation — resurrecting the very loop a /stop just stopped.
+                # A user /stop pauses the goal authoritatively in its own
+                # handler; other interrupts (restart / timeout) leave the goal
+                # active so the gateway's auto-resume can finish the turn and the
+                # NEXT completed turn re-judges.
+                _should_judge, _final_text = self._post_turn_goal_should_judge(_agent_result)
+                if not _should_judge:
+                    logger.debug(
+                        "goal continuation: skipping judge on interrupted/failed/empty turn (session %s)",
+                        _quick_key,
+                    )
+                else:
                     try:
                         session_entry = await self.async_session_store.get_or_create_session(source)
                     except Exception:
                         session_entry = None
                     if session_entry is not None:
+                        # Foreground tool/test results from THIS turn feed the
+                        # second-stage completion verifier — without them a
+                        # verified contract goal on the gateway can loop /
+                        # no-progress because its passing tests are invisible.
+                        _goal_evidence = None
+                        try:
+                            from hermes_cli.goals import extract_recent_tool_evidence
+                            if isinstance(_agent_result, dict):
+                                _goal_evidence = extract_recent_tool_evidence(
+                                    _agent_result.get("messages")
+                                )
+                        except Exception:
+                            _goal_evidence = None
                         await self._post_turn_goal_continuation(
                             session_entry=session_entry,
                             source=source,
                             final_response=_final_text,
+                            recent_evidence=_goal_evidence,
                         )
             except Exception as _goal_exc:
                 logger.debug("goal continuation hook failed: %s", _goal_exc)
@@ -14506,12 +14536,74 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         await _deliver()
 
+    @staticmethod
+    def _post_turn_goal_should_judge(agent_result):
+        """Decide whether a completed turn's result may drive the /goal judge.
+
+        Returns ``(should_judge, final_text)``. An interrupted or failed turn
+        produced only partial work and must NOT be judged / continued (R5); an
+        empty final response is likewise skipped (transient failure guard).
+        Pure and side-effect-free so it can be unit-tested directly.
+        """
+        final_text = ""
+        interrupted = False
+        failed = False
+        if isinstance(agent_result, dict):
+            final_text = str(agent_result.get("final_response") or "")
+            interrupted = bool(agent_result.get("interrupted"))
+            failed = bool(agent_result.get("failed"))
+        elif isinstance(agent_result, str):
+            final_text = agent_result
+        if interrupted or failed:
+            return False, final_text
+        return bool(final_text.strip()), final_text
+
+    async def _pause_goal_for_interrupt(self, source: Any, *, reason: str) -> None:
+        """Pause an active /goal after an interrupted or failed turn.
+
+        Mirrors the CLI Ctrl+C guard: an interrupted/partial turn must NOT be
+        judged or continued (that would resurrect the loop the user stopped),
+        so we pause the goal — keeping it recoverable via /goal resume — and
+        strip any queued synthetic continuations for the session. Safe when no
+        goal is set; never raises into the caller.
+        """
+        if source is None:
+            return
+        try:
+            from hermes_cli.goals import GoalManager
+        except Exception as exc:
+            logger.debug("goal interrupt-pause: goals module unavailable: %s", exc)
+            return
+        try:
+            session_entry = await self.async_session_store.get_or_create_session(source)
+        except Exception:
+            session_entry = None
+        sid = getattr(session_entry, "session_id", None) or ""
+        if not sid:
+            return
+        mgr = GoalManager(session_id=sid, default_max_turns=self._goal_max_turns_from_config())
+        # Only pause a live goal — never resurrect a terminal (done/cleared)
+        # one. pause() itself already guards terminal states.
+        if not mgr.has_goal():
+            return
+        mgr.pause(reason=reason)
+        # Drop any synthetic continuation already queued by an earlier judge so
+        # the stopped loop doesn't fire one more turn.
+        try:
+            adapter = self._adapter_for_source(source)
+            _quick_key = self._session_key_for_source(source)
+            if adapter and _quick_key:
+                self._clear_goal_pending_continuations(_quick_key, adapter)
+        except Exception as exc:
+            logger.debug("goal interrupt-pause: continuation cleanup failed: %s", exc)
+
     async def _post_turn_goal_continuation(
         self,
         *,
         session_entry: Any,
         source: Any,
         final_response: str,
+        recent_evidence: Optional[List[str]] = None,
     ) -> None:
         """Run the goal judge after a gateway turn and, if still active,
         enqueue a continuation prompt for the same session.
@@ -14541,7 +14633,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         try:
             from hermes_cli.goals import gather_background_processes as _gather_bg
-            _bg_procs = _gather_bg()
+            # Scope to THIS gateway session so the judge cannot see or WAIT on
+            # background jobs from another session. Background processes carry
+            # the gateway session_key (set via get_current_session_key), which
+            # is the key we resolve for this source — not the SessionDB id.
+            _sk = ""
+            try:
+                _sk = self._session_key_for_source(source) if source is not None else ""
+            except Exception:
+                _sk = ""
+            _bg_procs = _gather_bg(session_key=_sk or None)
         except Exception:
             _bg_procs = None
 
@@ -14549,6 +14650,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             final_response or "",
             user_initiated=True,
             background_processes=_bg_procs,
+            recent_evidence=recent_evidence,
         )
         msg = decision.get("message") or ""
 

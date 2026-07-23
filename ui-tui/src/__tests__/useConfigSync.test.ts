@@ -233,17 +233,12 @@ describe('normalizeBusyInputMode', () => {
     expect(normalizeBusyInputMode('STEER')).toBe('steer')
   })
 
-  it('defaults to queue for missing/unknown values (TUI-only override)', () => {
-    // CLI / messaging adapters keep `interrupt` as the framework default
-    // (see hermes_cli/config.py + tui_gateway/server.py::_load_busy_input_mode);
-    // the TUI ships `queue` because typing a follow-up while the agent
-    // streams is the common authoring pattern and an unintended interrupt
-    // loses work.
-    expect(normalizeBusyInputMode(undefined)).toBe('queue')
-    expect(normalizeBusyInputMode(null)).toBe('queue')
-    expect(normalizeBusyInputMode('')).toBe('queue')
-    expect(normalizeBusyInputMode('drop')).toBe('queue')
-    expect(normalizeBusyInputMode(42)).toBe('queue')
+  it('defaults to steer for missing/unknown values', () => {
+    expect(normalizeBusyInputMode(undefined)).toBe('steer')
+    expect(normalizeBusyInputMode(null)).toBe('steer')
+    expect(normalizeBusyInputMode('')).toBe('steer')
+    expect(normalizeBusyInputMode('drop')).toBe('steer')
+    expect(normalizeBusyInputMode(42)).toBe('steer')
   })
 })
 
@@ -284,14 +279,14 @@ describe('applyDisplay → busy_input_mode', () => {
     expect($uiState.get().busyInputMode).toBe('steer')
   })
 
-  it('falls back to queue when value is missing or invalid (TUI-only default)', () => {
+  it('falls back to steer when value is missing or invalid', () => {
     const setBell = vi.fn()
 
     applyDisplay({ config: { display: {} } }, setBell)
-    expect($uiState.get().busyInputMode).toBe('queue')
+    expect($uiState.get().busyInputMode).toBe('steer')
 
     applyDisplay({ config: { display: { busy_input_mode: 'drop' } } }, setBell)
-    expect($uiState.get().busyInputMode).toBe('queue')
+    expect($uiState.get().busyInputMode).toBe('steer')
   })
 })
 

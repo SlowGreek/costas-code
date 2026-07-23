@@ -1831,6 +1831,7 @@ export const ja = defineLocale({
   statusStack: {
     agents: 'エージェント',
     background: count => `バックグラウンド ${count} 件`,
+    goal: '継続目標',
     subagents: count => `サブエージェント ${count} 件`,
     todos: (done, total) => `タスク ${done}/${total}`,
     running: '実行中',

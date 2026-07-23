@@ -157,6 +157,13 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     routedSessionIdRef.current = null
   }, [])
 
+  const setRoutedSessionIntent = useCallback((storedSessionId: string) => {
+    const path = sessionRoute(storedSessionId)
+
+    routedSessionIdRef.current = storedSessionId
+    routeTokenRef.current = `${path}::`
+  }, [])
+
   // Mirror "the workspace is showing a full page" into its atom — the
   // workspace pane contribution re-registers headerVeto from it, so the main
   // zone's tab bar stands down on pages (and returns with the chat).
@@ -388,6 +395,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     branchStoredSession,
     createBackendSessionForSend,
     openNewSessionTile,
+    prepareSessionForPrompt,
     removeSession,
     resumeSession,
     selectSidebarItem,
@@ -402,6 +410,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     getRoutedStoredSessionId,
     navigate,
     onFreshDraftRouteIntent: clearRoutedSessionIntent,
+    onSessionRouteIntent: setRoutedSessionIntent,
     requestGateway,
     resetViewSync,
     runtimeIdByStoredSessionIdRef,
@@ -535,6 +544,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     getRouteToken,
     handleSkinCommand,
     openMemoryGraph: openStarmap,
+    prepareSessionForPrompt,
     refreshSessions,
     requestGateway,
     resumeStoredSession: resumeSession,

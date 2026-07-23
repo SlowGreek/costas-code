@@ -99,6 +99,7 @@ import {
 import { gitRootForIpc } from './git-root'
 import {
   addWorktree,
+  cleanupManagedWorktree,
   listBaseBranches,
   listBranches,
   listWorktrees,
@@ -10033,6 +10034,10 @@ ipcMain.handle('hermes:git:worktreeAdd', async (_event, repoPath, options) =>
 
 ipcMain.handle('hermes:git:worktreeRemove', async (_event, repoPath, worktreePath, options) =>
   removeWorktree(repoPath, worktreePath, options || {}, resolveGitBinary())
+)
+
+ipcMain.handle('hermes:git:worktreeCleanupManaged', async (_event, repoPath, worktreePath) =>
+  cleanupManagedWorktree(repoPath, worktreePath, resolveGitBinary())
 )
 
 ipcMain.handle('hermes:git:branchSwitch', async (_event, repoPath, branch) =>

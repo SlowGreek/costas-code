@@ -38,6 +38,7 @@ interface SubmitPromptDeps {
   getRoutedStoredSessionId: () => null | string
   getRuntimeIdForStoredSession: (storedSessionId: string) => null | string
   getRouteToken: () => string
+  prepareSessionForPrompt: (prompt: string) => Promise<boolean>
   requestGateway: GatewayRequest
   resumeStoredSession: (storedSessionId: string) => Promise<void> | void
   selectedStoredSessionIdRef: MutableRefObject<string | null>
@@ -83,6 +84,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
     getRoutedStoredSessionId,
     getRuntimeIdForStoredSession,
     getRouteToken,
+    prepareSessionForPrompt,
     requestGateway,
     resumeStoredSession,
     selectedStoredSessionIdRef,
@@ -138,6 +140,15 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       const hasSendable = Boolean(visibleText || terminalContextBlocks || attachments.length || hasImage)
 
       if (!hasSendable || (!options?.fromQueue && busyRef.current)) {
+        return false
+      }
+
+      if (
+        !options?.fromQueue &&
+        visibleText &&
+        !visibleText.startsWith('/') &&
+        !(await prepareSessionForPrompt(visibleText))
+      ) {
         return false
       }
 
@@ -563,6 +574,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       getRoutedStoredSessionId,
       getRuntimeIdForStoredSession,
       getRouteToken,
+      prepareSessionForPrompt,
       requestGateway,
       resumeStoredSession,
       scope,

@@ -8,6 +8,7 @@ import { test } from 'vitest'
 
 import {
   addWorktree,
+  cleanupManagedWorktree,
   ensureGitRepo,
   listBaseBranches,
   listBranches,
@@ -15,6 +16,20 @@ import {
   sanitizeBranch,
   switchBranch
 } from './git-worktree-ops'
+
+function initManagedRepo(prefix: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  const git = (args: string[], cwd = dir) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+
+  git(['init', '-b', 'main'])
+  git(['config', 'user.email', 'hermes@test.local'])
+  git(['config', 'user.name', 'Hermes Test'])
+  fs.writeFileSync(path.join(dir, 'README.md'), 'root\n')
+  git(['add', 'README.md'])
+  git(['commit', '-m', 'initial'])
+
+  return { dir, git }
+}
 
 test('sanitizeBranch: spaces → hyphens, forbidden chars dropped, edges trimmed', () => {
   assert.equal(sanitizeBranch('beach vibes'), 'beach-vibes')
@@ -267,6 +282,111 @@ test('addWorktree: base param branches off a specified local branch', async () =
     assert.equal(git('-C', result.path, 'merge-base', 'HEAD', 'staging').length > 0, true)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('cleanupManagedWorktree: removes an empty managed worktree and its branch', async () => {
+  const { dir, git } = initManagedRepo('hermes-managed-empty-')
+
+  try {
+    const created = await addWorktree(dir, { managed: true, name: 'empty' }, 'git')
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'empty', removed: true })
+    assert.equal(fs.existsSync(created.path), false)
+    assert.equal(git(['branch', '--list', created.branch]), '')
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('cleanupManagedWorktree: never removes a user-created worktree', async () => {
+  const { dir } = initManagedRepo('hermes-managed-user-')
+
+  try {
+    const created = await addWorktree(dir, { name: 'user-work' }, 'git')
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'not-managed', removed: false })
+    assert.equal(fs.existsSync(created.path), true)
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('cleanupManagedWorktree: preserves dirty managed worktrees', async () => {
+  const { dir } = initManagedRepo('hermes-managed-dirty-')
+
+  try {
+    const created = await addWorktree(dir, { managed: true, name: 'dirty' }, 'git')
+    fs.writeFileSync(path.join(created.path, 'README.md'), 'changed\n')
+
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'dirty', removed: false })
+    assert.equal(fs.existsSync(created.path), true)
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('cleanupManagedWorktree: preserves clean worktrees with unmerged commits', async () => {
+  const { dir, git } = initManagedRepo('hermes-managed-unmerged-')
+
+  try {
+    const created = await addWorktree(dir, { managed: true, name: 'unmerged' }, 'git')
+    fs.writeFileSync(path.join(created.path, 'feature.txt'), 'feature\n')
+    git(['add', 'feature.txt'], created.path)
+    git(['commit', '-m', 'feature'], created.path)
+
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'unmerged', removed: false })
+    assert.equal(fs.existsSync(created.path), true)
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('cleanupManagedWorktree: removes a clean worktree after merge', async () => {
+  const { dir, git } = initManagedRepo('hermes-managed-merged-')
+
+  try {
+    const created = await addWorktree(dir, { managed: true, name: 'merged' }, 'git')
+    fs.writeFileSync(path.join(created.path, 'feature.txt'), 'feature\n')
+    git(['add', 'feature.txt'], created.path)
+    git(['commit', '-m', 'feature'], created.path)
+    git(['merge', '--no-ff', '--no-edit', created.branch], dir)
+
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'merged', removed: true })
+    assert.equal(fs.existsSync(created.path), false)
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test('cleanupManagedWorktree: removes a clean worktree after squash-equivalent changes land', async () => {
+  const { dir, git } = initManagedRepo('hermes-managed-squash-')
+
+  try {
+    const created = await addWorktree(dir, { managed: true, name: 'squashed' }, 'git')
+    fs.writeFileSync(path.join(created.path, 'feature.txt'), 'feature\n')
+    git(['add', 'feature.txt'], created.path)
+    git(['commit', '-m', 'feature part one'], created.path)
+    fs.writeFileSync(path.join(created.path, 'second.txt'), 'second\n')
+    git(['add', 'second.txt'], created.path)
+    git(['commit', '-m', 'feature part two'], created.path)
+    git(['merge', '--squash', created.branch], dir)
+    git(['commit', '-m', 'squashed feature'], dir)
+
+    const result = await cleanupManagedWorktree(dir, created.path, 'git')
+
+    assert.deepEqual(result, { reason: 'merged', removed: true })
+    assert.equal(fs.existsSync(created.path), false)
+  } finally {
+    fs.rmSync(dir, { force: true, recursive: true })
   }
 })
 

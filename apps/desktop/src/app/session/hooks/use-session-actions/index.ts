@@ -13,7 +13,13 @@ import { clearQueuedPrompts, migrateQueuedPrompts } from '@/store/composer-queue
 import { $pinnedSessionIds } from '@/store/layout'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey } from '@/store/profile'
-import { resolveNewSessionCwd, tombstoneSessions, untombstoneSessions } from '@/store/projects'
+import {
+  cleanupManagedWorktreePath,
+  prepareSmartWorktree,
+  resolveNewSessionCwd,
+  tombstoneSessions,
+  untombstoneSessions
+} from '@/store/projects'
 import {
   $activeSessionStoredIdRotation,
   $currentCwd,
@@ -60,7 +66,7 @@ import {
 } from '@/store/session-states'
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { isWatchWindow } from '@/store/windows'
-import type { SessionCreateResponse, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
+import type { SessionCreateResponse, SessionInfo, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
 
 import { NEW_CHAT_ROUTE, sessionRoute, SETTINGS_ROUTE } from '../../../routes'
 import type { ClientSessionState, SidebarNavItem } from '../../../types'
@@ -93,6 +99,7 @@ interface SessionActionsOptions {
   getRoutedStoredSessionId: () => null | string
   navigate: NavigateFunction
   onFreshDraftRouteIntent?: () => void
+  onSessionRouteIntent?: (storedSessionId: string) => void
   requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>
   resetViewSync: () => void
   runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>>
@@ -115,6 +122,16 @@ interface SessionActionsOptions {
 // bounded retry rebinds it when the backend returns. Boot-into-a-stale-last-id
 // (NOT in this set) still legitimately drops to a draft.
 const createdThisRun = new Set<string>()
+
+function sessionIsOnlyWorkspaceUser(session: SessionInfo | undefined, storedSessionId: string): boolean {
+  const cwd = session?.cwd?.trim()
+
+  if (!cwd) {
+    return false
+  }
+
+  return !$sessions.get().some(other => !sessionMatchesStoredId(other, storedSessionId) && other.cwd?.trim() === cwd)
+}
 
 // Reflect a stored row's persisted token counts into the live usage atom
 // (total is derived, so callers can't drift it out of sync with input/output).
@@ -197,6 +214,7 @@ export function useSessionActions({
   getRoutedStoredSessionId,
   navigate,
   onFreshDraftRouteIntent,
+  onSessionRouteIntent,
   requestGateway,
   resetViewSync,
   runtimeIdByStoredSessionIdRef,
@@ -345,19 +363,27 @@ export function useSessionActions({
 
       creatingSessionRef.current = true
 
+      let managedWorktree: null | { branch: string; path: string } = null
+      let managedRepoPath = ''
+
       try {
         // An explicit one-shot workspace target (null → detached, string → that
         // folder) wins; otherwise the live cwd, then the project-aware default
         // (resolveNewSessionCwd — a project's new session keeps its repo cwd).
         const workspaceTarget = $newChatWorkspaceTarget.get()
 
-        const cwd =
+        const requestedCwd =
           workspaceTarget === null
             ? ''
             : typeof workspaceTarget === 'string'
               ? workspaceTarget.trim()
               : $currentCwd.get().trim() || resolveNewSessionCwd()
 
+        managedRepoPath = requestedCwd
+        managedWorktree =
+          requestedCwd && preview ? await prepareSmartWorktree(requestedCwd, preview).catch(() => null) : null
+
+        const cwd = managedWorktree?.path ?? requestedCwd
         const params = await desktopSessionCreateParams(cwd)
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id ?? null
@@ -381,6 +407,10 @@ export function useSessionActions({
         if (drift) {
           console.warn('[submit-drift-abort]', drift, { phase: 'mid-create' })
           await requestGateway('session.close', { session_id: created.session_id }).catch(() => undefined)
+
+          if (managedWorktree) {
+            await cleanupManagedWorktreePath(managedRepoPath, managedWorktree.path).catch(() => false)
+          }
 
           return null
         }
@@ -422,6 +452,12 @@ export function useSessionActions({
         }
 
         return created.session_id
+      } catch (err) {
+        if (managedWorktree) {
+          await cleanupManagedWorktreePath(managedRepoPath, managedWorktree.path).catch(() => false)
+        }
+
+        throw err
       } finally {
         window.setTimeout(() => {
           creatingSessionRef.current = false
@@ -1032,7 +1068,7 @@ export function useSessionActions({
   // Shared fork: create a child session seeded with `branchMessages`, linked to
   // `parentStoredId` so it nests under its parent, then make it the active chat.
   const forkBranch = useCallback(
-    async (branchMessages: BranchMessage[], parentStoredId: null | string, cwd?: string): Promise<boolean> => {
+    async (branchMessages: BranchMessage[], parentStoredId: null | string, cwd?: string): Promise<null | string> => {
       creatingSessionRef.current = true
 
       try {
@@ -1081,6 +1117,7 @@ export function useSessionActions({
         )
         setSelectedStoredSessionId(routedSessionId)
         selectedStoredSessionIdRef.current = routedSessionId
+        onSessionRouteIntent?.(routedSessionId)
         navigate(sessionRoute(routedSessionId))
 
         const runtimeInfo = applyRuntimeInfo(branched.info)
@@ -1090,11 +1127,11 @@ export function useSessionActions({
           updateSessionState(branched.session_id, state => ({ ...state, ...runtimeInfo }), routedSessionId)
         }
 
-        return true
+        return branched.session_id
       } catch (err) {
         notifyError(err, copy.branchFailed)
 
-        return false
+        return null
       } finally {
         window.setTimeout(() => {
           creatingSessionRef.current = false
@@ -1107,6 +1144,7 @@ export function useSessionActions({
       creatingSessionRef,
       ensureSessionState,
       navigate,
+      onSessionRouteIntent,
       requestGateway,
       selectedStoredSessionIdRef,
       updateSessionState
@@ -1146,7 +1184,7 @@ export function useSessionActions({
 
       clearNotifications()
 
-      return forkBranch(branchMessages, selectedStoredSessionIdRef.current, $currentCwd.get().trim())
+      return Boolean(await forkBranch(branchMessages, selectedStoredSessionIdRef.current, $currentCwd.get().trim()))
     },
     [activeSessionIdRef, busyRef, copy, forkBranch, selectedStoredSessionIdRef]
   )
@@ -1172,7 +1210,7 @@ export function useSessionActions({
           return false
         }
 
-        return await forkBranch(branchMessages, stored?.id ?? storedSessionId, stored?.cwd?.trim())
+        return Boolean(await forkBranch(branchMessages, stored?.id ?? storedSessionId, stored?.cwd?.trim()))
       } catch (err) {
         notifyError(err, copy.branchFailed)
 
@@ -1182,11 +1220,49 @@ export function useSessionActions({
     [copy, forkBranch]
   )
 
+  const prepareSessionForPrompt = useCallback(
+    async (prompt: string): Promise<boolean> => {
+      const currentRuntimeId = activeSessionIdRef.current
+      const currentStoredId = selectedStoredSessionIdRef.current
+      const currentCwd = $currentCwd.get().trim()
+
+      if (!currentRuntimeId || !currentStoredId || !currentCwd || busyRef.current) {
+        return true
+      }
+
+      const managedWorktree = await prepareSmartWorktree(currentCwd, prompt).catch(() => null)
+
+      if (!managedWorktree) {
+        return true
+      }
+
+      const branchMessages = toBranchMessages($messages.get())
+
+      if (!branchMessages.length) {
+        await cleanupManagedWorktreePath(currentCwd, managedWorktree.path).catch(() => false)
+
+        return true
+      }
+
+      const branched = await forkBranch(branchMessages, currentStoredId, managedWorktree.path)
+
+      if (!branched) {
+        await cleanupManagedWorktreePath(currentCwd, managedWorktree.path).catch(() => false)
+
+        return false
+      }
+
+      return true
+    },
+    [activeSessionIdRef, busyRef, forkBranch, selectedStoredSessionIdRef]
+  )
+
   const removeSession = useCallback(
     async (storedSessionId: string) => {
       clearNotifications()
 
       const removed = $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))
+      const cleanupWorktree = sessionIsOnlyWorkspaceUser(removed, storedSessionId)
       const wasSelected = selectedStoredSessionId === storedSessionId
       const closingRuntimeId = wasSelected ? activeSessionId : null
       const previousMessages = $messages.get()
@@ -1218,6 +1294,10 @@ export function useSessionActions({
 
         await deleteSession(storedSessionId, removed?.profile)
         clearQueuedPrompts(storedSessionId)
+
+        if (cleanupWorktree) {
+          await cleanupManagedWorktreePath(removed?.git_repo_root, removed?.cwd).catch(() => false)
+        }
 
         if (closingRuntimeId) {
           clearQueuedPrompts(closingRuntimeId)
@@ -1284,6 +1364,7 @@ export function useSessionActions({
       clearNotifications()
 
       const archived = $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))
+      const cleanupWorktree = sessionIsOnlyWorkspaceUser(archived, storedSessionId)
       const wasSelected = selectedStoredSessionId === storedSessionId
       const previousPinned = $pinnedSessionIds.get()
       // Pins are keyed on the durable lineage-root id; the stored id may be the
@@ -1305,6 +1386,11 @@ export function useSessionActions({
 
       try {
         await setSessionArchived(storedSessionId, true, archived?.profile)
+
+        if (cleanupWorktree) {
+          await cleanupManagedWorktreePath(archived?.git_repo_root, archived?.cwd).catch(() => false)
+        }
+
         // A sidebar refresh can race the optimistic removal while the PATCH is
         // in flight and briefly reinsert the still-unarchived backend row. Win
         // that race after the mutation succeeds so right-click → Archive does
@@ -1342,6 +1428,7 @@ export function useSessionActions({
     branchStoredSession,
     closeSettings,
     createBackendSessionForSend,
+    prepareSessionForPrompt,
     openNewSessionTile,
     openSettings,
     removeSession,

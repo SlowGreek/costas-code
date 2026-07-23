@@ -133,13 +133,17 @@ declare global {
         worktreeList: (repoPath: string) => Promise<HermesGitWorktree[]>
         worktreeAdd: (
           repoPath: string,
-          options?: { name?: string; branch?: string; base?: string; existingBranch?: string }
-        ) => Promise<{ path: string; branch: string; repoRoot: string }>
+          options?: { name?: string; branch?: string; base?: string; existingBranch?: string; managed?: boolean }
+        ) => Promise<{ path: string; branch: string; managed?: boolean; repoRoot: string }>
         worktreeRemove: (
           repoPath: string,
           worktreePath: string,
           options?: { force?: boolean }
         ) => Promise<{ removed: string }>
+        worktreeCleanupManaged?: (
+          repoPath: string,
+          worktreePath: string
+        ) => Promise<{ reason: 'dirty' | 'empty' | 'merged' | 'not-managed' | 'unmerged'; removed: boolean }>
         branchSwitch: (repoPath: string, branch: string) => Promise<{ branch: string }>
         // Local branches for the "convert a branch into a worktree" picker.
         branchList: (repoPath: string) => Promise<HermesGitBranch[]>

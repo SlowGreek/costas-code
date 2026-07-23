@@ -8,6 +8,10 @@ import path from 'node:path'
 
 import { resolveRequestedPathForIpc } from './hardening'
 
+const MANAGED_METADATA_FILE = 'hermes-managed-worktree.json'
+const MANAGED_BRANCH_PREFIX = 'hermes/managed/'
+const MANAGED_DIR_PREFIX = 'hermes-managed-'
+
 function runGit(gitBin, args, cwd): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -201,6 +205,63 @@ async function mainRoot(gitBin, cwd) {
   return main ? main.path : cwd
 }
 
+async function managedMetadataPath(gitBin, worktreePath) {
+  const gitDir = await gitLine(gitBin, ['rev-parse', '--path-format=absolute', '--git-dir'], worktreePath)
+
+  return gitDir ? path.join(gitDir, MANAGED_METADATA_FILE) : ''
+}
+
+async function writeManagedMetadata(gitBin, worktreePath, metadata) {
+  const metadataPath = await managedMetadataPath(gitBin, worktreePath)
+
+  if (!metadataPath) {
+    throw new Error('Could not resolve managed worktree metadata path.')
+  }
+
+  fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+}
+
+async function readManagedMetadata(gitBin, worktreePath) {
+  const metadataPath = await managedMetadataPath(gitBin, worktreePath)
+
+  if (!metadataPath) {
+    return null
+  }
+
+  try {
+    const value = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+
+    return value && value.managed === true ? value : null
+  } catch {
+    return null
+  }
+}
+
+async function gitSucceeds(gitBin, args, cwd) {
+  try {
+    await runGit(gitBin, args, cwd)
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function changesIntegratedInRef(gitBin, worktreePath, baseCommit, targetRef) {
+  if (!baseCommit || !targetRef || !(await gitSucceeds(gitBin, ['rev-parse', '--verify', targetRef], worktreePath))) {
+    return false
+  }
+
+  const changedPaths = (await gitLine(gitBin, ['diff', '--name-only', '-z', `${baseCommit}..HEAD`], worktreePath))
+    .split('\0')
+    .filter(Boolean)
+
+  return (
+    changedPaths.length > 0 &&
+    (await gitSucceeds(gitBin, ['diff', '--quiet', 'HEAD', targetRef, '--', ...changedPaths], worktreePath))
+  )
+}
+
 function uniqueDir(base) {
   let dir = base
   let n = 1
@@ -244,9 +305,15 @@ async function addWorktree(repoPath, options, gitBin) {
     return addExistingBranchWorktree(gitBin, root, opts.existingBranch)
   }
 
-  const slug = slugify(opts.name || `work-${Date.now().toString(36)}`)
-  const branch = sanitizeBranch(opts.branch) || `hermes/${slug}`
+  const requestedSlug = slugify(opts.name || `work-${Date.now().toString(36)}`)
+
+  const slug = opts.managed ? `${MANAGED_DIR_PREFIX}${requestedSlug}` : requestedSlug
+
+  const branch =
+    sanitizeBranch(opts.branch) || (opts.managed ? `${MANAGED_BRANCH_PREFIX}${requestedSlug}` : `hermes/${slug}`)
+
   const dir = uniqueDir(path.join(root, '.worktrees', slug))
+  const baseCommit = await gitLine(gitBin, ['rev-parse', 'HEAD'], root)
 
   const args = ['worktree', 'add', '-b', branch, dir]
 
@@ -291,7 +358,75 @@ async function addWorktree(repoPath, options, gitBin) {
     }
   }
 
-  return { path: dir, branch, repoRoot: root }
+  if (opts.managed) {
+    try {
+      await writeManagedMetadata(gitBin, dir, {
+        baseCommit,
+        branch,
+        createdAt: Date.now(),
+        managed: true,
+        repoRoot: root,
+        version: 1
+      })
+    } catch (err) {
+      await runGit(gitBin, ['worktree', 'remove', '--force', dir], root).catch(() => undefined)
+      await runGit(gitBin, ['branch', '-D', branch], root).catch(() => undefined)
+      throw err
+    }
+  }
+
+  return { path: dir, branch, managed: Boolean(opts.managed), repoRoot: root }
+}
+
+async function cleanupManagedWorktree(repoPath, worktreePath, gitBin) {
+  const resolvedRepo = resolveRequestedPathForIpc(repoPath, { purpose: 'Managed worktree cleanup (repo)' })
+  const resolvedTree = resolveRequestedPathForIpc(worktreePath, { purpose: 'Managed worktree cleanup (tree)' })
+  const root = await mainRoot(gitBin, resolvedRepo)
+  const trees = await listWorktrees(root, gitBin)
+  const tree = trees.find(item => path.resolve(item.path) === path.resolve(resolvedTree))
+  const metadata = await readManagedMetadata(gitBin, resolvedTree)
+
+  if (
+    !tree ||
+    tree.isMain ||
+    !metadata ||
+    typeof metadata.repoRoot !== 'string' ||
+    path.resolve(metadata.repoRoot) !== path.resolve(root) ||
+    metadata.branch !== tree.branch ||
+    !tree.branch?.startsWith(MANAGED_BRANCH_PREFIX) ||
+    !path.basename(resolvedTree).startsWith(MANAGED_DIR_PREFIX)
+  ) {
+    return { reason: 'not-managed', removed: false }
+  }
+
+  if ((await gitLine(gitBin, ['status', '--porcelain'], resolvedTree)).trim()) {
+    return { reason: 'dirty', removed: false }
+  }
+
+  const head = await gitLine(gitBin, ['rev-parse', 'HEAD'], resolvedTree)
+  const baseCommit = String(metadata.baseCommit || '').trim()
+  const trunk = await defaultBranch(gitBin, root)
+  const empty = Boolean(head && baseCommit && head === baseCommit)
+  const remoteTrunk = trunk ? `origin/${trunk}` : ''
+
+  const merged = Boolean(
+    trunk &&
+    ((await gitSucceeds(gitBin, ['merge-base', '--is-ancestor', head, trunk], root)) ||
+      (await changesIntegratedInRef(gitBin, resolvedTree, baseCommit, trunk)) ||
+      (await changesIntegratedInRef(gitBin, resolvedTree, baseCommit, remoteTrunk)))
+  )
+
+  if (!empty && !merged) {
+    return { reason: 'unmerged', removed: false }
+  }
+
+  await runGit(gitBin, ['worktree', 'remove', resolvedTree], root)
+
+  if (tree.branch) {
+    await runGit(gitBin, ['branch', '-D', tree.branch], root).catch(() => undefined)
+  }
+
+  return { reason: empty ? 'empty' : 'merged', removed: true }
 }
 
 async function removeWorktree(repoPath, worktreePath, options, gitBin) {
@@ -421,6 +556,7 @@ async function listBaseBranches(repoPath, gitBin) {
 
 export {
   addWorktree,
+  cleanupManagedWorktree,
   ensureGitRepo,
   listBaseBranches,
   listBranches,

@@ -45,6 +45,7 @@ interface SubmitPromptDeps {
   getRoutedStoredSessionId: () => null | string
   getRuntimeIdForStoredSession: (storedSessionId: string) => null | string
   getRouteToken: () => string
+  prepareSessionForPrompt: (prompt: string) => Promise<boolean>
   requestGateway: GatewayRequest
   resumeStoredSession: (storedSessionId: string) => Promise<void> | void
   selectedStoredSessionIdRef: MutableRefObject<string | null>
@@ -90,6 +91,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
     getRoutedStoredSessionId,
     getRuntimeIdForStoredSession,
     getRouteToken,
+    prepareSessionForPrompt,
     requestGateway,
     resumeStoredSession,
     selectedStoredSessionIdRef,
@@ -157,6 +159,15 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       // Barged mid-speech (here or via the voice loop's VAD)? Flag the submit
       // so the backend notes the interruption to the model.
       const interrupted = takeVoicePlaybackInterrupted()
+
+      if (
+        !options?.fromQueue &&
+        visibleText &&
+        !visibleText.startsWith('/') &&
+        !(await prepareSessionForPrompt(visibleText))
+      ) {
+        return false
+      }
 
       // Queue drains carry their source session explicitly. A background drain
       // must never inherit the currently selected session after the user moves
@@ -627,6 +638,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       getRoutedStoredSessionId,
       getRuntimeIdForStoredSession,
       getRouteToken,
+      prepareSessionForPrompt,
       requestGateway,
       resumeStoredSession,
       scope,

@@ -8,11 +8,18 @@ import { desktopDefaultCwd, isDesktopFsRemoteMode, selectDesktopPaths, writeDesk
 import { desktopGit } from '@/lib/desktop-git'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { persistentAtom } from '@/lib/persisted'
+import { promptNeedsManagedWorktree, smartWorktreeLabel } from '@/lib/smart-worktree'
 import { $gateway, activeGateway, ensureActiveGatewayOpen } from '@/store/gateway'
 import { setSidebarAgentsGrouped } from '@/store/layout'
 import { notify } from '@/store/notifications'
 import { $activeGatewayProfile, requestFreshSession } from '@/store/profile'
-import { $selectedStoredSessionId, $sessions, sessionMatchesStoredId, workspaceCwdForNewSession } from '@/store/session'
+import {
+  $connection,
+  $selectedStoredSessionId,
+  $sessions,
+  sessionMatchesStoredId,
+  workspaceCwdForNewSession
+} from '@/store/session'
 import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 
 // First-class, per-profile Projects (named, multi-folder workspaces). State is
@@ -899,8 +906,8 @@ export function refreshWorktrees(): void {
 // truth; the caller starts a session in the returned path.
 export async function startWorkInRepo(
   repoPath: string,
-  options?: { name?: string; branch?: string; base?: string; existingBranch?: string }
-): Promise<null | { path: string; branch: string }> {
+  options?: { name?: string; branch?: string; base?: string; existingBranch?: string; managed?: boolean }
+): Promise<null | { path: string; branch: string; managed?: boolean }> {
   const git = desktopGit()
 
   if (!git || !repoPath) {
@@ -910,7 +917,64 @@ export async function startWorkInRepo(
   const result = await git.worktreeAdd(repoPath, options)
   bumpWorktrees()
 
-  return { branch: result.branch, path: result.path }
+  return { branch: result.branch, managed: result.managed, path: result.path }
+}
+
+function sameFsPath(left: string, right: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/g, '')
+
+  return normalize(left) === normalize(right)
+}
+
+export async function prepareSmartWorktree(
+  repoPath: string,
+  prompt: string
+): Promise<null | { branch: string; path: string }> {
+  const git = desktopGit()
+
+  if (
+    $connection.get()?.mode === 'remote' ||
+    !git?.repoStatus ||
+    !git.worktreeList ||
+    !promptNeedsManagedWorktree(prompt)
+  ) {
+    return null
+  }
+
+  const [status, worktrees] = await Promise.all([git.repoStatus(repoPath), git.worktreeList(repoPath)])
+  const current = worktrees.find(worktree => sameFsPath(worktree.path, repoPath))
+
+  // Existing linked worktrees are already isolated. A dirty main checkout may
+  // contain user state that cannot be reproduced in a new worktree, so stay put.
+  if (!status || !current?.isMain || status.changed > 0) {
+    return null
+  }
+
+  const result = await startWorkInRepo(repoPath, {
+    managed: true,
+    name: smartWorktreeLabel(prompt)
+  })
+
+  return result ? { branch: result.branch, path: result.path } : null
+}
+
+export async function cleanupManagedWorktreePath(
+  repoPath: null | string | undefined,
+  worktreePath: null | string | undefined
+): Promise<boolean> {
+  const cleanup = window.hermesDesktop?.git?.worktreeCleanupManaged
+
+  if (!cleanup || !repoPath?.trim() || !worktreePath?.trim()) {
+    return false
+  }
+
+  const result = await cleanup(repoPath, worktreePath)
+
+  if (result.removed) {
+    bumpWorktrees()
+  }
+
+  return result.removed
 }
 
 // Local branches for the composer's "convert a branch into a worktree" picker.

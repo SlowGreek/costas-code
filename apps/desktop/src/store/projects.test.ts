@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $sidebarAgentsGrouped } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
+import { $connection } from '@/store/session'
 
 import {
   $activeProjectId,
@@ -17,6 +18,7 @@ import {
   exitProjectScope,
   openProjectCreate,
   pickProjectFolder,
+  prepareSmartWorktree,
   projectNameForCwd,
   refreshProjects,
   refreshProjectTree,
@@ -172,6 +174,70 @@ describe('worktree refresh', () => {
     const before = $worktreeRefreshToken.get()
     refreshWorktrees()
     expect($worktreeRefreshToken.get()).toBe(before + 1)
+  })
+
+  describe('prepareSmartWorktree', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      $connection.set({ mode: 'local' } as never)
+    })
+
+    it('creates a managed worktree for a mutating prompt on a clean main checkout', async () => {
+      const worktreeAdd = vi.fn(async () => ({
+        branch: 'hermes/managed/fix-auth',
+        managed: true,
+        path: '/repo/.worktrees/hermes-managed-fix-auth',
+        repoRoot: '/repo'
+      }))
+
+      desktopGit.mockReturnValue({
+        repoStatus: vi.fn(async () => ({ changed: 0 })),
+        worktreeAdd,
+        worktreeList: vi.fn(async () => [
+          { branch: 'main', detached: false, isMain: true, locked: false, path: '/repo' }
+        ])
+      } as never)
+
+      await expect(prepareSmartWorktree('/repo', 'Fix the authentication test.')).resolves.toEqual({
+        branch: 'hermes/managed/fix-auth',
+        path: '/repo/.worktrees/hermes-managed-fix-auth'
+      })
+      expect(worktreeAdd).toHaveBeenCalledWith(
+        '/repo',
+        expect.objectContaining({ managed: true, name: expect.stringMatching(/^managed-fix-authentication-test-/) })
+      )
+    })
+
+    it('keeps read-only prompts and already-linked worktrees in place', async () => {
+      const worktreeAdd = vi.fn()
+
+      desktopGit.mockReturnValue({
+        repoStatus: vi.fn(async () => ({ changed: 0 })),
+        worktreeAdd,
+        worktreeList: vi.fn(async () => [
+          { branch: 'feature', detached: false, isMain: false, locked: false, path: '/repo-wt' }
+        ])
+      } as never)
+
+      await expect(prepareSmartWorktree('/repo-wt', 'Explain the authentication flow.')).resolves.toBeNull()
+      await expect(prepareSmartWorktree('/repo-wt', 'Fix the authentication flow.')).resolves.toBeNull()
+      expect(worktreeAdd).not.toHaveBeenCalled()
+    })
+
+    it('does not detach a dirty main checkout from uncommitted user state', async () => {
+      const worktreeAdd = vi.fn()
+
+      desktopGit.mockReturnValue({
+        repoStatus: vi.fn(async () => ({ changed: 2 })),
+        worktreeAdd,
+        worktreeList: vi.fn(async () => [
+          { branch: 'main', detached: false, isMain: true, locked: false, path: '/repo' }
+        ])
+      } as never)
+
+      await expect(prepareSmartWorktree('/repo', 'Implement the feature.')).resolves.toBeNull()
+      expect(worktreeAdd).not.toHaveBeenCalled()
+    })
   })
 })
 

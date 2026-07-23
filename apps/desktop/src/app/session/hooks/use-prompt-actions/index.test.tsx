@@ -89,6 +89,7 @@ function Harness({
   onReady,
   onSeedState,
   openMemoryGraph,
+  prepareSessionForPrompt,
   refreshSessions,
   requestGateway,
   resumeStoredSession,
@@ -119,6 +120,7 @@ function Harness({
   storedSessionId?: null | string
   activeSessionId?: null | string
   createBackendSessionForSend?: () => Promise<null | string>
+  prepareSessionForPrompt?: (prompt: string) => Promise<boolean>
 }) {
   const localActiveSessionIdRef = useRef<string | null>(
     activeSessionId === undefined ? RUNTIME_SESSION_ID : activeSessionId
@@ -150,6 +152,7 @@ function Harness({
     getRouteToken: getRouteToken ?? (() => 'token'),
     handleSkinCommand: () => '',
     openMemoryGraph: openMemoryGraph ?? (() => undefined),
+    prepareSessionForPrompt: prepareSessionForPrompt ?? (async () => true),
     refreshSessions,
     requestGateway,
     resumeStoredSession: resumeStoredSession ?? (() => undefined),
@@ -198,6 +201,106 @@ function Harness({
 describe('usePromptActions /title', () => {
   beforeEach(() => {
     setSessions(() => [sessionInfo()])
+  })
+
+  describe('usePromptActions smart workspace preparation', () => {
+    afterEach(() => {
+      cleanup()
+      vi.restoreAllMocks()
+    })
+
+    it('prepares the workspace before submitting the prompt', async () => {
+      const calls: string[] = []
+
+      const prepareSessionForPrompt = vi.fn(async () => {
+        calls.push('prepare')
+
+        return true
+      })
+
+      const requestGateway = vi.fn(async (method: string) => {
+        calls.push(method)
+
+        return {} as never
+      })
+
+      let handle: HarnessHandle | null = null
+      await actRender(
+        <Harness
+          onReady={h => (handle = h)}
+          prepareSessionForPrompt={prepareSessionForPrompt}
+          refreshSessions={async () => undefined}
+          requestGateway={requestGateway}
+        />
+      )
+
+      expect(await handle!.submitText('Fix the failing test.')).toBe(true)
+      expect(prepareSessionForPrompt).toHaveBeenCalledWith('Fix the failing test.')
+      expect(calls.indexOf('prepare')).toBeLessThan(calls.indexOf('prompt.submit'))
+    })
+
+    it('does not submit when workspace preparation fails', async () => {
+      const requestGateway = vi.fn(async () => ({}) as never)
+
+      let handle: HarnessHandle | null = null
+      await actRender(
+        <Harness
+          onReady={h => (handle = h)}
+          prepareSessionForPrompt={async () => false}
+          refreshSessions={async () => undefined}
+          requestGateway={requestGateway}
+        />
+      )
+
+      expect(await handle!.submitText('Implement the feature.')).toBe(false)
+      expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything(), expect.anything())
+    })
+
+    it('routes a later mutating turn to the synchronously selected child session', async () => {
+      const activeSessionIdRef = { current: 'rt-parent' }
+      const selectedStoredSessionIdRef = { current: 'stored-parent' }
+      let routedStoredSessionId = 'stored-parent'
+      let routeToken = '/chat/stored-parent::'
+
+      const prepareSessionForPrompt = vi.fn(async () => {
+        activeSessionIdRef.current = 'rt-child'
+        selectedStoredSessionIdRef.current = 'stored-child'
+        routedStoredSessionId = 'stored-child'
+        routeToken = '/chat/stored-child::'
+
+        return true
+      })
+
+      const requestGateway = vi.fn(async () => ({}) as never)
+      let handle: HarnessHandle | null = null
+
+      await actRender(
+        <Harness
+          activeSessionId="rt-parent"
+          activeSessionIdRef={activeSessionIdRef}
+          getRoutedStoredSessionId={() => routedStoredSessionId}
+          getRouteToken={() => routeToken}
+          getRuntimeIdForStoredSession={storedId => (storedId === 'stored-child' ? 'rt-child' : 'rt-parent')}
+          onReady={h => (handle = h)}
+          prepareSessionForPrompt={prepareSessionForPrompt}
+          refreshSessions={async () => undefined}
+          requestGateway={requestGateway}
+          selectedStoredSessionIdRef={selectedStoredSessionIdRef}
+          storedSessionId="stored-parent"
+        />
+      )
+
+      expect(await handle!.submitText('Now implement the fix.')).toBe(true)
+      expect(requestGateway).toHaveBeenCalledWith(
+        'prompt.submit',
+        { session_id: 'rt-child', text: 'Now implement the fix.' },
+        expect.any(Number)
+      )
+      expect(requestGateway).not.toHaveBeenCalledWith(
+        'session.resume',
+        expect.objectContaining({ session_id: 'stored-parent' })
+      )
+    })
   })
 
   afterEach(() => {

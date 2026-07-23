@@ -117,9 +117,9 @@ class TestFallbackChainInit:
 
 
 class TestBusyInputMode:
-    def test_default_busy_input_mode_is_interrupt(self):
+    def test_default_busy_input_mode_is_steer(self):
         cli = _make_cli()
-        assert cli.busy_input_mode == "interrupt"
+        assert cli.busy_input_mode == "steer"
 
     def test_busy_input_mode_queue_is_honored(self):
         cli = _make_cli(config_overrides={"display": {"busy_input_mode": "queue"}})

@@ -15,7 +15,6 @@ import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
   cleanupManagedWorktreePath,
-  prepareSmartWorktree,
   resolveNewSessionCwd,
   tombstoneSessions,
   untombstoneSessions
@@ -363,9 +362,6 @@ export function useSessionActions({
 
       creatingSessionRef.current = true
 
-      let managedWorktree: null | { branch: string; path: string } = null
-      let managedRepoPath = ''
-
       try {
         // An explicit one-shot workspace target (null → detached, string → that
         // folder) wins; otherwise the live cwd, then the project-aware default
@@ -379,12 +375,10 @@ export function useSessionActions({
               ? workspaceTarget.trim()
               : $currentCwd.get().trim() || resolveNewSessionCwd()
 
-        managedRepoPath = requestedCwd
-        managedWorktree =
-          requestedCwd && preview ? await prepareSmartWorktree(requestedCwd, preview).catch(() => null) : null
-
-        const cwd = managedWorktree?.path ?? requestedCwd
-        const params = await desktopSessionCreateParams(cwd)
+        // Ordinary sends must stay in the current checkout. Worktree creation is
+        // available only through explicit Desktop flows (e.g. New worktree /
+        // Start work), never inferred from prompt text.
+        const params = await desktopSessionCreateParams(requestedCwd)
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id ?? null
 
@@ -407,10 +401,6 @@ export function useSessionActions({
         if (drift) {
           console.warn('[submit-drift-abort]', drift, { phase: 'mid-create' })
           await requestGateway('session.close', { session_id: created.session_id }).catch(() => undefined)
-
-          if (managedWorktree) {
-            await cleanupManagedWorktreePath(managedRepoPath, managedWorktree.path).catch(() => false)
-          }
 
           return null
         }
@@ -453,11 +443,9 @@ export function useSessionActions({
 
         return created.session_id
       } catch (err) {
-        if (managedWorktree) {
-          await cleanupManagedWorktreePath(managedRepoPath, managedWorktree.path).catch(() => false)
-        }
+        notifyError(err, copy.createSessionFailed)
 
-        throw err
+        return null
       } finally {
         window.setTimeout(() => {
           creatingSessionRef.current = false
@@ -1221,40 +1209,13 @@ export function useSessionActions({
   )
 
   const prepareSessionForPrompt = useCallback(
-    async (prompt: string): Promise<boolean> => {
-      const currentRuntimeId = activeSessionIdRef.current
-      const currentStoredId = selectedStoredSessionIdRef.current
-      const currentCwd = $currentCwd.get().trim()
-
-      if (!currentRuntimeId || !currentStoredId || !currentCwd || busyRef.current) {
-        return true
-      }
-
-      const managedWorktree = await prepareSmartWorktree(currentCwd, prompt).catch(() => null)
-
-      if (!managedWorktree) {
-        return true
-      }
-
-      const branchMessages = toBranchMessages($messages.get())
-
-      if (!branchMessages.length) {
-        await cleanupManagedWorktreePath(currentCwd, managedWorktree.path).catch(() => false)
-
-        return true
-      }
-
-      const branched = await forkBranch(branchMessages, currentStoredId, managedWorktree.path)
-
-      if (!branched) {
-        await cleanupManagedWorktreePath(currentCwd, managedWorktree.path).catch(() => false)
-
-        return false
-      }
-
+    async (_prompt: string): Promise<boolean> => {
+      // Ordinary follow-up prompts never auto-fork into a managed worktree.
+      // Explicit branching/worktree commands still route through forkBranch()
+      // and the dedicated New worktree / Start work UI.
       return true
     },
-    [activeSessionIdRef, busyRef, forkBranch, selectedStoredSessionIdRef]
+    []
   )
 
   const removeSession = useCallback(

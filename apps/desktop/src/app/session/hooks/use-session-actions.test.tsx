@@ -67,7 +67,7 @@ function deferred<T>() {
 
 type HarnessHandle = Pick<
   ReturnType<typeof useSessionActions>,
-  'createBackendSessionForSend' | 'startFreshSessionDraft'
+  'createBackendSessionForSend' | 'prepareSessionForPrompt' | 'startFreshSessionDraft'
 >
 
 function storedSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -90,19 +90,25 @@ function storedSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
 }
 
 function Harness({
+  activeSessionId = null,
   navigate = vi.fn(),
   onReady,
-  requestGateway
+  requestGateway,
+  selectedStoredSessionId = null
 }: {
+  activeSessionId?: string | null
   navigate?: ReturnType<typeof vi.fn>
   onReady: (handle: HarnessHandle) => void
   requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>
+  selectedStoredSessionId?: string | null
 }) {
+  const activeSessionIdRef = { current: activeSessionId }
+  const selectedStoredSessionIdRef = { current: selectedStoredSessionId }
   const ref = <T,>(value: T): MutableRefObject<T> => ({ current: value })
 
   const actions = useSessionActions({
-    activeSessionId: null,
-    activeSessionIdRef: ref<string | null>(null),
+    activeSessionId,
+    activeSessionIdRef,
     busyRef: ref(false),
     creatingSessionRef: ref(false),
     ensureSessionState: () => ({}) as ClientSessionState,
@@ -112,8 +118,8 @@ function Harness({
     requestGateway,
     resetViewSync: vi.fn(),
     runtimeIdByStoredSessionIdRef: ref(new Map<string, string>()),
-    selectedStoredSessionId: null,
-    selectedStoredSessionIdRef: ref<string | null>(null),
+    selectedStoredSessionId,
+    selectedStoredSessionIdRef,
     sessionStateByRuntimeIdRef: ref(new Map<string, ClientSessionState>()),
     syncSessionStateToView: vi.fn(),
     updateSessionState: () => ({}) as ClientSessionState
@@ -428,6 +434,7 @@ describe('startFreshSessionDraft', () => {
 describe('createBackendSessionForSend profile routing', () => {
   afterEach(() => {
     cleanup()
+
     $newChatProfile.set(null)
     $activeGatewayProfile.set('default')
     $projectScope.set(ALL_PROJECTS)
@@ -484,6 +491,44 @@ describe('createBackendSessionForSend profile routing', () => {
     })
 
     expect(params).toMatchObject({ cwd: '/remote/worktree' })
+  })
+
+  it('does not auto-create a managed worktree from a new-chat prompt preview', async () => {
+    let handle: HarnessHandle | null = null
+    const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'session.create') {
+        return { info: null, session_id: RUNTIME_SESSION_ID, stored_session_id: null, ...params } as never
+      }
+
+      return {} as never
+    })
+
+    setCurrentCwd('/repo')
+    render(<Harness onReady={h => (handle = h)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.createBackendSessionForSend('Implement the feature.')
+    })
+
+    expect(requestGateway).toHaveBeenCalledWith('session.create', expect.objectContaining({ cwd: '/repo' }))
+  })
+
+  it('does not auto-fork an existing session into a managed worktree on ordinary prompts', async () => {
+    let handle: HarnessHandle | null = null
+
+    setCurrentCwd('/repo')
+    render(
+      <Harness
+        activeSessionId="rt-parent"
+        onReady={h => (handle = h)}
+        requestGateway={async () => ({}) as never}
+        selectedStoredSessionId="stored-parent"
+      />
+    )
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await expect(handle!.prepareSessionForPrompt('Implement the feature.')).resolves.toBe(true)
   })
 
   it('freezes the visible selector state before profile readiness and sends fast: false explicitly', async () => {

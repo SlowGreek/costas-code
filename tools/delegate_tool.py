@@ -2436,6 +2436,7 @@ def delegate_task(
     max_iterations: Optional[int] = None,
     role: Optional[str] = None,
     background: Optional[bool] = None,
+    model: Optional[str] = None,
     parent_agent=None,
 ) -> str:
     """
@@ -2538,7 +2539,7 @@ def delegate_task(
             )
         task_list = tasks
     elif goal and isinstance(goal, str) and goal.strip():
-        task_list = [{"goal": goal, "context": context, "role": top_role}]
+        task_list = [{"goal": goal, "context": context, "role": top_role, "model": model}]
     else:
         return tool_error("Provide either 'goal' (single task) or 'tasks' (batch).")
 
@@ -2556,6 +2557,17 @@ def delegate_task(
 
     overall_start = time.monotonic()
     results = []
+
+    # Per-task model overrides. Resolved for the WHOLE batch here, before any
+    # child agent is constructed, so a bad model on task N cannot leave tasks
+    # 0..N-1 already built and running. Returns ({}, None) when no task
+    # requested an override, in which case every child uses `creds` exactly as
+    # before.
+    task_creds, task_creds_error = _resolve_task_model_overrides(
+        task_list, cfg, parent_agent
+    )
+    if task_creds_error:
+        return tool_error(task_creds_error)
 
     n_tasks = len(task_list)
     # Track goal labels for progress display (truncated for readability)
@@ -2604,6 +2616,10 @@ def delegate_task(
             # Per-task role beats top-level; normalise again so unknown
             # per-task values warn and degrade to leaf uniformly.
             effective_role = _normalize_role(t.get("role") or top_role)
+            # Per-task model override when this task requested one (already
+            # validated + resolved atomically above); otherwise the global
+            # delegation credential bundle.
+            _creds = task_creds.get(i, creds)
             child = _build_child_agent(
                 task_index=i,
                 goal=t["goal"],
@@ -2611,18 +2627,18 @@ def delegate_task(
                 # Subagents always inherit the parent's toolsets; the model
                 # cannot choose or narrow them (no model-facing toolsets arg).
                 toolsets=None,
-                model=creds["model"],
+                model=_creds["model"],
                 max_iterations=effective_max_iter,
                 task_count=n_tasks,
                 parent_agent=parent_agent,
-                override_provider=creds["provider"],
-                override_base_url=creds["base_url"],
-                override_api_key=creds["api_key"],
-                override_api_mode=creds["api_mode"],
-                override_request_overrides=creds.get("request_overrides"),
-                override_max_tokens=creds.get("max_output_tokens"),
-                override_acp_command=creds.get("command"),
-                override_acp_args=creds.get("args"),
+                override_provider=_creds["provider"],
+                override_base_url=_creds["base_url"],
+                override_api_key=_creds["api_key"],
+                override_api_mode=_creds["api_mode"],
+                override_request_overrides=_creds.get("request_overrides"),
+                override_max_tokens=_creds.get("max_output_tokens"),
+                override_acp_command=_creds.get("command"),
+                override_acp_args=_creds.get("args"),
                 role=effective_role,
             )
             # Override with correct parent tool names (before child construction mutated global)
@@ -3046,7 +3062,10 @@ def delegate_task(
             # parent's toolsets (no model-facing toolsets arg).
             toolsets=None,
             role=top_role,
-            model=creds["model"],
+            # Display/metadata only. With per-task model overrides a batch can
+            # span several models, so report the distinct set rather than
+            # mislabelling every child with the global bundle's model.
+            model=_describe_batch_models(task_list, task_creds, creds),
             session_key=_session_key,
             origin_ui_session_id=_origin_ui_session_id,
             origin_session_id=_wake_sid,
@@ -3327,6 +3346,193 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
     }
 
 
+def _describe_batch_models(task_list: list, task_creds: dict, base_creds: dict):
+    """Summarise which model(s) a batch runs on, for display metadata only.
+
+    Returns the single model string when the whole batch shares one (the
+    common case, byte-identical to the previous behaviour), or a
+    comma-separated list of the distinct models when per-task overrides make a
+    batch heterogeneous. Never affects execution.
+    """
+    try:
+        models = []
+        for i in range(len(task_list)):
+            c = task_creds.get(i, base_creds) if task_creds else base_creds
+            models.append((c or {}).get("model"))
+        distinct = [m for m in dict.fromkeys(models) if m]
+        if not distinct:
+            return (base_creds or {}).get("model")
+        if len(distinct) == 1:
+            return distinct[0]
+        return ", ".join(distinct)
+    except Exception:
+        return (base_creds or {}).get("model")
+
+
+def _get_allowed_models() -> list:
+    """Read delegation.allowed_models from config.
+
+    Returns a normalised list of allowed model specs. Empty list (the default)
+    means per-task model selection is DISABLED: the model cannot choose, the
+    `model` schema field is not advertised, and every child inherits the parent
+    model (or delegation.model when set) exactly as before.
+
+    Each entry is either "provider:model" or a bare "model". Entries are
+    returned verbatim (stripped); parsing happens in _parse_model_spec so the
+    allowlist comparison is a plain string match against what the user wrote.
+    """
+    try:
+        cfg = _load_config()
+        raw = cfg.get("allowed_models")
+    except Exception:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        if raw:
+            logger.warning(
+                "delegation.allowed_models=%r is not a list; per-task model "
+                "selection stays disabled.",
+                raw,
+            )
+        return []
+    out = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            logger.warning(
+                "delegation.allowed_models entry %r is not a string; ignoring.",
+                entry,
+            )
+            continue
+        spec = entry.strip()
+        if spec:
+            out.append(spec)
+    return out
+
+
+def _parse_model_spec(spec: str) -> tuple:
+    """Split an allowlist entry into (provider, model).
+
+    "openrouter:anthropic/claude-opus-4" -> ("openrouter", "anthropic/claude-opus-4")
+    "anthropic/claude-opus-4"            -> (None, "anthropic/claude-opus-4")
+
+    Only the FIRST colon separates provider from model, because model names
+    routinely contain slashes and may contain colons (e.g. ":free" suffixes on
+    OpenRouter). A bare model with no provider returns provider=None, which
+    makes _resolve_delegation_credentials fall through to the parent's provider
+    with only the model overridden.
+
+    A leading "custom:<name>" provider is preserved intact — that prefix is
+    part of the provider identifier in the runtime provider system, not a
+    provider/model separator.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return (None, None)
+    if spec.lower().startswith("custom:"):
+        # custom:<name>:<model> — provider is "custom:<name>"
+        rest = spec[len("custom:"):]
+        if ":" in rest:
+            name, model = rest.split(":", 1)
+            return (f"custom:{name.strip()}", model.strip() or None)
+        # "custom:<name>" with no model — provider only
+        return (spec, None)
+    if ":" in spec:
+        provider, model = spec.split(":", 1)
+        return (provider.strip() or None, model.strip() or None)
+    return (None, spec)
+
+
+def _resolve_task_model_overrides(task_list: list, base_cfg: dict, parent_agent) -> tuple:
+    """Pre-resolve per-task model credentials for an entire batch, atomically.
+
+    Returns ``(creds_by_index, error)``. On ANY failure, ``creds_by_index`` is
+    None and ``error`` is a user-facing message — the caller must abort the
+    whole batch before constructing a single child. This is the atomicity
+    guarantee: credential resolution for task N must not fail after children
+    0..N-1 have already been built and launched.
+
+    When no task requests a model override, returns ``({}, None)`` and the
+    caller uses the single global credential bundle, preserving the previous
+    behaviour byte-for-byte.
+    """
+    requested = {
+        i: str(t.get("model") or "").strip()
+        for i, t in enumerate(task_list)
+        if isinstance(t, dict) and str(t.get("model") or "").strip()
+    }
+    if not requested:
+        return ({}, None)
+
+    allowed = _get_allowed_models()
+    if not allowed:
+        return (
+            None,
+            "Per-task model selection is not enabled. Set "
+            "delegation.allowed_models in config.yaml to a list of permitted "
+            "models (e.g. ['openrouter:openai/gpt-5.1']) before using the "
+            "'model' field on a task.",
+        )
+
+    # Match case-insensitively but resolve using the user's spelling from the
+    # allowlist, so config is the source of truth for provider prefixes.
+    allowed_by_key = {a.lower(): a for a in allowed}
+
+    # PASS 1 — allowlist validation for EVERY task before any credential
+    # resolution. This ordering matters: allowlist violation is a policy error
+    # the caller can fix by editing the task, while credential failure is an
+    # environment error. Resolving first would mask "task 2 named a forbidden
+    # model" behind "task 0 has no API key", reporting the wrong problem.
+    canonical_by_index = {}
+    for idx in sorted(requested):
+        spec = requested[idx]
+        canonical = allowed_by_key.get(spec.lower())
+        if canonical is None:
+            return (
+                None,
+                f"Task {idx} requested model '{spec}', which is not in "
+                f"delegation.allowed_models. Permitted values: "
+                f"{', '.join(allowed)}. Add it to config.yaml or omit the "
+                f"'model' field to inherit the parent model.",
+            )
+        canonical_by_index[idx] = canonical
+
+    # PASS 2 — resolve credentials. Any failure aborts the whole batch before
+    # the caller constructs a single child.
+    creds_by_index = {}
+    for idx in sorted(canonical_by_index):
+        canonical = canonical_by_index[idx]
+        spec = requested[idx]
+        provider, model = _parse_model_spec(canonical)
+        # Overlay onto the global delegation config so unrelated keys
+        # (base_url/api_key/api_mode) keep their configured meaning. An
+        # explicit provider in the spec replaces delegation.provider; a bare
+        # model overrides only the model.
+        task_cfg = dict(base_cfg)
+        if model:
+            task_cfg["model"] = model
+        if provider:
+            task_cfg["provider"] = provider
+            # A per-task provider supersedes a globally configured direct
+            # endpoint — otherwise delegation.base_url would silently pin every
+            # child to one endpoint regardless of the requested provider.
+            task_cfg["base_url"] = ""
+            task_cfg["api_key"] = ""
+            task_cfg["api_mode"] = ""
+        try:
+            creds_by_index[idx] = _resolve_delegation_credentials(task_cfg, parent_agent)
+        except ValueError as exc:
+            return (
+                None,
+                f"Task {idx} model '{spec}' could not be resolved: {exc}",
+            )
+        except Exception as exc:  # defensive: never leave a batch half-built
+            return (
+                None,
+                f"Task {idx} model '{spec}' could not be resolved: {exc}",
+            )
+
+    return (creds_by_index, None)
+
+
 def _load_config() -> dict:
     """Load delegation config from the active Hermes config.
 
@@ -3475,9 +3681,39 @@ def _build_top_level_description() -> str:
         f"Orchestrators are bounded by max_spawn_depth={max_depth} for this "
         f"user and can be disabled globally via "
         "delegation.orchestrator_enabled=false.\n"
-        "- Subagent model is NOT selectable per call: children inherit the parent model (plus its fallback chain) unless you pin all subagents to a model via delegation.provider / delegation.model in config.yaml.\n"
-        "- Each subagent gets its own terminal session (separate working directory and state).\n"
+        + _build_model_selection_note()
+        + "- Each subagent gets its own terminal session (separate working directory and state).\n"
         "- Results are always returned as an array, one entry per task."
+    )
+
+
+def _build_model_selection_note() -> str:
+    """Compose the model-selection line of the delegate_task description.
+
+    Reflects whether the user has opted in via delegation.allowed_models, so
+    the model is never told it can pick a model when it cannot (and vice
+    versa).
+    """
+    try:
+        allowed = _get_allowed_models()
+    except Exception:
+        allowed = []
+    if allowed:
+        return (
+            "- Subagent model IS selectable per task via the 'model' field, "
+            "restricted to the values the user allowlisted in "
+            "delegation.allowed_models: " + ", ".join(allowed) + ". "
+            "Omit it to inherit the parent model. Use it deliberately for "
+            "cross-model review (one model critiquing another's work) or "
+            "mixture-of-agents fan-out; a different model is only worth the "
+            "cost when an independent perspective is the point.\n"
+        )
+    return (
+        "- Subagent model is NOT selectable per call: children inherit the "
+        "parent model (plus its fallback chain) unless you pin all subagents "
+        "to a model via delegation.provider / delegation.model in config.yaml, "
+        "or the user allowlists models in delegation.allowed_models to enable "
+        "per-task selection.\n"
     )
 
 
@@ -3548,6 +3784,50 @@ def _build_dynamic_schema_overrides() -> dict:
     }
     overrides_params["properties"]["tasks"]["description"] = _build_tasks_param_description()
     overrides_params["properties"]["role"]["description"] = _build_role_param_description()
+
+    # Per-task model selection is OPT-IN. The `model` field is advertised to
+    # the model ONLY when delegation.allowed_models is non-empty, so users who
+    # have not opted in pay zero extra schema tokens on every API call. Both
+    # the top-level (single-task) and per-task (batch) fields carry an `enum`
+    # of exactly the permitted values, so the model cannot name anything the
+    # user has not pre-approved and the allowlist is self-documenting.
+    try:
+        allowed = _get_allowed_models()
+    except Exception:
+        allowed = []
+    if allowed:
+        model_desc = (
+            "Optional model for this subagent. Omit to inherit the parent's "
+            "model (the default). Use this to get a genuinely different "
+            "model's perspective — e.g. one model reviewing another's work, "
+            "or a mixture-of-agents fan-out across several models in one "
+            "batch. Only the listed values are permitted (set by the user via "
+            "delegation.allowed_models)."
+        )
+        # Deep-copy the tasks item schema so the static module-level dict is
+        # never mutated; _build_dynamic_schema_overrides runs on every
+        # get_definitions() pass.
+        tasks_schema = dict(overrides_params["properties"]["tasks"])
+        items = dict(tasks_schema.get("items") or {})
+        items["properties"] = {
+            k: dict(v) for k, v in (items.get("properties") or {}).items()
+        }
+        items["properties"]["model"] = {
+            "type": "string",
+            "enum": list(allowed),
+            "description": model_desc,
+        }
+        tasks_schema["items"] = items
+        overrides_params["properties"]["tasks"] = tasks_schema
+
+        overrides_params["properties"]["model"] = {
+            "type": "string",
+            "enum": list(allowed),
+            "description": (
+                "Single-task mode only (ignored when 'tasks' is provided; set "
+                "the per-task 'model' field there instead). " + model_desc
+            ),
+        }
 
     return {
         "description": _build_top_level_description(),

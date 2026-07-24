@@ -2345,6 +2345,20 @@ DEFAULT_CONFIG = {
                            # "codex_responses", or "anthropic_messages". Empty = auto-detect
                            # from URL (e.g. /anthropic suffix → anthropic_messages). Set this
                            # explicitly for non-standard endpoints the heuristic can't detect.
+        # Opt-in allowlist enabling PER-TASK model selection in delegate_task.
+        # Empty (default) = the model cannot choose; children inherit the parent
+        # model, or delegation.model when set. The `model` schema field is only
+        # advertised to the model when this list is non-empty, so users who do
+        # not opt in pay zero extra tokens on every API call.
+        #
+        # Entries are "provider:model" or a bare "model" (provider inferred via
+        # the same runtime resolution CLI startup uses). Example:
+        #   allowed_models:
+        #     - openrouter:anthropic/claude-opus-4
+        #     - openrouter:openai/gpt-5.1
+        # Use cases: cross-model review (one model critiques another's work) and
+        # mixture-of-agents fan-out (one batch across several models).
+        "allowed_models": [],
         # When delegate_task narrows child toolsets explicitly, preserve any
         # MCP toolsets the parent already has enabled. On by default so
         # narrowing (e.g. toolsets=["web","browser"]) expresses "I want these

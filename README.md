@@ -1,22 +1,22 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
+  <img src="assets/banner.png" alt="Costas Code" width="100%">
 </p>
 
-# Hermes Agent ☤
+# Costas Code
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> | <a href="https://hermes-agent.nousresearch.com/">Hermes Desktop</a>
+  <a href="https://github.com/SlowGreek/costas-code">Costas Code</a> · Powered by <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
 </p>
 <p align="center">
   <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
+  <a href="https://github.com/SlowGreek/costas-code/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/SlowGreek/costas-code"><img src="https://img.shields.io/badge/Fork-Costas%20Code-5B6CFF?style=for-the-badge" alt="Costas Code"></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
   <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
   <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
 </p>
 
-**The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
+**Costas Code is a personal coding-agent distribution built on [Hermes Agent](https://github.com/NousResearch/hermes-agent).** It keeps Hermes protocol, configuration, session, skill, and plugin compatibility while shipping Costas Code branding, steering-first interaction, a native standing-goal surface, and the Costas Agent Plugin. Existing Hermes data in `~/.hermes` is reused automatically.
 
 Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
 
@@ -37,20 +37,20 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 ### Linux, macOS, WSL2, Termux
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/main/scripts/install.sh | bash
 ```
 
 ### Windows (native, PowerShell)
 
-> **Heads up:** Native Windows runs Hermes without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file issues](https://github.com/NousResearch/hermes-agent/issues).
+> **Heads up:** Native Windows runs Costas Code without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file an issue](https://github.com/SlowGreek/costas-code/issues).
 
 Run this in PowerShell:
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/SlowGreek/costas-code/main/scripts/install.ps1)
 ```
 
-The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** (MinGit, unpacked to `%LOCALAPPDATA%\hermes\git` — no admin required, completely isolated from any system Git install). Hermes uses this bundled Git Bash to run shell commands.
+The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** on Windows. Internal command names and state paths remain `hermes` / `~/.hermes` for upstream compatibility.
 
 If you already have Git installed, the installer detects it and uses that instead. Otherwise a ~45MB MinGit download is all you need — it won't touch or interfere with any system Git.
 
@@ -63,6 +63,52 @@ After installation:
 ```bash
 source ~/.bashrc    # reload shell (or: source ~/.zshrc)
 hermes              # start chatting!
+```
+
+### Install the desktop app from a release
+
+Download the artifact for your platform from [GitHub Releases](https://github.com/SlowGreek/costas-code/releases):
+
+- macOS: open `Costas-Code-<version>-mac-<arch>.dmg`, then drag **Costas Code.app** to Applications.
+- Windows: run the generated NSIS or MSI installer.
+- Linux: install the `.deb`/`.rpm`, or run the AppImage.
+
+Local development builds are not Apple-notarized. On macOS, Control-click the app and choose **Open**, or approve it under **System Settings → Privacy & Security**.
+
+## Build from source
+
+Prerequisites: Git, Python 3.11–3.13, and Node.js 20.19+ (Node 22.12+ recommended).
+
+```bash
+git clone https://github.com/SlowGreek/costas-code.git
+cd costas-code
+
+# Install the Python runtime and JavaScript workspace dependencies.
+bash scripts/install.sh --dir "$PWD" --skip-setup
+npm install
+
+# Run the desktop app in development mode.
+npm run dev --workspace apps/desktop
+```
+
+Build distributable desktop artifacts:
+
+```bash
+# macOS DMG
+npm run dist:mac:dmg --workspace apps/desktop
+
+# Windows NSIS installer (run on Windows)
+npm run dist:win:nsis --workspace apps/desktop
+
+# Linux AppImage, deb, and rpm
+npm run dist:linux --workspace apps/desktop
+```
+
+Artifacts are written to `apps/desktop/release/`. Before publishing, run:
+
+```bash
+NODE_OPTIONS=--no-experimental-webstorage npm run check -w apps/desktop
+scripts/run_tests.sh
 ```
 
 ### Troubleshooting

@@ -245,6 +245,8 @@ class WorkflowRuntime:
         args: Optional[Dict[str, Any]] = None,
         on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
         agent_runner: Callable[..., AgentOutcome] = run_workflow_agent,
+        replay: Any = None,
+        on_agent_record: Optional[Callable[[Any], None]] = None,
     ):
         self.owner_agent = owner_agent
         self.owner_depth = owner_depth
@@ -252,12 +254,22 @@ class WorkflowRuntime:
         self.args = args or {}
         self.on_event = on_event
         self._agent_runner = agent_runner
+        self._replay = replay
+        self._on_agent_record = on_agent_record
 
         self._lock = threading.Lock()
         self._agents_started = 0
         self._api_calls = 0
         self._failures: List[Dict[str, Any]] = []
         self._stop = threading.Event()
+
+    @property
+    def replayed_agents(self) -> int:
+        return getattr(self._replay, "replayed", 0) if self._replay else 0
+
+    @property
+    def diverged_at(self) -> Optional[int]:
+        return getattr(self._replay, "diverged_at", None) if self._replay else None
 
     # ── budget ────────────────────────────────────────────────────────────
 
@@ -319,6 +331,31 @@ class WorkflowRuntime:
         if self._stop.is_set():
             raise WorkflowError("workflow was stopped")
 
+        options = {
+            "model": model,
+            "toolsets": toolsets,
+            "max_iterations": max_iterations,
+            "max_attempts": max_attempts,
+            "context": context,
+        }
+
+        # Replay before claiming budget: a replayed agent costs nothing and
+        # must not consume a slot the live portion of the run still needs.
+        if self._replay is not None:
+            from agent.workflow_state import call_signature
+
+            signature = call_signature(prompt, schema, options)
+            record = self._replay.next_result(signature)
+            if record is not None:
+                self._emit({"type": "agent_replayed", "label": label, "index": record.index})
+                if record.ok:
+                    return record.value
+                if optional:
+                    return None
+                raise WorkflowAgentFailed(
+                    f"agent{f' [{label}]' if label else ''} failed: {record.error}"
+                )
+
         index = self._claim_agent_slot(label)
         self._emit({"type": "agent_start", "index": index, "label": label})
 
@@ -338,6 +375,28 @@ class WorkflowRuntime:
         )
 
         self._record(outcome)
+        if self._replay is not None:
+            self._replay.note_executed()
+        if self._on_agent_record is not None:
+            from agent.workflow_state import AgentRecord, call_signature
+
+            try:
+                self._on_agent_record(
+                    AgentRecord(
+                        index=index - 1,
+                        signature=call_signature(prompt, schema, options),
+                        ok=outcome.ok,
+                        label=label,
+                        value=outcome.value,
+                        error=outcome.error,
+                        status=outcome.status,
+                        api_calls=outcome.api_calls,
+                        duration=outcome.duration,
+                    )
+                )
+            except Exception:  # pragma: no cover - persistence must not kill a run
+                logger.debug("workflow agent record persistence failed", exc_info=True)
+
         self._emit(
             {
                 "type": "agent_end",

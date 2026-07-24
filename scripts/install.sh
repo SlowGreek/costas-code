@@ -1215,7 +1215,7 @@ clone_repo() {
             # branches — on a non-single-branch checkout that turns each update
             # into a multi-minute download that can stall the installer.
             git remote set-branches origin "$BRANCH" 2>/dev/null || true
-            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
+            git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
             git checkout -B "$BRANCH" "origin/$BRANCH"
             # Managed installs should follow origin/$BRANCH exactly. If the
             # checkout has diverged (or has local-only commits), ff-only pull

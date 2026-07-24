@@ -415,7 +415,7 @@ def test_cmd_update_retries_optional_extras_individually_when_all_fails(monkeypa
             "git",
             "fetch",
             "origin",
-            "costas-code:refs/remotes/origin/costas-code",
+            "+refs/heads/costas-code:refs/remotes/origin/costas-code",
         ]:
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -469,7 +469,7 @@ def test_cmd_update_succeeds_with_extras(monkeypatch, tmp_path):
             "git",
             "fetch",
             "origin",
-            "costas-code:refs/remotes/origin/costas-code",
+            "+refs/heads/costas-code:refs/remotes/origin/costas-code",
         ]:
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -727,7 +727,7 @@ def test_cmd_update_fetch_is_scoped_to_target_branch(monkeypatch, tmp_path):
             "git",
             "fetch",
             "origin",
-            "costas-code:refs/remotes/origin/costas-code",
+            "+refs/heads/costas-code:refs/remotes/origin/costas-code",
         ]
     ]
     assert ["git", "fetch", "origin"] not in recorded

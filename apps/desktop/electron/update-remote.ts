@@ -24,7 +24,7 @@ function resolveUpdateBranch(branch) {
 }
 
 function remoteTrackingRefspec(branch, remote = 'origin') {
-  return `${branch}:refs/remotes/${remote}/${branch}`
+  return `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`
 }
 
 function buildUpdateBranchArgs(branch) {

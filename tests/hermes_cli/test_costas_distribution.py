@@ -32,11 +32,11 @@ def test_cross_platform_installers_clone_the_costas_code_repository():
     assert 'REPO_URL_HTTPS="https://github.com/SlowGreek/costas-code.git"' in install_sh
     assert 'REPO_URL_SSH="git@github.com:SlowGreek/costas-code.git"' in install_sh
     assert 'BRANCH="costas-code"' in install_sh
-    assert 'git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"' in install_sh
+    assert 'git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"' in install_sh
     assert 'git checkout -B "$BRANCH" "origin/$BRANCH"' in install_sh
     assert '$RepoUrlHttps = "https://github.com/SlowGreek/costas-code.git"' in install_ps1
     assert '$RepoUrlSsh = "git@github.com:SlowGreek/costas-code.git"' in install_ps1
     assert '[string]$Branch = "costas-code"' in install_ps1
     assert '$pinnedBranch = "costas-code"' in install_ps1
-    assert 'fetch origin "${Branch}:refs/remotes/origin/${Branch}"' in install_ps1
+    assert 'fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"' in install_ps1
     assert 'checkout -B $Branch "origin/$Branch"' in install_ps1

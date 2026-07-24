@@ -9675,7 +9675,7 @@ def _resolve_update_branch(args) -> str:
 
 def _tracking_refspec(remote: str, branch: str) -> str:
     """Return a fetch refspec that creates the named remote-tracking ref."""
-    return f"{branch}:refs/remotes/{remote}/{branch}"
+    return f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
 
 
 def _cmd_update_check(

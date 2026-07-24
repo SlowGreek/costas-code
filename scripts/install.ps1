@@ -1498,7 +1498,7 @@ function Install-Repository {
                 }
                 git -c windows.appendAtomically=false remote set-branches origin $Branch
                 if ($LASTEXITCODE -ne 0) { throw "git remote set-branches failed (exit $LASTEXITCODE)" }
-                git -c windows.appendAtomically=false fetch origin "${Branch}:refs/remotes/origin/${Branch}"
+                git -c windows.appendAtomically=false fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"
                 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
                 # Precedence: Commit > Tag > Branch.  Commit and Tag check
                 # out as detached HEAD intentionally -- they're meant to be

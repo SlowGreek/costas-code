@@ -225,7 +225,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
             "git",
             "fetch",
             "origin",
-            f"{UPDATE_BRANCH}:refs/remotes/origin/{UPDATE_BRANCH}",
+            f"+refs/heads/{UPDATE_BRANCH}:refs/remotes/origin/{UPDATE_BRANCH}",
         ]
         if is_shallow:
             fetch_args += ["--depth", "1"]

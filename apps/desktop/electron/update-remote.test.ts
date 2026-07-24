@@ -91,7 +91,7 @@ test('update routing follows the Costas distribution branch', () => {
   assert.equal(resolveUpdateBranch('feature/preview'), 'feature/preview')
   assert.equal(
     remoteTrackingRefspec('costas-code'),
-    'costas-code:refs/remotes/origin/costas-code'
+    '+refs/heads/costas-code:refs/remotes/origin/costas-code'
   )
   assert.deepEqual(buildUpdateBranchArgs(undefined), ['--branch', 'costas-code'])
   assert.deepEqual(buildUpdateBranchArgs('main'), ['--branch', 'costas-code'])

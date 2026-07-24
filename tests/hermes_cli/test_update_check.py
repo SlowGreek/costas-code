@@ -149,7 +149,7 @@ def test_check_for_updates_official_ssh_origin_uses_https_probe(tmp_path):
         "git",
         "fetch",
         "origin",
-        "costas-code:refs/remotes/origin/costas-code",
+        "+refs/heads/costas-code:refs/remotes/origin/costas-code",
         "--quiet",
     ] not in calls
 
@@ -196,7 +196,7 @@ def test_check_via_local_git_shallow_clone_behind_reports_no_count(tmp_path):
         "git",
         "fetch",
         "origin",
-        "costas-code:refs/remotes/origin/costas-code",
+        "+refs/heads/costas-code:refs/remotes/origin/costas-code",
         "--depth",
         "1",
         "--quiet",

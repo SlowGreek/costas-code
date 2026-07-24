@@ -60,11 +60,19 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.decide.outputs.build }}
+      platforms: ${{ steps.decide.outputs.platforms }}
     steps:
       - id: decide
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Resolve platform selection HERE rather than in the matrix: `inputs`
+          # is not dependable during matrix expansion, and getting it wrong
+          # skips every step and yields a green run that built nothing.
+          want="${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'both' }}"
+          echo "platforms=${want:-both}" >> "$GITHUB_OUTPUT"
+          echo "::notice::platforms=${want:-both}"
+
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
             echo "::notice::${{ github.event_name }} — building on request."
@@ -104,16 +112,16 @@ jobs:
             script: dist:mac:dmg
             artifact: catalyst-macos
             selector: 'apps/desktop/release/*.dmg'
-            selected: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms != 'windows' }}
+            platform: macos
           - name: Windows (nsis)
             os: windows-latest
             script: dist:win:nsis
             artifact: catalyst-windows
             selector: 'apps/desktop/release/*.exe'
-            selected: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms != 'macos' }}
+            platform: windows
 
     steps:
-      - if: matrix.selected == 'true'
+      - if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           # write-build-stamp.mjs records the commit the app pins to for
@@ -121,27 +129,27 @@ jobs:
           # script prefers in CI, so fetch-depth 1 is fine.
           fetch-depth: 1
 
-      - if: matrix.selected == 'true'
+      - if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install workspace dependencies
-        if: matrix.selected == 'true'
+        if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         # npm ci needs the root lockfile: the desktop app is a workspace and
         # its native deps are hoisted to the repo root.
         run: npm ci
 
       - name: Typecheck and lint
-        if: matrix.selected == 'true'
+        if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         working-directory: apps/desktop
         run: |
           npm run typecheck
           npm run lint
 
       - name: Build (${{ matrix.script }})
-        if: matrix.selected == 'true'
+        if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         working-directory: apps/desktop
         env:
           # Node 22 warns loudly about experimental webstorage during the
@@ -160,7 +168,7 @@ jobs:
         run: npm run ${{ matrix.script }}
 
       - name: Report what was produced
-        if: matrix.selected == 'true'
+        if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         shell: bash
         working-directory: apps/desktop/release
         # Surfaces the artifact name and size in the log, and fails loudly if
@@ -173,7 +181,7 @@ jobs:
             exit 1
           fi
 
-      - if: matrix.selected == 'true'
+      - if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ${{ matrix.artifact }}
@@ -203,6 +211,19 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: artifacts
+
+      - name: Refuse to publish an empty release
+        # A build whose steps all skipped still reports success, and without
+        # this the release job cheerfully publishes zero files. Silence is the
+        # failure mode worth catching.
+        run: |
+          found=$(find artifacts -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) | wc -l)
+          echo "installers found: $found"
+          find artifacts -type f | head -20
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no installers were produced — refusing to publish an empty release"
+            exit 1
+          fi
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:

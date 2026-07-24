@@ -13,11 +13,17 @@ name: Build desktop artifacts
 # Privacy & Security. Windows shows a SmartScreen warning that can be
 # dismissed via "More info" → "Run anyway".
 #
-# Manual by default. Building on every push would burn a lot of runner minutes
-# for artifacts nobody asked for; use the Actions tab, or push a v* tag to cut
-# a release.
+# Runs daily at 06:00 UTC, but only when HEAD differs from the last successful
+# run — an unchanged repo costs one API call instead of two 20-minute runners.
+# Building on every push was never worth it for artifacts nobody asked for.
+# Manual dispatch and v* tags bypass the gate: those are explicit intent.
 
 on:
+  schedule:
+    # 06:00 UTC daily. The `gate` job below turns this into "build at most once
+    # a day, and only when something actually changed" — an unchanged repo
+    # costs one API call instead of two 20-minute runners.
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       platforms:
@@ -43,16 +49,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    # Answers one question: is there anything new to build?
+    #
+    # A scheduled build that re-packages an unchanged commit produces an
+    # artifact identical to yesterday's, so we compare HEAD against the SHA of
+    # the last successful run of this workflow. Manual dispatches and tag
+    # pushes bypass the check — those are explicit intent, and second-guessing
+    # them is just surprising.
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ github.event_name }} — building on request."
+            exit 0
+          fi
+
+          last=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/desktop-build.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""')
+
+          if [ "$last" = "${{ github.sha }}" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_SHA:0:8} already built successfully — skipping."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::New commits since ${last:-'(no prior run)'} — building."
+          fi
+
   build:
     name: ${{ matrix.name }}
+    needs: gate
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     # Job-level so an unselected platform never starts a runner at all —
     # a skipped-but-green job is easy to misread as a successful build.
     if: >-
-      github.event_name == 'push' ||
-      inputs.platforms == 'both' ||
-      inputs.platforms == matrix.platform
+      needs.gate.outputs.build == 'true' && (
+        github.event_name != 'workflow_dispatch' ||
+        inputs.platforms == 'both' ||
+        inputs.platforms == matrix.platform
+      )
     strategy:
       # One platform failing should not discard the other's artifact — a
       # usable mac build is still worth having when Windows breaks.
@@ -73,14 +116,14 @@ jobs:
             platform: windows
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           # write-build-stamp.mjs records the commit the app pins to for
           # updates; a shallow clone still exposes GITHUB_SHA, which that
           # script prefers in CI, so fetch-depth 1 is fine.
           fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
           cache: npm
@@ -127,7 +170,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ${{ matrix.artifact }}
           # Ship the blockmaps too: electron-builder's differential updater
@@ -144,14 +187,20 @@ jobs:
   release:
     name: Attach to release
     needs: build
-    if: github.event_name == 'push' || inputs.make_release
+    # Only for a tag push or an explicit request — and never when `build` was
+    # skipped, since `needs: build` alone is satisfied by a skipped job and
+    # would publish an empty release.
+    if: >-
+      !cancelled() &&
+      needs.build.result == 'success' &&
+      (github.event_name == 'push' || inputs.make_release)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: artifacts
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: artifacts/**/*
           # Tag pushes name themselves; a manual run gets a dated draft so it

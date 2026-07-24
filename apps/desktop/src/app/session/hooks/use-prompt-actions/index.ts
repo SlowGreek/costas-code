@@ -256,11 +256,17 @@ export function usePromptActions({
               ? state.messages.findIndex(candidate => candidate.id === state.streamId)
               : -1
 
-          const lastAssistantIndex = options.insertBeforeActiveReply
-            ? state.messages.map(candidate => candidate.role).lastIndexOf('assistant')
-            : -1
+          const roles = options.insertBeforeActiveReply ? state.messages.map(candidate => candidate.role) : []
+          const lastUserIndex = roles.lastIndexOf('user')
+          const lastAssistantIndex = roles.lastIndexOf('assistant')
+          // A missing stream row is normal before the first assistant/tool
+          // payload. In that window, the last assistant belongs to the prior
+          // turn and must not pull a newer steer above the current user prompt.
+          // Only use the completion-race fallback when the assistant row is
+          // actually downstream of the latest user-authored message.
+          const activeAssistantIndex = lastAssistantIndex > lastUserIndex ? lastAssistantIndex : -1
 
-          const insertionIndex = streamIndex >= 0 ? streamIndex : lastAssistantIndex
+          const insertionIndex = streamIndex >= 0 ? streamIndex : activeAssistantIndex
 
           const messages =
             insertionIndex >= 0

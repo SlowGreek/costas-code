@@ -1423,6 +1423,39 @@ describe('usePromptActions redirectPrompt', () => {
     ])
   })
 
+  it('keeps a steering correction after the current user prompt when the assistant row has not started', async () => {
+    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const capturedStates: Record<string, unknown>[] = []
+    let handle: HarnessHandle | null = null
+
+    await actRender(
+      <Harness
+        onReady={h => (handle = h)}
+        onSeedState={state => capturedStates.push(state)}
+        refreshSessions={async () => undefined}
+        requestGateway={requestGateway}
+        seedMessages={[
+          { id: 'assistant-previous', role: 'assistant', parts: [textPart('previous answer')] },
+          { id: 'user-current', role: 'user', parts: [textPart('source or installer?')] }
+        ]}
+      />
+    )
+
+    expect(await handle!.redirectPrompt('windows too')).toBe(true)
+    expect(
+      (
+        capturedStates.at(-1)?.messages as {
+          parts: { text?: string }[]
+          role: string
+        }[]
+      ).map(message => ({ role: message.role, text: message.parts[0]?.text }))
+    ).toEqual([
+      { role: 'assistant', text: 'previous answer' },
+      { role: 'user', text: 'source or installer?' },
+      { role: 'user', text: 'windows too' }
+    ])
+  })
+
   it('reports rejection so the caller queues when the turn already ended', async () => {
     const requestGateway = vi.fn(async () => ({ status: 'rejected' }) as never)
 

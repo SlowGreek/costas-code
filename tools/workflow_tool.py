@@ -1,12 +1,15 @@
 """The `workflow` tool — run a model-written orchestration script.
 
-Service-gated on ``workflows.enabled``. While that is false the tool is not
-registered into any toolset, so its schema is never sent to the model and the
-feature costs nothing per API call. This is the Footprint Ladder's rung 3
-(service-gated tool) rather than rung 6 (unconditional core tool): the runtime
-genuinely must live in core — it needs the delegation depth guard, the agent
-budget, and the durable run store — but the *model-facing surface* only appears
-for users who turned it on.
+Service-gated on ``workflows.enabled``, which defaults to **true**: this is a
+first-class capability, and a feature behind a flag nobody flips may as well not
+exist.
+
+The gate still earns its keep. Setting the flag false removes the tool's schema
+from every API call (~700 tokens) rather than merely refusing to run, so users
+who don't want workflows pay nothing for them. That is the Footprint Ladder's
+rung 3 (service-gated tool): the runtime genuinely must live in core — it needs
+the delegation depth guard, the agent budget, and the durable run store — but
+the model-facing surface remains switchable at zero residual cost.
 """
 
 from __future__ import annotations
@@ -32,8 +35,16 @@ def _load_config() -> Dict[str, Any]:
 
 
 def check_workflow_requirements() -> bool:
-    """Gate: the tool exists only when workflows are explicitly enabled."""
-    return bool(_load_config().get("enabled"))
+    """Gate: on unless explicitly disabled.
+
+    A missing ``workflows`` section means the user has an older config that
+    predates the feature — they should get it, not silently lose it. Only an
+    explicit ``enabled: false`` removes the tool.
+    """
+    cfg = _load_config()
+    if "enabled" not in cfg:
+        return True
+    return bool(cfg.get("enabled"))
 
 
 def _owner_depth(parent_agent) -> int:

@@ -2336,11 +2336,13 @@ DEFAULT_CONFIG = {
     # with the SCRIPT holding the loop/branching and intermediate results
     # instead of the model's context window. See agent/workflow_runtime.py.
     #
-    # Disabled by default. The `workflow` tool is service-gated on this flag,
-    # so while it is false the tool's schema is not sent to the model at all —
-    # zero per-call cost for users who don't want the feature.
+    # On by default: this is a first-class Catalyst capability, and a feature
+    # gated behind a flag nobody flips may as well not exist. The tool is
+    # service-gated on this flag (tools/workflow_tool.py), so setting it false
+    # removes the tool's schema from every API call entirely — ~700 tokens per
+    # call — rather than merely refusing to run.
     "workflows": {
-        "enabled": False,
+        "enabled": True,
         # Each agent is a separate API call, so these bound cost rather than
         # capability. A fan-out of 25 is already a real bill; raise it
         # deliberately.

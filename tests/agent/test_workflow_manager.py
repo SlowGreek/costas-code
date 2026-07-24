@@ -174,19 +174,28 @@ class TestSnapshot:
 
 
 class TestServiceGate:
-    def test_tool_is_absent_when_workflows_are_disabled(self):
-        # Footprint: a disabled feature must cost zero schema bytes per call.
+    def test_explicitly_disabling_removes_the_tool(self):
+        # The gate's value: false removes ~700 tokens of schema from EVERY API
+        # call, not merely refusing to run.
         from tools.workflow_tool import check_workflow_requirements
 
         with patch("tools.workflow_tool._load_config", return_value={"enabled": False}):
             assert check_workflow_requirements() is False
-        with patch("tools.workflow_tool._load_config", return_value={}):
-            assert check_workflow_requirements() is False
 
-    def test_tool_appears_when_enabled(self):
+    def test_enabled_by_default(self):
+        from tools.workflow_tool import check_workflow_requirements
+        from hermes_cli.config import DEFAULT_CONFIG
+
+        assert DEFAULT_CONFIG["workflows"]["enabled"] is True
+        with patch("tools.workflow_tool._load_config", return_value={"enabled": True}):
+            assert check_workflow_requirements() is True
+
+    def test_config_predating_the_feature_still_gets_it(self):
+        # An older config has no `workflows` section; absence must not read as
+        # "disabled" or upgrading users would silently lose the feature.
         from tools.workflow_tool import check_workflow_requirements
 
-        with patch("tools.workflow_tool._load_config", return_value={"enabled": True}):
+        with patch("tools.workflow_tool._load_config", return_value={}):
             assert check_workflow_requirements() is True
 
     def test_registered_in_the_workflows_toolset(self):
@@ -194,11 +203,14 @@ class TestServiceGate:
 
         assert "workflow" in TOOLSETS["workflows"]["tools"]
 
-    def test_not_in_any_default_bundle(self):
-        # Must not leak into the always-on core set.
+    def test_in_the_core_bundle_but_check_fn_gated(self):
+        # It must be in the core bundle to reach every platform, and it must
+        # stay check_fn-gated so `enabled: false` still removes the schema.
         from toolsets import _HERMES_CORE_TOOLS
+        from tools.registry import registry
 
-        assert "workflow" not in _HERMES_CORE_TOOLS
+        assert "workflow" in _HERMES_CORE_TOOLS
+        assert registry._tools["workflow"].check_fn is not None
 
 
 class TestWorkflowToolActions:

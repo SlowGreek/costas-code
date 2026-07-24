@@ -36,7 +36,7 @@ Usage:
     hermes honcho migrate                  # Step-by-step migration guide: OpenClaw native → Hermes + Honcho
     hermes version             Show version
     hermes update              Update to latest version
-    hermes uninstall           Uninstall Costas Code
+    hermes uninstall           Uninstall Catalyst
     hermes acp                 Run as an ACP server for editor integration
     hermes sessions browse     Interactive session picker with search
 
@@ -382,7 +382,7 @@ def _read_openai_version_fast() -> str | None:
 def _print_fast_version_info() -> None:
     from hermes_cli import __release_date__, __version__
 
-    print(f"Costas Code v{__version__} ({__release_date__})")
+    print(f"Catalyst v{__version__} ({__release_date__})")
     print(f"Install directory: {PROJECT_ROOT}")
 
     print(f"Python: {sys.version.split()[0]}")
@@ -2882,14 +2882,14 @@ def cmd_whatsapp(args):
             print("    2. Send a message to the bot's WhatsApp number")
             print("    3. The agent will reply automatically")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Costas Code'")
+            print("  Tip: Agent responses are prefixed with '⚕ Catalyst'")
         else:
             print("  Next steps:")
             print("    1. Start the gateway:  hermes gateway")
             print("    2. Open WhatsApp → Message Yourself")
             print("    3. Type a message — the agent will reply")
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Costas Code'")
+            print("  Tip: Agent responses are prefixed with '⚕ Catalyst'")
             print("  so you can tell them apart from your own messages.")
         print()
         print("  Or install as a service: hermes gateway install")
@@ -4637,7 +4637,7 @@ def cmd_version(args):
 
 
 def cmd_uninstall(args):
-    """Uninstall Costas Code (or just the Chat GUI with --gui)."""
+    """Uninstall Catalyst (or just the Chat GUI with --gui)."""
     # Machine-readable install snapshot for the desktop app's uninstall UI.
     # Must run before any TTY gate — it's called from a non-interactive child.
     if getattr(args, "gui_summary", False):
@@ -5480,19 +5480,22 @@ def _desktop_packaged_executable(desktop_dir: Path) -> Optional[Path]:
     """Return the current platform's unpacked Electron app executable."""
     release_dir = desktop_dir / "release"
     if sys.platform == "darwin":
-        candidates = list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
+        candidates = []
+        for product in ("Catalyst", "Costas Code", "Hermes"):
+            candidates.extend(
+                release_dir.glob(f"mac*/{product}.app/Contents/MacOS/{product}")
+            )
     elif sys.platform == "win32":
         candidates = [
-            release_dir / "win-unpacked" / "Hermes.exe",
-            release_dir / "win-ia32-unpacked" / "Hermes.exe",
-            release_dir / "win-arm64-unpacked" / "Hermes.exe",
+            release_dir / unpacked / f"{product}.exe"
+            for unpacked in ("win-unpacked", "win-ia32-unpacked", "win-arm64-unpacked")
+            for product in ("Catalyst", "Costas Code", "Hermes")
         ]
     else:
         candidates = [
-            release_dir / "linux-unpacked" / "hermes",
-            release_dir / "linux-unpacked" / "Hermes",
-            release_dir / "linux-arm64-unpacked" / "hermes",
-            release_dir / "linux-arm64-unpacked" / "Hermes",
+            release_dir / unpacked / product
+            for unpacked in ("linux-unpacked", "linux-arm64-unpacked")
+            for product in ("Catalyst", "Costas Code", "hermes", "Hermes")
         ]
 
     existing = [p for p in candidates if p.exists()]
@@ -5891,7 +5894,7 @@ def _desktop_linux_sandbox_fixup(packaged_executable: Path) -> bool:
 
     sandbox = packaged_executable.parent / "chrome-sandbox"
     if not sandbox.exists():
-        print(f"✗ Costas Code is missing Electron's Linux sandbox helper: {sandbox}")
+        print(f"✗ Catalyst is missing Electron's Linux sandbox helper: {sandbox}")
         return False
 
     # Reject symlinks — chown/chmod must not follow an attacker-controlled
@@ -5911,7 +5914,7 @@ def _desktop_linux_sandbox_fixup(packaged_executable: Path) -> bool:
 
     sudo = shutil.which("sudo")
     if not sudo:
-        print("✗ Costas Code requires sudo to configure Electron's Linux sandbox helper.")
+        print("✗ Catalyst requires sudo to configure Electron's Linux sandbox helper.")
         return False
 
     print("→ Configuring Electron Linux sandbox helper (sudo required)...")
@@ -6130,8 +6133,8 @@ def cmd_gui(args: argparse.Namespace):
                 print("✗ Desktop GUI build failed")
                 print(f"  Run manually:  cd apps/desktop && npm run {build_script}")
                 if sys.platform == "win32":
-                    print("  If this says \"Access is denied\" on Hermes.exe, close any")
-                    print("  running Hermes desktop window and retry.")
+                    print("  If this says \"Access is denied\" on Catalyst.exe, close any")
+                    print("  running Catalyst desktop window and retry.")
                 print("  If the log shows Electron download retries, rebuild via a mirror:")
                 print("    ELECTRON_MIRROR=<mirror-base-url> hermes desktop --force-build")
                 sys.exit(build_result.returncode or 1)
@@ -6166,7 +6169,7 @@ def cmd_gui(args: argparse.Namespace):
         return
 
     if source_mode:
-        print("→ Launching Costas Code from source build...")
+        print("→ Launching Catalyst from source build...")
         launch_result = subprocess.run([npm, "exec", "--", "electron", "."], cwd=desktop_dir, env=env, check=False)
         sys.exit(launch_result.returncode)
 
@@ -6184,7 +6187,7 @@ def cmd_gui(args: argparse.Namespace):
             sys.exit(1)
 
     launch_command.extend(config_electron_flags)
-    print(f"→ Launching packaged Costas Code: {' '.join(launch_command)}")
+    print(f"→ Launching packaged Catalyst: {' '.join(launch_command)}")
     launch_result = subprocess.run(launch_command, cwd=desktop_dir, env=env, check=False)
     sys.exit(launch_result.returncode)
 
@@ -6207,7 +6210,7 @@ def _find_stale_dashboard_pids(
     the kill path because we can't know their original launch args.
 
     *exclude_pids* is an optional set of PIDs that must never be returned.
-    This is used by the Costas Code Electron app to protect its own
+    This is used by the Catalyst Electron app to protect its own
     backend child process: when the desktop spawns ``hermes serve`` as
     a backend and triggers an auto-update, the update must not kill the
     backend that the desktop itself manages.  The desktop sets the
@@ -6687,7 +6690,7 @@ def _kill_stale_dashboard_processes(
     if restart_managed and _restart_managed_dashboard_service(reason):
         return
 
-    # When the Costas Code Electron app spawns this dashboard as a
+    # When the Catalyst Electron app spawns this dashboard as a
     # backend child, it sets HERMES_DESKTOP_CHILD_PID so that the update
     # path can skip killing the desktop-managed process.  (#37532)
     exclude: set[int] | None = None
@@ -6828,7 +6831,7 @@ def _atomic_replace_dir(src: str, dst: str) -> None:
 
 
 def _update_via_zip(args):
-    """Update Costas Code by downloading a ZIP archive.
+    """Update Catalyst by downloading a ZIP archive.
 
     Used on Windows when git file I/O is broken (antivirus, NTFS filter
     drivers causing 'Invalid argument' errors on file creation).
@@ -7520,7 +7523,7 @@ def _sync_with_upstream_if_needed(
 
         # Ask user if they want to add upstream
         print()
-        print("ℹ Your fork is not tracking the official Costas Code repository.")
+        print("ℹ Your fork is not tracking the official Catalyst distribution repository.")
         print("  This means you may miss updates from SlowGreek/costas-code.")
         print()
         try:
@@ -8068,7 +8071,7 @@ def _detect_concurrent_hermes_instances(
 
     Windows blocks DELETE/REPLACE on a running .exe — and even RENAME on the
     same .exe when another process opened it without ``FILE_SHARE_DELETE``.
-    The Costas Code Electron app spawns ``hermes.EXE`` as a backend child,
+    The Catalyst Electron app spawns ``hermes.EXE`` as a backend child,
     so during ``hermes update`` the user-invoked process and the desktop's
     child both hold the same file. The quarantine rename then fails with
     ``[WinError 32]`` and uv inherits the lock.
@@ -8190,7 +8193,7 @@ def _format_concurrent_instances_message(
     lines.append(f"  Updating now would fail to overwrite {shim} because")
     lines.append("  Windows blocks REPLACE on a running executable.")
     lines.append("")
-    lines.append("  Close Costas Code, exit any open `hermes` REPLs, and")
+    lines.append("  Close Catalyst, exit any open `hermes` REPLs, and")
     lines.append("  stop the gateway (`hermes gateway stop`) before retrying.")
     lines.append("")
     if matches:
@@ -8221,7 +8224,7 @@ def _quarantine_running_hermes_exe(
 
     Rename can still fail when *another* process has opened the .exe without
     ``FILE_SHARE_DELETE`` — typically AV real-time scanners with transient
-    handles (recovers in <1s), or the Costas Code backend child process
+    handles (recovers in <1s), or the Catalyst backend child process
     (won't recover until the user closes it). We mitigate:
 
     1. Retry up to ``max_attempts`` times with exponential backoff
@@ -8233,7 +8236,7 @@ def _quarantine_running_hermes_exe(
        update can complete; the user just needs to reboot to fully unload
        the stale image.
     3. Print a clear warning naming the most likely culprit (running
-       Costas Code / gateway / REPL) and pointing to ``--force``.
+       Catalyst / gateway / REPL) and pointing to ``--force``.
 
     Returns the list of (original, quarantined) pairs so the caller can roll
     back if the install itself fails before uv writes a replacement. Pairs
@@ -8300,7 +8303,7 @@ def _quarantine_running_hermes_exe(
             f"another process is holding it open)."
         )
         print(
-            "    Close Costas Code, exit other `hermes` REPLs, stop the "
+            "    Close Catalyst, exit other `hermes` REPLs, stop the "
             "gateway, or pause AV scanning, then re-run `hermes update`."
         )
 
@@ -9901,7 +9904,7 @@ def _ensure_fhs_path_guard() -> None:
 
     path_line = 'export PATH="/usr/local/bin:$PATH"'
     path_comment = (
-        "# Costas Code — ensure /usr/local/bin is on PATH " "(RHEL non-login shells)"
+        "# Catalyst — ensure /usr/local/bin is on PATH " "(RHEL non-login shells)"
     )
     wrote_any = False
     for candidate in (".bashrc", ".bash_profile"):
@@ -10328,7 +10331,7 @@ def _format_venv_python_holders_message(matches: list[tuple[int, str, str]]) -> 
         hint = ""
         low = cmdline.lower()
         if "serve" in low or "dashboard" in low:
-            hint = "  ← Costas Code backend (close the desktop app)"
+            hint = "  ← Catalyst backend (close the desktop app)"
         elif "gateway" in low:
             hint = "  ← gateway"
         lines.append(f"  PID {pid}  {name}  {cmdline}{hint}")
@@ -10689,7 +10692,7 @@ def _discard_lockfile_churn(git_cmd, repo_root):
 
 
 def cmd_update(args):
-    """Update Costas Code to the latest version.
+    """Update Catalyst to the latest version.
 
     Thin wrapper around ``_cmd_update_impl``: installs hangup protection,
     runs the update, then restores stdio on the way out (even on
@@ -10704,7 +10707,7 @@ def cmd_update(args):
     )
 
     if is_managed():
-        managed_error("update Costas Code")
+        managed_error("update Catalyst")
         return
 
     # Docker users can't ``git pull`` — the image excludes ``.git`` from
@@ -10779,7 +10782,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("Could not read updates.non_interactive_local_changes: %s", exc)
             discard_local_changes = False
 
-    print("⚕ Updating Costas Code...")
+    print("⚕ Updating Catalyst...")
     print()
 
     # On Windows, abort early if another hermes.exe is holding the venv shim
@@ -14276,7 +14279,7 @@ def cmd_memory(args):
 
 
 def cmd_acp(args):
-    """Launch Costas Code as an ACP server."""
+    """Launch Catalyst as an ACP server."""
     try:
         from acp_adapter.entry import main as acp_main
 

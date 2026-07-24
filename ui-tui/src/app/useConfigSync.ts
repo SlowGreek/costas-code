@@ -30,7 +30,7 @@ export const normalizeStatusBar = (raw: unknown): StatusBarMode =>
 
 const BUSY_MODES = new Set<BusyInputMode>(['interrupt', 'queue', 'steer'])
 
-// Costas Code treats a follow-up typed during an active turn as steering by
+// Catalyst treats a follow-up typed during an active turn as steering by
 // default. Users can opt into queue or interrupt semantics with /busy or
 // display.busy_input_mode.
 const TUI_BUSY_DEFAULT: BusyInputMode = 'steer'

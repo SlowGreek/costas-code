@@ -1733,10 +1733,10 @@ def init_agent(
     _compression_cfg = _agent_cfg.get("compression", {})
     if not isinstance(_compression_cfg, dict):
         _compression_cfg = {}
-    compression_threshold = float(_compression_cfg.get("threshold", 0.50))
+    compression_threshold = float(_compression_cfg.get("threshold", 0.85))
     # Per-model/route compaction-threshold override. Codex gpt-5.4 / gpt-5.5
-    # raise to 85% (the Codex backend caps both families at 272K, so the
-    # default 50% would compact at ~136K — half the usable context). Gated by
+    # raise to 85% when a user has explicitly lowered the global threshold
+    # (the Codex backend caps both families at 272K). Gated by
     # an opt-out config flag so the user can fall back to the global threshold;
     # when the override fires we stash a one-time notification (replayed on the
     # first turn) that tells the user what changed and how to revert. The

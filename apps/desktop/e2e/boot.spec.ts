@@ -32,9 +32,9 @@ test.afterAll(async () => {
 })
 
 test.describe('dev-mode boot with mock backend', () => {
-  test('window opens with Costas Code title', async () => {
+  test('window opens with Catalyst title', async () => {
     const title = await fixture!.page.title()
-    expect(title).toContain('Costas Code')
+    expect(title).toContain('Catalyst')
   })
 
   test('renderer mounts and shows DOM content', async () => {

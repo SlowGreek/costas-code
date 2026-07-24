@@ -1,22 +1,22 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Costas Code" width="100%">
+  <img src="assets/banner.png" alt="Catalyst" width="100%">
 </p>
 
-# Costas Code
+# Catalyst
 <p align="center">
-  <a href="https://github.com/SlowGreek/costas-code">Costas Code</a> · Powered by <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
+  <a href="https://github.com/SlowGreek/costas-code">Catalyst</a> · Powered by <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
 </p>
 <p align="center">
   <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/SlowGreek/costas-code/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/SlowGreek/costas-code"><img src="https://img.shields.io/badge/Fork-Costas%20Code-5B6CFF?style=for-the-badge" alt="Costas Code"></a>
+  <a href="https://github.com/SlowGreek/costas-code"><img src="https://img.shields.io/badge/Distribution-Catalyst-5B6CFF?style=for-the-badge" alt="Catalyst"></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
   <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
   <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
 </p>
 
-**Costas Code is a personal coding-agent distribution built on [Hermes Agent](https://github.com/NousResearch/hermes-agent).** It keeps Hermes protocol, configuration, session, skill, and plugin compatibility while shipping Costas Code branding, steering-first interaction, a native standing-goal surface, and the Costas Agent Plugin. Existing Hermes data in `~/.hermes` is reused automatically.
+**Catalyst is a collaborative agent workbench built on [Hermes Agent](https://github.com/NousResearch/hermes-agent).** It keeps Hermes protocol, configuration, session, skill, and plugin compatibility while shipping a team-facing Catalyst experience, steering-first interaction, a native standing-goal surface, and the Costas Agent Plugin. Existing Hermes data in `~/.hermes` is reused automatically; source and updates remain in the Costas Code distribution repository.
 
 Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
 
@@ -42,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/s
 
 ### Windows (native, PowerShell)
 
-> **Heads up:** Native Windows runs Costas Code without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file an issue](https://github.com/SlowGreek/costas-code/issues).
+> **Heads up:** Native Windows runs Catalyst without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file an issue](https://github.com/SlowGreek/costas-code/issues).
 
 Run this in PowerShell:
 
@@ -69,7 +69,7 @@ hermes              # start chatting!
 
 Download the artifact for your platform from [GitHub Releases](https://github.com/SlowGreek/costas-code/releases):
 
-- macOS: open `Costas-Code-<version>-mac-<arch>.dmg`, then drag **Costas Code.app** to Applications.
+- macOS: open `Catalyst-<version>-mac-<arch>.dmg`, then drag **Catalyst.app** to Applications.
 - Windows: run the generated NSIS or MSI installer.
 - Linux: install the `.deb`/`.rpm`, or run the AppImage.
 

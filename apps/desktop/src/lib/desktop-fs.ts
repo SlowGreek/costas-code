@@ -51,7 +51,7 @@ function bridge() {
   const desktop = window.hermesDesktop
 
   if (!desktop) {
-    throw new Error('Costas Code bridge is unavailable')
+    throw new Error('Catalyst bridge is unavailable')
   }
 
   return desktop

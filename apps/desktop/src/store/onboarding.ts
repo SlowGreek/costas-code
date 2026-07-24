@@ -537,7 +537,7 @@ export async function refreshOnboarding(ctx: OnboardingContext) {
       kind: 'error',
       title: 'Runtime not ready',
       message:
-        'Costas Code could not verify the running backend on startup. Some features may be unavailable until the gateway is reachable.'
+        'Catalyst could not verify the running backend on startup. Some features may be unavailable until the gateway is reachable.'
     })
 
     return false

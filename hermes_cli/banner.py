@@ -172,7 +172,7 @@ def _git_stdout(args: list[str], *, cwd: Path, timeout: int = 5) -> Optional[str
 
 
 def _check_via_rev(local_rev: str) -> Optional[int]:
-    """Compare an embedded git revision to Costas Code via ls-remote.
+    """Compare an embedded git revision to Catalyst's source via ls-remote.
 
     Returns 0 if up-to-date, ``UPDATE_AVAILABLE_NO_COUNT`` if behind,
     or ``None`` on failure.
@@ -472,7 +472,7 @@ def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
 
 def format_banner_version_label() -> str:
     """Return the version label shown in the startup banner title."""
-    base = f"Costas Code v{VERSION} ({RELEASE_DATE})"
+    base = f"Catalyst v{VERSION} ({RELEASE_DATE})"
     state = get_git_banner_state()
     if not state:
         return base

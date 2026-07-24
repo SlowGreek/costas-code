@@ -62,14 +62,14 @@ export const ja = defineLocale({
   },
 
   boot: {
-    ready: 'Costas Code の準備ができました',
+    ready: 'Catalyst の準備ができました',
     desktopBootFailedWithMessage: message => `デスクトップの起動に失敗しました: ${message}`,
     steps: {
       connectingGateway: 'ライブデスクトップゲートウェイに接続中',
       loadingSettings: 'Hermes の設定を読み込み中',
       loadingSessions: '最近のセッションを読み込み中',
       startingDesktopConnection: 'デスクトップ接続を開始中',
-      startingHermesDesktop: 'Costas Code を起動中…'
+      startingHermesDesktop: 'Catalyst を起動中…'
     },
     errors: {
       backgroundExited: 'Hermes バックグラウンドプロセスが終了しました。',
@@ -81,7 +81,7 @@ export const ja = defineLocale({
       ipcBridgeUnavailable: 'デスクトップ IPC ブリッジが利用できません。'
     },
     failure: {
-      title: 'Costas Code を起動できませんでした',
+      title: 'Catalyst を起動できませんでした',
       description:
         'バックグラウンドゲートウェイが起動しませんでした。以下の回復手順をお試しください。チャットや設定は削除されません。',
       remoteTitle: 'リモートゲートウェイへのサインインが必要です',
@@ -124,9 +124,9 @@ export const ja = defineLocale({
     copyDetailFailed: '通知の詳細をコピーできませんでした',
     backendOutOfDateTitle: 'バックエンドが古いです',
     backendOutOfDateMessage:
-      'Hermes バックエンドがこのデスクトップビルドより古く、正常に動作しない場合があります。更新して揃えてください。',
+      'Catalyst バックエンドがこのデスクトップビルドより古く、正常に動作しない場合があります。更新して揃えてください。',
     installMethodUnsupportedTitle: 'サポート対象外のインストール方法',
-    updateHermes: 'Hermes を更新',
+    updateHermes: 'Catalyst を更新',
     updateReadyTitle: '更新の準備ができました',
     updateReadyMessage: count => `${count} 件の新しい変更が利用可能です。`,
     seeWhatsNew: '新機能を見る',
@@ -135,7 +135,7 @@ export const ja = defineLocale({
       elevenLabsRejectedKey: 'ElevenLabs が API キーを拒否しました (401)。',
       gatewayAuthFailed: 'ゲートウェイ認証に失敗しました — API_SERVER_KEY を確認してください。',
       methodNotAllowed:
-        'デスクトップバックエンドがそのリクエストを拒否しました (405 Method Not Allowed)。Costas Code を再起動してください。',
+        'デスクトップバックエンドがそのリクエストを拒否しました (405 Method Not Allowed)。Catalyst を再起動してください。',
       microphonePermission: 'マイクのアクセス許可が拒否されました。',
       openaiRejectedApiKey: 'OpenAI が API キーを拒否しました。',
       openaiRejectedApiKeyWithStatus: status => `OpenAI が API キーを拒否しました (${status} invalid_api_key)。`,
@@ -291,7 +291,7 @@ export const ja = defineLocale({
       advanced: '詳細'
     },
     searchPlaceholder: {
-      about: 'Costas Code について',
+      about: 'Catalyst について',
       config: '設定を検索…',
       gateway: 'ゲートウェイ接続…',
       keys: 'API キーを検索…',
@@ -608,7 +608,7 @@ export const ja = defineLocale({
       }
     }),
     about: {
-      heading: 'Costas Code',
+      heading: 'Catalyst',
       version: value => `バージョン ${value}`,
       versionUnavailable: 'バージョンを取得できません',
       updates: '更新',
@@ -626,7 +626,7 @@ export const ja = defineLocale({
       lastChecked: age => `前回確認: ${age}`,
       justNowSuffix: ' · たった今',
       automaticUpdates: '自動更新',
-      automaticUpdatesDesc: 'Hermes はバックグラウンドで自動的に更新を確認し、利用可能になったら通知します。',
+      automaticUpdatesDesc: 'Catalyst はバックグラウンドで自動的に更新を確認し、利用可能になったら通知します。',
       branchCommit: (branch, commit) => `ブランチ ${branch} · コミット ${commit}`,
       never: '未確認',
       justNow: 'たった今',
@@ -678,7 +678,7 @@ export const ja = defineLocale({
       title: 'ゲートウェイ接続',
       envOverride: 'env オーバーライド',
       intro:
-        'Costas Code はデフォルトで独自のローカルゲートウェイを起動します。別のマシンや信頼できるプロキシの背後で既に動作している Hermes バックエンドをこのアプリで制御する場合は、リモートゲートウェイを使用してください。以下でプロファイルを選択して、それぞれのリモートホストを設定します。',
+        'Catalyst はデフォルトで独自のローカルゲートウェイを起動します。別のマシンや信頼できるプロキシの背後で既に動作している Hermes バックエンドをこのアプリで制御する場合は、リモートゲートウェイを使用してください。以下でプロファイルを選択して、それぞれのリモートホストを設定します。',
       appliesTo: '適用対象',
       allProfiles: 'すべてのプロファイル',
       defaultConnection: '独自のオーバーライドがないすべてのプロファイルのデフォルト接続。',
@@ -731,7 +731,7 @@ export const ja = defineLocale({
       enterUrlFirst: '最初にリモート URL を入力してください。',
       restartingTitle: 'ゲートウェイ接続を再起動中',
       savedTitle: 'ゲートウェイ設定を保存しました',
-      restartingMessage: 'Costas Code は保存された設定を使用して再接続します。',
+      restartingMessage: 'Catalyst は保存された設定を使用して再接続します。',
       savedMessage: '次回起動時に保存されます。',
       connectedTo: (baseUrl, version) => `${baseUrl}${version ? ` · Hermes ${version}` : ''} に接続しました`,
       reachableTitle: 'リモートゲートウェイに到達可能',
@@ -776,7 +776,7 @@ export const ja = defineLocale({
       sshErrNotInstalled:
         'リモートホストに Hermes がインストールされていません。リモートでインストールする（curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh）か、Hermes パスを設定してください。',
       sshErrPlatform:
-        'サポートされていないリモートプラットフォームです。Costas Code の SSH モードは Linux、macOS、Windows のリモートホストに対応しています。',
+        'サポートされていないリモートプラットフォームです。Catalyst の SSH モードは Linux、macOS、Windows のリモートホストに対応しています。',
       sshErrTimeout: 'SSH 接続がタイムアウトしました。ホストが到達不能、またはスリープ中の可能性があります。',
       sshErrUpdateRequired: 'Desktop SSH で接続する前に、リモートホストの Hermes を更新してください。',
       sshErrUnknown: 'SSH 接続に失敗しました。'
@@ -859,7 +859,7 @@ export const ja = defineLocale({
       connectAccount: 'アカウントを接続',
       haveApiKey: 'API キーをお持ちですか？',
       intro:
-        'サブスクリプションでサインインします。API キーのコピーは不要です。Hermes がアプリ内でブラウザーサインインを代行します。',
+        'サブスクリプションでサインインします。API キーのコピーは不要です。Catalyst がアプリ内でブラウザーサインインを代行します。',
       connected: '接続済み',
       collapse: '折りたたむ',
       connectAnother: '別のプロバイダーを接続',
@@ -1184,7 +1184,7 @@ export const ja = defineLocale({
     hermesActiveSessions: (version, count) => `Hermes ${version} · アクティブセッション ${count}`,
     restartGateway: 'ゲートウェイを再起動',
     gatewayRestartFailed: 'ゲートウェイの再起動に失敗しました。',
-    updateHermes: 'Hermes を更新',
+    updateHermes: 'Catalyst を更新',
     actionRunning: '実行中',
     actionDone: '完了',
     actionFailed: '失敗',
@@ -1712,7 +1712,7 @@ export const ja = defineLocale({
   composer: {
     message: 'メッセージ',
     wakingProfile: profile => `${profile} を起動中…`,
-    placeholderStarting: 'Costas Code を起動中...',
+    placeholderStarting: 'Catalyst を起動中...',
     placeholderReconnecting: 'Hermes に再接続中…',
     placeholderFollowUp: 'フォローアップを送信',
     newSessionPlaceholders: [
@@ -1889,7 +1889,7 @@ export const ja = defineLocale({
       createPr: 'PR を作成',
       openPr: 'PR を開く',
       ghMissing: 'PR を開くには GitHub CLI (gh) をインストールしてサインインしてください',
-      agentShip: 'Hermes にコミットと PR を任せる',
+      agentShip: 'Catalyst にコミットと PR を任せる',
       agentShipPrompt:
         '現在の変更を確認し、分かりやすい Conventional Commits 形式でコミットし、ブランチをプッシュして、プルリクエストを作成してください。',
       newBranch: '新しいブランチ',
@@ -1925,7 +1925,7 @@ export const ja = defineLocale({
     latestBodyBackend: 'バックエンドは最新バージョンを実行しています。',
     allSetTitle: '準備完了',
     availableTitle: '新しい更新が利用可能',
-    availableBody: '新しいバージョンの Hermes をインストールする準備ができています。',
+    availableBody: '新しいバージョンの Catalyst をインストールする準備ができています。',
     availableTitleBackend: 'バックエンドの更新があります',
     availableBodyBackend: '接続中の Hermes バックエンドの新しいバージョンをインストールできます。',
     availableBodyNoChangelog:
@@ -1978,7 +1978,7 @@ export const ja = defineLocale({
     installTo: 'インストール先',
     retryAfterRun: '実行しました — 再試行',
     failedTitle: 'インストールに失敗しました',
-    settingUpTitle: 'Costas Code を設定中',
+    settingUpTitle: 'Catalyst を設定中',
     finishingTitle: '仕上げ中',
     failedDesc:
       'インストール手順のいずれかが失敗しました。Windows では、別の Hermes CLI またはデスクトップインスタンスが実行中の場合に発生することがあります。実行中の Hermes インスタンスをすべて停止してから再試行してください。詳細は以下またはデスクトップログで確認できます。',
@@ -2001,10 +2001,10 @@ export const ja = defineLocale({
   },
 
   onboarding: {
-    headerTitle: 'Costas Code のセットアップをしましょう',
+    headerTitle: 'Catalyst のセットアップをしましょう',
     headerDesc: 'チャットを始めるにはモデルプロバイダーを接続してください。ほとんどのオプションはワンクリックです。',
-    preparingInstall: 'Costas Code はインストールを完了中です。初回実行では通常 1 分以内に完了します。',
-    starting: 'Costas Code を起動中…',
+    preparingInstall: 'Catalyst はインストールを完了中です。初回実行では通常 1 分以内に完了します。',
+    starting: 'Catalyst を起動中…',
     lookingUpProviders: 'プロバイダーを検索中...',
     collapse: '折りたたむ',
     otherProviders: 'その他のプロバイダー',
@@ -2042,7 +2042,7 @@ export const ja = defineLocale({
     update: '更新',
     flowSubtitles: {
       pkce: 'ブラウザーを開いてサインインし、ここに戻ります',
-      device_code: 'ブラウザーで確認ページを開きます — Hermes が自動接続します',
+      device_code: 'ブラウザーで確認ページを開きます — Catalyst が自動接続します',
       external: 'ターミナルで一度サインインして、チャットに戻ります'
     },
     startingSignIn: provider => `${provider} のサインインを開始中...`,
@@ -2058,7 +2058,7 @@ export const ja = defineLocale({
     pasteAuthCode: '認証コードを貼り付け',
     reopenAuthPage: '認証ページを再度開く',
     autoBrowser: provider =>
-      `${provider} をブラウザーで開きました。Hermes をそこで承認すれば自動接続されます。コピーや貼り付けは不要です。`,
+      `${provider} をブラウザーで開きました。Catalyst をそこで承認すれば自動接続されます。コピーや貼り付けは不要です。`,
     reopenSignInPage: 'サインインページを再度開く',
     waitingAuthorize: '承認を待っています...',
     externalPending: provider =>
@@ -2160,7 +2160,7 @@ export const ja = defineLocale({
       update: '更新',
       updateInProgress: '更新中',
       commitsBehind: (count, branch) => `${branch} より ${count} コミット遅れています`,
-      desktopVersion: version => `Costas Code v${version}`,
+      desktopVersion: version => `Catalyst v${version}`,
       backendVersion: version => `バックエンド v${version}`,
       clientLabel: version => `クライアント v${version}`,
       connectionSsh: host => `SSH: ${host}`,
@@ -2328,7 +2328,7 @@ export const ja = defineLocale({
       failedToLoad: 'プレビューの読み込みに失敗しました',
       tryAgain: '再試行',
       restarting: 'Hermes を再起動中...',
-      askRestart: 'Hermes にサーバーの再起動を依頼',
+      askRestart: 'Catalyst にサーバーの再起動を依頼',
       lookingRestart: taskId => `Hermes は再起動するプレビューサーバーを検索中です (${taskId})`,
       restartingTitle: 'プレビューサーバーを再起動中',
       restartingMessage: 'Hermes はバックグラウンドで作業中です。進捗はプレビューコンソールで確認してください。',
@@ -2632,8 +2632,8 @@ export const ja = defineLocale({
     sessionExportFailed: 'セッションをエクスポートできませんでした',
     imageSaved: '画像を保存しました',
     downloadStarted: 'ダウンロードを開始しました',
-    restartToUseSaveImage: '画像を保存するには Costas Code を再起動してください。',
-    restartToSaveImages: '画像を保存するには Costas Code を再起動してください',
+    restartToUseSaveImage: '画像を保存するには Catalyst を再起動してください。',
+    restartToSaveImages: '画像を保存するには Catalyst を再起動してください',
     imageDownloadFailed: '画像のダウンロードに失敗しました',
     openImage: '画像を開く',
     downloadImage: '画像をダウンロード',

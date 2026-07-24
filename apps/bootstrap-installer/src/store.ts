@@ -264,7 +264,7 @@ export async function initialize(): Promise<void> {
           currentStage: null
         })
 
-        // Install: show the "launch Hermes" success screen. Update: this is a
+        // Install: show the "launch Catalyst" success screen. Update: this is a
         // hand-off — the installer relaunches the desktop and exits within a
         // few hundred ms, so routing to success just flashes that screen
         // before the window closes. Stay on progress until we exit.
@@ -389,7 +389,7 @@ const FAKE_INSTALL_STAGES: FakeStage[] = [
   { name: 'system-packages', title: 'System packages' },
   { name: 'uv', title: 'uv' },
   { name: 'python', title: 'Python environment' },
-  { name: 'repo', title: 'Hermes repository' },
+  { name: 'repo', title: 'Catalyst source' },
   { name: 'dependencies', title: 'Python dependencies' },
   { name: 'node', title: 'Node runtime' },
   { name: 'desktop', title: 'Desktop app' }

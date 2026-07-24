@@ -1,7 +1,7 @@
 [package]
 name = "hermes-bootstrap"
 version = "0.0.1"
-description = "Hermes Setup — signed installer that drives scripts/install.ps1"
+description = "Catalyst Setup — signed installer powered by Hermes Agent"
 authors = ["Nous Research <info@nousresearch.com>"]
 edition = "2021"
 rust-version = "1.77"

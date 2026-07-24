@@ -18,7 +18,7 @@ describe('desktop i18n runtime translator', () => {
   it('translates string paths for the active runtime locale', () => {
     setRuntimeI18nLocale('zh')
 
-    expect(translateNow('boot.ready')).toBe('Costas Code 已就绪')
+    expect(translateNow('boot.ready')).toBe('Catalyst 已就绪')
     expect(translateNow('notifications.voice.noSpeechDetected')).toBe('没有检测到语音')
     expect(translateNow('composer.lookupNoMatches')).toBe('没有匹配项。')
     expect(translateNow('assistant.tool.statusRecovered')).toBe('已恢复')
@@ -26,6 +26,13 @@ describe('desktop i18n runtime translator', () => {
 
   it('passes arguments to function translations', () => {
     expect(translateNow('notifications.updateReadyMessage', 2)).toBe('2 new changes available.')
+  })
+
+  it('uses the Catalyst product name in About update copy', () => {
+    expect(translateNow('settings.about.heading')).toBe('Catalyst')
+    expect(translateNow('settings.about.automaticUpdatesDesc')).toBe(
+      'Catalyst checks for updates automatically in the background and lets you know when one is ready.'
+    )
   })
 
   it('translates migrated overlap keys for newly supported locales', () => {
@@ -61,7 +68,7 @@ describe('desktop i18n runtime translator', () => {
       boot.ready = undefined
       setRuntimeI18nLocale('ja')
 
-      expect(translateNow('boot.ready')).toBe('Costas Code is ready')
+      expect(translateNow('boot.ready')).toBe('Catalyst is ready')
     } finally {
       boot.ready = originalReady
     }

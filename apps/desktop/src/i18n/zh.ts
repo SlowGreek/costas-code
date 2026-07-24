@@ -62,14 +62,14 @@ export const zh: Translations = {
   },
 
   boot: {
-    ready: 'Costas Code 已就绪',
+    ready: 'Catalyst 已就绪',
     desktopBootFailedWithMessage: message => `桌面启动失败：${message}`,
     steps: {
       connectingGateway: '正在连接桌面网关',
       loadingSettings: '正在加载 Hermes 设置',
       loadingSessions: '正在加载最近会话',
       startingDesktopConnection: '正在启动桌面连接',
-      startingHermesDesktop: '正在启动 Costas Code…'
+      startingHermesDesktop: '正在启动 Catalyst…'
     },
     errors: {
       backgroundExited: 'Hermes 后台进程已退出。',
@@ -120,9 +120,9 @@ export const zh: Translations = {
     copyDetail: '复制详情',
     copyDetailFailed: '无法复制通知详情',
     backendOutOfDateTitle: '后端版本过旧',
-    backendOutOfDateMessage: '你的 Hermes 后端早于当前桌面构建，可能无法正常工作。请更新以保持一致。',
+    backendOutOfDateMessage: '你的 Catalyst 后端早于当前桌面构建，可能无法正常工作。请更新以保持一致。',
     installMethodUnsupportedTitle: '不受支持的安装方式',
-    updateHermes: '更新 Hermes',
+    updateHermes: '更新 Catalyst',
     updateReadyTitle: '有可用更新',
     updateReadyMessage: count => `有 ${count} 项新更改可用。`,
     seeWhatsNew: '查看更新内容',
@@ -130,7 +130,7 @@ export const zh: Translations = {
       elevenLabsNeedsKey: 'ElevenLabs STT 需要 ELEVENLABS_API_KEY。',
       elevenLabsRejectedKey: 'ElevenLabs 拒绝了该 API key (401)。',
       gatewayAuthFailed: '网关认证失败 — 请检查你的 API_SERVER_KEY。',
-      methodNotAllowed: '桌面后端拒绝了该请求 (405 Method Not Allowed)。请尝试重启 Costas Code。',
+      methodNotAllowed: '桌面后端拒绝了该请求 (405 Method Not Allowed)。请尝试重启 Catalyst。',
       microphonePermission: '麦克风权限已被拒绝。',
       openaiRejectedApiKey: 'OpenAI 拒绝了该 API key。',
       openaiRejectedApiKeyWithStatus: status => `OpenAI 拒绝了该 API key (${status} invalid_api_key)。`,
@@ -396,7 +396,7 @@ export const zh: Translations = {
       advanced: '高级'
     },
     searchPlaceholder: {
-      about: '关于 Costas Code',
+      about: '关于 Catalyst',
       config: '搜索设置…',
       gateway: '网关连接…',
       keys: '搜索 API 密钥…',
@@ -708,7 +708,7 @@ export const zh: Translations = {
       }
     }),
     about: {
-      heading: 'Costas Code',
+      heading: 'Catalyst',
       version: value => `版本 ${value}`,
       versionUnavailable: '版本不可用',
       updates: '更新',
@@ -726,7 +726,7 @@ export const zh: Translations = {
       lastChecked: age => `上次检查:${age}`,
       justNowSuffix: ' · 刚刚',
       automaticUpdates: '自动更新',
-      automaticUpdatesDesc: 'Hermes 会在后台自动检查更新，并在有可用更新时通知你。',
+      automaticUpdatesDesc: 'Catalyst 会在后台自动检查更新，并在有可用更新时通知你。',
       branchCommit: (branch, commit) => `分支 ${branch} · 提交 ${commit}`,
       never: '从未',
       justNow: '刚刚',
@@ -778,7 +778,7 @@ export const zh: Translations = {
       title: '网关连接',
       envOverride: '环境变量覆盖',
       intro:
-        'Costas Code 默认会启动自己的本地网关。当你希望此应用控制另一台机器上或可信代理后的现有 Hermes 后端时，可以使用远程网关。下面可按 profile 指定各自的远程主机。',
+        'Catalyst 默认会启动自己的本地网关。当你希望此应用控制另一台机器上或可信代理后的现有 Hermes 后端时，可以使用远程网关。下面可按 profile 指定各自的远程主机。',
       appliesTo: '应用于',
       allProfiles: '所有 profile',
       defaultConnection: '默认连接会用于所有没有自定义覆盖的 profile。',
@@ -854,7 +854,7 @@ export const zh: Translations = {
       enterUrlFirst: '请先输入远程 URL。',
       restartingTitle: '网关连接正在重启',
       savedTitle: '网关设置已保存',
-      restartingMessage: 'Costas Code 将使用已保存设置重新连接（界面保持打开）。',
+      restartingMessage: 'Catalyst 将使用已保存设置重新连接（界面保持打开）。',
       savedMessage: '已保存，下一次重启生效。',
       connectedTo: (baseUrl, version) => `已连接到 ${baseUrl}${version ? ` · Hermes ${version}` : ''}`,
       reachableTitle: '远程网关可访问',
@@ -897,7 +897,7 @@ export const zh: Translations = {
       sshErrHostKey: '自上次连接以来主机密钥已更改。请确认这是预期的，然后运行 ssh-keygen -R <host> 并重新连接。',
       sshErrNotInstalled:
         '远程主机上未安装 Hermes。请在远程安装（curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh）或设置 Hermes 路径。',
-      sshErrPlatform: '不支持的远程平台。Costas Code 的 SSH 模式支持 Linux、macOS 和 Windows 远程主机。',
+      sshErrPlatform: '不支持的远程平台。Catalyst 的 SSH 模式支持 Linux、macOS 和 Windows 远程主机。',
       sshErrTimeout: 'SSH 连接超时。主机可能无法访问或处于休眠状态。',
       sshErrUpdateRequired: '使用 Desktop SSH 连接前，请更新远程主机上的 Hermes。',
       sshErrUnknown: 'SSH 连接失败。'
@@ -1007,7 +1007,7 @@ export const zh: Translations = {
     providers: {
       connectAccount: '连接账号',
       haveApiKey: '改用 API 密钥？',
-      intro: '使用订阅登录，无需复制 API 密钥。Hermes 会在应用中为你完成浏览器登录。',
+      intro: '使用订阅登录，无需复制 API 密钥。Catalyst 会在应用中为你完成浏览器登录。',
       connected: '已连接',
       collapse: '收起',
       connectAnother: '连接其他提供方',
@@ -1377,7 +1377,7 @@ export const zh: Translations = {
     },
     nav: {
       newChat: { title: '新建会话', detail: '开始一个新会话' },
-      settings: { title: '设置', detail: '配置 Costas Code' },
+      settings: { title: '设置', detail: '配置 Catalyst' },
       skills: { title: '技能与工具', detail: '启用技能、工具集与提供方' },
       messaging: { title: '消息平台', detail: '配置 Telegram、Slack、Discord 等' },
       artifacts: { title: '产物', detail: '浏览生成的输出' }
@@ -1402,7 +1402,7 @@ export const zh: Translations = {
     hermesActiveSessions: (version, count) => `Hermes ${version} · 活跃会话 ${count}`,
     restartGateway: '重启网关',
     gatewayRestartFailed: '网关重启失败。',
-    updateHermes: '更新 Hermes',
+    updateHermes: '更新 Catalyst',
     actionRunning: '运行中',
     actionDone: '完成',
     actionFailed: '失败',
@@ -1968,7 +1968,7 @@ export const zh: Translations = {
   composer: {
     message: '消息',
     wakingProfile: profile => `正在唤醒 ${profile}…`,
-    placeholderStarting: '正在启动 Costas Code…',
+    placeholderStarting: '正在启动 Catalyst…',
     placeholderReconnecting: '正在重新连接 Hermes…',
     placeholderFollowUp: '发送后续消息',
     newSessionPlaceholders: [
@@ -2145,7 +2145,7 @@ export const zh: Translations = {
       createPr: '创建 PR',
       openPr: '打开 PR',
       ghMissing: '安装 GitHub CLI (gh) 并登录后可打开 PR',
-      agentShip: '让 Hermes 提交并开 PR',
+      agentShip: '让 Catalyst 提交并开 PR',
       agentShipPrompt: '检查当前更改，使用清晰的约定式提交信息提交，推送分支，并开启一个拉取请求。',
       newBranch: '新建分支',
       branchOffFrom: base => `从 ${base} 新建分支`,
@@ -2180,7 +2180,7 @@ export const zh: Translations = {
     latestBodyBackend: '后端正在运行最新版本。',
     allSetTitle: '已是最新',
     availableTitle: '有可用更新',
-    availableBody: '新版 Hermes 已可安装。',
+    availableBody: '新版 Catalyst 已可安装。',
     availableTitleBackend: '后端有可用更新',
     availableBodyBackend: '已连接的 Hermes 后端有新版本可安装。',
     availableBodyNoChangelog: '已有新版本可用。此安装方式无法显示更新日志。',
@@ -2192,7 +2192,7 @@ export const zh: Translations = {
     manualPickedUp: '下次启动 Hermes 时会使用新版本。',
     guiSkewTitle: '请更新桌面应用',
     guiSkewBody:
-      '后端已更新，但此桌面应用包未更改。请更新或重新安装 Costas Code（你的 AppImage / .deb / .rpm）以保持一致。',
+      '后端已更新，但此桌面应用包未更改。请更新或重新安装 Catalyst（你的 AppImage / .deb / .rpm）以保持一致。',
     copy: '复制',
     copied: '已复制',
     done: '完成',
@@ -2230,7 +2230,7 @@ export const zh: Translations = {
     installTo: '将安装到',
     retryAfterRun: '我已运行 -- 重试',
     failedTitle: '安装失败',
-    settingUpTitle: '正在设置 Costas Code',
+    settingUpTitle: '正在设置 Catalyst',
     finishingTitle: '正在收尾',
     failedDesc:
       '某个安装步骤失败。在 Windows 上，如果另一个 Hermes CLI 或桌面实例正在运行，可能会出现这种情况。请停止正在运行的 Hermes 实例后重试。可查看下面的详情或 desktop 日志中的完整记录。',
@@ -2252,10 +2252,10 @@ export const zh: Translations = {
   },
 
   onboarding: {
-    headerTitle: '开始设置 Costas Code',
+    headerTitle: '开始设置 Catalyst',
     headerDesc: '连接模型提供方即可开始对话。大多数选项只需一次点击。',
-    preparingInstall: 'Costas Code 正在完成安装。首次运行通常不到一分钟。',
-    starting: '正在启动 Costas Code…',
+    preparingInstall: 'Catalyst 正在完成安装。首次运行通常不到一分钟。',
+    starting: '正在启动 Catalyst…',
     lookingUpProviders: '正在查找提供方...',
     collapse: '收起',
     otherProviders: '其他提供方',
@@ -2403,7 +2403,7 @@ export const zh: Translations = {
       update: '更新',
       updateInProgress: '正在更新',
       commitsBehind: (count, branch) => `落后 ${branch} ${count} 个提交`,
-      desktopVersion: version => `Costas Code v${version}`,
+      desktopVersion: version => `Catalyst v${version}`,
       backendVersion: version => `后端 v${version}`,
       clientLabel: version => `客户端 v${version}`,
       connectionSsh: host => `SSH: ${host}`,
@@ -2570,7 +2570,7 @@ export const zh: Translations = {
       failedToLoad: '预览加载失败',
       tryAgain: '重试',
       restarting: 'Hermes 正在重启...',
-      askRestart: '让 Hermes 重启服务器',
+      askRestart: '让 Catalyst 重启服务器',
       lookingRestart: taskId => `Hermes 正在查找要重启的预览服务器 (${taskId})`,
       restartingTitle: '正在重启预览服务器',
       restartingMessage: 'Hermes 正在后台工作。可在预览控制台查看进度。',
@@ -2843,8 +2843,8 @@ export const zh: Translations = {
     sessionExportFailed: '无法导出会话',
     imageSaved: '图片已保存',
     downloadStarted: '下载已开始',
-    restartToUseSaveImage: '重启 Costas Code 后可使用保存图片。',
-    restartToSaveImages: '重启 Costas Code 以保存图片',
+    restartToUseSaveImage: '重启 Catalyst 后可使用保存图片。',
+    restartToSaveImages: '重启 Catalyst 以保存图片',
     imageDownloadFailed: '图片下载失败',
     openImage: '打开图片',
     downloadImage: '下载图片',

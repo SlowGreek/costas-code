@@ -46,8 +46,8 @@ Hermes has two separate compression layers that operate independently:
                                    │
                                    ▼
                      ┌──────────────────────────┐
-                     │   Agent ContextCompressor │  Fires at 50% of context (default)
-                     │   (in-loop, real tokens)  │  Normal context management
+                     │   Agent ContextCompressor │  Fires at 85% of context (default)
+                     │ (real + calibrated growth)│  Normal context management
                      └──────────────────────────┘
 ```
 
@@ -63,11 +63,11 @@ grow too large between turns (e.g., overnight accumulation in Telegram/Discord).
 - **Fires**: Only when `len(history) >= 4` and compression is enabled
 - **Purpose**: Catch sessions that escaped the agent's own compressor
 
-The gateway hygiene threshold is intentionally higher than the agent's compressor.
-Setting it at 50% (same as the agent) caused premature compression on every turn
-in long gateway sessions.
+Gateway hygiene is an independent 85% safety net for sessions that have not yet
+started an agent turn. The in-loop compressor uses the same nominal threshold but
+calibrates conservative rough estimates against provider-reported usage.
 
-### 2. Agent ContextCompressor (50% threshold, configurable)
+### 2. Agent ContextCompressor (85% threshold, configurable)
 
 Located in `agent/context_compressor.py`. This is the **primary compression
 system** that runs inside the agent's tool loop with access to accurate,
@@ -81,7 +81,7 @@ All compression settings are read from `config.yaml` under the `compression` key
 ```yaml
 compression:
   enabled: true              # Enable/disable compression (default: true)
-  threshold: 0.50            # Fraction of context window (default: 0.50 = 50%)
+  threshold: 0.85            # Fraction of context window (default: 0.85 = 85%)
   # model_thresholds:        # Per-model threshold overrides (substring match,
   #   "glm-5.2": 0.40        # longest key wins). See "Per-model threshold
   #   "claude-sonnet": 0.35  # overrides" below.
@@ -104,7 +104,7 @@ auxiliary:
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `threshold` | `0.50` | 0.0-1.0 | Compression triggers when prompt tokens ≥ `threshold × context_length` |
+| `threshold` | `0.85` | 0.0-1.0 | Compression triggers when calibrated request pressure ≥ `threshold × context_length` |
 | `model_thresholds` | `{}` | map | Per-model overrides of `threshold`. Keys are substring-matched against the model name (longest match wins). The small-context floor still applies on top (see below) |
 | `target_ratio` | `0.20` | 0.10-0.80 | Controls tail protection token budget: `threshold_tokens × target_ratio` |
 | `protect_last_n` | `20` | ≥1 | Minimum number of recent messages always preserved |
@@ -124,7 +124,7 @@ different context windows (e.g. a 1M-context model can compress later while a
 
 ```yaml
 compression:
-  threshold: 0.50
+  threshold: 0.85
   model_thresholds:
     "glm-5.2": 0.40
     "glm-5.2-1M": 0.25
@@ -152,8 +152,8 @@ map.
 
 The ChatGPT Codex OAuth backend hard-caps gpt-5.5 at a **272K** context window
 (the same slug exposes 1.05M on OpenAI's direct API and OpenRouter, and 400K on
-GitHub Copilot). At the default 50% trigger, compaction would fire at ~136K —
-half the window the model can actually use. When the active route is Codex
+GitHub Copilot). With an explicitly lowered 50% trigger, compaction would fire
+at ~136K — half the window the model can actually use. When the active route is Codex
 OAuth (`provider: openai-codex`) and the model is gpt-5.5, Hermes raises the
 trigger to **85%** (~231K) and shows a notice with the opt-out command. The
 notice is shown once per profile — a marker under `$HERMES_HOME`
@@ -199,18 +199,16 @@ routes (including Codex OAuth chat sessions) keep Hermes' summary compressor.
 
 ```
 context_length       = 200,000
-threshold_tokens     = 200,000 × 0.50 = 100,000
-tail_token_budget    = 100,000 × 0.20 = 20,000
+threshold_tokens     = 200,000 × 0.85 = 170,000
+tail_token_budget    = 170,000 × 0.20 = 34,000
 max_summary_tokens   = min(200,000 × 0.05, 12,000) = 10,000
 ```
 
 :::note Threshold is derived from the MAIN model's context window
 `threshold_tokens` is always `threshold × context_length`, where `context_length`
 is the **main agent model's** context window — never the auxiliary/summary
-model's. On a 262,144-token model at the default `0.50`, the threshold is
-`262,144 × 0.50 = 131,072`. That number being close to a common "128K context"
-is a coincidence of the percentage, not a sign that the auxiliary model's window
-is the trigger. The auxiliary model's context window is a separate concern — see
+model's. On a 262,144-token model at the default `0.85`, the threshold is
+`262,144 × 0.85 = 222,822`. The auxiliary model's context window is a separate concern — see
 the "Summary model context length" warning below for how it affects whether a
 summary can be produced, not when compression fires.
 :::
@@ -459,4 +457,4 @@ The CLI shows caching status at startup:
 
 ## Context Pressure Warnings
 
-Intermediate context-pressure warnings have been removed (see the iteration-budget block in `run_agent.py`, which notes: "No intermediate pressure warnings — they caused models to 'give up' prematurely on complex tasks"). Compression fires when prompt tokens reach the configured `compression.threshold` (default 50%) with no prior warning step; gateway session hygiene fires as the secondary safety net at 85% of the model's context window.
+Intermediate context-pressure warnings have been removed (see the iteration-budget block in `run_agent.py`, which notes: "No intermediate pressure warnings — they caused models to 'give up' prematurely on complex tasks"). Compression fires when calibrated request pressure reaches the configured `compression.threshold` (default 85%) with no prior warning step; gateway session hygiene remains an independent 85% safety net before the agent starts.

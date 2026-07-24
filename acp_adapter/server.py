@@ -1,4 +1,4 @@
-"""ACP agent server — exposes Costas Code via the Agent Client Protocol."""
+"""ACP agent server — exposes Catalyst via the Agent Client Protocol."""
 
 from __future__ import annotations
 
@@ -2130,7 +2130,7 @@ class HermesACPAgent(acp.Agent):
         return f"Queued for the next turn. ({depth} queued)"
 
     def _cmd_version(self, args: str, state: SessionState) -> str:
-        return f"Costas Code v{HERMES_VERSION}"
+        return f"Catalyst v{HERMES_VERSION}"
 
     # ---- Model switching (ACP protocol method) -------------------------------
 

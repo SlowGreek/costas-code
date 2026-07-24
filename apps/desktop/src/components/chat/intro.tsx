@@ -130,7 +130,7 @@ function fallbackCopyForPersonality(personalityKey: string): IntroCopy[] {
       body: "Send the problem, file, or idea. I'll follow the personality you've configured."
     },
     {
-      headline: `What should ${label} Hermes tackle?`,
+      headline: `What should ${label} Catalyst tackle?`,
       body: "Drop the task here. I'll keep the work grounded in the repo."
     },
     {
@@ -144,7 +144,7 @@ function pickCopy(copies: IntroCopy[], seed = 0): IntroCopy {
   return copies[Math.abs(seed) % copies.length] || FALLBACK_COPY[0]
 }
 
-const WORDMARK = 'HERMES AGENT'
+const WORDMARK = 'CATALYST'
 
 function resolveCopy(personality?: string, seed?: number): IntroCopy {
   const personalityKey = normalizeKey(personality)

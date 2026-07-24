@@ -68,7 +68,7 @@ non-goals and authority boundaries when they matter.
 A good criterion names observable proof:
 
 ```text
-C1 — The packaged app displays “Costas Code” in native app metadata.
+C1 — The packaged app displays “Catalyst” in native app metadata.
 Proof: package metadata test and packaged-build inspection.
 ```
 

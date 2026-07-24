@@ -1,5 +1,5 @@
 # ============================================================================
-# Costas Code Installer for Windows
+# Catalyst Installer for Windows
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
@@ -207,9 +207,9 @@ function Get-WindowsArch {
 function Write-Banner {
     Write-Host ""
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|              * Costas Code Installer                    |" -ForegroundColor Magenta
+    Write-Host "|                 * Catalyst Installer                    |" -ForegroundColor Magenta
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|  Costas Code - powered by Hermes Agent.                 |" -ForegroundColor Magenta
+    Write-Host "|  Catalyst - powered by Hermes Agent.                    |" -ForegroundColor Magenta
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
     Write-Host ""
 }
@@ -3041,6 +3041,10 @@ function Install-Desktop {
     # 3. Sanity-check the produced binary. Probe both arches so this works
     # on x64 and arm64 build machines.
     $exeCandidates = @(
+        "$desktopDir\release\win-unpacked\Catalyst.exe",
+        "$desktopDir\release\win-arm64-unpacked\Catalyst.exe",
+        "$desktopDir\release\win-unpacked\Costas Code.exe",
+        "$desktopDir\release\win-arm64-unpacked\Costas Code.exe",
         "$desktopDir\release\win-unpacked\Hermes.exe",
         "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
     )
@@ -3055,7 +3059,7 @@ function Install-Desktop {
         }
     }
     if (-not $found) {
-        throw "Desktop build completed but no Hermes.exe was found under $desktopDir\release\*-unpacked\"
+        throw "Desktop build completed but no Catalyst executable was found under $desktopDir\release\*-unpacked\"
     }
 
     # 3b. The Hermes icon + identity are stamped onto Hermes.exe by the
@@ -3115,9 +3119,28 @@ function New-DesktopShortcuts {
         }
 
         $targets = @(
-            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Catalyst.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Catalyst.lnk')
         )
+
+        # Remove shortcuts created under previous product names. Rebuilding
+        # replaces the old executable, so a stale Hermes.lnk / 'Costas Code.lnk'
+        # would sit next to the new one pointing at a binary that no longer
+        # exists. Best-effort: never fail the install over a shortcut.
+        $legacyNames = @('Hermes.lnk', 'Costas Code.lnk')
+        foreach ($folder in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop'))) {
+            foreach ($legacyName in $legacyNames) {
+                $legacyLnk = Join-Path $folder $legacyName
+                if (Test-Path $legacyLnk) {
+                    try {
+                        Remove-Item -LiteralPath $legacyLnk -Force -ErrorAction Stop
+                        Write-Success "Removed legacy shortcut: $legacyLnk"
+                    } catch {
+                        Write-Warn "Could not remove legacy shortcut $legacyLnk : $($_.Exception.Message)"
+                    }
+                }
+            }
+        }
 
         foreach ($lnkPath in $targets) {
             try {
@@ -3129,7 +3152,7 @@ function New-DesktopShortcuts {
                 $sc.TargetPath = $TargetExe
                 $sc.WorkingDirectory = $workDir
                 $sc.IconLocation = $iconLocation
-                $sc.Description = 'Hermes Agent'
+                $sc.Description = 'Catalyst — powered by Hermes Agent'
                 $sc.Save()
                 Write-Success "Shortcut created: $lnkPath"
             } catch {

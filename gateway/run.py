@@ -5571,7 +5571,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     def _load_busy_text_mode() -> str:
         """Resolve normal busy TEXT follow-up behavior.
 
-        ``busy_input_mode`` is the single source of truth (Costas Code defaults
+        ``busy_input_mode`` is the single source of truth (Catalyst defaults
         to ``steer``). The legacy ``busy_text_mode`` knob is honored only
         when a user explicitly set it, so existing queue setups keep
         working; new installs follow ``busy_input_mode``. Returns one of

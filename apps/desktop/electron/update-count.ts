@@ -6,8 +6,11 @@
 // discards that bogus count in favour of a SHA compare, so the caller should
 // SKIP the expensive rev-list entirely in that case rather than run it and
 // throw the result away.
-function shouldCountCommits({ isShallow, hasMergeBase }) {
-  return !(isShallow && !hasMergeBase)
+function shouldCountCommits({ isShallow: _isShallow, hasMergeBase }) {
+  // Without a merge base, rev-list is either meaningless (shallow divergence)
+  // or fails outright (the packaged stamp object is absent). In both cases the
+  // caller must use the binary SHA comparison instead of trusting empty output.
+  return hasMergeBase
 }
 
 // Resolve how many commits the local checkout is behind origin for the desktop
@@ -27,4 +30,24 @@ function resolveBehindCount({ countStr, currentSha, targetSha, isShallow, hasMer
   return Number.parseInt(countStr, 10) || 0
 }
 
-export { resolveBehindCount, shouldCountCommits }
+// Desktop and backend update on separate clocks. A packaged client's update
+// baseline is the commit baked into the running app, not the managed backend
+// checkout it happens to point at. Source/dev runs still use the live checkout.
+function resolveClientUpdateBaseline({ checkoutBranch, checkoutSha, installStamp, isPackaged }) {
+  const stampedCommit = isPackaged && typeof installStamp?.commit === 'string' ? installStamp.commit.trim() : ''
+  const validStampedCommit = /^[0-9a-f]{7,64}$/i.test(stampedCommit) && !/^0+$/.test(stampedCommit)
+
+  if (validStampedCommit) {
+    return {
+      currentBranch: installStamp.branch || checkoutBranch,
+      currentSha: stampedCommit
+    }
+  }
+
+  return {
+    currentBranch: checkoutBranch,
+    currentSha: checkoutSha
+  }
+}
+
+export { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits }

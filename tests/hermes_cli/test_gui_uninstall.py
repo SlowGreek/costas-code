@@ -72,7 +72,7 @@ def test_gui_is_installed_true_when_built(tmp_path, monkeypatch):
     # Make sure packaged-app + userdata probes don't false-positive on the box
     # running the test.
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [tmp_path / "nope"])
     assert gu.gui_is_installed(hermes_home) is True
 
 
@@ -80,7 +80,7 @@ def test_gui_is_installed_false_when_nothing(tmp_path, monkeypatch):
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [tmp_path / "nope"])
     assert gu.gui_is_installed(hermes_home) is False
 
 
@@ -93,7 +93,7 @@ def test_uninstall_gui_removes_only_gui_artifacts(tmp_path, monkeypatch):
 
     # Isolate the packaged-app + userdata probes from the test machine.
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "userdata-none")
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [tmp_path / "userdata-none"])
 
     removed = gu.uninstall_gui(hermes_home)
     removed_names = {p.name for p in removed}
@@ -125,7 +125,7 @@ def test_uninstall_gui_removes_userdata(tmp_path, monkeypatch):
     (userdata / "connection.json").write_text("{}")
 
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: userdata)
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [userdata])
 
     gu.uninstall_gui(hermes_home)
     assert not userdata.exists()
@@ -138,7 +138,7 @@ def test_uninstall_gui_keeps_userdata_when_requested(tmp_path, monkeypatch):
     userdata.mkdir()
 
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: userdata)
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [userdata])
 
     gu.uninstall_gui(hermes_home, remove_userdata=False)
     assert userdata.exists()
@@ -151,7 +151,7 @@ def test_uninstall_gui_removes_packaged_bundle(tmp_path, monkeypatch):
     (bundle / "Contents").mkdir(parents=True)
 
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [bundle])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "none")
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [tmp_path / "none"])
 
     removed = gu.uninstall_gui(hermes_home)
     assert not bundle.exists()
@@ -163,7 +163,7 @@ def test_gui_install_summary_shape(tmp_path, monkeypatch):
     _make_agent(hermes_home)
     _make_gui_build(hermes_home)
     monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "none")
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [tmp_path / "none"])
 
     summary = gu.gui_install_summary(hermes_home)
     # JSON-serializable primitives the desktop UI gates on.
@@ -176,16 +176,70 @@ def test_gui_install_summary_shape(tmp_path, monkeypatch):
 
 
 def test_userdata_dir_per_platform(monkeypatch):
-    """userData path matches Electron's app.getPath('userData') for "Hermes"."""
+    """userData path matches Electron's app.getPath('userData').
+
+    The desktop app pins userData to the legacy "Costas Code" directory even
+    under the Catalyst product name, so that is the primary path.
+    """
     home = Path("/home/tester")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
     monkeypatch.setattr(gu.sys, "platform", "darwin")
-    assert gu.desktop_userdata_dir() == home / "Library" / "Application Support" / "Hermes"
+    support = home / "Library" / "Application Support"
+    assert gu.desktop_userdata_dir() == support / "Costas Code"
 
     monkeypatch.setattr(gu.sys, "platform", "linux")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    assert gu.desktop_userdata_dir() == home / ".config" / "Hermes"
+    assert gu.desktop_userdata_dir() == home / ".config" / "Costas Code"
+
+
+def test_userdata_dirs_cover_every_shipped_product_name(monkeypatch):
+    """Uninstall must not strand state written under a previous product name."""
+    home = Path("/home/tester")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(gu.sys, "platform", "darwin")
+
+    support = home / "Library" / "Application Support"
+    dirs = gu.desktop_userdata_dirs()
+
+    assert dirs[0] == support / "Costas Code"
+    assert set(dirs) == {support / name for name in gu.DESKTOP_USER_DATA_NAMES}
+    assert support / "Catalyst" in dirs
+    assert support / "Hermes" in dirs
+
+
+def test_packaged_app_paths_cover_every_shipped_product_name(monkeypatch):
+    """A Catalyst-era uninstall must still find old Costas Code/Hermes bundles."""
+    home = Path("/home/tester")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(gu.sys, "platform", "darwin")
+
+    paths = gu.packaged_gui_app_paths()
+
+    for name in gu.DESKTOP_APP_NAMES:
+        assert Path("/Applications") / f"{name}.app" in paths
+        assert home / "Applications" / f"{name}.app" in paths
+    assert len(paths) == len(set(paths)), "candidates must be de-duplicated"
+
+
+def test_uninstall_gui_removes_every_legacy_userdata_dir(tmp_path, monkeypatch):
+    """Both the pinned and legacy userData dirs are cleaned in one pass."""
+    hermes_home = tmp_path / ".hermes"
+    _make_agent(hermes_home)
+    current = tmp_path / "Costas Code"
+    legacy = tmp_path / "Hermes"
+    for d in (current, legacy):
+        d.mkdir()
+        (d / "connection.json").write_text("{}")
+
+    monkeypatch.setattr(gu, "packaged_gui_app_paths", lambda: [])
+    monkeypatch.setattr(gu, "desktop_userdata_dirs", lambda: [current, legacy])
+
+    removed = gu.uninstall_gui(hermes_home)
+
+    assert not current.exists()
+    assert not legacy.exists()
+    assert current in removed and legacy in removed
 
 
 def test_userdata_dir_windows(monkeypatch):
@@ -193,7 +247,8 @@ def test_userdata_dir_windows(monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(gu.sys, "platform", "win32")
     monkeypatch.setenv("APPDATA", r"C:\Users\tester\AppData\Roaming")
-    assert gu.desktop_userdata_dir() == Path(r"C:\Users\tester\AppData\Roaming") / "Hermes"
+    roaming = Path(r"C:\Users\tester\AppData\Roaming")
+    assert gu.desktop_userdata_dir() == roaming / "Costas Code"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")

@@ -263,10 +263,10 @@ The `display.busy_input_mode` config key controls what happens when you press En
 ```yaml
 # ~/.hermes/config.yaml
 display:
-  busy_input_mode: "steer"   # Costas Code default; or "queue" / "interrupt"
+  busy_input_mode: "steer"   # Catalyst default; or "queue" / "interrupt"
 ```
 
-`"queue"` mode prepares a separate follow-up turn. `"steer"` always waits for the next tool-result boundary and is the Costas Code default. `"interrupt"` responds sooner during model generation while avoiding cancellation of a running tool. Use `/stop` when you want to cancel the turn and its foreground work. Unknown values fall back to `"steer"`.
+`"queue"` mode prepares a separate follow-up turn. `"steer"` always waits for the next tool-result boundary and is the Catalyst default. `"interrupt"` responds sooner during model generation while avoiding cancellation of a running tool. Use `/stop` when you want to cancel the turn and its foreground work. Unknown values fall back to `"steer"`.
 
 `"steer"` has two automatic fallbacks: if the agent hasn't started yet, or if images are attached, the message falls back to `"queue"` behavior so nothing is lost.
 
@@ -374,7 +374,7 @@ Long conversations are automatically summarized when approaching context limits:
 # In ~/.hermes/config.yaml
 compression:
   enabled: true
-  threshold: 0.50    # Compress at 50% of context limit by default
+  threshold: 0.85    # Compress at 85% of context limit by default
 
 # Summarization model configured under auxiliary:
 auxiliary:

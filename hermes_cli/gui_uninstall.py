@@ -67,24 +67,46 @@ def _agent_root(hermes_home: Path) -> Path:
     return hermes_home / "hermes-agent"
 
 
-def desktop_userdata_dir() -> Path:
-    """Return the Electron ``userData`` directory for the desktop app.
+# Every product name this desktop app has shipped under, most current first.
+# The public product is Catalyst, but Electron ``userData`` stays pinned to
+# "Costas Code" for continuity, and older builds used "Hermes". Discovery and
+# uninstall must know all three or they strand state / leave dead bundles.
+DESKTOP_USER_DATA_NAMES = ("Costas Code", "Catalyst", "Hermes")
+DESKTOP_APP_NAMES = ("Catalyst", "Costas Code", "Hermes")
 
-    Mirrors Electron's ``app.getPath('userData')`` for an app named "Hermes"
-    on each platform. This is GUI-only state (connection.json, updates.json,
-    Chromium cache) and never holds agent config or sessions.
+
+def desktop_userdata_dir() -> Path:
+    """Return the primary Electron ``userData`` directory for the desktop app.
+
+    The desktop app pins ``userData`` to the historical "Costas Code"
+    directory even now that the product is presented as Catalyst (see
+    ``apps/desktop/electron/desktop-user-data.ts``), so that is the primary
+    location. ``desktop_userdata_dirs()`` returns every legacy name too.
+
+    This is GUI-only state (connection.json, updates.json, Chromium cache) and
+    never holds agent config or sessions.
+    """
+    return desktop_userdata_dirs()[0]
+
+
+def desktop_userdata_dirs() -> "list[Path]":
+    """Every Electron ``userData`` directory this product has ever used.
+
+    Ordered most-current first. Catalyst deliberately keeps reading the
+    "Costas Code" directory, and older installs used "Hermes" — an uninstall
+    that only knew one name silently stranded desktop credentials/settings.
     """
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Hermes"
-    if sys.platform == "win32":
+        base = home / "Library" / "Application Support"
+    elif sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         base = Path(appdata) if appdata else (home / "AppData" / "Roaming")
-        return base / "Hermes"
-    # Linux / other POSIX — XDG config home.
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg else (home / ".config")
-    return base / "Hermes"
+    else:
+        # Linux / other POSIX — XDG config home.
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        base = Path(xdg) if xdg else (home / ".config")
+    return [base / name for name in DESKTOP_USER_DATA_NAMES]
 
 
 def source_built_gui_artifacts(hermes_home: Path) -> "list[Path]":
@@ -111,30 +133,29 @@ def source_built_gui_artifacts(hermes_home: Path) -> "list[Path]":
 def packaged_gui_app_paths() -> "list[Path]":
     """Standard install locations of the packaged desktop distributable.
 
-    Returns every candidate for the current OS; the caller filters to those
-    that actually exist. We never glob system-wide — only the well-known
-    electron-builder output locations for the "Hermes" product.
+    Returns every candidate for the current OS, for every product name this
+    app has shipped under (Catalyst today, "Costas Code" and "Hermes"
+    historically); the caller filters to those that actually exist. We never
+    glob system-wide — only well-known electron-builder output locations.
     """
     home = Path.home()
     paths: list[Path] = []
     if sys.platform == "darwin":
-        paths += [
-            Path("/Applications/Hermes.app"),
-            home / "Applications" / "Hermes.app",
-        ]
+        for name in DESKTOP_APP_NAMES:
+            paths.append(Path("/Applications") / f"{name}.app")
+            paths.append(home / "Applications" / f"{name}.app")
     elif sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
         local_base = Path(local) if local else (home / "AppData" / "Local")
-        paths += [
-            # NSIS per-user install (perMachine=false → Programs\Hermes).
-            local_base / "Programs" / "Hermes",
-            # Older / alternate layout some builds used.
-            local_base / "hermes-desktop",
-        ]
         program_files = os.environ.get("ProgramFiles")
-        if program_files:
-            # NSIS per-machine fallback (needs admin to remove).
-            paths.append(Path(program_files) / "Hermes")
+        for name in DESKTOP_APP_NAMES:
+            # NSIS per-user install (perMachine=false → Programs\<Name>).
+            paths.append(local_base / "Programs" / name)
+            if program_files:
+                # NSIS per-machine fallback (needs admin to remove).
+                paths.append(Path(program_files) / name)
+        # Older / alternate layout some builds used.
+        paths.append(local_base / "hermes-desktop")
     else:
         # Linux: AppImage is a single file the user placed somewhere; we can
         # only reliably clean the desktop entry + icon we know the name of.
@@ -144,11 +165,18 @@ def packaged_gui_app_paths() -> "list[Path]":
         # ``uninstall_gui``.
         data = os.environ.get("XDG_DATA_HOME")
         data_base = Path(data) if data else (home / ".local" / "share")
-        paths += [
-            data_base / "applications" / "hermes.desktop",
-            data_base / "applications" / "Hermes.desktop",
-        ]
-    return paths
+        apps = data_base / "applications"
+        for name in DESKTOP_APP_NAMES:
+            paths.append(apps / f"{name}.desktop")
+            paths.append(apps / f"{name.lower().replace(' ', '-')}.desktop")
+    # Preserve order while dropping duplicates (e.g. lowercase collisions).
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return unique
 
 
 def agent_is_installed(hermes_home: Path) -> bool:
@@ -176,8 +204,9 @@ def gui_is_installed(hermes_home: Path) -> bool:
     for p in packaged_gui_app_paths():
         if p.exists():
             return True
-    if desktop_userdata_dir().exists():
-        return True
+    for p in desktop_userdata_dirs():
+        if p.exists():
+            return True
     return False
 
 
@@ -193,6 +222,8 @@ def gui_install_summary(hermes_home: "Path | None" = None) -> dict:
     source_artifacts = [p for p in source_built_gui_artifacts(home) if p.exists()]
     packaged = [p for p in packaged_gui_app_paths() if p.exists()]
     userdata = desktop_userdata_dir()
+    userdata_all = desktop_userdata_dirs()
+    userdata_existing = [p for p in userdata_all if p.exists()]
 
     return {
         "hermes_home": str(home),
@@ -201,7 +232,9 @@ def gui_install_summary(hermes_home: "Path | None" = None) -> dict:
         "source_built_artifacts": [str(p) for p in source_artifacts],
         "packaged_app_paths": [str(p) for p in packaged],
         "userdata_dir": str(userdata),
-        "userdata_exists": userdata.exists(),
+        "userdata_exists": bool(userdata_existing),
+        "userdata_dirs": [str(p) for p in userdata_all],
+        "userdata_existing_dirs": [str(p) for p in userdata_existing],
         "platform": sys.platform,
     }
 
@@ -261,12 +294,13 @@ def uninstall_gui(hermes_home: "Path | None" = None, *, remove_userdata: bool = 
         log_info("No packaged desktop app found in standard locations")
 
     if remove_userdata:
-        userdata = desktop_userdata_dir()
-        if userdata.exists():
+        existing_userdata = [p for p in desktop_userdata_dirs() if p.exists()]
+        if existing_userdata:
             log_info("Removing desktop app data (Electron userData)...")
-            if _remove_path(userdata):
-                log_success(f"Removed {userdata}")
-                removed.append(userdata)
+            for userdata in existing_userdata:
+                if _remove_path(userdata):
+                    log_success(f"Removed {userdata}")
+                    removed.append(userdata)
 
     if not removed:
         log_info("No desktop GUI artifacts found to remove")

@@ -62,14 +62,14 @@ async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, 
   await rcedit(exe, {
     icon,
     'version-string': {
-      ProductName: 'Costas Code',
-      FileDescription: 'Costas Code',
+      ProductName: 'Catalyst',
+      FileDescription: 'Catalyst',
       CompanyName: 'Nous Research',
       LegalCopyright: 'Copyright (c) 2026 Nous Research'
     }
   })
 
-  console.log('[set-exe-identity] done — Costas Code icon + identity stamped')
+  console.log('[set-exe-identity] done — Catalyst icon + identity stamped')
 }
 
 export { stampExeIdentity }

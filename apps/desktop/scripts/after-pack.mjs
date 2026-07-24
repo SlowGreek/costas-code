@@ -28,7 +28,7 @@ export default async function afterPack(context) {
     return
   }
 
-  const productName = context.packager?.appInfo?.productFilename || 'Costas Code'
+  const productName = context.packager?.appInfo?.productFilename || 'Catalyst'
   const exe = path.join(context.appOutDir, `${productName}.exe`)
   const desktopRoot = path.resolve(import.meta.dirname, '..')
 
@@ -36,6 +36,6 @@ export default async function afterPack(context) {
     await stampExeIdentity(exe, desktopRoot)
   } catch (err) {
     // Never fail the build over a cosmetic stamp.
-    console.warn(`[after-pack] exe identity stamp failed (${err.message}); Costas Code.exe keeps the stock Electron icon`)
+    console.warn(`[after-pack] exe identity stamp failed (${err.message}); Catalyst.exe keeps the stock Electron icon`)
   }
 }

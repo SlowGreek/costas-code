@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Costas Code CLI - Interactive Terminal Interface
+Catalyst CLI - Interactive Terminal Interface
 
-A beautiful command-line interface for the Costas Code, inspired by Claude Code.
+A beautiful command-line interface for Catalyst, inspired by Claude Code.
 Features ASCII art branding, interactive REPL, toolset selection, and rich formatting.
 
 Usage:
@@ -467,7 +467,7 @@ def load_cli_config() -> Dict[str, Any]:
         },
         "compression": {
             "enabled": True,      # Auto-compress when approaching context limit
-            "threshold": 0.50,    # Compress at 50% of model's context limit
+            "threshold": 0.85,    # Preserve most of the context window before compressing
             "min_tail_user_messages": 1,  # Real user messages guaranteed in the tail (1 = existing single anchor)
         },
         "agent": {
@@ -3669,10 +3669,10 @@ def _build_compact_banner() -> str:
     dim_color = _skin.get_color("banner_dim", "#B8860B") if _skin else "#B8860B"
 
     if skin_name == "default":
-        line1 = "⚕ COSTAS CODE - AI Agent Framework"
-        tiny_line = "⚕ COSTAS CODE"
+        line1 = "⚕ CATALYST - AI Agent Framework"
+        tiny_line = "⚕ CATALYST"
     else:
-        agent_name = _skin.get_branding("agent_name", "Costas Code") if _skin else "Costas Code"
+        agent_name = _skin.get_branding("agent_name", "Catalyst") if _skin else "Catalyst"
         line1 = f"{agent_name} - AI Agent Framework"
         tiny_line = agent_name
 
@@ -3680,7 +3680,7 @@ def _build_compact_banner() -> str:
         from hermes_cli import __release_date__ as _release_date
         from hermes_cli import __version__ as _version
 
-        version_line = f"Costas Code v{_version} ({_release_date})"
+        version_line = f"Catalyst v{_version} ({_release_date})"
     else:
         version_line = format_banner_version_label()
 
@@ -3879,7 +3879,7 @@ def _normalize_moa_model(model: Optional[str]) -> tuple[Optional[str], Optional[
 
 class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
     """
-    Interactive CLI for the Costas Code.
+    Interactive CLI for Catalyst.
     
     Provides a REPL interface with rich formatting, command history,
     and tool execution capabilities.
@@ -6591,7 +6591,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             self._console_print()
             self._console_print(
                 "[bold yellow]⚠  Nous Research Hermes 3 & 4 models are NOT agentic and are not "
-                "designed for use with Costas Code.[/]"
+                "designed for use with Catalyst.[/]"
             )
             self._console_print(
                 "[dim]   They lack tool-calling capabilities required for agent workflows. "
@@ -13494,10 +13494,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         try:
             from hermes_cli.skin_engine import get_active_skin
             _welcome_skin = get_active_skin()
-            _welcome_text = _welcome_skin.get_branding("welcome", "Welcome to Costas Code! Type your message or /help for commands.")
+            _welcome_text = _welcome_skin.get_branding("welcome", "Welcome to Catalyst! Type your message or /help for commands.")
             _welcome_color = _welcome_skin.get_color("banner_text", "#FFF8DC")
         except Exception:
-            _welcome_text = "Welcome to Costas Code! Type your message or /help for commands."
+            _welcome_text = "Welcome to Catalyst! Type your message or /help for commands."
             _welcome_color = "#FFF8DC"
         self._console_print(f"[{_welcome_color}]{_welcome_text}[/]")
 
@@ -14387,7 +14387,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             import signal as _sig
             from prompt_toolkit.application import run_in_terminal
             from hermes_cli.skin_engine import get_active_skin
-            agent_name = get_active_skin().get_branding("agent_name", "Costas Code")
+            agent_name = get_active_skin().get_branding("agent_name", "Catalyst")
             msg = f"\n{agent_name} has been suspended. Run `fg` to bring {agent_name} back."
             def _suspend():
                 os.write(1, msg.encode())
@@ -16174,7 +16174,7 @@ def main(
     ignore_rules: bool = False,
 ):
     """
-    Costas Code CLI - Interactive AI Assistant
+    Catalyst CLI - Interactive AI Assistant
     
     Args:
         query: Single query to execute (then exit). Alias: -q

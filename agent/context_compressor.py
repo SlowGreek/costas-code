@@ -2071,13 +2071,20 @@ class ContextCompressor(ContextEngine):
 
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""
+        request_estimate_tokens = usage.get("_hermes_request_estimate_tokens", 0)
         self.last_prompt_tokens = usage.get("prompt_tokens", 0)
         self.last_completion_tokens = usage.get("completion_tokens", 0)
         self.last_total_tokens = usage.get("total_tokens", self.last_prompt_tokens + self.last_completion_tokens)
         if self.last_prompt_tokens > 0:
             self.last_real_prompt_tokens = self.last_prompt_tokens
             if self.last_prompt_tokens < self.threshold_tokens:
-                if self.awaiting_real_usage_after_compression and self.last_compression_rough_tokens > 0:
+                if request_estimate_tokens > 0:
+                    # Pair the provider's measured request with the conservative
+                    # estimate for that SAME request. Future preflights can then
+                    # add only rough growth instead of repeatedly charging the
+                    # estimate's schema/code inflation against the whole prompt.
+                    self.last_rough_tokens_when_real_prompt_fit = request_estimate_tokens
+                elif self.awaiting_real_usage_after_compression and self.last_compression_rough_tokens > 0:
                     self.last_rough_tokens_when_real_prompt_fit = self.last_compression_rough_tokens
                 # Any real provider reading below the trigger proves the prompt
                 # fits again. Clear the real-usage effectiveness latch even
@@ -2127,6 +2134,49 @@ class ContextCompressor(ContextEngine):
         self._verify_compaction_cleared_threshold = False
         self.awaiting_real_usage_after_compression = False
 
+    def tolerated_preflight_rough_growth(self) -> int:
+        """Rough-estimate growth that a provider baseline is still trusted for.
+
+        Beyond this band the paired real/rough measurement is treated as stale:
+        the conversation has grown enough that the provider has not measured
+        anything comparable, so the conservative rough estimate must stand.
+        """
+        return max(4096, int(self.threshold_tokens * 0.05))
+
+    def calibrate_preflight_tokens(self, rough_tokens: int) -> int:
+        """Calibrate a rough request estimate against recent provider usage.
+
+        The rough estimator deliberately errs high for code and tool schemas.
+        Once the provider has measured the same request, retain that real
+        baseline and charge only newly-added rough growth.
+
+        Calibration is downward-only and intentionally narrow. It is disabled
+        when there is no paired provider measurement, when the last real
+        request was already over threshold, or when the rough estimate has
+        grown beyond :meth:`tolerated_preflight_rough_growth` since the
+        measured request. That last guard keeps calibration from silently
+        cancelling the "large rough growth still compresses" safety path in
+        :meth:`should_defer_preflight_to_real_usage`, which would otherwise let
+        a genuinely growing conversation ride past the threshold on a stale
+        real/rough gap and overflow the provider.
+        """
+        rough_tokens = max(0, int(rough_tokens or 0))
+        real_tokens = max(0, int(self.last_real_prompt_tokens or 0))
+        rough_baseline = max(0, int(self.last_rough_tokens_when_real_prompt_fit or 0))
+
+        if (
+            real_tokens <= 0
+            or rough_baseline <= 0
+            or real_tokens >= self.threshold_tokens
+        ):
+            return rough_tokens
+
+        rough_growth = max(0, rough_tokens - rough_baseline)
+        if rough_growth > self.tolerated_preflight_rough_growth():
+            return rough_tokens
+
+        return min(rough_tokens, real_tokens + rough_growth)
+
     def snapshot_preflight_display_tokens(self) -> int:
         """Capture the display token count before a speculative preflight seed."""
         return self.last_prompt_tokens
@@ -2172,7 +2222,7 @@ class ContextCompressor(ContextEngine):
             return False
 
         growth = max(0, rough_tokens - baseline)
-        tolerated_growth = max(4096, int(self.threshold_tokens * 0.05))
+        tolerated_growth = self.tolerated_preflight_rough_growth()
         if growth > tolerated_growth:
             return False
 

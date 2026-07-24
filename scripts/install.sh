@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Costas Code Installer
+# Catalyst Installer
 # ============================================================================
 # Installation script for Linux, macOS, and Android/Termux.
 # Uses uv for desktop/server installs and Python's stdlib venv + pip on Termux.
@@ -152,7 +152,7 @@ while [[ $# -gt 0 ]]; do
             ;;
 
         -h|--help)
-            echo "Costas Code Installer"
+            echo "Catalyst Installer"
             echo ""
             echo "Usage: install.sh [OPTIONS]"
             echo ""
@@ -169,7 +169,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --stage NAME   Run one desktop bootstrap stage"
             echo "  --json         Print a JSON result frame for --stage"
             echo "  --non-interactive  Skip stages that require user input"
-            echo "  --include-desktop  Also build the desktop app (apps/desktop -> Hermes.app)"
+            echo "  --include-desktop  Also build the desktop app (apps/desktop -> Catalyst.app)"
             echo "  --dir PATH     Installation directory"
             echo "                   default (non-root):  ~/.hermes/hermes-agent"
             echo "                   default (root, Linux): /usr/local/lib/hermes-agent"
@@ -205,9 +205,9 @@ print_banner() {
     echo ""
     echo -e "${MAGENTA}${BOLD}"
     echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│              ⚕ Costas Code Installer                    │"
+    echo "│                 ⚕ Catalyst Installer                    │"
     echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  Costas Code — powered by Hermes Agent.                 │"
+    echo "│  Catalyst — powered by Hermes Agent.                    │"
     echo "└─────────────────────────────────────────────────────────┘"
     echo -e "${NC}"
 }
@@ -315,7 +315,7 @@ emit_manifest() {
     if [ "$INCLUDE_DESKTOP" = true ]; then
         desktop_stage='{"name":"desktop","title":"Build desktop app","category":"runtime","needs_user_input":false},'
     fi
-    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download Costas Code","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
+    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download Catalyst","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
     printf '\n'
 }
 
@@ -2863,7 +2863,11 @@ install_desktop() {
 
     local app=""
     if [ "$OS" = "linux" ]; then
-        if [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
+        if [ -x "$desktop_dir/release/linux-unpacked/Catalyst" ]; then
+            app="$desktop_dir/release/linux-unpacked/Catalyst"
+        elif [ -x "$desktop_dir/release/linux-unpacked/Costas Code" ]; then
+            app="$desktop_dir/release/linux-unpacked/Costas Code"
+        elif [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/Hermes"
         elif [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/hermes"
@@ -2871,6 +2875,10 @@ install_desktop() {
     else
         local cand
         for cand in \
+            "$desktop_dir/release/mac-arm64/Catalyst.app" \
+            "$desktop_dir/release/mac/Catalyst.app" \
+            "$desktop_dir/release/mac-arm64/Costas Code.app" \
+            "$desktop_dir/release/mac/Costas Code.app" \
             "$desktop_dir/release/mac-arm64/Hermes.app" \
             "$desktop_dir/release/mac/Hermes.app"; do
             if [ -d "$cand" ]; then

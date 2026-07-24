@@ -76,6 +76,7 @@ import {
   shouldRemoveAppBundle,
   uninstallArgsForMode
 } from './desktop-uninstall'
+import { resolveDesktopUserDataPath } from './desktop-user-data'
 import { blockedEgressDomains, isBlockedEgressUrl } from './egress-policy'
 import { installEmbedReferer } from './embed-referer'
 import { createEventDeduper } from './event-dedupe'
@@ -150,8 +151,9 @@ import {
   redactSecrets,
   SshConnection
 } from './ssh-connection'
+import { staleBundlePaths } from './stale-bundles'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
-import { resolveBehindCount, shouldCountCommits } from './update-count'
+import { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits } from './update-count'
 import { readLiveUpdateMarker, writeUpdateMarker } from './update-marker'
 import { runRebuildWithRetry } from './update-rebuild'
 import {
@@ -216,11 +218,13 @@ import { resolvePickerDefaultPath } from './wsl-path-bridge'
 
 const USER_DATA_OVERRIDE = process.env.HERMES_DESKTOP_USER_DATA_DIR
 
-if (USER_DATA_OVERRIDE) {
-  const resolvedUserData = path.resolve(USER_DATA_OVERRIDE)
-  fs.mkdirSync(resolvedUserData, { recursive: true })
-  app.setPath('userData', resolvedUserData)
-}
+const RESOLVED_USER_DATA = resolveDesktopUserDataPath({
+  appDataPath: app.getPath('appData'),
+  overridePath: USER_DATA_OVERRIDE
+})
+
+fs.mkdirSync(RESOLVED_USER_DATA, { recursive: true })
+app.setPath('userData', RESOLVED_USER_DATA)
 
 const DEV_SERVER = process.env.HERMES_DESKTOP_DEV_SERVER
 const IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED)
@@ -601,7 +605,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Costas Code'
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Catalyst'
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
 
@@ -2274,12 +2278,19 @@ async function checkUpdates() {
   if (isOfficialSshRemote(originUrl)) {
     const git = args => runGit(args, { cwd: updateRoot }).then(r => r.stdout.trim())
 
-    const [currentSha, target, dirtyStr, currentBranch] = await Promise.all([
+    const [checkoutSha, target, dirtyStr, checkoutBranch] = await Promise.all([
       git(['rev-parse', 'HEAD']),
       runGit(['ls-remote', OFFICIAL_REPO_HTTPS_URL, `refs/heads/${branch}`], { cwd: updateRoot }),
       git(['status', '--porcelain']),
       git(['rev-parse', '--abbrev-ref', 'HEAD'])
     ])
+
+    const { currentBranch, currentSha } = resolveClientUpdateBaseline({
+      checkoutBranch,
+      checkoutSha,
+      installStamp: INSTALL_STAMP,
+      isPackaged: IS_PACKAGED
+    })
 
     const targetSha = firstLine(target.stdout).split(/\s+/)[0] || ''
 
@@ -2326,16 +2337,24 @@ async function checkUpdates() {
 
   const git = args => runGit(args, { cwd: updateRoot }).then(r => r.stdout.trim())
 
-  const [currentSha, targetSha, dirtyStr, currentBranch, shallowStr, mergeBaseStr] = await Promise.all([
+  const [checkoutSha, targetSha, dirtyStr, checkoutBranch, shallowStr] = await Promise.all([
     git(['rev-parse', 'HEAD']),
     git(['rev-parse', `origin/${branch}`]),
     git(['status', '--porcelain']),
     git(['rev-parse', '--abbrev-ref', 'HEAD']),
-    git(['rev-parse', '--is-shallow-repository']),
-    // merge-base exits non-zero with empty stdout when HEAD shares no common
-    // ancestor with the freshly fetched tip — exactly the shallow-clone case.
-    git(['merge-base', 'HEAD', `origin/${branch}`])
+    git(['rev-parse', '--is-shallow-repository'])
   ])
+
+  const { currentBranch, currentSha } = resolveClientUpdateBaseline({
+    checkoutBranch,
+    checkoutSha,
+    installStamp: INSTALL_STAMP,
+    isPackaged: IS_PACKAGED
+  })
+
+  // Compare the target with the running client's build commit, not merely the
+  // backend checkout. The two can diverge after a backend-only repair/update.
+  const mergeBaseStr = await git(['merge-base', currentSha, `origin/${branch}`])
 
   const isShallow = shallowStr === 'true'
   const hasMergeBase = Boolean(mergeBaseStr)
@@ -2345,7 +2364,7 @@ async function checkUpdates() {
   // (thousands of commits, see #51922) and resolveBehindCount discards the
   // result anyway in favour of a SHA compare — so skip the expensive query.
   const countStr = shouldCountCommits({ isShallow, hasMergeBase })
-    ? await git(['rev-list', `HEAD..origin/${branch}`, '--count'])
+    ? await git(['rev-list', `${currentSha}..origin/${branch}`, '--count'])
     : ''
 
   const behind = resolveBehindCount({
@@ -2356,7 +2375,7 @@ async function checkUpdates() {
     hasMergeBase
   })
 
-  const commits = behind > 0 ? await readCommitLog(updateRoot, branch) : []
+  const commits = behind > 0 ? await readCommitLog(updateRoot, branch, currentSha) : []
 
   return {
     supported: true,
@@ -2372,12 +2391,12 @@ async function checkUpdates() {
   }
 }
 
-async function readCommitLog(cwd, branch) {
+async function readCommitLog(cwd, branch, currentSha = 'HEAD') {
   const SEP = '\x1f'
   const REC = '\x1e'
 
   const { stdout } = await runGit(
-    ['log', `HEAD..origin/${branch}`, `--pretty=format:%H${SEP}%s${SEP}%an${SEP}%at${REC}`, '-n', '40'],
+    ['log', `${currentSha}..origin/${branch}`, `--pretty=format:%H${SEP}%s${SEP}%an${SEP}%at${REC}`, '-n', '40'],
     { cwd }
   )
 
@@ -3118,11 +3137,14 @@ async function applyUpdatesPosixInApp(opts: any) {
       sandboxBlocked: true,
       message:
         'Backend updated. The rebuilt app can’t relaunch automatically ' +
-        '(sandbox helper needs root). Quit and reopen Hermes to finish.'
+        '(sandbox helper needs root). Quit and reopen Catalyst to finish.'
     }
   }
 
   const rebuiltApp = [
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Catalyst.app'),
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Catalyst.app'),
+    // Compatibility with the previous Costas Code bundle name.
     path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Costas Code.app'),
     path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Costas Code.app'),
     // Compatibility with an older build produced before the front-facing rename.
@@ -3137,7 +3159,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   if (!rebuiltApp || !targetApp) {
     emitUpdateProgress({
       stage: 'done',
-      message: 'Backend updated. Restart Hermes to load the new version.',
+      message: 'Backend updated. Restart Catalyst to load the new version.',
       percent: 100
     })
 
@@ -3642,7 +3664,7 @@ function resolveHermesBackend(backendArgs) {
   //    is a recoverable state the GUI can drive through.
   return {
     kind: 'bootstrap-needed',
-    label: 'Costas Code not installed yet; bootstrap required',
+    label: 'Catalyst not installed yet; bootstrap required',
     command: null,
     args: backendArgs,
     bootstrap: true,
@@ -10696,6 +10718,7 @@ app.whenReady().then(() => {
   configureSpellChecker()
   registerPowerResumeListeners()
   keepAwake.set(readPersistedKeepAwake())
+  retireStaleAppBundles()
   createWindow()
 
   // Win/Linux cold start: the launching hermes:// URL is in our own argv.
@@ -10716,6 +10739,52 @@ app.whenReady().then(() => {
     }
   })
 })
+
+/**
+ * Remove app bundles superseded by this one (the Hermes -> Costas Code ->
+ * Catalyst rename, plus local `CostasCode.rollback*` copies).
+ *
+ * They all share bundle id com.nousresearch.hermes and the `hermes://` scheme,
+ * so leaving them on disk lets LaunchServices launch a stale build and route
+ * deep links to the wrong app. Retiring them makes the installed app the
+ * unambiguous target.
+ *
+ * macOS-only and strictly best-effort: a packaged-app guard keeps it away from
+ * dev runs, and any failure (a read-only volume, a bundle the user owns
+ * differently) is logged and ignored rather than blocking startup. The pure
+ * selection logic — including the never-delete-yourself rule — lives in
+ * stale-bundles.ts and is unit-tested there.
+ */
+function retireStaleAppBundles() {
+  if (!IS_MAC || !app.isPackaged) {return}
+
+  try {
+    // process.execPath -> Catalyst.app/Contents/MacOS/Catalyst
+    const runningAppPath = path.resolve(path.dirname(process.execPath), '..', '..')
+
+    if (!runningAppPath.endsWith('.app')) {return}
+
+    const parentDir = path.dirname(runningAppPath)
+
+    const stale = staleBundlePaths({
+      runningAppPath,
+      siblingNames: fs.readdirSync(parentDir)
+    })
+
+    if (stale.length === 0) {return}
+
+    for (const bundlePath of stale) {
+      try {
+        fs.rmSync(bundlePath, { force: true, recursive: true })
+        rememberLog(`[cleanup] retired superseded app bundle: ${bundlePath}`)
+      } catch (err) {
+        rememberLog(`[cleanup] could not remove ${bundlePath}: ${String(err)}`)
+      }
+    }
+  } catch (err) {
+    rememberLog(`[cleanup] stale-bundle sweep skipped: ${String(err)}`)
+  }
+}
 
 // Seed Chromium's spellchecker with the system locale (falling back to en-US).
 // On macOS Electron uses the native spellchecker which ignores this list, but

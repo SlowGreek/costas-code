@@ -1398,7 +1398,7 @@ DEFAULT_CONFIG = {
 
     "compression": {
         "enabled": True,
-        "threshold": 0.50,            # compress when context usage exceeds this ratio.
+        "threshold": 0.85,            # compress when context usage exceeds this ratio.
                                       # Models with context windows below 512K are
                                       # floored at 0.75 (raise-only) so compaction
                                       # doesn't fire with half the window still free;
@@ -1468,9 +1468,10 @@ DEFAULT_CONFIG = {
                                       # ChatGPT Codex OAuth route raise their compaction
                                       # trigger to 85% (vs the global `threshold` above).
                                       # Codex hard-caps these families at a 272K window, so
-                                      # the default 50% would compact at ~136K and waste half
-                                      # the usable context. Set to False to opt back down to
-                                      # the global threshold (e.g. 0.50) for those Codex
+                                      # an explicitly lowered 50% threshold would compact at
+                                      # ~136K and waste half the usable context. Set False to
+                                      # opt back down to
+                                      # the global threshold (e.g. 0.85) for those Codex
                                       # sessions. Only this exact route is affected —
                                       # gpt-5.4 / 5.5 / 5.6 on OpenAI's direct API,
                                       # OpenRouter, and Copilot keep the global threshold
@@ -1856,7 +1857,7 @@ DEFAULT_CONFIG = {
         # when an exchange was tool-heavy. Set False to restore the legacy
         # behavior of showing tool-call summaries inline.
         "resume_skip_tool_only": True,
-        "busy_input_mode": "steer",  # Costas Code default; interrupt | queue | steer
+        "busy_input_mode": "steer",  # Catalyst default; interrupt | queue | steer
         # When busy_input_mode="steer", suppress only the visible
         # "Steered into current run" confirmation bubble by setting this false.
         # The mid-turn steering itself still happens.
@@ -8587,7 +8588,7 @@ def show_config():
     enabled = compression.get('enabled', True)
     print(f"  Enabled:      {'yes' if enabled else 'no'}")
     if enabled:
-        print(f"  Threshold:    {compression.get('threshold', 0.50) * 100:.0f}%")
+        print(f"  Threshold:    {compression.get('threshold', 0.85) * 100:.0f}%")
         _tt = compression.get('threshold_tokens')
         if _tt is not None:
             try:

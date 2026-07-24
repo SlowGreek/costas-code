@@ -807,7 +807,7 @@ Context compression is configured exclusively through `config.yaml` — there ar
 ```yaml
 compression:
   enabled: true
-  threshold: 0.50
+  threshold: 0.85
   target_ratio: 0.20         # fraction of threshold to preserve as recent tail
   protect_last_n: 20         # minimum recent messages to keep uncompressed
 ```

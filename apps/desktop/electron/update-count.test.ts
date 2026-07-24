@@ -2,7 +2,58 @@ import assert from 'node:assert/strict'
 
 import { test } from 'vitest'
 
-import { resolveBehindCount, shouldCountCommits } from './update-count'
+import { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits } from './update-count'
+
+test('packaged update status uses the running app stamp instead of a newer backend checkout', () => {
+  assert.deepEqual(
+    resolveClientUpdateBaseline({
+      checkoutBranch: 'costas-code',
+      checkoutSha: '803bf1686c5aeca7076fcac4f917b079c8a9f24e',
+      installStamp: { branch: 'costas-code', commit: '8555ac23bd1a497fe7d9ed0976547ab641a59f99' },
+      isPackaged: true
+    }),
+    { currentBranch: 'costas-code', currentSha: '8555ac23bd1a497fe7d9ed0976547ab641a59f99' }
+  )
+})
+
+test('source builds keep using their live checkout even when a local build stamp exists', () => {
+  assert.deepEqual(
+    resolveClientUpdateBaseline({
+      checkoutBranch: 'feature/dev',
+      checkoutSha: 'checkout-current',
+      installStamp: { branch: 'costas-code', commit: 'last-build' },
+      isPackaged: false
+    }),
+    { currentBranch: 'feature/dev', currentSha: 'checkout-current' }
+  )
+})
+
+test('packaged builds without a valid stamp fall back to the checkout', () => {
+  assert.deepEqual(
+    resolveClientUpdateBaseline({
+      checkoutBranch: 'costas-code',
+      checkoutSha: 'checkout-current',
+      installStamp: null,
+      isPackaged: true
+    }),
+    { currentBranch: 'costas-code', currentSha: 'checkout-current' }
+  )
+})
+
+test('packaged builds reject the all-zero fallback stamp', () => {
+  assert.deepEqual(
+    resolveClientUpdateBaseline({
+      checkoutBranch: 'costas-code',
+      checkoutSha: '803bf1686c5aeca7076fcac4f917b079c8a9f24e',
+      installStamp: { branch: 'costas-code', commit: '0000000000000000000000000000000000000000' },
+      isPackaged: true
+    }),
+    {
+      currentBranch: 'costas-code',
+      currentSha: '803bf1686c5aeca7076fcac4f917b079c8a9f24e'
+    }
+  )
+})
 
 // FAIL-BEFORE: pre-fix the function did `Number.parseInt(countStr) || 0`
 // unconditionally, so a shallow checkout with no merge-base surfaced the bogus
@@ -59,6 +110,19 @@ test('full (non-shallow) clone keeps the exact count path unchanged', () => {
   )
 })
 
+test('full clone with no merge-base falls back to binary SHA comparison', () => {
+  assert.equal(
+    resolveBehindCount({
+      countStr: '',
+      currentSha: 'missing-stamped-commit',
+      targetSha: 'target',
+      isShallow: false,
+      hasMergeBase: false
+    }),
+    1
+  )
+})
+
 test('up-to-date full clone reports 0', () => {
   assert.equal(
     resolveBehindCount({
@@ -97,9 +161,9 @@ test('shallow checkout WITH a merge-base still runs the count', () => {
   assert.equal(shouldCountCommits({ isShallow: true, hasMergeBase: true }), true)
 })
 
-test('full (non-shallow) clone always runs the count', () => {
+test('full clone runs the count only when the comparison has a merge-base', () => {
   assert.equal(shouldCountCommits({ isShallow: false, hasMergeBase: true }), true)
-  assert.equal(shouldCountCommits({ isShallow: false, hasMergeBase: false }), true)
+  assert.equal(shouldCountCommits({ isShallow: false, hasMergeBase: false }), false)
 })
 
 // The skip path produces an empty countStr; resolveBehindCount must NOT trust

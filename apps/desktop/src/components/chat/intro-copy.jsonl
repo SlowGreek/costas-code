@@ -2,7 +2,7 @@
 {"personality":"helpful","headline":"How can I help today?","body":"Point me at a file, paste an error, or describe what you're building. I'll take it from there."}
 {"personality":"helpful","headline":"Let's get started","body":"Try: review my diff, run the test suite, or explain this function. Ask anything about your code."}
 {"personality":"helpful","headline":"Tell me what you need","body":"I can edit files, run commands, search the web, and walk you through tricky bugs. Just describe the task."}
-{"personality":"helpful","headline":"Hi, Hermes here","body":"Share a repo path or a question to start. I keep replies clear and link back to the files I touch."}
+{"personality":"helpful","headline":"Hi, Catalyst here","body":"Share a repo path or a question to start. I keep replies clear and link back to the files I touch."}
 {"personality":"concise","headline":"Ready.","body":"Describe the task. I'll do it."}
 {"personality":"concise","headline":"Waiting for input","body":"Paste code, errors, or a goal. Short answers, fast edits."}
 {"personality":"concise","headline":"Go.","body":"Ask. I'll read files, run tests, ship patches. No filler."}

@@ -41,8 +41,10 @@ from agent.context_engine import automatic_compaction_status_message
 from agent.iteration_budget import IterationBudget
 from agent.memory_manager import build_memory_context_block
 from agent.model_metadata import (
+    calibrated_request_pressure_tokens,
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
+    real_prompt_tokens_for_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -714,12 +716,23 @@ def build_turn_context(
         agent.context_compressor.protect_last_n,
         agent.context_compressor.threshold_tokens,
     ):
-        _preflight_tokens = estimate_request_tokens_rough(
+        _rough_preflight_tokens = estimate_request_tokens_rough(
             messages,
             system_prompt=active_system_prompt or "",
             tools=agent.tools or None,
         )
         _compressor = agent.context_compressor
+        _preflight_tokens = calibrated_request_pressure_tokens(
+            _compressor, _rough_preflight_tokens
+        )
+        if _preflight_tokens != _rough_preflight_tokens:
+            logger.info(
+                "Calibrated preflight pressure: rough ~%s -> ~%s using last "
+                "real provider prompt %s",
+                f"{_rough_preflight_tokens:,}",
+                f"{_preflight_tokens:,}",
+                f"{real_prompt_tokens_for_log(_compressor):,}",
+            )
         # getattr guard: minimal compressor doubles (SimpleNamespace in the
         # engine-preflight tests) and plugin context engines lack this
         # ContextCompressor-only method — absence means no snapshot, and the

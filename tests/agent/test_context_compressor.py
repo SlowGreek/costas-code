@@ -118,6 +118,62 @@ class TestUpdateFromResponse:
         compressor.update_from_response({})
         assert compressor.last_prompt_tokens == 0
 
+    def test_records_the_rough_estimate_that_the_provider_measured(self, compressor):
+        compressor.update_from_response({
+            "prompt_tokens": 50_000,
+            "_hermes_request_estimate_tokens": 90_000,
+        })
+
+        assert compressor.last_real_prompt_tokens == 50_000
+        assert compressor.last_rough_tokens_when_real_prompt_fit == 90_000
+
+
+class TestCalibratedPreflightTokens:
+    def test_uses_real_usage_plus_only_new_rough_growth(self, compressor):
+        compressor.threshold_tokens = 85_000
+        compressor.last_real_prompt_tokens = 50_000
+        compressor.last_rough_tokens_when_real_prompt_fit = 90_000
+
+        growth = compressor.tolerated_preflight_rough_growth()
+        assert compressor.calibrate_preflight_tokens(90_000 + growth) == 50_000 + growth
+
+    def test_never_calibrates_above_the_raw_safety_estimate(self, compressor):
+        compressor.last_real_prompt_tokens = 80_000
+        compressor.last_rough_tokens_when_real_prompt_fit = 120_000
+
+        assert compressor.calibrate_preflight_tokens(100_000) == 80_000
+
+    def test_keeps_raw_estimate_without_a_provider_baseline(self, compressor):
+        compressor.last_real_prompt_tokens = 0
+        compressor.last_rough_tokens_when_real_prompt_fit = 0
+
+        assert compressor.calibrate_preflight_tokens(100_000) == 100_000
+
+    def test_keeps_raw_estimate_when_last_real_prompt_was_already_over_threshold(self, compressor):
+        compressor.threshold_tokens = 85_000
+        compressor.last_real_prompt_tokens = 90_000
+        compressor.last_rough_tokens_when_real_prompt_fit = 100_000
+
+        assert compressor.calibrate_preflight_tokens(110_000) == 110_000
+
+    def test_keeps_raw_estimate_once_rough_growth_outruns_the_measured_request(self, compressor):
+        """Calibration must not cancel the large-rough-growth compression path.
+
+        A stale real/rough gap would otherwise discount unbounded new growth
+        and let a genuinely growing conversation sail past the threshold.
+        """
+        compressor.threshold_tokens = 100_000
+        compressor.last_real_prompt_tokens = 58_000
+        compressor.last_rough_tokens_when_real_prompt_fit = 113_000
+
+        tolerated = compressor.tolerated_preflight_rough_growth()
+        assert compressor.calibrate_preflight_tokens(125_000) == 125_000
+        assert compressor.should_defer_preflight_to_real_usage(125_000) is False
+
+        # Growth inside the tolerated band still calibrates downward.
+        within_band = 113_000 + tolerated
+        assert compressor.calibrate_preflight_tokens(within_band) == 58_000 + tolerated
+
 class TestPreflightDeferral:
     def test_defers_when_recent_real_usage_fit_and_rough_growth_is_small(self, compressor):
         compressor.threshold_tokens = 85_000

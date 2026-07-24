@@ -2860,6 +2860,34 @@ def estimate_request_tokens_rough(
     return total
 
 
+def calibrated_request_pressure_tokens(compressor: Any, rough_tokens: int) -> int:
+    """Calibrate ``rough_tokens`` against a compressor's provider measurements.
+
+    Shared by the turn-prologue preflight and the mid-loop pre-API check so
+    both apply the same guard chain. Any compressor that lacks the method, is a
+    test double, or returns a non-int (MagicMock, plugin engine) falls back to
+    the conservative raw estimate rather than poisoning the pressure number.
+    """
+    calibrate = getattr(compressor, "calibrate_preflight_tokens", None)
+    if not callable(calibrate):
+        return rough_tokens
+    try:
+        calibrated = calibrate(rough_tokens)
+    except Exception:
+        return rough_tokens
+    if isinstance(calibrated, bool) or not isinstance(calibrated, int):
+        return rough_tokens
+    return calibrated
+
+
+def real_prompt_tokens_for_log(compressor: Any) -> int:
+    """Last provider-reported prompt tokens, safe for ``:,`` log formatting."""
+    value = getattr(compressor, "last_real_prompt_tokens", 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
 # NOTE: tool schemas can be large. Avoid repeated `str(tools)` conversions,
 # which are CPU-heavy and can stall GUI event loops under GIL pressure.
 #

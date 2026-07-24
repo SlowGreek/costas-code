@@ -1,9 +1,9 @@
 {
   "name": "hermes",
-  "productName": "Costas Code",
+  "productName": "Catalyst",
   "private": true,
   "version": "0.17.0",
-  "description": "Native desktop shell for Costas Code, powered by Hermes Agent.",
+  "description": "Native desktop shell for Catalyst, powered by Hermes Agent.",
   "author": "Nous Research",
   "type": "module",
   "main": "dist/electron-main.mjs",
@@ -170,17 +170,17 @@
   "build": {
     "electronVersion": "40.10.2",
     "appId": "com.nousresearch.hermes",
-    "productName": "Costas Code",
-    "executableName": "Costas Code",
+    "productName": "Catalyst",
+    "executableName": "Catalyst",
     "protocols": [
       {
-        "name": "Costas Code Protocol",
+        "name": "Catalyst Protocol",
         "schemes": [
           "hermes"
         ]
       }
     ],
-    "artifactName": "Costas-Code-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Catalyst-${version}-${os}-${arch}.${ext}",
     "icon": "assets/icon",
     "directories": {
       "output": "release"
@@ -216,11 +216,11 @@
       "entitlements": "electron/entitlements.mac.plist",
       "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "extendInfo": {
-        "CFBundleDisplayName": "Costas Code",
-        "CFBundleExecutable": "Costas Code",
-        "CFBundleName": "Costas Code",
-        "NSAudioCaptureUsageDescription": "Costas Code uses audio capture for voice conversations.",
-        "NSMicrophoneUsageDescription": "Costas Code uses the microphone for voice input and voice conversations."
+        "CFBundleDisplayName": "Catalyst",
+        "CFBundleExecutable": "Catalyst",
+        "CFBundleName": "Catalyst",
+        "NSAudioCaptureUsageDescription": "Catalyst uses audio capture for voice conversations.",
+        "NSMicrophoneUsageDescription": "Catalyst uses the microphone for voice input and voice conversations."
       },
       "gatekeeperAssess": false,
       "hardenedRuntime": true,
@@ -230,7 +230,7 @@
       ]
     },
     "dmg": {
-      "title": "Install Costas Code",
+      "title": "Install Catalyst",
       "backgroundColor": "#f5f5f7",
       "iconSize": 96,
       "window": {
@@ -252,7 +252,7 @@
       ]
     },
     "win": {
-      "legalTrademarks": "Costas Code",
+      "legalTrademarks": "Catalyst",
       "target": [
         "nsis",
         "msi"
@@ -262,7 +262,7 @@
     "linux": {
       "category": "Development",
       "maintainer": "Nous Research <support@nousresearch.com>",
-      "synopsis": "Native desktop shell for Costas Code.",
+      "synopsis": "Native desktop shell for Catalyst.",
       "target": [
         "AppImage",
         "deb",
@@ -273,8 +273,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "Costas Code",
-      "uninstallDisplayName": "Costas Code",
+      "shortcutName": "Catalyst",
+      "uninstallDisplayName": "Catalyst",
       "warningsAsErrors": false
     }
   }

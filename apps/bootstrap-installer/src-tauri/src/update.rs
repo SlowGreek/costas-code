@@ -293,7 +293,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
             emit_stage(&app, "update", StageState::Succeeded, Some(update_ms), None);
         }
         Some(code) if code == UPDATE_EXIT_CONCURRENT => {
-            let msg = "Hermes is still running. Close all Hermes windows and try \
+            let msg = "Catalyst or Hermes is still running. Close all Catalyst windows and Hermes terminals, then try \
                        the update again."
                 .to_string();
             emit_stage(
@@ -460,7 +460,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 &app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+                &format!("[update] could not auto-launch desktop: {err}. Launch Catalyst manually."),
             );
         }
     } else if let Err(err) =
@@ -473,7 +473,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
             &app,
             None,
             LogStream::Stdout,
-            &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+            &format!("[update] could not auto-launch desktop: {err}. Launch Catalyst manually."),
         );
     }
 
@@ -487,7 +487,7 @@ pub(crate) async fn wait_for_install_locks_free(install_root: &Path, app: &AppHa
     let lock_targets = install_lock_probe_paths(install_root);
     let deadline = Instant::now() + DESKTOP_EXIT_WAIT;
 
-    emit_log(app, Some(stage), LogStream::Stdout, "[handoff] waiting for Hermes to exit…");
+    emit_log(app, Some(stage), LogStream::Stdout, "[handoff] waiting for Catalyst to exit…");
 
     loop {
         let locked = locked_paths(&lock_targets);
@@ -554,6 +554,10 @@ fn desktop_app_payload_paths(install_root: &Path) -> Vec<PathBuf> {
         ]
     } else if cfg!(target_os = "macos") {
         vec![
+            release.join("mac").join("Catalyst.app").join("Contents").join("Resources").join("app.asar"),
+            release.join("mac-arm64").join("Catalyst.app").join("Contents").join("Resources").join("app.asar"),
+            release.join("mac").join("Costas Code.app").join("Contents").join("Resources").join("app.asar"),
+            release.join("mac-arm64").join("Costas Code.app").join("Contents").join("Resources").join("app.asar"),
             release.join("mac").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
             release.join("mac-arm64").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
         ]
@@ -821,10 +825,21 @@ async fn install_macos_app_update(
 
     let rebuilt_app = crate::bootstrap::resolve_hermes_desktop_app(install_root).ok_or_else(|| {
         anyhow!(
-            "desktop rebuild succeeded but no Hermes.app was found under {}",
+            "desktop rebuild succeeded but no Catalyst app was found under {}",
             install_root.join("apps").join("desktop").join("release").display()
         )
     })?;
+
+    // The product was renamed (Hermes / Costas Code -> Catalyst), so the
+    // rebuilt bundle's name can differ from the installed one. Installing the
+    // new build back over the OLD name would leave the user on a stale-named
+    // app, and a later DMG install would drop a second bundle beside it — two
+    // apps sharing one bundle ID and the hermes:// scheme, with ambiguous
+    // LaunchServices ownership. Migrate to the rebuilt name and retire the old
+    // bundle instead.
+    let renamed_target = renamed_target_app(target_app, &rebuilt_app);
+    let retire_old = renamed_target.as_ref().map(|_| target_app.to_path_buf());
+    let target_app: &Path = renamed_target.as_deref().unwrap_or(target_app);
 
     let same = match (rebuilt_app.canonicalize(), target_app.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -881,6 +896,19 @@ async fn install_macos_app_update(
     // without ditto / a real .app bundle.
     swap_in_new_bundle(&tmp, target_app, &old).await?;
 
+    if let Some(old_bundle) = retire_old {
+        emit_log(
+            app,
+            Some("install"),
+            LogStream::Stdout,
+            &format!(
+                "[update] retiring previous app bundle {}",
+                old_bundle.display()
+            ),
+        );
+        remove_dir_if_exists(&old_bundle).await;
+    }
+
     let _ = Command::new("/usr/bin/xattr")
         .arg("-dr")
         .arg("com.apple.quarantine")
@@ -890,6 +918,20 @@ async fn install_macos_app_update(
         .await;
 
     Ok(target_app.to_path_buf())
+}
+
+/// Where an update should land when the product bundle has been renamed.
+///
+/// Returns `None` when the installed bundle already carries the rebuilt name
+/// (steady state — no migration needed), otherwise the sibling path in the
+/// SAME install directory under the new name, so an app in `/Applications`
+/// migrates within `/Applications` and never relocates.
+fn renamed_target_app(target_app: &Path, rebuilt_app: &Path) -> Option<PathBuf> {
+    let new_name = rebuilt_app.file_name()?;
+    if target_app.file_name() == Some(new_name) {
+        return None;
+    }
+    Some(target_app.with_file_name(new_name))
 }
 
 /// Move a freshly-staged bundle (`tmp`) into place at `target`, parking any
@@ -1177,6 +1219,35 @@ mod tests {
             with_install.len(),
             base.len() + 1,
             "include_install adds exactly one stage"
+        );
+    }
+
+    #[test]
+    fn renamed_target_migrates_within_the_same_install_dir() {
+        // Legacy install, rebuilt bundle now carries the Catalyst name: the
+        // update must land on the new name beside the old one, not relocate.
+        assert_eq!(
+            renamed_target_app(
+                Path::new("/Applications/Costas Code.app"),
+                Path::new("/tmp/build/release/mac-arm64/Catalyst.app"),
+            ),
+            Some(PathBuf::from("/Applications/Catalyst.app"))
+        );
+        assert_eq!(
+            renamed_target_app(
+                Path::new("/Applications/Hermes.app"),
+                Path::new("/tmp/build/release/mac-arm64/Catalyst.app"),
+            ),
+            Some(PathBuf::from("/Applications/Catalyst.app"))
+        );
+        // Steady state: names already match, so no migration is signalled and
+        // the old bundle is NOT retired.
+        assert_eq!(
+            renamed_target_app(
+                Path::new("/Applications/Catalyst.app"),
+                Path::new("/tmp/build/release/mac-arm64/Catalyst.app"),
+            ),
+            None
         );
     }
 

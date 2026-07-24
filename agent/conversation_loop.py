@@ -63,10 +63,12 @@ from agent.message_sanitization import (
 from agent.model_metadata import (
     MINIMUM_CONTEXT_LENGTH,
     _estimate_tools_tokens_rough,
+    calibrated_request_pressure_tokens,
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
     get_context_length_from_provider_error,
     is_output_cap_error,
+    real_prompt_tokens_for_log,
     parse_available_output_tokens_from_error,
     save_context_length,
 )
@@ -1337,6 +1339,17 @@ def run_conversation(
         # LLM cooldown + anti-thrash guards (#11529). compression_attempts is a
         # hard per-turn backstop shared with the overflow error handlers.
         _compressor = agent.context_compressor
+        compression_pressure_tokens = calibrated_request_pressure_tokens(
+            _compressor, request_pressure_tokens
+        )
+        if compression_pressure_tokens != request_pressure_tokens:
+            logger.info(
+                "Calibrated pre-API pressure: rough ~%s -> ~%s using last "
+                "real provider prompt %s",
+                f"{request_pressure_tokens:,}",
+                f"{compression_pressure_tokens:,}",
+                f"{real_prompt_tokens_for_log(_compressor):,}",
+            )
         _preflight_threshold = int(
             getattr(_compressor, "threshold_tokens", 0) or 0
         )
@@ -1350,10 +1363,10 @@ def run_conversation(
         _last_preflight_pressure = None
         if (
             _previous_preflight_pressure is not None
-            and request_pressure_tokens >= _preflight_threshold
+            and compression_pressure_tokens >= _preflight_threshold
             and not _compression_warrants_another_preflight_pass(
                 _previous_preflight_pressure,
-                request_pressure_tokens,
+                compression_pressure_tokens,
                 _preflight_threshold,
             )
         ):
@@ -1366,7 +1379,7 @@ def run_conversation(
                 "Pre-API compression made insufficient progress: ~%s -> "
                 "~%s request tokens; skipping additional preflight passes",
                 f"{_previous_preflight_pressure:,}",
-                f"{request_pressure_tokens:,}",
+                f"{compression_pressure_tokens:,}",
             )
         _defer_preflight = getattr(
             _compressor, "should_defer_preflight_to_real_usage", lambda _t: False
@@ -1379,13 +1392,18 @@ def run_conversation(
             and len(messages) > 1
             and compression_attempts < max_compression_attempts
             and not _preflight_compression_blocked
-            and not _defer_preflight(request_pressure_tokens)
+            and not _defer_preflight(compression_pressure_tokens)
             and not _compression_cooldown
-            and _compressor.should_compress(request_pressure_tokens)
+            and _compressor.should_compress(compression_pressure_tokens)
         ):
             if _moa_prepared_request is not None:
                 pending_moa_prepared_request = _moa_prepared_request
             compression_attempts += 1
+            # Keep the status-bar gauge aligned with the calibrated pressure
+            # that actually triggered compaction instead of the stale previous
+            # provider response (the misleading "26% while summarizing" case).
+            if getattr(_compressor, "last_prompt_tokens", 0) >= 0:
+                _compressor.last_prompt_tokens = compression_pressure_tokens
             # Compression is actually running (block cleared / was never
             # blocked) — reset the blocked-overflow warning dedup so a future
             # blocked-over-threshold turn can warn again. Mirrors the
@@ -1398,7 +1416,7 @@ def run_conversation(
             logger.info(
                 "Pre-API compression: ~%s request tokens >= %s threshold "
                 "(context=%s, attempt=%s/%s)",
-                f"{request_pressure_tokens:,}",
+                f"{compression_pressure_tokens:,}",
                 f"{int(getattr(_compressor, 'threshold_tokens', 0) or 0):,}",
                 f"{int(getattr(_compressor, 'context_length', 0) or 0):,}"
                 if getattr(_compressor, "context_length", 0) else "unknown",
@@ -1409,9 +1427,9 @@ def run_conversation(
                 _compressor,
                 phase="pre_api",
                 default_message=PRE_API_COMPRESSION_STATUS_TEMPLATE.format(
-                    tokens=request_pressure_tokens
+                    tokens=compression_pressure_tokens
                 ),
-                approx_tokens=request_pressure_tokens,
+                approx_tokens=compression_pressure_tokens,
                 threshold_tokens=int(
                     getattr(_compressor, "threshold_tokens", 0) or 0
                 ),
@@ -1424,12 +1442,12 @@ def run_conversation(
             )
             if _pre_api_status:
                 agent._emit_status(_pre_api_status)
-            _last_preflight_pressure = request_pressure_tokens
+            _last_preflight_pressure = compression_pressure_tokens
             _pre_api_input = messages
             messages, active_system_prompt = agent._compress_context(
                 messages,
                 system_message,
-                approx_tokens=request_pressure_tokens,
+                approx_tokens=compression_pressure_tokens,
                 task_id=effective_task_id,
             )
             if messages is _pre_api_input and compression_skipped_due_to_lock(agent):
@@ -1475,7 +1493,7 @@ def run_conversation(
             agent.compression_enabled
             and len(messages) > 1
             and compression_attempts < max_compression_attempts
-            and not _defer_preflight(request_pressure_tokens)
+            and not _defer_preflight(compression_pressure_tokens)
             and _compression_cooldown
         ):
             # Blocked by the summary-LLM cooldown. Surface a deduped warning
@@ -1487,14 +1505,14 @@ def run_conversation(
             _block_reason = None
             try:
                 _block_reason = _compressor.should_compress_info(
-                    request_pressure_tokens
+                    compression_pressure_tokens
                 )[1]
             except Exception:
                 _block_reason = None
             if _block_reason:
                 agent._warn_context_overflow_blocked(
                     _block_reason,
-                    request_pressure_tokens,
+                    compression_pressure_tokens,
                     int(getattr(_compressor, "threshold_tokens", 0) or 0),
                 )
         
@@ -2607,6 +2625,9 @@ def run_conversation(
                         "cache_read_tokens": canonical_usage.cache_read_tokens,
                         "cache_write_tokens": canonical_usage.cache_write_tokens,
                         "reasoning_tokens": canonical_usage.reasoning_tokens,
+                        # Internal calibration pair: this conservative estimate
+                        # describes the exact request the provider just measured.
+                        "_hermes_request_estimate_tokens": request_pressure_tokens,
                     }
                     agent.context_compressor.update_from_response(usage_dict)
                 elif getattr(

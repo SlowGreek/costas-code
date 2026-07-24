@@ -156,7 +156,7 @@ pub async fn get_bootstrap_status(
     })
 }
 
-/// Spawn the locally-built Hermes desktop binary, then close the installer
+/// Spawn the locally-built Catalyst desktop binary, then close the installer
 /// window. Caller resolves the binary path from `install_root`.
 ///
 /// Returns Err with a human-readable message if the binary doesn't exist
@@ -170,14 +170,14 @@ pub async fn launch_hermes_desktop(
     let install_root = PathBuf::from(install_root);
     let exe_path = resolve_hermes_desktop_exe(&install_root).ok_or_else(|| {
         format!(
-            "Couldn't find a built Hermes desktop at {}. The desktop build step \
+            "Couldn't find a built Catalyst desktop at {}. The desktop build step \
              may have been skipped or failed. Run `hermes desktop` from a \
              terminal to build and launch it.",
             install_root.join("apps").join("desktop").join("release").display()
         )
     })?;
 
-    tracing::info!(?exe_path, "launching Hermes desktop");
+    tracing::info!(?exe_path, "launching Catalyst desktop");
 
     // Detach from us — the installer is about to exit. On macOS launch the
     // bundle through LaunchServices instead of exec'ing Contents/MacOS/Hermes
@@ -214,16 +214,29 @@ pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Opti
     let release_dir = install_root.join("apps").join("desktop").join("release");
     let candidates: &[(&str, &str)] = if cfg!(target_os = "windows") {
         &[
+            ("win-unpacked", "Catalyst.exe"),
+            ("win-arm64-unpacked", "Catalyst.exe"),
+            ("win-unpacked", "Costas Code.exe"),
+            ("win-arm64-unpacked", "Costas Code.exe"),
             ("win-unpacked", "Hermes.exe"),
             ("win-arm64-unpacked", "Hermes.exe"),
         ]
     } else if cfg!(target_os = "macos") {
         &[
+            ("mac/Catalyst.app/Contents/MacOS", "Catalyst"),
+            ("mac-arm64/Catalyst.app/Contents/MacOS", "Catalyst"),
+            ("mac/Costas Code.app/Contents/MacOS", "Costas Code"),
+            ("mac-arm64/Costas Code.app/Contents/MacOS", "Costas Code"),
             ("mac/Hermes.app/Contents/MacOS", "Hermes"),
             ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
         ]
     } else {
-        &[("linux-unpacked", "hermes")]
+        &[
+            ("linux-unpacked", "Catalyst"),
+            ("linux-unpacked", "Costas Code"),
+            ("linux-unpacked", "hermes"),
+            ("linux-unpacked", "Hermes"),
+        ]
     };
     for (subdir, exe) in candidates {
         let p = release_dir.join(subdir).join(exe);
@@ -254,7 +267,7 @@ pub(crate) fn resolve_hermes_desktop_app(install_root: &std::path::Path) -> Opti
 
 /// True when a prior install completed (bootstrap-complete marker present) AND a
 /// launchable desktop app exists on disk. Used by the installer's launcher fast
-/// path so a bare re-open just opens Hermes instead of re-running setup.
+/// path so a bare re-open just opens Catalyst instead of re-running setup.
 pub(crate) fn hermes_is_installed(install_root: &std::path::Path) -> bool {
     install_root.join(".hermes-bootstrap-complete").exists()
         && resolve_hermes_desktop_exe(install_root).is_some()
@@ -265,7 +278,7 @@ pub(crate) fn hermes_is_installed(install_root: &std::path::Path) -> bool {
 /// installer UI.
 pub(crate) fn spawn_installed_desktop(install_root: &std::path::Path) -> std::io::Result<()> {
     let exe = resolve_hermes_desktop_exe(install_root).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "no built Hermes desktop app")
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no built Catalyst desktop app")
     })?;
     let mut cmd = desktop_launch_command_std(&exe, install_root);
     #[cfg(target_os = "windows")]
@@ -844,22 +857,22 @@ mod tests {
         if cfg!(target_os = "macos") {
             let macos_dir = release
                 .join("mac-arm64")
-                .join("Hermes.app")
+                .join("Catalyst.app")
                 .join("Contents")
                 .join("MacOS");
             std::fs::create_dir_all(&macos_dir).unwrap();
-            std::fs::write(macos_dir.join("Hermes"), b"#!/bin/sh\n").unwrap();
-            macos_dir.parent().unwrap().parent().unwrap().to_path_buf() // .../Hermes.app
+            std::fs::write(macos_dir.join("Catalyst"), b"#!/bin/sh\n").unwrap();
+            macos_dir.parent().unwrap().parent().unwrap().to_path_buf() // .../Catalyst.app
         } else if cfg!(target_os = "windows") {
             let dir = release.join("win-unpacked");
             std::fs::create_dir_all(&dir).unwrap();
-            let exe = dir.join("Hermes.exe");
+            let exe = dir.join("Catalyst.exe");
             std::fs::write(&exe, b"stub").unwrap();
             exe
         } else {
             let dir = release.join("linux-unpacked");
             std::fs::create_dir_all(&dir).unwrap();
-            let exe = dir.join("hermes");
+            let exe = dir.join("Catalyst");
             std::fs::write(&exe, b"stub").unwrap();
             exe
         }
@@ -867,7 +880,7 @@ mod tests {
 
     // The relaunch / install target is derived from the rebuilt desktop app.
     // On macOS this MUST resolve to the .app bundle (what `open` relaunches and
-    // what the updater ditto's over /Applications/Hermes.app). A regression in
+    // what the updater ditto's over /Applications/Catalyst.app). A regression in
     // this derivation breaks the post-update auto-relaunch, so guard it.
     #[test]
     fn resolve_hermes_desktop_app_finds_built_bundle() {

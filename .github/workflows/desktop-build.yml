@@ -88,14 +88,11 @@ jobs:
     needs: gate
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    # Job-level so an unselected platform never starts a runner at all —
-    # a skipped-but-green job is easy to misread as a successful build.
-    if: >-
-      needs.gate.outputs.build == 'true' && (
-        github.event_name != 'workflow_dispatch' ||
-        inputs.platforms == 'both' ||
-        inputs.platforms == matrix.platform
-      )
+    # Only the gate lives here: a job-level `if` is evaluated BEFORE the matrix
+    # expands, so `matrix` is not in scope (actionlint catches this; GitHub
+    # just fails the whole run with no jobs). Platform selection is therefore
+    # done per-entry via `matrix.selected` below.
+    if: needs.gate.outputs.build == 'true'
     strategy:
       # One platform failing should not discard the other's artifact — a
       # usable mac build is still worth having when Windows breaks.
@@ -107,39 +104,44 @@ jobs:
             script: dist:mac:dmg
             artifact: catalyst-macos
             selector: 'apps/desktop/release/*.dmg'
-            platform: macos
+            selected: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms != 'windows' }}
           - name: Windows (nsis)
             os: windows-latest
             script: dist:win:nsis
             artifact: catalyst-windows
             selector: 'apps/desktop/release/*.exe'
-            platform: windows
+            selected: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms != 'macos' }}
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - if: matrix.selected == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           # write-build-stamp.mjs records the commit the app pins to for
           # updates; a shallow clone still exposes GITHUB_SHA, which that
           # script prefers in CI, so fetch-depth 1 is fine.
           fetch-depth: 1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      - if: matrix.selected == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install workspace dependencies
+        if: matrix.selected == 'true'
         # npm ci needs the root lockfile: the desktop app is a workspace and
         # its native deps are hoisted to the repo root.
         run: npm ci
 
       - name: Typecheck and lint
+        if: matrix.selected == 'true'
         working-directory: apps/desktop
         run: |
           npm run typecheck
           npm run lint
 
       - name: Build (${{ matrix.script }})
+        if: matrix.selected == 'true'
         working-directory: apps/desktop
         env:
           # Node 22 warns loudly about experimental webstorage during the
@@ -158,6 +160,7 @@ jobs:
         run: npm run ${{ matrix.script }}
 
       - name: Report what was produced
+        if: matrix.selected == 'true'
         shell: bash
         working-directory: apps/desktop/release
         # Surfaces the artifact name and size in the log, and fails loudly if
@@ -170,7 +173,8 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      - if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ${{ matrix.artifact }}
           # Ship the blockmaps too: electron-builder's differential updater

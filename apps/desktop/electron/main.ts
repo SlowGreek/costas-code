@@ -131,6 +131,7 @@ import { runNativeLogin } from './native-oauth-login'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { createKeepAwake } from './power-save'
 import { decideProfileDeleteAction, profileNameFromDeleteRequest, resolveRouteProfile } from './profile-delete-routing'
+import { resolveRebuiltMacBundle } from './rebuilt-bundle'
 import * as remoteLifecycle from './remote-lifecycle'
 import { RemoteLivenessTracker, RemoteRevalidationCoordinator, revalidateRemoteConnection } from './remote-liveness'
 import {
@@ -3141,18 +3142,35 @@ async function applyUpdatesPosixInApp(opts: any) {
     }
   }
 
-  const rebuiltApp = [
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Catalyst.app'),
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Catalyst.app'),
-    // Compatibility with the previous Costas Code bundle name.
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Costas Code.app'),
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Costas Code.app'),
-    // Compatibility with an older build produced before the front-facing rename.
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Hermes.app'),
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Hermes.app')
-  ].find(directoryExists)
-
   const targetApp = runningAppBundle()
+
+  // Discover the rebuilt bundle by shape, not by a hardcoded name list. The
+  // updater doing the swap is the OLD build, so any baked-in list was written
+  // before the name it now has to match could exist — that is precisely how
+  // the Costas Code -> Catalyst rename silently no-oped the swap and left
+  // users on a stale GUI with an updated backend. See rebuilt-bundle.ts.
+  const rebuiltApp = resolveRebuiltMacBundle({
+    preferredName: `${APP_NAME}.app`,
+    probes: {
+      isDirectory: directoryExists,
+      modifiedAtMs: candidate => {
+        try {
+          return fs.statSync(candidate).mtimeMs
+        } catch {
+          return 0
+        }
+      },
+      readDir: dirPath => {
+        try {
+          return fs.readdirSync(dirPath)
+        } catch {
+          return []
+        }
+      }
+    },
+    runningBundleName: targetApp ? path.basename(targetApp) : null,
+    updateRoot
+  })
 
   // No bundle to swap (dev run, Linux AppImage, or unresolved paths): the
   // backend is updated; the next launch picks up the rebuilt GUI.

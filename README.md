@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/SlowGreek/costas-code/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/SlowGreek/costas-code/blob/costas-code/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/SlowGreek/costas-code"><img src="https://img.shields.io/badge/Distribution-Catalyst-5B6CFF?style=for-the-badge" alt="Catalyst"></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
   <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
@@ -26,6 +26,8 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 <tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
 <tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
 <tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
+<tr><td><b>Dynamic workflows</b></td><td>Ask for a workflow and Catalyst writes a script that orchestrates dozens of subagents — the <i>script</i> holds the loop, the branching, and the intermediate results, so only the final answer reaches the conversation. Agents return schema-validated JSON, so the script can filter and re-feed results; runs are backgrounded and resumable. Built for fan-out-and-verify, tournaments, and audits where one agent should adversarially check another's findings rather than grade its own.</td></tr>
+<tr><td><b>Per-task model selection</b></td><td>Opt in with <code>delegation.allowed_models</code> and each subagent can run on a different model — a Claude parent can dispatch a review to Gemini or GPT. Cross-model critique catches what a model misses about its own work. Off by default, and the field never enters the tool schema unless you set an allowlist.</td></tr>
 <tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six terminal backends — local, Docker, SSH, Singularity, Modal, and Daytona. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
 <tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
 </table>
@@ -33,6 +35,13 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 ---
 
 ## Quick Install
+
+> **Note:** `SlowGreek/costas-code` is currently a **private** repository, so the
+> `raw.githubusercontent.com` one-liners below return 404 for everyone —
+> including you, in a shell that isn't authenticated. Until the repo is public,
+> use [Build from source](#build-from-source) with a `git clone` over
+> authenticated HTTPS or SSH. The one-liners are correct and will work as-is the
+> moment visibility changes.
 
 ### Linux, macOS, WSL2, Termux
 
@@ -79,8 +88,16 @@ Local development builds are not Apple-notarized. On macOS, Control-click the ap
 
 Prerequisites: Git, Python 3.11–3.13, and Node.js 20.19+ (Node 22.12+ recommended).
 
+While the repository is private, clone over authenticated HTTPS (`gh auth login`
+first) or SSH:
+
 ```bash
+# HTTPS (GitHub CLI supplies credentials)
 git clone --branch costas-code --single-branch https://github.com/SlowGreek/costas-code.git
+
+# or SSH
+git clone --branch costas-code --single-branch git@github.com:SlowGreek/costas-code.git
+
 cd costas-code
 
 # Install the Python runtime and JavaScript workspace dependencies.

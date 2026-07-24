@@ -36,28 +36,45 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ## Quick Install
 
-> **Note:** `SlowGreek/costas-code` is currently a **private** repository, so the
-> `raw.githubusercontent.com` one-liners below return 404 for everyone —
-> including you, in a shell that isn't authenticated. Until the repo is public,
-> use [Build from source](#build-from-source) with a `git clone` over
-> authenticated HTTPS or SSH. The one-liners are correct and will work as-is the
-> moment visibility changes.
+Catalyst lives in a **private** repository, so installs need GitHub auth. Do this
+once:
+
+```bash
+gh auth login          # https://cli.github.com if you don't have gh
+```
 
 ### Linux, macOS, WSL2, Termux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.sh | bash
+gh api repos/SlowGreek/costas-code/contents/scripts/install.sh --jq .content | base64 -d | bash
 ```
 
 ### Windows (native, PowerShell)
 
 > **Heads up:** Native Windows runs Catalyst without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file an issue](https://github.com/SlowGreek/costas-code/issues).
 
-Run this in PowerShell:
-
 ```powershell
-iex (irm https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.ps1)
+$b64 = (gh api repos/SlowGreek/costas-code/contents/scripts/install.ps1 --jq .content) -replace '\s',''
+[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | iex
 ```
+
+<details>
+<summary>Pointing an AI agent at this repo</summary>
+
+Give your agent the one-liner above verbatim — `gh` supplies credentials, so
+there is no token to paste or leak. If the agent already has a checkout, it can
+install from source with `bash scripts/install.sh --dir "$PWD" --skip-setup`.
+
+Plain `curl https://raw.githubusercontent.com/...` will **404** on this repo.
+That is a private-visibility response, not a wrong URL — anonymous reads are
+refused. Use `gh api` (above) or pass a token:
+
+```bash
+curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
+  https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.sh | bash
+```
+
+</details>
 
 The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** on Windows. Internal command names and state paths remain `hermes` / `~/.hermes` for upstream compatibility.
 

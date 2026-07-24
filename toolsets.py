@@ -249,6 +249,14 @@ TOOLSETS = {
         "includes": []
     },
 
+    # Service-gated on workflows.enabled (see tools/workflow_tool.py):
+    # while disabled the tool's schema is never sent to the model.
+    "workflows": {
+        "description": "Orchestrate many subagents from a script that holds the plan",
+        "tools": ["workflow"],
+        "includes": []
+    },
+
     # "honcho" toolset removed — Honcho is now a memory provider plugin.
     # Tools are injected via MemoryManager, not the toolset system.
 

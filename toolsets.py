@@ -63,6 +63,11 @@ _HERMES_CORE_TOOLS = [
     "clarify",
     # Code execution + delegation
     "execute_code", "delegate_task",
+    # Dynamic workflows — a script the model writes orchestrates many
+    # subagents. Gated via check_fn on workflows.enabled (default true), so
+    # setting that false drops the schema from every call rather than merely
+    # refusing to run.
+    "workflow",
     # Cronjob management
     "cronjob",
     # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
@@ -246,6 +251,14 @@ TOOLSETS = {
     "delegation": {
         "description": "Spawn subagents with isolated context for complex subtasks",
         "tools": ["delegate_task"],
+        "includes": []
+    },
+
+    # Service-gated on workflows.enabled (see tools/workflow_tool.py):
+    # while disabled the tool's schema is never sent to the model.
+    "workflows": {
+        "description": "Orchestrate many subagents from a script that holds the plan",
+        "tools": ["workflow"],
         "includes": []
     },
 

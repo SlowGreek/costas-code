@@ -6522,6 +6522,28 @@ class AIAgent:
             parent_agent=self,
         )
 
+    def _dispatch_workflow(self, function_args: dict) -> str:
+        """Single call site for the `workflow` tool.
+
+        Like delegate_task, this is intercepted at the AGENT level rather than
+        dispatched through the generic registry, because the runtime needs the
+        parent agent itself: ``handle_function_call`` has no ``parent_agent``
+        parameter, so a registry dispatch would hand the workflow ``None`` and
+        its agents would spawn with an assumed depth of 0 — silently reopening
+        the recursion guard for a workflow started by a subagent.
+        """
+        from tools.workflow_tool import workflow as _workflow
+
+        return _workflow(
+            action=function_args.get("action", "start"),
+            script=function_args.get("script"),
+            run_id=function_args.get("run_id"),
+            args=function_args.get("args"),
+            workspace=function_args.get("workspace"),
+            wait_seconds=function_args.get("wait_seconds"),
+            parent_agent=self,
+        )
+
     def _invoke_tool(self, function_name: str, function_args: dict, effective_task_id: str,
                      tool_call_id: Optional[str] = None, messages: list = None,
                      pre_tool_block_checked: bool = False,

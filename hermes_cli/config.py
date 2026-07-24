@@ -2332,6 +2332,31 @@ DEFAULT_CONFIG = {
         "provider": "",
     },
 
+    # Dynamic workflows: a model-written script orchestrates many subagents,
+    # with the SCRIPT holding the loop/branching and intermediate results
+    # instead of the model's context window. See agent/workflow_runtime.py.
+    #
+    # On by default: this is a first-class Catalyst capability, and a feature
+    # gated behind a flag nobody flips may as well not exist. The tool is
+    # service-gated on this flag (tools/workflow_tool.py), so setting it false
+    # removes the tool's schema from every API call entirely — ~700 tokens per
+    # call — rather than merely refusing to run.
+    "workflows": {
+        "enabled": True,
+        # Each agent is a separate API call, so these bound cost rather than
+        # capability. A fan-out of 25 is already a real bill; raise it
+        # deliberately.
+        "max_agents": 25,
+        "max_concurrency": 8,
+        # Wall-clock ceiling for a whole run. 0 = no limit.
+        "timeout_seconds": 3600,
+        # Retries for an agent whose output failed schema validation. Each
+        # retry is a full agent run.
+        "max_attempts": 2,
+        # Runs kept on disk under $HERMES_HOME/workflows before pruning.
+        "keep_runs": 50,
+    },
+
     # Subagent delegation — override the provider:model used by delegate_task
     # so child agents can run on a different (cheaper/faster) provider and model.
     # Uses the same runtime provider resolution as CLI/gateway startup, so all

@@ -1,0 +1,169 @@
+name: Build desktop artifacts
+
+# Builds the Catalyst desktop app for macOS and Windows.
+#
+# Each OS builds on its own runner because the app ships `node-pty`, a native
+# module: cross-compiling it is not supported, so a mac .dmg has to come from a
+# macOS runner and a Windows .exe from a Windows runner.
+#
+# Signing is intentionally optional. The repo is private and internal, so most
+# builds are unsigned developer artifacts; the signing/notarization steps only
+# engage when the corresponding secrets are present. An unsigned macOS build
+# still runs — Control-click → Open, or approve under System Settings →
+# Privacy & Security. Windows shows a SmartScreen warning that can be
+# dismissed via "More info" → "Run anyway".
+#
+# Manual by default. Building on every push would burn a lot of runner minutes
+# for artifacts nobody asked for; use the Actions tab, or push a v* tag to cut
+# a release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which platforms to build
+        type: choice
+        default: both
+        options: [both, macos, windows]
+      make_release:
+        description: Attach the artifacts to a GitHub Release
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create a Release; harmless otherwise
+
+concurrency:
+  # One build per ref. A newer push supersedes an in-flight build rather than
+  # queueing a second 20-minute macOS job behind it.
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    # Job-level so an unselected platform never starts a runner at all —
+    # a skipped-but-green job is easy to misread as a successful build.
+    if: >-
+      github.event_name == 'push' ||
+      inputs.platforms == 'both' ||
+      inputs.platforms == matrix.platform
+    strategy:
+      # One platform failing should not discard the other's artifact — a
+      # usable mac build is still worth having when Windows breaks.
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (dmg + zip)
+            os: macos-14           # arm64 runner
+            script: dist:mac:dmg
+            artifact: catalyst-macos
+            selector: 'apps/desktop/release/*.dmg'
+            platform: macos
+          - name: Windows (nsis)
+            os: windows-latest
+            script: dist:win:nsis
+            artifact: catalyst-windows
+            selector: 'apps/desktop/release/*.exe'
+            platform: windows
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # write-build-stamp.mjs records the commit the app pins to for
+          # updates; a shallow clone still exposes GITHUB_SHA, which that
+          # script prefers in CI, so fetch-depth 1 is fine.
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        # npm ci needs the root lockfile: the desktop app is a workspace and
+        # its native deps are hoisted to the repo root.
+        run: npm ci
+
+      - name: Typecheck and lint
+        working-directory: apps/desktop
+        run: |
+          npm run typecheck
+          npm run lint
+
+      - name: Build (${{ matrix.script }})
+        working-directory: apps/desktop
+        env:
+          # Node 22 warns loudly about experimental webstorage during the
+          # Electron build; the local build scripts disable it the same way.
+          NODE_OPTIONS: --no-experimental-webstorage
+          # electron-builder publishes to GitHub when it detects a token.
+          # Releases are handled explicitly below, so keep that off.
+          GH_TOKEN: ''
+          # Signing — each is a no-op when the secret is absent, which is the
+          # normal case for internal builds.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm run ${{ matrix.script }}
+
+      - name: Report what was produced
+        shell: bash
+        working-directory: apps/desktop/release
+        # Surfaces the artifact name and size in the log, and fails loudly if
+        # the build "succeeded" without emitting an installer — silent empty
+        # output is the failure mode worth catching here.
+        run: |
+          ls -la
+          if ! ls ${{ matrix.selector }} >/dev/null 2>&1; then
+            echo "::error::no installer matched ${{ matrix.selector }}"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          # Ship the blockmaps too: electron-builder's differential updater
+          # uses them, and they are useless if separated from the installer.
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Attach to release
+    needs: build
+    if: github.event_name == 'push' || inputs.make_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          # Tag pushes name themselves; a manual run gets a dated draft so it
+          # cannot be mistaken for a published version.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          draft: ${{ github.ref_type != 'tag' }}
+          generate_release_notes: ${{ github.ref_type == 'tag' }}
+          body: |
+            Catalyst desktop build.
+
+            These artifacts are **unsigned** unless signing secrets were
+            configured for this run. On macOS, Control-click the app and choose
+            **Open** (or approve it under System Settings → Privacy & Security).
+            On Windows, choose **More info → Run anyway** at the SmartScreen
+            prompt.

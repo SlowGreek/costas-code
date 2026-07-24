@@ -303,11 +303,11 @@ class TestCmdUpdateTermuxUvBootstrap:
 
 
 class TestCmdUpdateBranchFallback:
-    """cmd_update falls back to main when current branch has no remote counterpart."""
+    """cmd_update targets the Costas distribution branch by default."""
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
-    def test_update_falls_back_to_main_when_branch_not_on_remote(
+    def test_update_targets_costas_code_when_current_branch_is_different(
         self, mock_run, _mock_which, mock_args, capsys
     ):
         mock_run.side_effect = _make_run_side_effect(
@@ -318,16 +318,16 @@ class TestCmdUpdateBranchFallback:
 
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
 
-        # rev-list should use origin/main, not origin/fix/stoicneko
+        # rev-list should use origin/costas-code, not the current branch.
         rev_list_cmds = [c for c in commands if "rev-list" in c]
         assert len(rev_list_cmds) == 1
-        assert "origin/main" in rev_list_cmds[0]
+        assert "origin/costas-code" in rev_list_cmds[0]
         assert "origin/fix/stoicneko" not in rev_list_cmds[0]
 
-        # pull should use main, not fix/stoicneko
+        # pull should use costas-code, not fix/stoicneko
         pull_cmds = [c for c in commands if "pull" in c]
         assert len(pull_cmds) == 1
-        assert "main" in pull_cmds[0]
+        assert "costas-code" in pull_cmds[0]
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -335,7 +335,7 @@ class TestCmdUpdateBranchFallback:
         self, mock_run, _mock_which, mock_args, capsys
     ):
         mock_run.side_effect = _make_run_side_effect(
-            branch="main", verify_ok=True, commit_count="2"
+            branch="costas-code", verify_ok=True, commit_count="2"
         )
 
         cmd_update(mock_args)
@@ -344,11 +344,11 @@ class TestCmdUpdateBranchFallback:
 
         rev_list_cmds = [c for c in commands if "rev-list" in c]
         assert len(rev_list_cmds) == 1
-        assert "origin/main" in rev_list_cmds[0]
+        assert "origin/costas-code" in rev_list_cmds[0]
 
         pull_cmds = [c for c in commands if "pull" in c]
         assert len(pull_cmds) == 1
-        assert "main" in pull_cmds[0]
+        assert "costas-code" in pull_cmds[0]
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -356,7 +356,7 @@ class TestCmdUpdateBranchFallback:
         self, mock_run, _mock_which, mock_args, capsys
     ):
         mock_run.side_effect = _make_run_side_effect(
-            branch="main", verify_ok=True, commit_count="0"
+            branch="costas-code", verify_ok=True, commit_count="0"
         )
 
         cmd_update(mock_args)
@@ -375,14 +375,14 @@ class TestCmdUpdateBranchFallback:
         self, mock_run, _mock_which, mock_args, capsys
     ):
         """Regression for issue #26172: forks whose local HEAD already matches
-        origin/main must still consult upstream/main before printing
-        "Already up to date!" — otherwise a fork that's caught up to its own
-        origin but behind NousResearch/hermes-agent silently misses updates.
+        origin/costas-code must still consult upstream/costas-code before
+        printing "Already up to date!" — otherwise a fork caught up to its own
+        origin but behind SlowGreek/costas-code silently misses updates.
         """
         from hermes_cli import main as hm
 
         mock_run.side_effect = _make_run_side_effect(
-            branch="main", verify_ok=True, commit_count="0"
+            branch="costas-code", verify_ok=True, commit_count="0"
         )
 
         with patch.object(
@@ -395,7 +395,9 @@ class TestCmdUpdateBranchFallback:
         expected_git_cmd = (
             ["git", "-c", "windows.appendAtomically=false"] if hm._is_windows() else ["git"]
         )
-        sync_mock.assert_called_once_with(expected_git_cmd, PROJECT_ROOT)
+        sync_mock.assert_called_once_with(
+            expected_git_cmd, PROJECT_ROOT, "costas-code"
+        )
         captured = capsys.readouterr()
         assert "Already up to date!" in captured.out
 
@@ -736,10 +738,10 @@ class TestCmdUpdateBranchFlag:
 
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
 
-        # rev-list must compare against origin/bb/gui, not origin/main
+        # rev-list must compare against origin/bb/gui, not origin/costas-code
         rev_list_cmds = [c for c in commands if "rev-list" in c]
         assert any("origin/bb/gui" in c for c in rev_list_cmds), rev_list_cmds
-        assert not any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+        assert not any("origin/costas-code" in c for c in rev_list_cmds), rev_list_cmds
 
         # pull must target bb/gui
         pull_cmds = [c for c in commands if "pull" in c and "ff-only" in c]
@@ -747,10 +749,14 @@ class TestCmdUpdateBranchFlag:
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
-    def test_branch_flag_defaults_to_main_when_none(self, mock_run, _mock_which, capsys):
-        """No --branch (or --branch=None) preserves the historical 'main' default."""
+    def test_branch_flag_defaults_to_costas_code_when_none(
+        self, mock_run, _mock_which, capsys
+    ):
+        """No --branch follows the Costas distribution branch."""
         mock_run.side_effect = self._branch_side_effect(
-            current_branch="main", target_branch="main", commit_count="0"
+            current_branch="costas-code",
+            target_branch="costas-code",
+            commit_count="0",
         )
         args = SimpleNamespace(branch=None)
 
@@ -758,7 +764,7 @@ class TestCmdUpdateBranchFlag:
 
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
         rev_list_cmds = [c for c in commands if "rev-list" in c]
-        assert all("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+        assert all("origin/costas-code" in c for c in rev_list_cmds), rev_list_cmds
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -881,7 +887,7 @@ class TestCmdUpdateCheckBranchFlag:
     def test_check_branch_compares_against_named_origin_branch(
         self, mock_run, _mock_method, capsys
     ):
-        """--check --branch bb/gui compares against origin/bb/gui, never origin/main."""
+        """--check --branch bb/gui compares against origin/bb/gui, never origin/costas-code."""
         mock_run.side_effect = self._check_side_effect(
             target_branch="bb/gui", verify_ok=True, commit_count="2"
         )
@@ -897,7 +903,7 @@ class TestCmdUpdateCheckBranchFlag:
         assert any("origin/bb/gui" in c for c in verify_cmds), verify_cmds
         rev_list_cmds = [c for c in commands if "rev-list" in c]
         assert any("origin/bb/gui" in c for c in rev_list_cmds), rev_list_cmds
-        assert not any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+        assert not any("origin/costas-code" in c for c in rev_list_cmds), rev_list_cmds
 
     @patch("hermes_cli.config.detect_install_method", return_value="git")
     @patch("subprocess.run")
@@ -932,12 +938,12 @@ class TestCmdUpdateCheckBranchFlag:
 
     @patch("hermes_cli.config.detect_install_method", return_value="git")
     @patch("subprocess.run")
-    def test_check_default_main_still_prefers_upstream(
+    def test_check_default_costas_code_still_prefers_upstream(
         self, mock_run, _mock_method, capsys
     ):
         """No --branch (or --branch=None) preserves the upstream-then-origin probe."""
         mock_run.side_effect = self._check_side_effect(
-            target_branch="main", verify_ok=True, commit_count="0"
+            target_branch="costas-code", verify_ok=True, commit_count="0"
         )
         args = SimpleNamespace(check=True, branch=None)
 
@@ -946,21 +952,80 @@ class TestCmdUpdateCheckBranchFlag:
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
         # Should have tried upstream first.
         assert any("fetch" in c and "upstream" in c for c in commands), commands
-        # Compare ref is upstream/main (upstream fetch succeeded).
+        # Compare ref is upstream/costas-code (upstream fetch succeeded).
         rev_list_cmds = [c for c in commands if "rev-list" in c]
-        assert any("upstream/main" in c for c in rev_list_cmds), rev_list_cmds
+        assert any("upstream/costas-code" in c for c in rev_list_cmds), rev_list_cmds
+
+
+def test_tracking_refspec_migrates_a_legacy_single_branch_clone(tmp_path):
+    """Fetching costas-code must materialize origin/costas-code for old clones."""
+    from hermes_cli import main as hm
+    tracking_refspec = getattr(hm, "_tracking_refspec")
+
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "clone"
+    remote.mkdir()
+    seed.mkdir()
+
+    def run_git(*args, cwd):
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    run_git("init", "--bare", cwd=remote)
+    run_git("init", cwd=seed)
+    run_git("config", "user.email", "costas-code@example.invalid", cwd=seed)
+    run_git("config", "user.name", "Costas Code Tests", cwd=seed)
+    (seed / "version.txt").write_text("main\n", encoding="utf-8")
+    run_git("add", "version.txt", cwd=seed)
+    run_git("commit", "-m", "main", cwd=seed)
+    run_git("branch", "-M", "main", cwd=seed)
+    run_git("remote", "add", "origin", remote.as_uri(), cwd=seed)
+    run_git("push", "-u", "origin", "main", cwd=seed)
+    run_git("checkout", "-b", "costas-code", cwd=seed)
+    (seed / "version.txt").write_text("costas-code\n", encoding="utf-8")
+    run_git("commit", "-am", "costas-code", cwd=seed)
+    run_git("push", "-u", "origin", "costas-code", cwd=seed)
+
+    run_git(
+        "clone",
+        "--depth",
+        "1",
+        "--single-branch",
+        "--branch",
+        "main",
+        remote.as_uri(),
+        str(clone),
+        cwd=tmp_path,
+    )
+    missing = subprocess.run(
+        ["git", "rev-parse", "--verify", "origin/costas-code"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode != 0
+
+    run_git("fetch", "origin", tracking_refspec("origin", "costas-code"), cwd=clone)
+    resolved = run_git("rev-parse", "origin/costas-code", cwd=clone)
+    assert resolved.stdout.strip()
 
 
 class TestCmdUpdateZipBranchRefusal:
-    """``hermes update --branch=<non-main>`` must refuse on the ZIP fallback path.
+    """Non-distribution branches must refuse on the ZIP fallback path.
 
-    The ZIP fallback hard-codes a GitHub archive URL for main.zip; honoring
+    The ZIP fallback uses the Costas distribution archive; honoring
     --branch arbitrarily would require remote-branch existence checks the
     fallback can't easily do. Refusing is the right move — silently lying
     about which branch got installed is the bug --branch was meant to prevent.
     """
 
-    def test_zip_fallback_refuses_non_main_branch(self, capsys):
+    def test_zip_fallback_refuses_non_distribution_branch(self, capsys):
         from hermes_cli.main import _update_via_zip
 
         args = SimpleNamespace(branch="bb/gui")

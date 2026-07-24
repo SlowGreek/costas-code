@@ -46,9 +46,9 @@ def test_get_git_banner_state_reads_origin_and_head(tmp_path):
     (repo_dir / ".git").mkdir(parents=True)
 
     results = {
-        ("git", "rev-parse", "--short=8", "origin/main"): MagicMock(returncode=0, stdout="b2f477a3\n"),
+        ("git", "rev-parse", "--short=8", "origin/costas-code"): MagicMock(returncode=0, stdout="b2f477a3\n"),
         ("git", "rev-parse", "--short=8", "HEAD"): MagicMock(returncode=0, stdout="af8aad31\n"),
-        ("git", "rev-list", "--count", "origin/main..HEAD"): MagicMock(returncode=0, stdout="3\n"),
+        ("git", "rev-list", "--count", "origin/costas-code..HEAD"): MagicMock(returncode=0, stdout="3\n"),
     }
 
     def fake_run(cmd, **kwargs):
@@ -96,10 +96,10 @@ def test_get_git_banner_state_returns_none_when_no_repo_and_no_build_sha():
 
 
 def test_get_git_banner_state_falls_back_when_live_git_returns_nothing(tmp_path):
-    """Shallow clone without origin/main → still surface build SHA if baked.
+    """Shallow clone without origin/costas-code still surfaces the build SHA.
 
     Some install paths (e.g. ``git clone --depth 1`` without a remote) have
-    a ``.git`` directory but ``git rev-parse origin/main`` fails.  When that
+    a ``.git`` directory but ``git rev-parse origin/costas-code`` fails. When that
     happens AND a baked SHA exists, return the baked one instead of None.
     """
     from hermes_cli import banner

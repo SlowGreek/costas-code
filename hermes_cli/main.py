@@ -6838,13 +6838,13 @@ def _update_via_zip(args):
     from urllib.request import urlretrieve
 
     # The ZIP fallback exists for Windows git-file-I/O breakage. It pulls a
-    # static archive from GitHub, which is fine for the default "main"
-    # channel but would silently ignore --branch and update from main even
+    # static archive from GitHub, which is fine for the default Costas channel
+    # but would silently ignore --branch and update from costas-code even
     # if the user asked for something else — exactly the silent-divergence
     # bug --branch was added to prevent. Refuse to proceed in that case
     # rather than lie.
     branch = _resolve_update_branch(args)
-    if branch != "main":
+    if branch != COSTAS_UPDATE_BRANCH:
         print(
             f"✗ --branch={branch} is not supported on the Windows ZIP-fallback "
             "update path."
@@ -6853,7 +6853,8 @@ def _update_via_zip(args):
             "  This path runs when git file I/O is broken on the system. "
             "Either resolve the git-side breakage (typically an antivirus "
             "or NTFS filter holding files open) and rerun `hermes update "
-            f"--branch {branch}`, or update against main with `hermes update`."
+            f"--branch {branch}`, or update against {COSTAS_UPDATE_BRANCH} "
+            "with `hermes update`."
         )
         sys.exit(1)
     zip_url = (
@@ -7382,6 +7383,7 @@ OFFICIAL_REPO_URLS = {
     "git@github.com:SlowGreek/costas-code",
 }
 OFFICIAL_REPO_URL = "https://github.com/SlowGreek/costas-code.git"
+COSTAS_UPDATE_BRANCH = "costas-code"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
 
@@ -7479,14 +7481,16 @@ def _mark_skip_upstream_prompt():
         pass
 
 
-def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
-    """Attempt to push updated main to origin (sync fork).
+def _sync_fork_with_upstream(
+    git_cmd: list[str], cwd: Path, branch: str = COSTAS_UPDATE_BRANCH
+) -> bool:
+    """Attempt to push the updated distribution branch to origin.
 
     Returns True if push succeeded, False otherwise.
     """
     try:
         result = subprocess.run(
-            git_cmd + ["push", "origin", "main", "--force-with-lease"],
+            git_cmd + ["push", "origin", branch],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -7496,13 +7500,15 @@ def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
         return False
 
 
-def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
+def _sync_with_upstream_if_needed(
+    git_cmd: list[str], cwd: Path, branch: str = COSTAS_UPDATE_BRANCH
+) -> None:
     """Check if fork is behind upstream and sync if safe.
 
     This implements the fork upstream sync logic:
     - If upstream remote doesn't exist, ask user if they want to add it
-    - Compare origin/main with upstream/main
-    - If origin/main is strictly behind upstream/main, pull from upstream
+    - Compare the selected branch on origin with the official Costas remote
+    - If origin is strictly behind, fast-forward from the official remote
     - Try to sync fork back to origin if possible
     """
     has_upstream = _has_upstream_remote(git_cmd, cwd)
@@ -7514,7 +7520,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
 
         # Ask user if they want to add upstream
         print()
-        print("ℹ Your fork is not tracking the official Hermes repository.")
+        print("ℹ Your fork is not tracking the official Costas Code repository.")
         print("  This means you may miss updates from SlowGreek/costas-code.")
         print()
         try:
@@ -7542,14 +7548,14 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
             _mark_skip_upstream_prompt()
             return
 
-    # Fetch upstream main only. This sync compares upstream/main with
-    # origin/main, so there's no reason to pull every upstream ref — and a bare
+    # Fetch the selected distribution branch only. There is no reason to pull
+    # every upstream ref, and a bare
     # fetch drags in thousands of auto-generated branches.
     print()
     print("→ Fetching upstream...")
     try:
         subprocess.run(
-            git_cmd + ["fetch", "upstream", "main", "--quiet"],
+            git_cmd + ["fetch", "upstream", branch, "--quiet"],
             cwd=cwd,
             capture_output=True,
             check=True,
@@ -7558,23 +7564,24 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         print("  ✗ Failed to fetch upstream. Skipping upstream sync.")
         return
 
-    # Compare origin/main with upstream/main
-    origin_ahead = _count_commits_between(git_cmd, cwd, "upstream/main", "origin/main")
+    origin_ref = f"origin/{branch}"
+    upstream_ref = f"upstream/{branch}"
+    origin_ahead = _count_commits_between(git_cmd, cwd, upstream_ref, origin_ref)
     upstream_ahead = _count_commits_between(
-        git_cmd, cwd, "origin/main", "upstream/main"
+        git_cmd, cwd, origin_ref, upstream_ref
     )
 
     if origin_ahead < 0 or upstream_ahead < 0:
         print("  ✗ Could not compare branches. Skipping upstream sync.")
         return
 
-    # If origin/main has commits not on upstream, don't trample
+    # If origin has commits not on the official branch, don't trample them.
     if origin_ahead > 0:
         print()
         print(f"ℹ Your fork has {origin_ahead} commit(s) not on upstream.")
         print("  Skipping upstream sync to preserve your changes.")
         print("  If you want to merge upstream changes, run:")
-        print("    git pull upstream main")
+        print(f"    git pull upstream {branch}")
         return
 
     # If upstream is not ahead, fork is up to date
@@ -7582,14 +7589,14 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         print("  ✓ Fork is up to date with upstream")
         return
 
-    # origin/main is strictly behind upstream/main (can fast-forward)
+    # Origin is strictly behind the official branch (can fast-forward).
     print()
     print(f"→ Fork is {upstream_ahead} commit(s) behind upstream")
     print("→ Pulling from upstream...")
 
     try:
         subprocess.run(
-            git_cmd + ["pull", "--ff-only", "upstream", "main"],
+            git_cmd + ["pull", "--ff-only", "upstream", branch],
             cwd=cwd,
             check=True,
         )
@@ -7603,7 +7610,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
 
     # Try to sync fork back to origin
     print("→ Syncing fork...")
-    if _sync_fork_with_upstream(git_cmd, cwd):
+    if _sync_fork_with_upstream(git_cmd, cwd, branch):
         print("  ✓ Fork synced with upstream")
     else:
         print(
@@ -9654,19 +9661,30 @@ def _finalize_update_output(state):
 def _resolve_update_branch(args) -> str:
     """Normalize ``args.branch`` into a non-empty branch name.
 
-    Centralizes the "default to main, accept --branch override, treat empty
+    Centralizes the Costas distribution default, accepts ``--branch``
+    overrides, and treats empty
     or whitespace-only values as the default" parsing so every consumer of
     ``--branch`` (check path, git-update path, ZIP-fallback path) agrees on
     the same answer.
     """
-    return (getattr(args, "branch", None) or "main").strip() or "main"
+    return (
+        (getattr(args, "branch", None) or COSTAS_UPDATE_BRANCH).strip()
+        or COSTAS_UPDATE_BRANCH
+    )
 
 
-def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
+def _tracking_refspec(remote: str, branch: str) -> str:
+    """Return a fetch refspec that creates the named remote-tracking ref."""
+    return f"{branch}:refs/remotes/{remote}/{branch}"
+
+
+def _cmd_update_check(
+    branch: str = COSTAS_UPDATE_BRANCH, *, branch_explicit: bool = False
+):
     """Implement ``hermes update --check``: fetch and report without installing.
 
     ``branch`` selects which branch the check compares against. Default is
-    "main"; callers can pass another branch to ask "are there new commits
+    "costas-code"; callers can pass another branch to ask "are there new commits
     on origin/<branch>?" without performing the update.
 
     ``branch_explicit`` is True iff the caller passed --branch on the CLI.
@@ -9719,10 +9737,13 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
     )
     depth_args = ["--depth", "1"] if is_shallow else []
 
-    if branch == "main":
+    if branch == COSTAS_UPDATE_BRANCH:
         print("→ Fetching from upstream...")
         fetch_result = subprocess.run(
-            git_cmd + ["fetch"] + depth_args + ["upstream", branch],
+            git_cmd
+            + ["fetch"]
+            + depth_args
+            + ["upstream", _tracking_refspec("upstream", branch)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -9731,7 +9752,10 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             # Fallback to origin if upstream doesn't exist
             print("→ Fetching from origin...")
             fetch_result = subprocess.run(
-                git_cmd + ["fetch"] + depth_args + ["origin", branch],
+                git_cmd
+                + ["fetch"]
+                + depth_args
+                + ["origin", _tracking_refspec("origin", branch)],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -9745,7 +9769,10 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
         # Non-default branch: compare against origin/<branch> directly.
         print("→ Fetching from origin...")
         fetch_result = subprocess.run(
-            git_cmd + ["fetch"] + depth_args + ["origin", branch],
+            git_cmd
+            + ["fetch"]
+            + depth_args
+            + ["origin", _tracking_refspec("origin", branch)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -10810,7 +10837,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
         else:
             print("✗ Not a git repository. Please reinstall:")
             print(
-                "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+                "  curl -fsSL https://raw.githubusercontent.com/"
+                "SlowGreek/costas-code/costas-code/scripts/install.sh | bash"
             )
             sys.exit(1)
 
@@ -10874,7 +10902,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         print("→ Fetching updates...")
         fetch_result = subprocess.run(
-            git_cmd + ["fetch", "origin", branch],
+            git_cmd
+            + ["fetch", "origin", _tracking_refspec("origin", branch)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -10907,10 +10936,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
         current_branch = result.stdout.strip()
 
         # If user is on a different branch than the update target, switch
-        # to the target. When the target is "main" this is the historical
-        # "always update against main" behavior; for any other target it's
-        # the same thing — get HEAD onto the requested branch first, then
-        # fast-forward.
+        # to the requested channel before fast-forwarding. This also migrates
+        # legacy main/detached installs onto the Costas distribution branch.
         if current_branch != branch:
             label = (
                 "detached HEAD"
@@ -10975,8 +11002,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _invalidate_update_cache()
 
             # Even if origin is up to date, the fork may be behind upstream
-            if is_fork and branch == "main":
-                _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT)
+            if is_fork and branch == COSTAS_UPDATE_BRANCH:
+                _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT, branch)
 
             # Restore stash and switch back to original branch if we moved
             if auto_stash_ref is not None:
@@ -11168,9 +11195,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
             )
 
-        # Fork upstream sync logic (only for main branch on forks)
-        if is_fork and branch == "main":
-            _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT)
+        # Fork upstream sync logic (only for the Costas distribution branch).
+        if is_fork and branch == COSTAS_UPDATE_BRANCH:
+            _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT, branch)
 
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra
         # breaks on this machine, keep base deps and reinstall the remaining extras

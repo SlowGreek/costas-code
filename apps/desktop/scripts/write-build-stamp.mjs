@@ -36,7 +36,8 @@ const STAMP_SCHEMA_VERSION = 1
 
 /** All-zero placeholder used when no real commit can be resolved. */
 export const FALLBACK_COMMIT = "0000000000000000000000000000000000000000"
-export const FALLBACK_BRANCH = "main"
+export const FALLBACK_BRANCH = "costas-code"
+export const DISTRIBUTION_BRANCH = "costas-code"
 
 const DESKTOP_ROOT = resolve(import.meta.dirname, "..")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "..", "..")
@@ -54,10 +55,9 @@ function tryExec(cmd, opts) {
 export function fromCI(env = process.env) {
   const sha = env.GITHUB_SHA
   if (!sha) return null
-  const branch = env.GITHUB_REF_NAME || env.GITHUB_HEAD_REF || null
   return {
     commit: sha,
-    branch: branch,
+    branch: DISTRIBUTION_BRANCH,
     dirty: false, // CI builds from a checkout-of-ref by definition
     source: "ci"
   }
@@ -66,7 +66,7 @@ export function fromCI(env = process.env) {
 export function fromLocalGit(repoRoot = REPO_ROOT, execFn = tryExec) {
   const sha = execFn("git rev-parse HEAD", { cwd: repoRoot })
   if (!sha) return null
-  const branch = execFn("git rev-parse --abbrev-ref HEAD", { cwd: repoRoot })
+
   // `git status --porcelain -uno` is empty iff tracked files match HEAD.
   // We exclude untracked files (-uno) intentionally: a developer who's
   // checked out an installer scratch dir alongside the repo shouldn't
@@ -77,7 +77,7 @@ export function fromLocalGit(repoRoot = REPO_ROOT, execFn = tryExec) {
   const dirty = status !== null && status.length > 0
   return {
     commit: sha,
-    branch: branch === "HEAD" ? null : branch, // detached HEAD -> null
+    branch: DISTRIBUTION_BRANCH,
     dirty: dirty,
     source: "local"
   }

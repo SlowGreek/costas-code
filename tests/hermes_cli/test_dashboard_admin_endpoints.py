@@ -10,6 +10,25 @@ visible to the CLI data layer), not specific catalog values.
 import pytest
 
 
+def test_update_changelog_uses_the_costas_distribution_branch(monkeypatch):
+    from hermes_cli import web_server
+
+    calls = []
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return Completed()
+
+    monkeypatch.setattr(web_server.subprocess, "run", fake_run)
+
+    assert web_server._recent_upstream_commits() == []
+    assert "HEAD..origin/costas-code" in calls[0]
+
+
 def _client():
     try:
         from starlette.testclient import TestClient

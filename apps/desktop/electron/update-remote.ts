@@ -14,6 +14,34 @@
 
 const OFFICIAL_REPO_HTTPS_URL = 'https://github.com/SlowGreek/costas-code.git'
 const OFFICIAL_REPO_CANONICAL = 'github.com/slowgreek/costas-code'
+const DEFAULT_UPDATE_BRANCH = 'costas-code'
+const LEGACY_UPDATE_BRANCH = 'main'
+
+function resolveUpdateBranch(branch) {
+  const normalized = typeof branch === 'string' ? branch.trim() : ''
+
+  return !normalized || normalized === LEGACY_UPDATE_BRANCH ? DEFAULT_UPDATE_BRANCH : normalized
+}
+
+function remoteTrackingRefspec(branch, remote = 'origin') {
+  return `${branch}:refs/remotes/${remote}/${branch}`
+}
+
+function buildUpdateBranchArgs(branch) {
+  return ['--branch', resolveUpdateBranch(branch)]
+}
+
+function manualUpdateCommand(branch) {
+  const resolved = resolveUpdateBranch(branch)
+
+  if (resolved === DEFAULT_UPDATE_BRANCH) {
+    return 'hermes update'
+  }
+
+  const quoted = `'${resolved.replaceAll("'", "''")}'`
+
+  return `hermes update --branch ${quoted}`
+}
 
 // Normalize common GitHub remote URL forms to `host/owner/repo` (lowercased,
 // no trailing slash, no .git suffix) so SSH and HTTPS forms of the same repo
@@ -62,4 +90,15 @@ function isOfficialSshRemote(url) {
   return isSshRemote(url) && canonicalGitHubRemote(url) === OFFICIAL_REPO_CANONICAL
 }
 
-export { canonicalGitHubRemote, isOfficialSshRemote, isSshRemote, OFFICIAL_REPO_CANONICAL, OFFICIAL_REPO_HTTPS_URL }
+export {
+  buildUpdateBranchArgs,
+  canonicalGitHubRemote,
+  DEFAULT_UPDATE_BRANCH,
+  isOfficialSshRemote,
+  isSshRemote,
+  manualUpdateCommand,
+  OFFICIAL_REPO_CANONICAL,
+  OFFICIAL_REPO_HTTPS_URL,
+  remoteTrackingRefspec,
+  resolveUpdateBranch
+}

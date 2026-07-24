@@ -20,11 +20,16 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  buildUpdateBranchArgs,
   canonicalGitHubRemote,
+  DEFAULT_UPDATE_BRANCH,
   isOfficialSshRemote,
   isSshRemote,
+  manualUpdateCommand,
   OFFICIAL_REPO_CANONICAL,
-  OFFICIAL_REPO_HTTPS_URL
+  OFFICIAL_REPO_HTTPS_URL,
+  remoteTrackingRefspec,
+  resolveUpdateBranch
 } from './update-remote'
 
 test('canonicalGitHubRemote normalizes SSH and HTTPS forms to the same value', () => {
@@ -76,4 +81,27 @@ test('isOfficialSshRemote does NOT match forks, other hosts, or HTTPS', () => {
 test('OFFICIAL_REPO_HTTPS_URL canonicalizes to OFFICIAL_REPO_CANONICAL', () => {
   // Invariant: the URL we substitute in must be the same repo we detect.
   assert.equal(canonicalGitHubRemote(OFFICIAL_REPO_HTTPS_URL), OFFICIAL_REPO_CANONICAL)
+})
+
+test('update routing follows the Costas distribution branch', () => {
+  assert.equal(DEFAULT_UPDATE_BRANCH, 'costas-code')
+  assert.equal(resolveUpdateBranch(undefined), 'costas-code')
+  assert.equal(resolveUpdateBranch(''), 'costas-code')
+  assert.equal(resolveUpdateBranch('main'), 'costas-code')
+  assert.equal(resolveUpdateBranch('feature/preview'), 'feature/preview')
+  assert.equal(
+    remoteTrackingRefspec('costas-code'),
+    'costas-code:refs/remotes/origin/costas-code'
+  )
+  assert.deepEqual(buildUpdateBranchArgs(undefined), ['--branch', 'costas-code'])
+  assert.deepEqual(buildUpdateBranchArgs('main'), ['--branch', 'costas-code'])
+  assert.deepEqual(buildUpdateBranchArgs('feature/preview'), ['--branch', 'feature/preview'])
+  assert.equal(manualUpdateCommand(undefined), 'hermes update')
+  assert.equal(manualUpdateCommand('main'), 'hermes update')
+  assert.equal(manualUpdateCommand('feature/preview'), "hermes update --branch 'feature/preview'")
+  assert.equal(
+    manualUpdateCommand('preview$(touch${IFS}/tmp/pwn)'),
+    "hermes update --branch 'preview$(touch${IFS}/tmp/pwn)'"
+  )
+  assert.equal(manualUpdateCommand("preview/o'hare"), "hermes update --branch 'preview/o''hare'")
 })

@@ -122,6 +122,7 @@ UPDATE_AVAILABLE_NO_COUNT = -1
 
 _UPSTREAM_REPO_URL = "https://github.com/SlowGreek/costas-code.git"
 _OFFICIAL_REPO_CANONICAL = "github.com/slowgreek/costas-code"
+UPDATE_BRANCH = "costas-code"
 
 
 def _canonical_github_remote(url: str | None) -> str:
@@ -171,14 +172,14 @@ def _git_stdout(args: list[str], *, cwd: Path, timeout: int = 5) -> Optional[str
 
 
 def _check_via_rev(local_rev: str) -> Optional[int]:
-    """Compare an embedded git revision to upstream main via ls-remote.
+    """Compare an embedded git revision to Costas Code via ls-remote.
 
     Returns 0 if up-to-date, ``UPDATE_AVAILABLE_NO_COUNT`` if behind,
     or ``None`` on failure.
     """
     try:
         result = subprocess.run(
-            ["git", "ls-remote", _UPSTREAM_REPO_URL, "refs/heads/main"],
+            ["git", "ls-remote", _UPSTREAM_REPO_URL, f"refs/heads/{UPDATE_BRANCH}"],
             capture_output=True, text=True, timeout=10,
         )
     except Exception:
@@ -192,8 +193,15 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
-    """Count commits behind origin/main in a local checkout."""
+    """Count commits behind the Costas distribution branch."""
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
+    if _canonical_github_remote(origin_url) != _OFFICIAL_REPO_CANONICAL:
+        head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
+        checked = _check_via_rev(head_rev) if head_rev else None
+        if checked == UPDATE_AVAILABLE_NO_COUNT:
+            return 1
+        return checked
+
     if _is_official_ssh_remote(origin_url):
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
         checked = _check_via_rev(head_rev) if head_rev else None
@@ -204,7 +212,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     # Installer checkouts are shallow (`git clone --depth 1`). On a shallow
     # clone the history stops at a single commit, so a plain `git fetch` would
     # unshallow the repo (dragging in the whole history) and
-    # `rev-list --count HEAD..origin/main` would report a huge bogus "behind"
+    # `rev-list --count HEAD..origin/costas-code` would report a huge bogus "behind"
     # number (e.g. "12492 commits behind"). Detect shallow up front: fetch with
     # --depth 1 to preserve the boundary and compare tip SHAs instead of
     # counting. Full clones (developers, Docker dev images) keep the exact
@@ -213,7 +221,12 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     is_shallow = shallow == "true"
 
     try:
-        fetch_args = ["git", "fetch", "origin"]
+        fetch_args = [
+            "git",
+            "fetch",
+            "origin",
+            f"{UPDATE_BRANCH}:refs/remotes/origin/{UPDATE_BRANCH}",
+        ]
         if is_shallow:
             fetch_args += ["--depth", "1"]
         fetch_args.append("--quiet")
@@ -226,13 +239,13 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
         pass  # Offline or timeout — use stale refs, that's fine
 
     if is_shallow:
-        # No history to count across the shallow boundary. `origin/main` may not
+        # No history to count across the shallow boundary. `origin/costas-code` may not
         # be a tracking ref in a `clone --depth 1`, so prefer FETCH_HEAD (just
-        # updated by the fetch above) and fall back to origin/main.
+        # updated by the fetch above) and fall back to origin/costas-code.
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
         target_rev = (
             _git_stdout(["rev-parse", "FETCH_HEAD"], cwd=repo_dir)
-            or _git_stdout(["rev-parse", "origin/main"], cwd=repo_dir)
+            or _git_stdout(["rev-parse", f"origin/{UPDATE_BRANCH}"], cwd=repo_dir)
         )
         if not head_rev or not target_rev:
             return None
@@ -240,7 +253,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
 
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "HEAD..origin/main"],
+            ["git", "rev-list", "--count", f"HEAD..origin/{UPDATE_BRANCH}"],
             capture_output=True, text=True, timeout=5,
             cwd=str(repo_dir),
         )
@@ -255,8 +268,9 @@ def check_for_updates() -> Optional[int]:
     """Check whether a Hermes update is available.
 
     Two paths: if ``HERMES_REVISION`` is set (nix builds embed it), compare
-    it to upstream main via ``git ls-remote``. Otherwise look for a local
-    git checkout and count commits behind ``origin/main``.
+    it to the Costas distribution branch via ``git ls-remote``. Otherwise
+    look for a local git checkout and count commits behind
+    ``origin/costas-code``.
 
     Returns the number of commits behind, ``UPDATE_AVAILABLE_NO_COUNT`` (-1)
     if behind but the count is unknown, ``0`` if up-to-date, or ``None`` if
@@ -379,10 +393,10 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
             pass
         return None
 
-    upstream = _git_short_hash(repo_dir, "origin/main")
+    upstream = _git_short_hash(repo_dir, f"origin/{UPDATE_BRANCH}")
     local = _git_short_hash(repo_dir, "HEAD")
     if not upstream or not local:
-        # Live-git lookup failed (e.g. shallow clone without origin/main).
+        # Live-git lookup failed (e.g. shallow clone without origin/costas-code).
         # Fall back to the baked build SHA if available.
         try:
             from hermes_cli.build_info import get_build_sha
@@ -396,7 +410,7 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
     ahead = 0
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "origin/main..HEAD"],
+            ["git", "rev-list", "--count", f"origin/{UPDATE_BRANCH}..HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

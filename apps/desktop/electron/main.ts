@@ -163,7 +163,15 @@ import {
   sandboxFallbackFromEnv,
   sandboxPreflight
 } from './update-relaunch'
-import { isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
+import {
+  buildUpdateBranchArgs,
+  DEFAULT_UPDATE_BRANCH,
+  isOfficialSshRemote,
+  manualUpdateCommand,
+  OFFICIAL_REPO_HTTPS_URL,
+  remoteTrackingRefspec,
+  resolveUpdateBranch
+} from './update-remote'
 import { spawnUpdaterProcess } from './updater-process'
 import { fetchMarketplaceThemes, searchMarketplaceThemes } from './vscode-marketplace'
 import {
@@ -555,10 +563,6 @@ const DESKTOP_PROFILE_CONFIG_PATH = path.join(app.getPath('userData'), 'active-p
 // Mirrors hermes_cli.profiles._PROFILE_ID_RE so we never hand the backend a
 // value its profile resolver would reject and exit on.
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
-// Branch we track for self-update. The GUI work has merged to main, so this
-// tracks main. User can also override at runtime via
-// hermesDesktop.updates.setBranch().
-const DEFAULT_UPDATE_BRANCH = 'main'
 // desktop.log lives under HERMES_HOME/logs/ so it sits next to agent.log,
 // errors.log, gateway.log produced by hermes_logging.setup_logging — one log
 // directory per user, regardless of which UI surface produced the line.
@@ -2077,7 +2081,7 @@ function readDesktopUpdateConfig() {
     const parsed = JSON.parse(fs.readFileSync(DESKTOP_UPDATE_CONFIG_PATH, 'utf8'))
     const branch = typeof parsed?.branch === 'string' ? parsed.branch.trim() : ''
 
-    return { branch: branch || DEFAULT_UPDATE_BRANCH }
+    return { branch: resolveUpdateBranch(branch) }
   } catch {
     return { branch: DEFAULT_UPDATE_BRANCH }
   }
@@ -2093,7 +2097,10 @@ function writeFileAtomic(targetPath, data, encoding?: BufferEncoding) {
 
 function writeDesktopUpdateConfig(config) {
   fs.mkdirSync(path.dirname(DESKTOP_UPDATE_CONFIG_PATH), { recursive: true })
-  writeFileAtomic(DESKTOP_UPDATE_CONFIG_PATH, JSON.stringify(config, null, 2))
+  writeFileAtomic(
+    DESKTOP_UPDATE_CONFIG_PATH,
+    JSON.stringify({ ...config, branch: resolveUpdateBranch(config?.branch) }, null, 2)
+  )
 }
 
 // ─── Main-window geometry persistence (window-state.json) ──────────────────
@@ -2215,33 +2222,35 @@ function emitUpdateProgress(payload) {
   }
 }
 
-// Self-heal the tracked update branch: if origin no longer publishes it (e.g.
-// bb/gui was merged into main and deleted), fall back to main and persist so
-// every later check/apply follows main — no manual flip, even for already-
-// installed clients. Read-only ls-remote probe; only flips on a definitive
+// Self-heal an explicit custom update branch if origin no longer publishes it:
+// fall back to the Costas distribution branch and persist that choice so every
+// later check/apply follows the same channel. Read-only ls-remote probe; it only
+// flips on a definitive
 // "ref absent" (exit 2), never on a transient network error, so a flaky
 // connection can't strand a user on the wrong branch.
 async function resolveHealedBranch(updateRoot, branch) {
-  if (!branch || branch === 'main') {
-    return branch || 'main'
+  const resolvedBranch = resolveUpdateBranch(branch)
+
+  if (resolvedBranch === DEFAULT_UPDATE_BRANCH) {
+    return DEFAULT_UPDATE_BRANCH
   }
 
   const originUrl = await getOriginUrl(updateRoot)
   const remote = isOfficialSshRemote(originUrl) ? OFFICIAL_REPO_HTTPS_URL : 'origin'
-  const probe = await runGit(['ls-remote', '--exit-code', '--heads', remote, branch], { cwd: updateRoot })
+  const probe = await runGit(['ls-remote', '--exit-code', '--heads', remote, resolvedBranch], { cwd: updateRoot })
 
   if (probe.code !== 2) {
-    return branch
+    return resolvedBranch
   }
 
-  rememberLog(`[updates] origin/${branch} is gone (merged?); falling back to main`)
+  rememberLog(`[updates] origin/${resolvedBranch} is gone; falling back to ${DEFAULT_UPDATE_BRANCH}`)
   const config = readDesktopUpdateConfig()
 
-  if (config.branch !== 'main') {
-    writeDesktopUpdateConfig({ ...config, branch: 'main' })
+  if (config.branch !== DEFAULT_UPDATE_BRANCH) {
+    writeDesktopUpdateConfig({ ...config, branch: DEFAULT_UPDATE_BRANCH })
   }
 
-  return 'main'
+  return DEFAULT_UPDATE_BRANCH
 }
 
 async function checkUpdates() {
@@ -2299,7 +2308,10 @@ async function checkUpdates() {
     }
   }
 
-  const fetched = await runGit(['fetch', '--quiet', 'origin', branch], { cwd: updateRoot })
+  const fetched = await runGit(
+    ['fetch', '--quiet', 'origin', remoteTrackingRefspec(branch)],
+    { cwd: updateRoot }
+  )
 
   if (fetched.code !== 0) {
     return {
@@ -2645,28 +2657,20 @@ async function applyUpdates(opts = {}) {
       // `hermes desktop`, never the Tauri installer that self-copies
       // hermes-setup.exe into HERMES_HOME). They DO have a working `hermes`
       // on PATH / in the venv, so the correct path is the one-liner in their
-      // native medium. We show the EXACT command, branch-pinned to the
-      // checkout they're on — bare `hermes update` defaults to main and would
-      // silently switch a bb/gui (or any non-main) install off-branch. Mirror
-      // the GUI button's contract: append --branch <current> for non-main
-      // checkouts, keep it bare for main so the card stays clean.
+      // native medium. We show the EXACT command for the configured update
+      // channel. Bare `hermes update` follows the Costas distribution branch;
+      // append --branch only for an explicit custom channel.
       const updateRoot = resolveUpdateRoot()
-      let command = 'hermes update'
+      const { branch: configuredBranch } = readDesktopUpdateConfig()
+      let branch = resolveUpdateBranch(configuredBranch)
 
       try {
-        const head = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: updateRoot })
-        const current = (head.stdout || '').trim()
-
-        if (head.code === 0 && current && current !== 'HEAD') {
-          const branch = await resolveHealedBranch(updateRoot, current)
-
-          if (branch !== 'main') {
-            command = `hermes update --branch ${branch}`
-          }
-        }
+        branch = await resolveHealedBranch(updateRoot, branch)
       } catch {
-        // Best-effort: fall back to bare `hermes update` if branch detection fails.
+        // Best-effort: keep the configured branch on transient probe failures.
       }
+
+      const command = manualUpdateCommand(branch)
 
       rememberLog(`[updates] no staged updater; surfacing manual \`${command}\` for CLI install at ${updateRoot}`)
       emitUpdateProgress({ stage: 'manual', message: command, percent: null })
@@ -2950,20 +2954,18 @@ async function applyUpdatesPosixInApp(opts: any) {
     env.HERMES_DESKTOP_CHILD_PID = desktopChildPids.join(',')
   }
 
-  // Branch-pin so a non-main checkout doesn't get switched to main (and self-heal
-  // to main when the pinned branch no longer exists on origin).
-  let branchArgs = []
+  // Always pass the configured distribution channel explicitly. Existing
+  // managed installs can be detached at a packaged commit and may still run an
+  // older CLI whose bare `hermes update` default is `main`; omitting --branch
+  // there would bypass the Costas update channel on the very first migration.
+  const { branch: configuredBranch } = readDesktopUpdateConfig()
 
-  try {
-    const head = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: updateRoot })
-    const current = (head.stdout || '').trim()
+  const branch = await resolveHealedBranch(
+    updateRoot,
+    configuredBranch || DEFAULT_UPDATE_BRANCH
+  )
 
-    if (head.code === 0 && current && current !== 'HEAD') {
-      branchArgs = ['--branch', await resolveHealedBranch(updateRoot, current)]
-    }
-  } catch {
-    // best effort
-  }
+  const branchArgs = buildUpdateBranchArgs(branch)
 
   emitUpdateProgress({ stage: 'update', message: 'Updating Hermes (git + dependencies)…', percent: 10 })
 
@@ -10268,7 +10270,7 @@ ipcMain.handle('hermes:updates:apply', async (_event, payload) =>
 ipcMain.handle('hermes:updates:branch:get', async () => readDesktopUpdateConfig())
 
 ipcMain.handle('hermes:updates:branch:set', async (_event, name) => {
-  const branch = typeof name === 'string' && name.trim() ? name.trim() : DEFAULT_UPDATE_BRANCH
+  const branch = resolveUpdateBranch(name)
   writeDesktopUpdateConfig({ branch })
 
   return { branch }

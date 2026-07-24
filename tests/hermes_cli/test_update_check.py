@@ -85,10 +85,27 @@ def test_check_for_updates_expired_cache(tmp_path, monkeypatch):
     cache_file = tmp_path / ".update_check"
     cache_file.write_text(json.dumps({"ts": 0, "behind": 1}))
 
-    mock_result = MagicMock(returncode=0, stdout="5\n")
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "remote", "get-url", "origin"]:
+            return MagicMock(
+                returncode=0,
+                stdout="https://github.com/SlowGreek/costas-code.git\n",
+            )
+        if cmd == ["git", "rev-parse", "--is-shallow-repository"]:
+            return MagicMock(returncode=0, stdout="false\n")
+        if cmd[:2] == ["git", "fetch"]:
+            return MagicMock(returncode=0, stdout="")
+        if cmd == [
+            "git",
+            "rev-list",
+            "--count",
+            "HEAD..origin/costas-code",
+        ]:
+            return MagicMock(returncode=0, stdout="5\n")
+        raise AssertionError(f"unexpected git command: {cmd!r}")
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    with patch("hermes_cli.banner.subprocess.run", return_value=mock_result) as mock_run:
+    with patch("hermes_cli.banner.subprocess.run", side_effect=fake_run) as mock_run:
         result = check_for_updates()
 
     assert result == 5
@@ -116,23 +133,32 @@ def test_check_for_updates_official_ssh_origin_uses_https_probe(tmp_path):
             "git",
             "ls-remote",
             "https://github.com/SlowGreek/costas-code.git",
-            "refs/heads/main",
+            "refs/heads/costas-code",
         ]:
-            return MagicMock(returncode=0, stdout="upstream-sha\trefs/heads/main\n")
+            return MagicMock(
+                returncode=0,
+                stdout="upstream-sha\trefs/heads/costas-code\n",
+            )
         raise AssertionError(f"unexpected git command: {cmd!r}")
 
     with patch("hermes_cli.banner.subprocess.run", side_effect=fake_run):
         result = banner._check_via_local_git(repo_dir)
 
     assert result == 1
-    assert ["git", "fetch", "origin", "--quiet"] not in calls
+    assert [
+        "git",
+        "fetch",
+        "origin",
+        "costas-code:refs/remotes/origin/costas-code",
+        "--quiet",
+    ] not in calls
 
 
 def test_check_via_local_git_shallow_clone_behind_reports_no_count(tmp_path):
     """Shallow installer clones must report presence-only, never a bogus count.
 
     On a ``git clone --depth 1`` checkout the history stops at one commit, so
-    counting ``HEAD..origin/main`` across the shallow boundary yields a huge
+    counting ``HEAD..origin/costas-code`` across the shallow boundary yields a huge
     nonsense number (the "12492 commits behind" banner). The shallow path must
     compare tip SHAs and return UPDATE_AVAILABLE_NO_COUNT instead, and must
     never run ``git rev-list --count``.
@@ -166,7 +192,15 @@ def test_check_via_local_git_shallow_clone_behind_reports_no_count(tmp_path):
 
     assert result == banner.UPDATE_AVAILABLE_NO_COUNT
     # The shallow fetch must preserve the boundary (--depth 1), not unshallow.
-    assert ["git", "fetch", "origin", "--depth", "1", "--quiet"] in calls
+    assert [
+        "git",
+        "fetch",
+        "origin",
+        "costas-code:refs/remotes/origin/costas-code",
+        "--depth",
+        "1",
+        "--quiet",
+    ] in calls
 
 
 def test_check_via_local_git_shallow_clone_up_to_date(tmp_path):

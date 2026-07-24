@@ -37,7 +37,7 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 ### Linux, macOS, WSL2, Termux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.sh | bash
 ```
 
 ### Windows (native, PowerShell)
@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/SlowGreek/costas-code/main/scripts/
 Run this in PowerShell:
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/SlowGreek/costas-code/main/scripts/install.ps1)
+iex (irm https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.ps1)
 ```
 
 The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** on Windows. Internal command names and state paths remain `hermes` / `~/.hermes` for upstream compatibility.
@@ -80,7 +80,7 @@ Local development builds are not Apple-notarized. On macOS, Control-click the ap
 Prerequisites: Git, Python 3.11–3.13, and Node.js 20.19+ (Node 22.12+ recommended).
 
 ```bash
-git clone https://github.com/SlowGreek/costas-code.git
+git clone --branch costas-code --single-branch https://github.com/SlowGreek/costas-code.git
 cd costas-code
 
 # Install the Python runtime and JavaScript workspace dependencies.

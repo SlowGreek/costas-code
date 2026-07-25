@@ -34,7 +34,12 @@ import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executiv
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
-import { buildDesktopBackendEnv, normalizeHermesHomeRoot } from './backend-env'
+import {
+  appendUniquePathEntries,
+  buildDesktopBackendEnv,
+  normalizeHermesHomeRoot,
+  pathEnvKey
+} from './backend-env'
 import { canImportHermesCli, shouldTrustHermesOverride, verifyHermesCli } from './backend-probes'
 import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { shouldLatchBackendStartFailure } from './backend-start-failure'
@@ -391,6 +396,7 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
+const AE_RUNTIME_BIN = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
 
 // Build-time install stamp -- the git ref this .exe was built against.
 //
@@ -3505,6 +3511,7 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
+      extraPathEntries: [AE_RUNTIME_BIN],
       venvRoot
     }),
     root,
@@ -3529,6 +3536,7 @@ function createActiveBackend(backendArgs) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [ACTIVE_HERMES_ROOT, ...getVenvSitePackagesEntries(VENV_ROOT)],
+      extraPathEntries: [AE_RUNTIME_BIN],
       venvRoot: VENV_ROOT
     }),
     root: ACTIVE_HERMES_ROOT,
@@ -7682,6 +7690,14 @@ async function spawnPoolBackend(profile, entry) {
         ...process.env,
         HERMES_HOME,
         ...backend.env,
+        [pathEnvKey({ ...process.env, ...backend.env })]: appendUniquePathEntries(
+          [
+            AE_RUNTIME_BIN,
+            backend.env?.[pathEnvKey(backend.env)],
+            process.env[pathEnvKey(process.env)]
+          ],
+          { delimiter: path.delimiter }
+        ),
         // Pin the gateway's tool/terminal cwd to the same directory we chose for
         // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
         // can still point at the install dir even when spawn cwd is home.
@@ -7948,6 +7964,14 @@ async function startHermes() {
           // can't reliably do that, so we set it inline for every spawn.
           HERMES_HOME,
           ...backend.env,
+          [pathEnvKey({ ...process.env, ...backend.env })]: appendUniquePathEntries(
+            [
+              AE_RUNTIME_BIN,
+              backend.env?.[pathEnvKey(backend.env)],
+              process.env[pathEnvKey(process.env)]
+            ],
+            { delimiter: path.delimiter }
+          ),
           TERMINAL_CWD: hermesCwd,
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron

@@ -1,0 +1,38 @@
+# Nous-approved first-party MCP catalog entry.
+# The command resolves the packaged AgentExperiments LUCID contract through
+# Butler's package owner; no workspace path or model-visible authority material.
+manifest_version: 1
+
+name: lucid-quine
+description: AgentExperiments LUCID — seven closed verbs for QUINE-governed projects, evidence, dispatch, steering, and cancellation.
+source: https://github.com/microsoft/AgentExperiments
+
+transport:
+  type: stdio
+  command: "butler"
+  args:
+    - "--mcp-stdio"
+  version: "0.1.0"
+
+auth:
+  type: none
+
+tools:
+  default_enabled:
+    - lucid.show
+    - lucid.get
+    - lucid.set
+    - lucid.morph
+    - lucid.dispatch
+    - lucid.steer
+    - lucid.cancel
+
+post_install: |
+  LUCID is a local stdio MCP backed by the packaged AgentExperiments Butler.
+  It exposes the closed show/get/set/morph/dispatch/steer/cancel grammar plus
+  read-only onboarding and current-system resources. Resources and prompts grant
+  no authority. Consequential calls still require Butler/Envelope capability and
+  confirmation checks, and QUINE remains the acceptance owner.
+
+  The Butler executable must be installed on the Desktop backend PATH. Open the
+  MCP tab to test the connection and inspect the exact seven tools.

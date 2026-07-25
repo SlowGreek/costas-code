@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { useDebounced } from '@/app/hooks/use-debounced'
 import { DetailPane } from '@/app/master-detail'
@@ -18,7 +19,10 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import {
+  getMcpCatalog,
   getSkillHubSources,
+  installMcpCatalogEntry,
+  type McpCatalogEntry,
   previewSkillHub,
   scanSkillHub,
   searchSkillsHub,
@@ -45,6 +49,74 @@ import { notify, notifyError } from '@/store/notifications'
 // Dedup rank when the same skill surfaces from multiple sources — higher trust
 // wins. Mirrors the backend's unified_search `_TRUST_RANK`.
 const TRUST_RANK: Record<string, number> = { builtin: 2, trusted: 1, community: 0 }
+const LUCID_MCP_NAME = 'lucid-quine'
+
+export function LucidMcpHubCard({ entry }: { entry: McpCatalogEntry }) {
+  const navigate = useNavigate()
+  const [installing, setInstalling] = useState(false)
+  const verbs = entry.default_enabled ?? []
+
+  const install = async () => {
+    setInstalling(true)
+
+    try {
+      await installMcpCatalogEntry(entry.name)
+      notify({ kind: 'success', title: 'LUCID MCP installed', message: 'Opening the MCP server inspector.' })
+      navigate(`/skills?tab=mcp&server=${encodeURIComponent(entry.name)}`)
+    } catch (error) {
+      notifyError(error, 'LUCID MCP installation failed')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const open = () => navigate(`/skills?tab=mcp&server=${encodeURIComponent(entry.name)}`)
+
+  return (
+    <section className="mb-5 overflow-hidden rounded-xl border border-(--ui-stroke-secondary) bg-[color-mix(in_srgb,var(--theme-primary)_6%,var(--ui-chat-surface-background))]">
+      <div className="flex items-start gap-3 p-4">
+        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-(--theme-primary) text-primary-foreground">
+          <Codicon name="lightbulb" size="1.15rem" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h2 className="font-mono text-sm font-semibold text-foreground">LUCID MCP</h2>
+            <Badge variant="default">AgentExperiments</Badge>
+            <Badge variant="muted">first-party</Badge>
+            <Badge variant="muted">stdio</Badge>
+            {entry.installed && (
+              <span className="text-[0.65rem] text-emerald-500">{entry.enabled ? 'Enabled' : 'Installed'}</span>
+            )}
+          </div>
+          <p className="mt-1 max-w-3xl text-[0.72rem] leading-relaxed text-(--ui-text-secondary)">
+            {entry.description}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {verbs.map(verb => (
+              <span
+                className="rounded-md bg-(--ui-bg-quinary) px-2 py-1 font-mono text-[0.65rem] text-(--ui-text-secondary)"
+                key={verb}
+              >
+                {verb}
+              </span>
+            ))}
+          </div>
+          <p className="mt-3 font-mono text-[0.62rem] text-(--ui-text-quaternary)">
+            {entry.command} {entry.args.join(' ')} · local transport · QUINE-governed
+          </p>
+        </div>
+        <Button disabled={installing} onClick={entry.installed ? open : () => void install()} size="sm">
+          {installing ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Codicon name={entry.installed ? 'server' : 'cloud-download'} />
+          )}
+          {installing ? 'Installing…' : entry.installed ? 'Open MCP' : 'Install MCP'}
+        </Button>
+      </div>
+    </section>
+  )
+}
 
 function trustTone(level: string): string {
   switch (level) {
@@ -143,6 +215,14 @@ interface SkillsHubProps {
 export function SkillsHub({ query }: SkillsHubProps) {
   const { t } = useI18n()
   const h = t.skills.hub
+
+  const mcpCatalog = useQuery({
+    queryKey: ['mcp-catalog', 'hub-featured'],
+    queryFn: getMcpCatalog,
+    staleTime: 5 * 60_000
+  })
+
+  const lucidMcp = mcpCatalog.data?.entries.find(entry => entry.name === LUCID_MCP_NAME) ?? null
 
   // Sources + featured + the installed map — one cached fetch, revalidated on
   // mount and re-fetched (from the store) after an action lands.
@@ -316,6 +396,12 @@ export function SkillsHub({ query }: SkillsHubProps) {
               })}
         </div>
       </div>
+
+      {showLanding && lucidMcp && (
+        <div className="shrink-0 px-4">
+          <LucidMcpHubCard entry={lucidMcp} />
+        </div>
+      )}
 
       {/* Result summary (left) + Update installed (right) — only when a results
           table is actually on screen, and update only if something's installed. */}

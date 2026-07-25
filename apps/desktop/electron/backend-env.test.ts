@@ -50,6 +50,19 @@ test('desktop backend PATH preserves first occurrence and avoids duplicates', ()
   )
 })
 
+test('desktop backend PATH prepends packaged AE runtime binaries', () => {
+  const result = buildDesktopBackendPath({
+    hermesHome: '/Users/test/.hermes',
+    venvRoot: '/Users/test/.hermes/hermes-agent/venv',
+    extraPathEntries: ['/Applications/Catalyst.app/Contents/Resources/ae'],
+    currentPath: '/usr/bin:/bin',
+    platform: 'darwin',
+    pathModule: path.posix
+  })
+
+  assert.equal(result.split(':')[0], '/Applications/Catalyst.app/Contents/Resources/ae')
+})
+
 test('buildDesktopBackendEnv extends PYTHONPATH and backend PATH together', () => {
   const env = buildDesktopBackendEnv({
     hermesHome: '/Users/test/.hermes',

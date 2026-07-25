@@ -109,6 +109,27 @@ def _entry(name: str):
 
 
 class TestManifestParsing:
+    def test_shipped_lucid_quine_is_first_party_closed_seven_verb_stdio(self, monkeypatch):
+        monkeypatch.delenv("HERMES_OPTIONAL_MCPS", raising=False)
+        from hermes_cli.mcp_catalog import get_entry
+
+        entry = get_entry("lucid-quine")
+        assert entry is not None
+        assert entry.transport.type == "stdio"
+        assert entry.transport.command == "butler"
+        assert entry.transport.args == ["--mcp-stdio"]
+        assert entry.auth.type == "none"
+        assert entry.install is None
+        assert entry.tools.default_enabled == [
+            "lucid.show",
+            "lucid.get",
+            "lucid.set",
+            "lucid.morph",
+            "lucid.dispatch",
+            "lucid.steer",
+            "lucid.cancel",
+        ]
+
     def test_minimal_valid(self, catalog_dir):
         _write_manifest(catalog_dir, "demo", _basic_manifest())
         from hermes_cli.mcp_catalog import list_catalog

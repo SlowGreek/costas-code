@@ -15,6 +15,8 @@
 > **Costas receipt UI checkpoint:** `3cad879636f536d8cb28f6e361b04c1ddb170c28`<br>
 > **Costas clean packaged UI checkpoint:** `f7835a87d6ad3072d9a56305e88854132a4d9938`<br>
 > **Costas safety-state UI checkpoint:** `e943c61bece7e6c8baa0e0fd4441f469b46bd59c`<br>
+> **Costas CLI probe hardening checkpoint:** `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`<br>
+> **Costas chat navigation repair checkpoint:** `83eba5585b53b748ff1bae7f930deb3302597fdc`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -305,6 +307,17 @@ Invalid receipt accepts only the two exact backend messages for refusal/success 
 retryable, mismatched, foreign, and forged shapes stay on the generic fallback path. The safety card never claims
 execution or Butler refusal.
 
+Two Desktop lifecycle regressions discovered during packaged verification are closed separately from Butler
+authority:
+
+- a healthy local `hermes --version` measured 8.6 seconds, exceeding the old shared 5-second probe and causing a
+  false bootstrap attempt; CLI liveness now has a bounded 15-second budget while runtime import probes remain 5s;
+- selecting the already-loaded main conversation from a full-page tab previously fronted the workspace pane but
+  skipped React Router navigation, leaving the page visible; session-open disposition now distinguishes `tile`,
+  `main`, and `load`, and both `main` and `load` navigate to the conversation route.
+
+Neither repair changes LUCID identity, authority, capability, retry, or receipt semantics.
+
 ---
 
 ## 2 · Live observed evidence
@@ -456,6 +469,8 @@ Desktop TypeScript          GREEN
 Desktop ESLint              GREEN, baseline unrelated warnings only
 Hub UI tests                GREEN
 Receipt/safety UI + Thread  31 passed
+Chat route regression       56 passed
+CLI probe tests             11 passed
 Production renderer build   GREEN
 Electron main/preload       GREEN
 Packaged Catalyst.app       GREEN
@@ -479,6 +494,11 @@ e64a389ccd67ef0b10c017ff3249eadbe28352523f344a6ef850c6736178fc90  apps/desktop/s
 2dd43df0534cd3f3e783cc65ef921d37111f621faa15eb89c417c2b619356b53  apps/desktop/src/lib/lucid-receipt.test.ts
 7d8edae58402d0927df42f72ed03be04228f876e21d116cf34f6c813b78ffd93  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.test.tsx
 05bc52313044d0b22fefed0d658107ab638cc0e2f550e5c296a7c0529e887bb9  apps/desktop/src/components/assistant-ui/thread/streaming.test.tsx
+b98b2eb698af7d01e10ab334c3d0b2678cba275eee94ffd8027982acc9bf80b6  apps/desktop/electron/backend-probes.ts
+644614bfe36b17ac40a3b4b133810ff49f09561f1804ce20a9fcae1b735c6089  apps/desktop/electron/backend-probes.test.ts
+7e41c7d2a18b50ab796856fbd1fe6975197a8502afdc1599055b913e84638d9f  apps/desktop/src/store/session-states.ts
+70ac25cc7df510b535af0115ccf3f195babd20276b2a8150903d1831960383e6  apps/desktop/src/store/session-states.test.ts
+fbb0fe6394c45e4d9869dc0c9c8fb34bba2c15d801d48ef5ca45470ba32cddb0  apps/desktop/src/app/contrib/wiring.tsx
 ```
 
 ---
@@ -764,7 +784,9 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, receipt UI checkpoint
 `3cad879636f536d8cb28f6e361b04c1ddb170c28`, clean packaged UI checkpoint
 `f7835a87d6ad3072d9a56305e88854132a4d9938`, safety-state UI checkpoint
-`e943c61bece7e6c8baa0e0fd4441f469b46bd59c`, and this document hash:
+`e943c61bece7e6c8baa0e0fd4441f469b46bd59c`, CLI probe checkpoint
+`a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`, chat navigation checkpoint
+`83eba5585b53b748ff1bae7f930deb3302597fdc`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -792,9 +814,12 @@ lifecycle hardening 7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d
 receipt UI          3cad879636f536d8cb28f6e361b04c1ddb170c28
 clean packaged UI   f7835a87d6ad3072d9a56305e88854132a4d9938
 safety-state UI     e943c61bece7e6c8baa0e0fd4441f469b46bd59c
+CLI probe hardening a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb
+chat navigation     83eba5585b53b748ff1bae7f930deb3302597fdc
 ```
 
-Rollback safety-state UI by reverting `e943c61be`; rollback packaged evidence separately by reverting
+Rollback chat navigation by reverting `83eba5585`; rollback CLI probe hardening separately by reverting
+`a5cb4a304`; rollback safety-state UI separately by reverting `e943c61be`; rollback packaged evidence separately by reverting
 `f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;
 rollback lifecycle hardening separately by reverting
 `7b5c0f22b`; rollback success projection separately by reverting

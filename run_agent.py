@@ -2876,11 +2876,10 @@ class AIAgent:
         # Codex app-server owns its model/tool loop and watches a private
         # interrupt event rather than Hermes' per-thread flag.
         if getattr(self, "api_mode", None) == "codex_app_server":
-            _codex_session = getattr(self, "_codex_session", None)
-            _request_interrupt = getattr(_codex_session, "request_interrupt", None)
-            if callable(_request_interrupt):
+            runtime_host = getattr(self, "_runtime_session_host", None)
+            if runtime_host is not None:
                 try:
-                    _request_interrupt()
+                    runtime_host.interrupt()
                 except Exception:
                     logger.debug(
                         "Failed to interrupt Codex app-server turn",
@@ -3049,9 +3048,8 @@ class AIAgent:
         # Codex owns its internal reasoning/tool loop, so use its first-class
         # active-turn steering protocol rather than interrupting the subprocess.
         if getattr(self, "api_mode", None) == "codex_app_server":
-            _codex_session = getattr(self, "_codex_session", None)
-            _native_steer = getattr(_codex_session, "request_steer", None)
-            if callable(_native_steer):
+            runtime_host = getattr(self, "_runtime_session_host", None)
+            if runtime_host is not None:
                 _redirect_lock = getattr(self, "_pending_redirect_lock", None)
                 if _redirect_lock is not None:
                     with _redirect_lock:
@@ -3060,7 +3058,7 @@ class AIAgent:
                 elif self._interrupt_requested:
                     return False
                 try:
-                    return bool(_native_steer(cleaned))
+                    return bool(runtime_host.steer_active_turn(cleaned))
                 except Exception:
                     logger.debug("Codex app-server turn/steer failed", exc_info=True)
                     return False
@@ -3808,6 +3806,16 @@ class AIAgent:
         except Exception:
             pass
 
+        # A soft cache eviction drops the only in-memory control path. The
+        # current host cannot resume after restart, so retaining its subprocess
+        # would be an unreachable leak rather than resumability.
+        try:
+            from agent.codex_runtime import _close_runtime_session_host
+
+            _close_runtime_session_host(self)
+        except Exception:
+            pass
+
         # Close the OpenAI/httpx client to release sockets immediately.
         try:
             client = getattr(self, "client", None)
@@ -3864,7 +3872,16 @@ class AIAgent:
         except Exception:
             pass
 
-        # 5. Close the OpenAI/httpx client
+        # 5. Close the process-local runtime session host. Clearing ownership
+        # before close makes repeated close/release paths exactly-once.
+        try:
+            from agent.codex_runtime import _close_runtime_session_host
+
+            _close_runtime_session_host(self)
+        except Exception:
+            pass
+
+        # 6. Close the OpenAI/httpx client
         try:
             client = getattr(self, "client", None)
             if client is not None:
@@ -3873,7 +3890,7 @@ class AIAgent:
         except Exception:
             pass
 
-        # 6. Free conversation history.  Mirrors _release_evicted_agent_soft's
+        # 7. Free conversation history.  Mirrors _release_evicted_agent_soft's
         # soft-eviction clear — close() is the hard teardown for true session
         # boundaries (/new, /reset, session expiry), so the message list won't
         # be reused.  Drops the reference proactively rather than waiting for
@@ -3884,7 +3901,7 @@ class AIAgent:
         except Exception:
             pass
 
-        # 7. Finalize the owned SQLite session row unless this agent is only a
+        # 8. Finalize the owned SQLite session row unless this agent is only a
         # temporary helper that deliberately handed session ownership forward
         # (manual compression helpers that rotate to a continuation session_id,
         # or background-review forks that share the live parent's session_id and

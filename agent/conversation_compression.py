@@ -2199,10 +2199,10 @@ def _compress_context_via_codex_app_server(
             existing_prompt = agent._build_system_prompt(system_message)
         return messages, existing_prompt
 
-    codex_session = getattr(agent, "_codex_session", None)
-    if codex_session is None:
+    runtime_host = getattr(agent, "_runtime_session_host", None)
+    if runtime_host is None:
         logger.info(
-            "codex app-server compaction skipped: no active codex thread "
+            "runtime session compaction skipped: no active host "
             "(session=%s messages=%d tokens=~%s)",
             getattr(agent, "session_id", None) or "none",
             len(messages),
@@ -2236,7 +2236,8 @@ def _compress_context_via_codex_app_server(
     _activity_heartbeat: Optional[_CompressionActivityHeartbeat] = None
     try:
         _activity_heartbeat = _CompressionActivityHeartbeat(agent).start()
-        result = codex_session.compact_thread()
+        result = runtime_host.compact()
+        legacy_result = runtime_host.take_legacy_result(result)
     except BaseException:
         if _activity_heartbeat is not None:
             _activity_heartbeat.stop("context compression failed")
@@ -2249,11 +2250,9 @@ def _compress_context_via_codex_app_server(
         _activity_heartbeat.stop("context compression completed")
 
     if getattr(result, "should_retire", False):
-        try:
-            codex_session.close()
-        except Exception:
-            pass
-        agent._codex_session = None
+        from agent.codex_runtime import _close_runtime_session_host
+
+        _close_runtime_session_host(agent)
 
     if getattr(result, "interrupted", False) or getattr(result, "error", None):
         try:
@@ -2276,7 +2275,7 @@ def _compress_context_via_codex_app_server(
 
         _record_codex_app_server_compaction(
             agent,
-            result,
+            legacy_result or result,
             approx_tokens=approx_tokens,
             force=True,
         )
@@ -2299,8 +2298,8 @@ def _compress_context_via_codex_app_server(
     logger.info(
         "codex app-server compaction done: session=%s thread=%s turn=%s",
         getattr(agent, "session_id", None) or "none",
-        getattr(result, "thread_id", None) or "",
-        getattr(result, "turn_id", None) or "",
+        getattr(legacy_result, "thread_id", None) or "",
+        getattr(legacy_result, "turn_id", None) or "",
     )
     existing_prompt = getattr(agent, "_cached_system_prompt", None)
     if not existing_prompt:

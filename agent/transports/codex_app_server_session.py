@@ -29,7 +29,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 from agent.codex_responses_adapter import _format_responses_error
 from agent.redact import redact_sensitive_text
@@ -90,6 +90,18 @@ class TurnResult:
     should_retire: bool = False
 
 
+class _CodexSessionBackend(Protocol):
+    def run_turn(self, user_input: Any, **kwargs: Any) -> TurnResult: ...
+
+    def request_steer(self, text: str) -> bool: ...
+
+    def request_interrupt(self) -> None: ...
+
+    def compact_thread(self, **kwargs: Any) -> TurnResult: ...
+
+    def close(self) -> None: ...
+
+
 class CodexRuntimeSessionHost:
     """Provider-neutral host facade over one lazy Codex session.
 
@@ -110,7 +122,7 @@ class CodexRuntimeSessionHost:
         durable_close_proof=False,
     )
 
-    def __init__(self, session: "CodexAppServerSession") -> None:
+    def __init__(self, session: _CodexSessionBackend) -> None:
         self._session = session
         self._closed = False
         self._legacy_result: tuple[RuntimeTurnResult, TurnResult] | None = None
@@ -146,16 +158,22 @@ class CodexRuntimeSessionHost:
         self._legacy_result = None
         self._session.close()
 
-    def legacy_result_fields(self, result: RuntimeTurnResult) -> dict[str, str | None]:
-        """Codex-only compatibility fields for the existing outer result dict."""
+    def take_legacy_result(self, result: RuntimeTurnResult) -> TurnResult | None:
+        """Consume the Codex-only result retained for an outer compatibility adapter."""
         pair = self._legacy_result
         self._legacy_result = None
         if pair is None or pair[0] is not result:
+            return None
+        return pair[1]
+
+    @staticmethod
+    def legacy_result_fields(result: TurnResult | None) -> dict[str, str | None]:
+        """Codex-only compatibility fields for the existing outer result dict."""
+        if result is None:
             return {"codex_thread_id": None, "codex_turn_id": None}
-        legacy = pair[1]
         return {
-            "codex_thread_id": legacy.thread_id,
-            "codex_turn_id": legacy.turn_id,
+            "codex_thread_id": result.thread_id,
+            "codex_turn_id": result.turn_id,
         }
 
     def _project_result(self, result: TurnResult) -> RuntimeTurnResult:

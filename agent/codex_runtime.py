@@ -693,31 +693,30 @@ def run_codex_app_server_turn(
         # users see no live tool-progress or interim commentary while
         # codex_app_server is running — only the final answer (#33200).
         # Supersedes the narrower item/started-only bridge from #38835.
-        agent._codex_session = CodexAppServerSession(
-            cwd=cwd,
-            approval_callback=approval_callback,
-            request_routing=_ServerRequestRouting(
-                auto_approve_exec=auto_approve_requests,
-                auto_approve_apply_patch=auto_approve_requests,
-            ),
-            on_event=make_codex_app_server_event_bridge(agent),
+        agent._runtime_session_host = CodexRuntimeSessionHost(
+            CodexAppServerSession(
+                cwd=cwd,
+                approval_callback=approval_callback,
+                request_routing=_ServerRequestRouting(
+                    auto_approve_exec=auto_approve_requests,
+                    auto_approve_apply_patch=auto_approve_requests,
+                ),
+                on_event=make_codex_app_server_event_bridge(agent),
+            )
         )
 
     # NOTE: the user message is ALREADY appended to messages by the
     # standard run_conversation() flow (line ~11823) before the early
     # return reaches us. Do NOT append again — that would duplicate.
 
+    runtime_host = agent._runtime_session_host
     try:
-        turn = agent._codex_session.run_turn(user_input=user_message)
+        turn = runtime_host.send(user_message)
     except Exception as exc:
         logger.exception("codex app-server turn failed")
-        # Crash → unconditionally drop the session so the next turn
-        # respawns from scratch instead of reusing a dead client.
-        try:
-            agent._codex_session.close()
-        except Exception:
-            pass
-        agent._codex_session = None
+        # Crash → unconditionally drop the host so the next turn creates a
+        # fresh process/session instead of reusing a dead client.
+        _close_runtime_session_host(agent)
         _user_interrupted = bool(
             getattr(agent, "_interrupt_requested", False)
         )
@@ -768,11 +767,10 @@ def run_codex_app_server_turn(
             "codex app-server session retired (turn error: %s)",
             turn.error,
         )
-        try:
-            agent._codex_session.close()
-        except Exception:
-            pass
-        agent._codex_session = None
+        _close_runtime_session_host(agent)
+
+    legacy_turn = runtime_host.take_legacy_result(turn)
+    legacy_result_fields = runtime_host.legacy_result_fields(legacy_turn)
 
     # Splice projected messages into the conversation. The projector emits
     # standard {role, content, tool_calls, tool_call_id} entries, which
@@ -812,7 +810,7 @@ def run_codex_app_server_turn(
     agent._iters_since_skill = (
         getattr(agent, "_iters_since_skill", 0) + turn.tool_iterations
     )
-    _record_codex_app_server_compaction(agent, turn)
+    _record_codex_app_server_compaction(agent, legacy_turn or turn)
     usage_result = _record_codex_app_server_usage(agent, turn)
     api_calls = 1
 
@@ -882,8 +880,7 @@ def run_codex_app_server_turn(
         # would re-INSERT the already-flushed user turn (append_message has no
         # dedup), reintroducing the #860 / #42039 duplicate-write bug.
         "agent_persisted": True,
-        "codex_thread_id": turn.thread_id,
-        "codex_turn_id": turn.turn_id,
+        **legacy_result_fields,
         **usage_result,
     }
 

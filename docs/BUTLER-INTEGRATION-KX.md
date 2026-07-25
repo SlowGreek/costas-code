@@ -10,6 +10,7 @@
 > **Costas branch:** `users/brianhu/ideation`<br>
 > **Costas source checkpoint:** `415b82b34b7c6516decedd6f05d655025d11a0c2`<br>
 > **Costas TTD hardening checkpoint:** `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`<br>
+> **Costas success-projection checkpoint:** `8e48fab077116554add17832a0aaf714e816373f`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -326,7 +327,7 @@ HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
   tests/hermes_cli/test_dashboard_admin_endpoints.py -q
 
 4 files
-362 passed
+365 passed
 0 failed
 ```
 
@@ -342,6 +343,10 @@ Coverage includes:
 - closed content-free `hermes-lucid-receipt/1` projection;
 - raw Butler error text and raw Envelope fields omitted for admitted LUCID calls;
 - malformed LUCID structured errors fail closed as `lucid-invalid-receipt`;
+- successful LUCID calls discard raw text and raw `structuredContent.envelope`;
+- successful LUCID calls expose only intended `result` plus the closed receipt;
+- malformed successful LUCID receipts fail closed without result/text fallback;
+- foreign MCP success/error behavior remains unchanged;
 - policy refusals do not trip the MCP transport circuit breaker;
 - automatic retry disabled for SHOW/SET/MORPH/DISPATCH/STEER/CANCEL;
 - exact `lucid-outcome-unknown` on effect-capable transport ambiguity;
@@ -367,12 +372,12 @@ Current source hashes:
 
 ```text
 2185981336c7267328024e7f43251c5d3ee6a86d4a7666212f72dee8c963ce12  tools/lucid_mcp_bridge.py
-458e10700c11205a20623bab1ec33e793af6aa5095b9dce4a443ba98b5e2cf05  tools/mcp_tool.py
+236cff0d1db5bdbf9f32d554e750077e177115e1e697bae8e0f301841aef86ae  tools/mcp_tool.py
 b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web_server.py
 96ce91596e89e58f6b5cd7684bfa8e6b2930b68881b6aaf6f4ce700667df1244  apps/desktop/src/app/skills/lucid-bridge-status.tsx
 41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
 8ca0160475047b7cb841e63ab8e9d8d1d9d7c1a435bdccb977354a68b1911a17  tests/tools/test_lucid_mcp_bridge.py
-5a6db149b9e40d7d7596bbb01157547f63b8cbdd044924ae2a9cdecb4a63f620  tests/tools/test_mcp_tool.py
+d35683e94986b9f417c75adba3ddd5abff1707e9fe0cb48a9ff17bfa0de8e553  tests/tools/test_mcp_tool.py
 ```
 
 ---
@@ -554,6 +559,11 @@ unknown fields
 session identity
 ```
 
+For an admitted successful LUCID call, generic MCP text is also never forwarded. Costas returns only the intended
+`structuredContent.result` plus the same closed receipt. Missing or malformed successful receipts fail closed as
+`lucid-invalid-receipt`; there is no fallback to text or raw structured content. Foreign MCP success and error
+projection remains unchanged.
+
 For an admitted LUCID `isError`, raw Butler text is never forwarded. A valid receipt yields a generic bounded
 summary such as `Butler refused LUCID call (no-capability)` plus the closed DTO. An invalid receipt yields only
 `lucid-invalid-receipt` with `retryable=false`. Ordinary MCP errors retain generic behavior. Valid Butler policy
@@ -648,7 +658,8 @@ not an incomplete claim of execution.
 
 AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costas identity checkpoint
 `415b82b34b7c6516decedd6f05d655025d11a0c2`, TTD hardening checkpoint
-`9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, and this document hash:
+`9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, success-projection checkpoint
+`8e48fab077116554add17832a0aaf714e816373f`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -671,9 +682,11 @@ Costas checkpoints:
 ```text
 identity bridge    415b82b34b7c6516decedd6f05d655025d11a0c2
 TTD hardening      9bb6e4f67697e6435056ed2b2b0fe56bc194a165
+success projection 8e48fab077116554add17832a0aaf714e816373f
 ```
 
-Rollback TTD hardening by reverting `9bb6e4f67`; rollback identity enrichment separately by reverting
+Rollback success projection by reverting `8e48fab07`; rollback TTD hardening separately by reverting
+`9bb6e4f67`; rollback identity enrichment separately by reverting
 `415b82b34`. The prior first-class Hub/catalog install remains separately checkpointed at `6a5d26774`.
 
 No AE file is modified by this handoff. AE may copy this document into its docs shelf or return disposition in a

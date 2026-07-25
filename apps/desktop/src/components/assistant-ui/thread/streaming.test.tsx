@@ -311,6 +311,46 @@ function assistantLucidMessage(): ThreadMessage {
   } as ThreadMessage
 }
 
+function assistantLucidSafetyMessage(code: 'lucid-invalid-receipt' | 'lucid-outcome-unknown'): ThreadMessage {
+  const outcomeUnknown = code === 'lucid-outcome-unknown'
+
+  return {
+    id: `assistant-${code}`,
+    role: 'assistant',
+    content: [
+      {
+        type: 'tool-call',
+        toolCallId: code,
+        toolName: outcomeUnknown ? 'mcp__lucid_quine__lucid_dispatch' : 'mcp__lucid_quine__lucid_get',
+        args: outcomeUnknown ? { task: 'engineer' } : { path: 'fleet' },
+        argsText: '{}',
+        result: outcomeUnknown
+          ? {
+              error: 'LUCID call outcome is unknown; automatic retry is disabled',
+              code,
+              retryable: false,
+              server: 'lucid-quine',
+              tool: 'lucid.dispatch'
+            }
+          : {
+              error: 'Butler returned an invalid LUCID refusal receipt',
+              code,
+              retryable: false
+            }
+      }
+    ],
+    status: { type: 'complete', reason: 'stop' },
+    createdAt,
+    metadata: {
+      unstable_state: null,
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {}
+    }
+  } as ThreadMessage
+}
+
 interface StreamingControls {
   emitSecond: () => void
   complete: () => void
@@ -710,6 +750,24 @@ describe('assistant-ui streaming renderer', () => {
     expect(screen.getByText('LUCID · GET')).toBeTruthy()
     expect(screen.getByText('Executed')).toBeTruthy()
     expect(container.querySelector('[data-tool-row]')).toBeNull()
+  })
+
+  it('renders LUCID outcome ambiguity as a dedicated safety card', async () => {
+    const { container } = render(
+      <MessageHarness message={assistantLucidSafetyMessage('lucid-outcome-unknown')} />
+    )
+
+    await waitFor(() => expect(screen.getByRole('alert', { name: 'LUCID safety state' })).toBeTruthy())
+    expect(screen.getByText('Outcome unknown')).toBeTruthy()
+    expect(screen.getByText('Do not retry automatically')).toBeTruthy()
+    expect(container.querySelector('[data-tool-row]')).toBeNull()
+  })
+
+  it('renders invalid LUCID receipts as protocol failures', async () => {
+    render(<MessageHarness message={assistantLucidSafetyMessage('lucid-invalid-receipt')} />)
+
+    await waitFor(() => expect(screen.getByText('Invalid receipt')).toBeTruthy())
+    expect(screen.getByText('No effect status accepted from this response')).toBeTruthy()
   })
 
   it('uses the normal tool row for failed image generations instead of dropping their error payload', async () => {

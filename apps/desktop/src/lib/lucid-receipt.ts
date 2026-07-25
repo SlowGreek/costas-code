@@ -28,6 +28,12 @@ export interface ParsedLucidToolResult {
   result: unknown
 }
 
+export interface ParsedLucidSafetyState {
+  code: 'lucid-invalid-receipt' | 'lucid-outcome-unknown'
+  message: string
+  verb: LucidVerb
+}
+
 const VERBS: readonly LucidVerb[] = ['show', 'get', 'set', 'morph', 'dispatch', 'steer', 'cancel']
 const TRUST: readonly LucidTrust[] = ['untrusted', 'attested', 'signed', 'verified']
 
@@ -149,4 +155,40 @@ export function parseLucidToolResult(toolName: string, value: unknown): ParsedLu
     receipt,
     result: hasResult ? object.result : null
   }
+}
+
+export function parseLucidSafetyState(toolName: string, value: unknown): ParsedLucidSafetyState | null {
+  const verb = VERBS.find(candidate => TOOL_NAMES.get(candidate) === toolName)
+
+  if (!verb) {
+    return null
+  }
+
+  const object = parseResult(value)
+
+  if (!object || object.retryable !== false) {
+    return null
+  }
+
+  if (
+    object.code === 'lucid-invalid-receipt' &&
+    Object.keys(object).sort().join('\0') === ['code', 'error', 'retryable'].join('\0') &&
+    (object.error === 'Butler returned an invalid LUCID refusal receipt' ||
+      object.error === 'Butler returned an invalid LUCID success receipt')
+  ) {
+    return { code: 'lucid-invalid-receipt', message: object.error, verb }
+  }
+
+  if (
+    object.code === 'lucid-outcome-unknown' &&
+    verb !== 'get' &&
+    Object.keys(object).sort().join('\0') === ['code', 'error', 'retryable', 'server', 'tool'].join('\0') &&
+    object.error === 'LUCID call outcome is unknown; automatic retry is disabled' &&
+    object.server === 'lucid-quine' &&
+    object.tool === `lucid.${verb}`
+  ) {
+    return { code: 'lucid-outcome-unknown', message: object.error, verb }
+  }
+
+  return null
 }

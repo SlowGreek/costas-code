@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { LucidReceiptCard } from './lucid-receipt-card'
+import { LucidSafetyStateCard } from './lucid-safety-state-card'
 
 const success = {
   result: { status: 'GREEN', rows: 2 },
@@ -66,5 +67,41 @@ describe('LUCID receipt card', () => {
     )
 
     expect(screen.getByText('Needs user · not run')).toBeTruthy()
+  })
+})
+
+describe('LUCID safety-state card', () => {
+  it('renders outcome ambiguity without claiming execution or retryability', () => {
+    render(
+      <LucidSafetyStateCard
+        value={{
+          code: 'lucid-outcome-unknown',
+          message: 'LUCID call outcome is unknown; automatic retry is disabled',
+          verb: 'dispatch'
+        }}
+      />
+    )
+
+    expect(screen.getByRole('alert', { name: 'LUCID safety state' })).toBeTruthy()
+    expect(screen.getByText('LUCID · DISPATCH')).toBeTruthy()
+    expect(screen.getByText('Outcome unknown')).toBeTruthy()
+    expect(screen.getByText('Do not retry automatically')).toBeTruthy()
+    expect(screen.queryByText('Executed')).toBeNull()
+  })
+
+  it('renders invalid receipt as a protocol failure, not a Butler refusal', () => {
+    render(
+      <LucidSafetyStateCard
+        value={{
+          code: 'lucid-invalid-receipt',
+          message: 'Butler returned an invalid LUCID refusal receipt',
+          verb: 'get'
+        }}
+      />
+    )
+
+    expect(screen.getByText('Invalid receipt')).toBeTruthy()
+    expect(screen.getByText('Butler returned an invalid LUCID refusal receipt')).toBeTruthy()
+    expect(screen.queryByText('Refused · not run')).toBeNull()
   })
 })

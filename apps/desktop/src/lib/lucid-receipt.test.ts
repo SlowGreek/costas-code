@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseLucidToolResult } from './lucid-receipt'
+import { parseLucidSafetyState, parseLucidToolResult } from './lucid-receipt'
 
 const receipt = {
   schema: 'hermes-lucid-receipt/1',
@@ -84,6 +84,66 @@ describe('LUCID receipt parser', () => {
       { result: {}, lucid_receipt: receipt, extra: true }
     ]) {
       expect(parseLucidToolResult('mcp__lucid_quine__lucid_get', value)).toBeNull()
+    }
+  })
+})
+
+describe('LUCID safety-state parser', () => {
+  it('admits exact outcome-unknown posture for an effect-capable LUCID tool', () => {
+    expect(
+      parseLucidSafetyState('mcp__lucid_quine__lucid_dispatch', {
+        error: 'LUCID call outcome is unknown; automatic retry is disabled',
+        code: 'lucid-outcome-unknown',
+        retryable: false,
+        server: 'lucid-quine',
+        tool: 'lucid.dispatch'
+      })
+    ).toEqual({
+      code: 'lucid-outcome-unknown',
+      message: 'LUCID call outcome is unknown; automatic retry is disabled',
+      verb: 'dispatch'
+    })
+  })
+
+  it('admits exact invalid-receipt posture without claiming a verb effect', () => {
+    expect(
+      parseLucidSafetyState('mcp__lucid_quine__lucid_get', {
+        error: 'Butler returned an invalid LUCID refusal receipt',
+        code: 'lucid-invalid-receipt',
+        retryable: false
+      })
+    ).toEqual({
+      code: 'lucid-invalid-receipt',
+      message: 'Butler returned an invalid LUCID refusal receipt',
+      verb: 'get'
+    })
+  })
+
+  it('rejects forged, open, retryable, mismatched, and read-only outcome-unknown states', () => {
+    const valid = {
+      error: 'LUCID call outcome is unknown; automatic retry is disabled',
+      code: 'lucid-outcome-unknown',
+      retryable: false,
+      server: 'lucid-quine',
+      tool: 'lucid.dispatch'
+    }
+
+    const cases: Array<[string, unknown]> = [
+      ['mcp__foreign__lucid_dispatch', valid],
+      ['mcp__lucid_quine__lucid_get', { ...valid, tool: 'lucid.get' }],
+      ['mcp__lucid_quine__lucid_dispatch', { ...valid, retryable: true }],
+      ['mcp__lucid_quine__lucid_dispatch', { ...valid, server: 'foreign' }],
+      ['mcp__lucid_quine__lucid_dispatch', { ...valid, tool: 'lucid.set' }],
+      ['mcp__lucid_quine__lucid_dispatch', { ...valid, extra: true }],
+      ['mcp__lucid_quine__lucid_dispatch', { ...valid, error: 'different' }],
+      [
+        'mcp__lucid_quine__lucid_get',
+        { error: 'raw private text', code: 'lucid-invalid-receipt', retryable: false }
+      ]
+    ]
+
+    for (const [toolName, value] of cases) {
+      expect(parseLucidSafetyState(toolName, value)).toBeNull()
     }
   })
 })

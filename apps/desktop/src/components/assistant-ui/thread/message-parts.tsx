@@ -10,13 +10,14 @@ import { ClarifyTool } from '@/components/assistant-ui/clarify-tool'
 import { MarkdownText, MarkdownTextContent } from '@/components/assistant-ui/markdown-text'
 import { ToolFallback, ToolGroupSlot } from '@/components/assistant-ui/tool/fallback'
 import { LucidReceiptCard } from '@/components/assistant-ui/tool/lucid-receipt-card'
+import { LucidSafetyStateCard } from '@/components/assistant-ui/tool/lucid-safety-state-card'
 import { useElapsedSeconds } from '@/components/chat/activity-timer'
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { DisclosureRow } from '@/components/chat/disclosure-row'
 import { GeneratedImage } from '@/components/chat/generated-image-result'
 import { useI18n } from '@/i18n'
 import { generatedImageFromResult } from '@/lib/generated-images'
-import { parseLucidToolResult } from '@/lib/lucid-receipt'
+import { parseLucidSafetyState, parseLucidToolResult } from '@/lib/lucid-receipt'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
 
@@ -56,6 +57,12 @@ const ChainToolFallback: FC<ToolCallMessagePartProps> = props => {
 
   if (lucid) {
     return <LucidReceiptCard value={lucid} />
+  }
+
+  const safety = parseLucidSafetyState(props.toolName, props.result)
+
+  if (safety) {
+    return <LucidSafetyStateCard value={safety} />
   }
 
   return <ToolFallback {...props} />

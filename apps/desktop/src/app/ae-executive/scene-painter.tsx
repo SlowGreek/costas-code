@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-import type { AeExecutiveScene, AeSceneNode } from './scene'
+import type { AeExecutiveScene } from './scene'
 
 interface AeScenePainterProps {
   scene: AeExecutiveScene
@@ -48,12 +48,14 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             {node.kids.map(paint)}
           </div>
         )
+
       case 'row':
         return (
           <div className="flex min-w-0 flex-wrap items-center" key={node.id} style={{ gap: node.a?.gap ?? 8 }}>
             {node.kids.map(paint)}
           </div>
         )
+
       case 'text':
         return (
           <p
@@ -68,8 +70,10 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             {node.a.text}
           </p>
         )
+
       case 'divider':
         return <div className="h-px bg-(--ui-stroke-tertiary)" key={node.id} role="separator" />
+
       case 'progress':
         return (
           <div className="grid gap-1.5" key={node.id}>
@@ -80,6 +84,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             <Progress aria-label={node.a.label} value={node.a.value} />
           </div>
         )
+
       case 'button':
         return (
           <Button
@@ -92,6 +97,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             {node.a.label}
           </Button>
         )
+
       case 'input':
         return (
           <label className="grid gap-1.5" key={node.id}>
@@ -111,6 +117,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
         )
       default: {
         const exhaustive: never = node
+
         return exhaustive
       }
     }
@@ -132,19 +139,27 @@ export function validateExecutiveScene(scene: AeExecutiveScene): readonly string
   const errors: string[] = []
   const ids = new Set<string>()
 
-  if (scene.sceneVersion !== '1.0.0') errors.push('scene-version')
+  if (scene.sceneVersion !== '1.0.0') {
+    errors.push('scene-version')
+  }
 
   for (const node of scene.nodes) {
-    if (!node.id || ids.has(node.id)) errors.push(`node-id:${node.id || 'empty'}`)
+    if (!node.id || ids.has(node.id)) {
+      errors.push(`node-id:${node.id || 'empty'}`)
+    }
+
     ids.add(node.id)
   }
 
-  if (!ids.has(scene.root)) errors.push('root-missing')
+  if (!ids.has(scene.root)) {
+    errors.push('root-missing')
+  }
 
   for (const node of scene.nodes) {
     if ((node.p === 'column' || node.p === 'row') && node.kids.some(id => !ids.has(id))) {
       errors.push(`child-missing:${node.id}`)
     }
+
     if (node.p === 'progress' && (node.a.value < 0 || node.a.value > 1)) {
       errors.push(`progress-bounds:${node.id}`)
     }

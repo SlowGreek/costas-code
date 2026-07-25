@@ -181,9 +181,11 @@ const bodyByTab: Record<AeExecutiveTabId, readonly AeSceneNode[]> = {
 export function executiveScene(tab: AeExecutiveTabId): AeExecutiveScene {
   const children = bodyByTab[tab]
   const root = `ae-${tab}-root`
+
   const nestedIds = new Set(
     children.flatMap(node => (node.p === 'column' || node.p === 'row' ? [...node.kids] : []))
   )
+
   const rootKids = children.filter(node => !nestedIds.has(node.id)).map(node => node.id)
   const nodes: AeSceneNode[] = [{ id: root, p: 'column', a: { gap: 14 }, kids: rootKids }, ...children]
 

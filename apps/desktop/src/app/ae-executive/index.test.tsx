@@ -3,10 +3,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { AeExecutiveWorkspace } from '.'
 import { AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
 import { executiveScene } from './scene'
 import { validateExecutiveScene } from './scene-painter'
+
+import { AeExecutiveWorkspace } from '.'
 
 const EXPECTED_LABELS = [
   '[H]OME',

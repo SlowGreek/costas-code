@@ -20,7 +20,11 @@ export function AeExecutiveWorkspace() {
     (action: string) => {
       if (action.startsWith('route:')) {
         const destination = action.slice('route:'.length)
-        if (isAeExecutiveTabId(destination)) navigate(`/ae/${destination}`)
+
+        if (isAeExecutiveTabId(destination)) {
+          navigate(`/ae/${destination}`)
+        }
+
         return
       }
 
@@ -83,7 +87,7 @@ export function AeExecutiveWorkspace() {
       </main>
 
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-(--ui-stroke-tertiary) px-4 text-[0.65rem] text-(--ui-text-quaternary)">
-        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />
         <span aria-live="polite">{notice}</span>
         <span className="ml-auto">Desktop paints · AE owns semantics · QUINE settles</span>
       </footer>

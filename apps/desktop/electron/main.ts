@@ -30,6 +30,7 @@ import {
 } from 'electron'
 import nodePty from 'node-pty'
 
+import { runAeExecutiveProjector, resolveAeExecutiveBinary } from './ae-executive'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
@@ -8671,6 +8672,21 @@ function createWindow() {
     sendWindowStateChanged()
   })
 }
+
+ipcMain.handle('hermes:ae-executive:scenes', async () => {
+  const binary = resolveAeExecutiveBinary({
+    isPackaged: IS_PACKAGED,
+    resourcesPath: process.resourcesPath,
+    sourceRepoRoot: SOURCE_REPO_ROOT,
+    override: process.env.HERMES_DESKTOP_AE_EXECUTIVE_BINARY
+  })
+
+  if (!binary) {
+    throw new Error('ae-executive-projector-unavailable')
+  }
+
+  return runAeExecutiveProjector(binary)
+})
 
 ipcMain.handle('hermes:connection', async (_event, profile) => ensureBackend(profile))
 // Reconnect-after-wake recovery. A REMOTE primary backend has no child process,

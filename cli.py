@@ -9043,6 +9043,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             return False
         elif canonical == "help":
             self.show_help()
+        elif canonical == "feedback":
+            self._handle_feedback_command(cmd_original)
         elif canonical == "profile":
             self._handle_profile_command()
         elif canonical == "tools":

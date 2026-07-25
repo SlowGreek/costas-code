@@ -506,6 +506,44 @@ class CLICommandsMixin:
         self.new_session()
         _cprint(f"{_DIM}Session reset. New tool configuration is active.{_RST}")
 
+    def _handle_feedback_command(self, cmd_original: str):
+        """``/feedback <what went wrong>`` — file a GitHub issue from the chat.
+
+        Shows the rendered report and asks before publishing: the payload
+        carries a log tail, and a user should see what leaves their machine
+        rather than discover it on a public-facing issue afterwards.
+        """
+        from cli import _cprint, _DIM, _RST
+        from hermes_cli.feedback import ISSUES_URL, file_issue, format_result
+
+        parts = (cmd_original or "").strip().split(None, 1)
+        description = parts[1] if len(parts) > 1 else ""
+
+        if not description.strip():
+            _cprint(
+                f"{_DIM}Usage: /feedback <what went wrong>{_RST}\n"
+                f"{_DIM}Attaches version, platform, model, and the last errors.log "
+                f"lines. Nothing from this conversation is included.{_RST}\n"
+                f"{_DIM}Issues: {ISSUES_URL}{_RST}"
+            )
+            return
+
+        preview = file_issue(description, dry_run=True)
+        _cprint(format_result(preview))
+
+        try:
+            answer = input("\nFile this issue? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            _cprint(f"\n{_DIM}Cancelled.{_RST}")
+            return
+
+        if answer not in {"y", "yes"}:
+            _cprint(f"{_DIM}Cancelled — nothing was sent.{_RST}")
+            return
+
+        _cprint(f"{_DIM}Filing…{_RST}")
+        _cprint(format_result(file_issue(description)))
+
     def _handle_profile_command(self):
         """Display active profile name and home directory."""
         from hermes_constants import display_hermes_home

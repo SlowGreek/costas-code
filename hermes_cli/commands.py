@@ -228,6 +228,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",
                gateway_only=True, args_hint="[page]"),
+    CommandDef("feedback", "File a bug report on GitHub", "Info",
+               aliases=("bug",), args_hint="<what went wrong>"),
     CommandDef("help", "Show available commands", "Info"),
     CommandDef("restart", "Gracefully restart the gateway after draining active runs", "Session",
                gateway_only=True),
@@ -1167,7 +1169,10 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
 #   - moa: high-cost slash mode, available through /hermes moa to avoid
 #     displacing existing native Slack slash commands at the 50-command cap.
 #   - debug: the log/report upload surface; reached via /hermes debug on Slack.
-_SLACK_VIA_HERMES_ONLY = frozenset({"topup", "moa", "debug"})
+#   - feedback: filing a bug is a rare, deliberate act and the flow continues in
+#     the browser anyway, so it yields its native slot rather than displacing an
+#     everyday command at the cap.
+_SLACK_VIA_HERMES_ONLY = frozenset({"topup", "moa", "debug", "feedback"})
 
 
 def _sanitize_slack_name(raw: str) -> str:

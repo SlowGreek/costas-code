@@ -108,7 +108,7 @@ r0_fixture_claim: GREEN 37/37 sibling-owned focused tests
 c2_binding_foundation: GREEN typed SessionDB observe binding; gateway/Desktop no-effect attachment PENDING
 f1_disposition: 11/5/3; authority none
 ae_f1_receipt_sha256: fcbe71f1930994b3061fb656bff1146798308c51a403590db2d4c464d731b4da
-ae_f5_receipt_sha256: 6e4021d6b2cf85472fc20a10baebf682d2a5f582bea3f0396684dfbf163d4e8c
+ae_f5_receipt_sha256: 455fdbfab693666516d433916c9d588aedc9dcfbf1e8433fc62d6bb6c6d5c985
 f5_live: HOLD INDEPENDENT INTEGRATION REVIEW
 fleet_launch: false
 fleet_mutation: false

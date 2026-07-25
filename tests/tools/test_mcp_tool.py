@@ -1957,6 +1957,38 @@ class TestGracefulFallback:
 # Shutdown (public API)
 # ---------------------------------------------------------------------------
 
+class TestLifecycleWaitCleanup:
+    def test_closed_owner_loop_is_not_cancelled(self):
+        from tools.mcp_tool import _cancel_wait_task_safely
+
+        task = MagicMock()
+        task.done.return_value = False
+        task.get_loop.return_value.is_closed.return_value = True
+
+        assert asyncio.run(_cancel_wait_task_safely(task)) is False
+        task.cancel.assert_not_called()
+
+    def test_event_loop_closed_during_cancel_is_swallowed(self):
+        from tools.mcp_tool import _cancel_wait_task_safely
+
+        task = MagicMock()
+        task.done.return_value = False
+        task.get_loop.return_value.is_closed.return_value = False
+        task.cancel.side_effect = RuntimeError("Event loop is closed")
+
+        assert asyncio.run(_cancel_wait_task_safely(task)) is False
+
+    def test_normal_pending_task_is_cancelled_and_awaited(self):
+        from tools.mcp_tool import _cancel_wait_task_safely
+
+        async def drive():
+            task = asyncio.create_task(asyncio.Event().wait())
+            cancelled = await _cancel_wait_task_safely(task)
+            return cancelled, task.cancelled()
+
+        assert asyncio.run(drive()) == (True, True)
+
+
 class TestShutdown:
     def test_no_servers_safe(self):
         """shutdown_mcp_servers with no servers does nothing."""

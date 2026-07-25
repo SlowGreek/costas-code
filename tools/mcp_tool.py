@@ -1810,6 +1810,37 @@ class ElicitationHandler:
 # Server task -- each MCP server lives in one long-lived asyncio Task
 # ---------------------------------------------------------------------------
 
+async def _cancel_wait_task_safely(task) -> bool:
+    """Cancel and await one lifecycle waiter without racing loop closure.
+
+    Coroutine finalization can run after the owner loop has closed during a
+    Desktop/backend restart. In that state ``Task.cancel()`` itself raises
+    ``RuntimeError('Event loop is closed')`` before the existing guarded await.
+    Treat only that exact shutdown race as already terminal; normal cancellation
+    still propagates through and is awaited.
+    """
+
+    if task.done():
+        return False
+    try:
+        owner_loop = task.get_loop()
+        if owner_loop.is_closed():
+            return False
+    except (AttributeError, RuntimeError):
+        return False
+    try:
+        task.cancel()
+    except RuntimeError as exc:
+        if "Event loop is closed" in str(exc):
+            return False
+        raise
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+    return True
+
+
 class MCPServerTask:
     """Manages a single MCP server connection in a dedicated asyncio Task.
 
@@ -2293,13 +2324,8 @@ class MCPServerTask:
                     # Clear the rapid-drop budget (#62212).
                     self._mark_session_proven()
         finally:
-            for t in (shutdown_task, reconnect_task):
-                if not t.done():
-                    t.cancel()
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
+            for task in (shutdown_task, reconnect_task):
+                await _cancel_wait_task_safely(task)
 
         if self._shutdown_event.is_set():
             return "shutdown"
@@ -2337,13 +2363,8 @@ class MCPServerTask:
                 timeout=timeout,
             )
         finally:
-            for t in (shutdown_task, reconnect_task):
-                if not t.done():
-                    t.cancel()
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
+            for task in (shutdown_task, reconnect_task):
+                await _cancel_wait_task_safely(task)
         if self._shutdown_event.is_set():
             return "shutdown"
         self._reconnect_event.clear()

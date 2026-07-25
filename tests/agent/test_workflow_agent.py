@@ -20,6 +20,7 @@ from agent.workflow_agent import (
     build_agent_goal,
     check_depth_allowed,
     resolve_child_depth,
+    resolve_workflow_max_iterations,
     run_workflow_agent,
 )
 
@@ -84,6 +85,29 @@ class TestBuildAgentGoal:
         assert build_agent_goal("Just do it", None, None) == "Just do it"
 
 
+class TestResolveWorkflowMaxIterations:
+    def test_omitted_value_uses_delegation_config(self):
+        with patch("tools.delegate_tool._load_config", return_value={"max_iterations": 17}):
+            assert resolve_workflow_max_iterations(None) == 17
+
+    def test_omitted_value_uses_default_when_config_missing(self):
+        with patch("tools.delegate_tool._load_config", return_value={}):
+            assert resolve_workflow_max_iterations(None) == 50
+
+    def test_invalid_config_falls_back_to_default(self):
+        for value in (0, -1, False, "not-a-number"):
+            with patch("tools.delegate_tool._load_config", return_value={"max_iterations": value}):
+                assert resolve_workflow_max_iterations(None) == 50
+
+    def test_explicit_positive_value_is_honored(self):
+        assert resolve_workflow_max_iterations(3) == 3
+
+    def test_explicit_non_positive_or_non_integer_value_fails_closed(self):
+        for value in (0, -1, False, "3"):
+            with pytest.raises(WorkflowAgentError):
+                resolve_workflow_max_iterations(value)
+
+
 def _fake_child_runner(results):
     """Return a _run_single_child stub yielding queued results in order."""
     queue = list(results)
@@ -117,6 +141,25 @@ class TestRunWorkflowAgent:
         assert outcome.ok
         assert outcome.value == {"verdict": "confirmed"}
         assert outcome.attempts == 1
+
+    def test_omitted_iteration_override_never_builds_a_zero_turn_child(self):
+        with (
+            patch("tools.delegate_tool._build_child_agent", return_value=object()) as build,
+            patch("tools.delegate_tool._get_max_spawn_depth", return_value=3),
+            patch("tools.delegate_tool._load_config", return_value={"max_iterations": 23}),
+            patch(
+                "tools.delegate_tool._run_single_child",
+                side_effect=_fake_child_runner([_completed('{"verdict": "confirmed"}')]),
+            ),
+        ):
+            outcome = run_workflow_agent(
+                "Verify the finding",
+                owner_agent=object(),
+                owner_depth=0,
+                schema=SCHEMA,
+            )
+        assert outcome.ok
+        assert build.call_args.kwargs["max_iterations"] == 23
 
     def test_narrated_json_still_parses(self):
         outcome = self._run(

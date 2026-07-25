@@ -124,6 +124,46 @@ def build_agent_goal(prompt: str, schema: Optional[Dict[str, Any]], context: Opt
     return "".join(parts)
 
 
+def resolve_workflow_max_iterations(value: Any) -> int:
+    """Resolve a workflow child's positive tool/API iteration budget.
+
+    ``workflow.agent()`` exposes an optional per-call override.  Omission must
+    inherit the operator-owned delegation budget, not become ``0``: a zero-turn
+    child immediately enters the max-iterations finalizer and can never call a
+    tool.  Explicit values are script input and therefore fail closed unless
+    they are positive integers.
+    """
+    from tools.delegate_tool import DEFAULT_MAX_ITERATIONS, _load_config
+
+    if value is not None:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise WorkflowAgentError(
+                f"workflow agent max_iterations must be a positive integer, got {value!r}"
+            )
+        return value
+
+    configured = _load_config().get("max_iterations", DEFAULT_MAX_ITERATIONS)
+    if isinstance(configured, bool):
+        logger.warning(
+            "Invalid delegation.max_iterations=%r for workflow child; using default %d",
+            configured,
+            DEFAULT_MAX_ITERATIONS,
+        )
+        return DEFAULT_MAX_ITERATIONS
+    try:
+        resolved = int(configured)
+    except (TypeError, ValueError):
+        resolved = 0
+    if resolved < 1:
+        logger.warning(
+            "Invalid delegation.max_iterations=%r for workflow child; using default %d",
+            configured,
+            DEFAULT_MAX_ITERATIONS,
+        )
+        return DEFAULT_MAX_ITERATIONS
+    return resolved
+
+
 def run_workflow_agent(
     prompt: str,
     *,
@@ -159,6 +199,7 @@ def run_workflow_agent(
 
     attempts_allowed = resolve_max_attempts(max_attempts)
     goal = build_agent_goal(prompt, schema, context)
+    child_max_iterations = resolve_workflow_max_iterations(max_iterations)
 
     last: Optional[StructuredResult] = None
     total_api_calls = 0
@@ -171,7 +212,7 @@ def run_workflow_agent(
             context=None,
             toolsets=toolsets,
             model=model,
-            max_iterations=max_iterations or 0,
+            max_iterations=child_max_iterations,
             task_count=task_count,
             parent_agent=owner_agent,
             role="leaf",

@@ -111,13 +111,13 @@ jobs:
             os: macos-14           # arm64 runner
             script: dist:mac:dmg
             artifact: catalyst-macos
-            selector: 'apps/desktop/release/*.dmg'
+            ext: dmg
             platform: macos
           - name: Windows (nsis)
             os: windows-latest
             script: dist:win:nsis
             artifact: catalyst-windows
-            selector: 'apps/desktop/release/*.exe'
+            ext: exe
             platform: windows
 
     steps:
@@ -144,6 +144,9 @@ jobs:
       - name: Typecheck and lint
         if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         working-directory: apps/desktop
+        # Every multi-line run step pins bash: the Windows runner's default
+        # PowerShell silently changes the language these blocks are written in.
+        shell: bash
         run: |
           npm run typecheck
           npm run lint
@@ -168,6 +171,9 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        # bash explicitly: Windows runners default to PowerShell, which cannot
+        # parse the loop below ("Missing opening '(' after keyword 'for'").
+        shell: bash
         run: |
           # Strip empty signing vars so electron-builder takes its unsigned
           # path instead of trying to open '' as a cert.
@@ -185,8 +191,10 @@ jobs:
         # output is the failure mode worth catching here.
         run: |
           ls -la
-          if ! ls ${{ matrix.selector }} >/dev/null 2>&1; then
-            echo "::error::no installer matched ${{ matrix.selector }}"
+          # Glob is relative to working-directory (release/), so match on the
+          # bare extension rather than a repo-root path.
+          if ! ls *.${{ matrix.ext }} >/dev/null 2>&1; then
+            echo "::error::build reported success but produced no .${{ matrix.ext }}"
             exit 1
           fi
 

@@ -12,6 +12,7 @@
 > **Costas TTD hardening checkpoint:** `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`<br>
 > **Costas success-projection checkpoint:** `8e48fab077116554add17832a0aaf714e816373f`<br>
 > **Costas lifecycle hardening checkpoint:** `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`<br>
+> **Costas receipt UI checkpoint:** `3cad879636f536d8cb28f6e361b04c1ddb170c28`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -252,6 +253,40 @@ The authenticated catalog response exposes only:
 It contains no session ID, token, grant, signature, key, token path, role-private identity, capability bytes, raw
 resource, raw Envelope, or model content.
 
+### 1.6 First-class chat receipt rendering
+
+Owners:
+
+```text
+apps/desktop/src/lib/lucid-receipt.ts
+apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.tsx
+apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
+```
+
+The assistant Thread now renders valid LUCID tool results as a dedicated receipt card rather than a generic MCP
+JSON row. Admission requires both:
+
+```text
+exact tool name mcp__lucid_quine__lucid_<closed verb>
+exact closed hermes-lucid-receipt/1
+```
+
+The TypeScript parser independently revalidates exact receipt keys, verb/tool agreement, ID, timestamp, trust,
+content hash, refusal code, `ran`, and `needs_user`. Foreign MCPs cannot trigger the card by forging only the
+schema. Malformed, open, mismatched, and secret-shaped lookalikes fall back to the existing generic renderer.
+
+The card visibly distinguishes:
+
+```text
+Executed
+Refused · not run
+Needs user · not run
+Verified · not run
+```
+
+It shows only the intended result/error plus the already-closed receipt fields. It does not parse raw Envelopes,
+load capability state, or claim authority.
+
 ---
 
 ## 2 · Live observed evidence
@@ -380,6 +415,7 @@ Ruff focused paths          GREEN
 Desktop TypeScript          GREEN
 Desktop ESLint              GREEN, baseline unrelated warnings only
 Hub UI tests                GREEN
+Receipt parser/card/Thread  24 passed
 Production renderer build   GREEN
 Electron main/preload       GREEN
 Packaged Catalyst.app       GREEN
@@ -396,6 +432,12 @@ b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web
 41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
 8ca0160475047b7cb841e63ab8e9d8d1d9d7c1a435bdccb977354a68b1911a17  tests/tools/test_lucid_mcp_bridge.py
 262ccac4a40eed120e23fbd0a4d86117d1886084826f5a5156c109517eea438e  tests/tools/test_mcp_tool.py
+529d925619317ca13b649943915b87ff4e6394f3e396c8b810b48e34c96107c8  apps/desktop/src/lib/lucid-receipt.ts
+1a0ebefcf4a13b993afb0e2acfb5a680ae8909828ff5727b093bd2aad14cc3c8  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.tsx
+28763c031655584f39a4abc4995751ff93940e416f95acf252ec27110e44839a  apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
+ea108f8f5175db9957ffc20a1203e4b1714b0f31d31cae38c97c831d9b74f878  apps/desktop/src/lib/lucid-receipt.test.ts
+01e15404412cdcfae6637511f4028167fd7d932dff2fae1b1f59bc08f7341957  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.test.tsx
+87ae80c8daa1b720cedf6053ea55a12af7c159554e65fe8d6f74bd2e644221ac  apps/desktop/src/components/assistant-ui/thread/streaming.test.tsx
 ```
 
 ---
@@ -678,7 +720,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `415b82b34b7c6516decedd6f05d655025d11a0c2`, TTD hardening checkpoint
 `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, success-projection checkpoint
 `8e48fab077116554add17832a0aaf714e816373f`, lifecycle hardening checkpoint
-`7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, and this document hash:
+`7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, receipt UI checkpoint
+`3cad879636f536d8cb28f6e361b04c1ddb170c28`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -703,9 +746,11 @@ identity bridge    415b82b34b7c6516decedd6f05d655025d11a0c2
 TTD hardening      9bb6e4f67697e6435056ed2b2b0fe56bc194a165
 success projection 8e48fab077116554add17832a0aaf714e816373f
 lifecycle hardening 7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d
+receipt UI          3cad879636f536d8cb28f6e361b04c1ddb170c28
 ```
 
-Rollback lifecycle hardening by reverting `7b5c0f22b`; rollback success projection separately by reverting
+Rollback receipt UI by reverting `3cad87963`; rollback lifecycle hardening separately by reverting
+`7b5c0f22b`; rollback success projection separately by reverting
 `8e48fab07`; rollback TTD hardening separately by reverting
 `9bb6e4f67`; rollback identity enrichment separately by reverting
 `415b82b34`. The prior first-class Hub/catalog install remains separately checkpointed at `6a5d26774`.

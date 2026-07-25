@@ -11,6 +11,7 @@
 > **Costas source checkpoint:** `415b82b34b7c6516decedd6f05d655025d11a0c2`<br>
 > **Costas TTD hardening checkpoint:** `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`<br>
 > **Costas success-projection checkpoint:** `8e48fab077116554add17832a0aaf714e816373f`<br>
+> **Costas lifecycle hardening checkpoint:** `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -266,7 +267,21 @@ Catalyst
         └── Catalyst.app/Contents/Resources/ae/butler --mcp-stdio
 ```
 
-The active backend environment contains the exact packaged Butler path. The live authenticated MCP catalog
+The active backend environment contains the exact packaged Butler path. After lifecycle checkpoint `7b5c0f22b`,
+Catalyst was restarted across an exact saved Desktop log boundary:
+
+```text
+old Catalyst PID                 14636
+new Catalyst PID                 24009
+new backend port                 52559
+new log lines                    13
+MCPServerTask ignored exceptions 0
+Event loop is closed traces      0
+```
+
+The unrelated node-pty `spawn-helper` app-asar packaging warning remains outside the LUCID MCP lifecycle claim.
+
+The live authenticated MCP catalog
 reports:
 
 ```text
@@ -327,7 +342,7 @@ HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
   tests/hermes_cli/test_dashboard_admin_endpoints.py -q
 
 4 files
-365 passed
+368 passed
 0 failed
 ```
 
@@ -351,6 +366,9 @@ Coverage includes:
 - automatic retry disabled for SHOW/SET/MORPH/DISPATCH/STEER/CANCEL;
 - exact `lucid-outcome-unknown` on effect-capable transport ambiguity;
 - GET alone retains bounded generic transport recovery;
+- lifecycle waiter cancellation checks its owner loop before `Task.cancel()`;
+- the exact `Event loop is closed` finalization race is swallowed without widening other errors;
+- normal pending lifecycle tasks are still cancelled and awaited;
 - content-free public status;
 - Hub install/open behavior and trust ladder;
 - MCP catalog/API projection.
@@ -372,12 +390,12 @@ Current source hashes:
 
 ```text
 2185981336c7267328024e7f43251c5d3ee6a86d4a7666212f72dee8c963ce12  tools/lucid_mcp_bridge.py
-236cff0d1db5bdbf9f32d554e750077e177115e1e697bae8e0f301841aef86ae  tools/mcp_tool.py
+0ac404021e8ec1866c1927ac0bc5f2c7cd2f712495513038596b05fa5d38e998  tools/mcp_tool.py
 b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web_server.py
 96ce91596e89e58f6b5cd7684bfa8e6b2930b68881b6aaf6f4ce700667df1244  apps/desktop/src/app/skills/lucid-bridge-status.tsx
 41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
 8ca0160475047b7cb841e63ab8e9d8d1d9d7c1a435bdccb977354a68b1911a17  tests/tools/test_lucid_mcp_bridge.py
-d35683e94986b9f417c75adba3ddd5abff1707e9fe0cb48a9ff17bfa0de8e553  tests/tools/test_mcp_tool.py
+262ccac4a40eed120e23fbd0a4d86117d1886084826f5a5156c109517eea438e  tests/tools/test_mcp_tool.py
 ```
 
 ---
@@ -659,7 +677,8 @@ not an incomplete claim of execution.
 AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costas identity checkpoint
 `415b82b34b7c6516decedd6f05d655025d11a0c2`, TTD hardening checkpoint
 `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, success-projection checkpoint
-`8e48fab077116554add17832a0aaf714e816373f`, and this document hash:
+`8e48fab077116554add17832a0aaf714e816373f`, lifecycle hardening checkpoint
+`7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -683,9 +702,11 @@ Costas checkpoints:
 identity bridge    415b82b34b7c6516decedd6f05d655025d11a0c2
 TTD hardening      9bb6e4f67697e6435056ed2b2b0fe56bc194a165
 success projection 8e48fab077116554add17832a0aaf714e816373f
+lifecycle hardening 7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d
 ```
 
-Rollback success projection by reverting `8e48fab07`; rollback TTD hardening separately by reverting
+Rollback lifecycle hardening by reverting `7b5c0f22b`; rollback success projection separately by reverting
+`8e48fab07`; rollback TTD hardening separately by reverting
 `9bb6e4f67`; rollback identity enrichment separately by reverting
 `415b82b34`. The prior first-class Hub/catalog install remains separately checkpointed at `6a5d26774`.
 

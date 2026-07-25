@@ -1,0 +1,654 @@
+<!-- docs/BUTLER-INTEGRATION-KX.md — Costas-owned handoff to AgentExperiments EM for the
+     next Butler increment behind the first-class LUCID MCP experience. This document
+     records the realized identity-only bridge and requests a Butler-owned R1 authority
+     resolution design. It contains no capability material and grants no authority. -->
+
+# BUTLER INTEGRATION KX — first-class LUCID MCP identity is live; Butler-owned R1 authority remains held
+
+> **From:** Costas / Hermes Desktop integration owner<br>
+> **To:** AgentExperiments EM / Butler / QUINE owners<br>
+> **Costas branch:** `users/brianhu/ideation`<br>
+> **Costas source checkpoint:** `415b82b34b7c6516decedd6f05d655025d11a0c2`<br>
+> **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
+> **Authority:** none<br>
+> **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
+> **Current product state:** first-class install, discovery, executable admission, request-scoped identity,
+> resources/prompts, typed refusal, and content-free posture are live. Capability resolution and consequential
+> execution remain Butler/QUINE-owned and held.
+
+## 0 · Executive outcome
+
+Hermes Desktop now ships and runs the AgentExperiments Butler as the first-party `lucid-quine` MCP. The live
+Desktop experience:
+
+- features LUCID in Browse Hub rather than hiding it in generic JSON settings;
+- installs the exact closed seven-tool manifest through Hermes' curated MCP catalog;
+- packages Butler under `Catalyst.app/Contents/Resources/ae/butler`;
+- admits host enrichment only when the resolved executable realpath equals that enrolled packaged path;
+- passes the active Hermes session through MCP request `_meta`, never through model arguments;
+- displays transport, identity, authority, and receipt ownership as separate states;
+- leaves authority explicitly held at `butler-capability-required`;
+- preserves Butler's valid `no-capability` Envelope receipt when no capability is available.
+
+The realized waist is:
+
+```text
+Hermes model call arguments
+    │  unchanged
+    ▼
+Hermes generic MCP handler
+    │  exact lucid-quine + stdio + args + packaged Butler realpath
+    │  request-scoped session identity
+    ▼
+MCP tools/call
+    ├── arguments = original model arguments
+    └── _meta.com.nous.lucid/host-context.session_id = host identity
+            authority = none
+    ▼
+Butler
+    ├── parses bounded stdio-only host context
+    ├── does not treat identity as authority
+    ├── returns resources/prompts normally
+    └── refuses tool effects without capability
+            receipt.ran = false
+            refusal.code = no-capability
+```
+
+This is the intended safety posture for R0. It is not the final first-class execution posture.
+
+The next increment must be owned by Butler, not by the generic Hermes MCP client:
+
+```text
+trusted enrolled stdio host
+→ exact host-session ↔ AE role-session binding
+→ Butler-owned local capability resolution
+→ existing verb/scope/session/expiry/MAC verification
+→ independent confirmation policy
+→ effect or typed refusal
+→ bounded Envelope receipt
+```
+
+Hermes must not read Butler capability files, copy bearer tokens into Python, put them in `config.yaml`, attach
+them from React, expose them through tool schemas, or become a second capability broker.
+
+---
+
+## 1 · Realized Costas source
+
+### 1.1 Curated LUCID MCP catalog
+
+Owner:
+
+```text
+optional-mcps/lucid-quine/manifest.yaml
+```
+
+Declared transport:
+
+```yaml
+name: lucid-quine
+transport:
+  type: stdio
+  command: butler
+  args:
+    - --mcp-stdio
+auth:
+  type: none
+```
+
+Default-enabled tools are exactly:
+
+```text
+lucid.show
+lucid.get
+lucid.set
+lucid.morph
+lucid.dispatch
+lucid.steer
+lucid.cancel
+```
+
+The manifest does not contain a token, grant, signature, role, lease, repository path, session ID, confirmation,
+or authority selector.
+
+### 1.2 Host-owned identity enrichment
+
+Owner:
+
+```text
+tools/lucid_mcp_bridge.py
+```
+
+The policy admits enrichment only when all conditions hold:
+
+```text
+server name                == lucid-quine
+transport                  == stdio
+configured command basename == butler | butler.exe
+configured args            == ["--mcp-stdio"]
+resolved command realpath  == HERMES_LUCID_BUTLER_PATH realpath
+session ID                 matches ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+session ID UTF-8 bytes     <= 192
+```
+
+Malformed, absent, normalized-from-invalid, foreign, HTTP, extra-argument, wrong-command, and same-name
+impersonation cases receive no host metadata.
+
+The generated metadata is exactly:
+
+```json
+{
+  "com.nous.lucid/host-context": {
+    "session_id": "<bounded request-scoped identity>"
+  }
+}
+```
+
+It is supplied through the MCP SDK's `meta=` parameter, which serializes to request `params._meta`. The model's
+`arguments` object is not changed.
+
+Primary session source is the immutable handler `session_id` kwarg passed independently from model arguments.
+Request-scoped Hermes `ContextVar` identity is only a compatibility fallback for older entry points.
+
+### 1.3 Generic MCP call seam
+
+Owner:
+
+```text
+tools/mcp_tool.py
+```
+
+At the one generic `session.call_tool` boundary, Costas now performs:
+
+```python
+host_meta = current_lucid_host_context_meta(
+    server_name,
+    server._config,
+    session_id=kwargs.get("session_id"),
+    resolved_command=server._resolved_command,
+)
+result = await server.session.call_tool(
+    tool_name,
+    arguments=args,
+    **({"meta": host_meta} if host_meta is not None else {}),
+)
+```
+
+Non-LUCID servers preserve their previous byte/semantic call shape and receive no metadata.
+
+No `localCapability`, `capability`, `callContext`, grant, scope, signature, nonce, timestamp, or confirmation is
+automatically added by Hermes.
+
+### 1.4 Packaged executable enrollment input
+
+Desktop packages:
+
+```text
+Catalyst.app/Contents/Resources/ae/ae-executive-scene
+Catalyst.app/Contents/Resources/ae/butler
+```
+
+Electron supplies the backend with:
+
+```text
+HERMES_LUCID_BUTLER_PATH=<exact packaged Butler path>
+```
+
+The MCP runtime records the command after its normal executable resolution. Per-call enrichment requires the
+resolved realpath to match the enrolled path. First-party naming alone is not admission.
+
+Current packaged Butler SHA-256:
+
+```text
+2def1edd20590cc3d30ca01d859231d5d95515ef222747a9e651ddf7314fc27c
+```
+
+This path/hash evidence is useful package provenance. It is not by itself role, lease, session, or mutation
+authority.
+
+### 1.5 First-class Desktop posture
+
+Owners:
+
+```text
+apps/desktop/src/app/skills/hub.tsx
+apps/desktop/src/app/skills/mcp-tab.tsx
+apps/desktop/src/app/skills/lucid-bridge-status.tsx
+apps/desktop/src/types/hermes.ts
+hermes_cli/web_server.py
+```
+
+Hub and MCP inspector share one status component. The user sees:
+
+```text
+Host identity bound
+  request-scoped MCP metadata
+
+Authority held
+  Butler capability required per call
+
+Receipts native
+  Butler/Envelope
+```
+
+The authenticated catalog response exposes only:
+
+```json
+{
+  "schema": "hermes-lucid-host-bridge/1",
+  "server": "lucid-quine",
+  "transport_admitted": true,
+  "identity_binding": "request-scoped",
+  "authority": "butler-capability-required",
+  "capability_material_exposed": false,
+  "arguments_mutated": false,
+  "receipt_owner": "Butler/Envelope"
+}
+```
+
+It contains no session ID, token, grant, signature, key, token path, role-private identity, capability bytes, raw
+resource, raw Envelope, or model content.
+
+---
+
+## 2 · Live observed evidence
+
+The packaged Catalyst app was rebuilt and restarted from checkpoint `415b82b34`.
+
+Observed live process chain:
+
+```text
+Catalyst
+└── hermes serve
+    └── mcp_stdio_watchdog
+        └── Catalyst.app/Contents/Resources/ae/butler --mcp-stdio
+```
+
+The active backend environment contains the exact packaged Butler path. The live authenticated MCP catalog
+reports:
+
+```text
+installed                  true
+enabled                    true
+transport_admitted         true
+identity_binding           request-scoped
+authority                  butler-capability-required
+capability_material_exposed false
+arguments_mutated          false
+receipt_owner              Butler/Envelope
+```
+
+The live MCP probe returns:
+
+```text
+protocol    2025-06-18
+tools       7
+prompts     8
+resources   25
+stderr      empty for LUCID probe
+```
+
+Safe operations observed:
+
+```text
+resources/read lucid://projects/onboarding/universal    GREEN
+resources/read lucid://projects/system/current          GREEN, explicit unavailable enrichment
+prompts/get lucid.get                                   GREEN, non-authorizing recipe
+tools/call lucid.get path=fleet without capability     typed no-capability refusal
+```
+
+The enriched direct frame preserved the original arguments and returned:
+
+```text
+receipt.ran      false
+receipt.trust    untrusted
+receipt.effect   capability is required
+refusal.code     no-capability
+refusal.reason   capability is required
+capability       null
+```
+
+This proves identity projection without authority widening.
+
+---
+
+## 3 · Verification evidence
+
+Focused backend/security/API suites:
+
+```text
+HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
+  scripts/run_tests.sh \
+  tests/tools/test_lucid_mcp_bridge.py \
+  tests/tools/test_mcp_tool.py \
+  tests/hermes_cli/test_dashboard_admin_endpoints.py -q
+
+3 files
+314 passed
+0 failed
+```
+
+Coverage includes:
+
+- exact packaged Butler admission;
+- same-name wrong-realpath impersonation refusal;
+- malformed and over-bound session refusal;
+- LUCID metadata attached outside model arguments;
+- explicit handler session identity preferred over ambient context;
+- ordinary MCP receives no LUCID metadata;
+- no capability/signature material attached;
+- content-free public status;
+- Hub install/open behavior and trust ladder;
+- MCP catalog/API projection.
+
+Additional gates:
+
+```text
+Ruff focused paths          GREEN
+Desktop TypeScript          GREEN
+Desktop ESLint              GREEN, baseline unrelated warnings only
+Hub UI tests                GREEN
+Production renderer build   GREEN
+Electron main/preload       GREEN
+Packaged Catalyst.app       GREEN
+git diff --check            GREEN
+```
+
+Current source hashes:
+
+```text
+bedfdaa1d1d398706b4ab3f3081a2993991afa9c60baca0c4589472928135b9d  tools/lucid_mcp_bridge.py
+f5c627f71c0b21935b06847122b4213fc5034acd39ca86c288aaa802b6c56f34  tools/mcp_tool.py
+b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web_server.py
+96ce91596e89e58f6b5cd7684bfa8e6b2930b68881b6aaf6f4ce700667df1244  apps/desktop/src/app/skills/lucid-bridge-status.tsx
+41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
+```
+
+---
+
+## 4 · Why Costas stops at identity
+
+Butler already defines the critical law:
+
+```text
+host context authority = none
+```
+
+The `session_id` in MCP `_meta` identifies the originating Hermes request. It does not prove:
+
+- an AE role;
+- a live role lease;
+- repository authority;
+- a canonical LUCID grant;
+- scope authority;
+- confirmation;
+- capability possession;
+- enrollment of the stdio parent;
+- a process/package episode;
+- permission to retry a consequential operation.
+
+The existing Butler local capability is:
+
+- owner-private;
+- repository-bound;
+- session-hash-bound;
+- role-policy-bound;
+- lease-sensitive;
+- verb/scope checked;
+- expiring;
+- MAC verified;
+- stored outside MCP telemetry.
+
+Hermes cannot safely load it because that would:
+
+1. duplicate Butler's broker policy in Python;
+2. place bearer material in the generic MCP client's memory;
+3. expand logging, crash, middleware, and plugin exposure surfaces;
+4. create a second authority that can drift from QUINE and role-session state;
+5. risk cross-session reuse on process-global MCP connections;
+6. make identical model-visible calls gain hidden ambient authority.
+
+Therefore Costas intentionally sends identity only and preserves the no-capability receipt.
+
+---
+
+## 5 · Requested Butler R1 increment
+
+### 5.1 Required owner
+
+Butler remains the sole capability issuer/loader/verifier. QUINE remains policy, acceptance, and settlement
+owner. Costas remains transport/presentation/session-origin owner.
+
+### 5.2 Requested behavior
+
+For exact admitted stdio LUCID calls only, Butler should be able to consume the bounded host context and resolve
+one exact internal authority decision without returning capability material to Hermes.
+
+Conceptual flow:
+
+```text
+1. Parse request _meta host context.
+2. Verify transport is stdio and the host/process enrollment is admitted.
+3. Resolve exactly one host-session ↔ AE role-session binding.
+4. Re-observe canonical repository, role, lease, and revocation state.
+5. Load or issue the owner-private local capability internally.
+6. Verify capability against the same exact session, verb, scope, expiry, repository, role policy, and MAC.
+7. Apply independent confirmation policy.
+8. Execute once, refuse, escalate, or report outcome-unknown.
+9. Return only the bounded Envelope receipt/result.
+```
+
+### 5.3 Binding requirement
+
+Do not treat the Hermes session ID itself as an AE role session. R1 needs an exact, typed binding owner.
+
+A valid design must answer:
+
+```text
+Which registry owns the binding?
+Which side enrolls it?
+What package/process observation admits the host?
+How is profile/repository identity bound?
+How is session rotation handled?
+How is role/lease/revocation freshness rechecked?
+How is ambiguous or absent binding represented?
+How is the binding closed and garbage-collected?
+```
+
+Costas already has a durable observe-only external role-session binding foundation in SessionDB. That foundation
+must not be silently upgraded to authority. AE EM should decide whether R1 consumes a separately attested
+projection of that binding, defines a Butler-owned binding registry, or remains HOLD pending the broader
+execution-host enrollment track.
+
+### 5.4 No token crossing
+
+R1 must not require Hermes to send any of:
+
+```text
+localCapability
+capability
+grant
+scope
+signature
+broker key
+token path
+token bytes
+role text as authority
+lease material
+```
+
+The preferred R1 shape is Butler-internal capability resolution after trusted host and exact binding validation.
+If that cannot be made safe, return a typed hold/refusal. Do not add a compatibility bypass.
+
+### 5.5 Confirmation
+
+Identity and capability must not imply confirmation.
+
+For operations requiring confirmation, Butler must consume a separately host-owned confirmation decision bound
+to the exact request/operation. The existing QUINE confirmation policy remains authoritative. Hermes must not
+force `confirmed=true`, infer it from a click that was not bound to the call, or retry a refused call as confirmed.
+
+### 5.6 Replay and outcome ambiguity
+
+Hermes' generic MCP client currently has bounded reconnect/auth/session retry paths. Consequential LUCID effects
+must not be retried merely because the response was lost.
+
+Before mutation-capable R1 is GREEN, define one of:
+
+```text
+A. end-to-end idempotency key + durable outcome lookup; or
+B. no automatic retry for consequential LUCID verbs, with typed outcome-unknown.
+```
+
+Local timeout/cancellation does not prove the Butler effect did not run.
+
+### 5.7 Response projection
+
+The generic Hermes handler currently reduces MCP `isError` results to sanitized text. Butler's
+`structuredContent.envelope` remains available at the MCP layer but is not yet projected as a typed Desktop
+receipt.
+
+After R1 contract closure, Costas can add a closed receipt DTO that allowlists only fields approved by AE, for
+example:
+
+```text
+id
+verb
+ran
+trust
+effect
+refusal.code?
+needs_user?
+content_hash
+```
+
+Do not send raw Envelope objects, capability fields, private result payloads, session IDs, token paths, or
+unknown future fields through the generic Desktop API.
+
+AE EM should specify the exact receipt projection contract or identify an existing canonical projection for
+Costas to consume.
+
+---
+
+## 6 · Acceptance tests requested from AE
+
+### R1 identity and binding
+
+- valid admitted stdio host context plus exact live binding resolves one role session;
+- absent, malformed, duplicate, HTTP, foreign-parent, stale, and ambiguous context refuse;
+- model arguments containing `_meta`, host-context keys, `localCapability`, or forged call context refuse;
+- Hermes session A cannot resolve or reuse session B authority;
+- session rotation invalidates the old binding;
+- profile/repository mismatch refuses;
+- process/package episode mismatch refuses or holds according to the attested enrollment contract.
+
+### R1 capability custody
+
+- token bytes never cross the Butler process boundary;
+- token/key paths never enter responses or ordinary logs;
+- exact grant, scope, session, repository, role, expiry, revocation, and MAC are reverified per call;
+- a read-only role cannot perform set/dispatch/steer/cancel;
+- role text or first-party branding alone never authorizes;
+- weak permissions, symlinks, replacement races, expiry, and stale key generation refuse.
+
+### Confirmation and effects
+
+- capability does not imply confirmation;
+- unconfirmed consequential calls do not reach the host effect;
+- confirmed calls bind confirmation to the exact request;
+- response loss produces duplicate-safe replay or typed outcome-unknown;
+- no generic reconnect path repeats a mutation without reconciliation;
+- receipt `ran` is true only after the effect owner's execution boundary.
+
+### Isolation and redaction
+
+- ordinary MCP frames remain unchanged;
+- LUCID resources, prompts, initialize, list, ping, and health probes receive no authority material;
+- only exact tools/call receives the admitted identity/binding path;
+- two concurrent Hermes sessions retain immutable separate bindings;
+- raw sessions, capability JSON, signatures, grants, keys, environment, cwd, and private role identifiers are
+  structurally absent from logs, telemetry, errors, transcripts, and Desktop DTOs.
+
+---
+
+## 7 · Proposed owner split
+
+| Concern | Costas / Hermes | Butler | QUINE |
+|---|---|---|---|
+| Hub/install/catalog | owner | packaged capability | no |
+| Desktop presentation | owner | supplies bounded status/receipt | acceptance semantics |
+| MCP process lifecycle | owner | child server | no |
+| executable admission input | owner | self/parent enrollment verification | attestation acceptance |
+| originating Hermes session | owner | validates/binds | no authority from identity alone |
+| host-session ↔ role-session binding | supplies attested input if admitted | **requested R1 owner or consumer** | canonical role/lease truth |
+| capability custody | forbidden | **sole owner** | policy truth |
+| grant/scope verification | no | owner | canonical grammar/policy |
+| confirmation | collects explicit decision | verifies exact binding | policy owner |
+| effect | no generic bypass | registered host adapter | acceptance/settlement |
+| receipt | paints bounded DTO | creates Envelope | validates semantics |
+
+---
+
+## 8 · Current HOLDs
+
+The following remain unavailable or unauthorized:
+
+- treating MCP host context as authority;
+- loading Butler token files from Hermes;
+- automatic `localCapability` injection;
+- hidden grant/scope/signature injection;
+- inferring AE role from a Hermes chat/session ID;
+- role/lease mutation from Desktop presentation state;
+- mutation retries without idempotency/outcome reconciliation;
+- raw Envelope forwarding to React;
+- first-party branding as executable/process enrollment;
+- HTTP LUCID host-context authority;
+- generic MCP server authority upgrade;
+- QUINE acceptance or settlement by Costas.
+
+Current green state is identity-bound and authority-held. That is a product improvement and a security boundary,
+not an incomplete claim of execution.
+
+---
+
+## 9 · Requested disposition
+
+AE EM / Butler / QUINE owners: return exactly one disposition bound to Costas checkpoint
+`415b82b34b7c6516decedd6f05d655025d11a0c2` and this document hash:
+
+```text
+ATTEST BUTLER-R1-INPUT
+REVISE BUTLER-R1-<named invariant>
+HOLD BUTLER-R1
+```
+
+`ATTEST BUTLER-R1-INPUT` means only:
+
+- Costas' identity-only input is admitted as the starting contract;
+- Butler remains the capability owner;
+- authority remains held until the separately implemented and tested R1 binding/capability path is green.
+
+It grants no role, lease, grant, scope, confirmation, mutation, retry, settlement, or product acceptance.
+
+## 10 · Rollback
+
+Costas source checkpoint:
+
+```text
+415b82b34b7c6516decedd6f05d655025d11a0c2
+```
+
+Rollback of the identity enrichment is one Costas revert of that checkpoint. The prior first-class Hub/catalog
+install remains separately checkpointed at `6a5d26774`.
+
+No AE file is modified by this handoff. AE may copy this document into its docs shelf or return disposition in a
+new AE-owned feedforward.
+
+<!-- Cross-refs: optional-mcps/lucid-quine/manifest.yaml; tools/lucid_mcp_bridge.py;
+     tools/mcp_tool.py; hermes_cli/web_server.py; apps/desktop/src/app/skills/hub.tsx;
+     apps/desktop/src/app/skills/mcp-tab.tsx; apps/desktop/src/app/skills/lucid-bridge-status.tsx;
+     docs/catalyst-host-track-c1.md; sibling ../AgentExperiments/envelope/MCP.json;
+     sibling ../AgentExperiments/envelope/LUCID.json; sibling ../AgentExperiments/docs/LUCID-MCP.md;
+     sibling ../AgentExperiments/butler/src/server/host_context.rs;
+     sibling ../AgentExperiments/butler/src/capability_broker.rs;
+     sibling ../AgentExperiments/butler/src/server/tools.rs. -->

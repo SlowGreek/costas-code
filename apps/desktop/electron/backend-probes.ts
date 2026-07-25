@@ -19,9 +19,10 @@
  * sentinel, which is exactly what we want when nothing pre-existing
  * actually works.
  *
- * Both probes are deliberately fast and forgiving:
- *   - 5s timeout (a hung interpreter beats forever, but we still give
- *     slow disks / cold caches room to breathe)
+ * Both probes are deliberately bounded and forgiving:
+ *   - runtime imports retain a 5s timeout;
+ *   - CLI liveness gets 15s because `hermes --version` can include bounded
+ *     update metadata work and measured 8.6s on a healthy cold local install;
  *   - stdio ignored (we only care about exit code; stdout/stderr are
  *     not surfaced to the user, just to recentHermesLog for forensics
  *     via the caller's catch block if it chooses)
@@ -35,6 +36,7 @@
 import { execFileSync } from 'node:child_process'
 
 const PROBE_TIMEOUT_MS = 5000
+const HERMES_CLI_PROBE_TIMEOUT_MS = 15000
 
 /**
  * Return the Python snippet used to verify Hermes can import far enough to
@@ -122,7 +124,7 @@ function verifyHermesCli(hermesCommand: string, opts?: { shell?: boolean }) {
   try {
     execFileSync(hermesCommand, ['--version'], {
       stdio: 'ignore',
-      timeout: PROBE_TIMEOUT_MS,
+      timeout: HERMES_CLI_PROBE_TIMEOUT_MS,
       shell: Boolean(opts?.shell),
       windowsHide: true
     })
@@ -133,4 +135,11 @@ function verifyHermesCli(hermesCommand: string, opts?: { shell?: boolean }) {
   }
 }
 
-export { canImportHermesCli, hermesRuntimeImportProbe, PROBE_TIMEOUT_MS, shouldTrustHermesOverride, verifyHermesCli }
+export {
+  canImportHermesCli,
+  HERMES_CLI_PROBE_TIMEOUT_MS,
+  hermesRuntimeImportProbe,
+  PROBE_TIMEOUT_MS,
+  shouldTrustHermesOverride,
+  verifyHermesCli
+}

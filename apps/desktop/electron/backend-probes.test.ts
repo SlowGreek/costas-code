@@ -14,7 +14,9 @@ import { test } from 'vitest'
 
 import {
   canImportHermesCli,
+  HERMES_CLI_PROBE_TIMEOUT_MS,
   hermesRuntimeImportProbe,
+  PROBE_TIMEOUT_MS,
   shouldTrustHermesOverride,
   verifyHermesCli
 } from './backend-probes'
@@ -69,6 +71,12 @@ test('verifyHermesCli returns false when command is falsy', () => {
   assert.equal(verifyHermesCli(''), false)
   assert.equal(verifyHermesCli(null), false)
   assert.equal(verifyHermesCli(undefined), false)
+})
+
+test('CLI liveness gets a larger bounded budget than runtime imports', () => {
+  assert.equal(PROBE_TIMEOUT_MS, 5000)
+  assert.equal(HERMES_CLI_PROBE_TIMEOUT_MS, 15000)
+  assert.ok(HERMES_CLI_PROBE_TIMEOUT_MS > PROBE_TIMEOUT_MS)
 })
 
 test('verifyHermesCli returns false when binary does not exist', () => {

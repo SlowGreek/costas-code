@@ -155,17 +155,26 @@ jobs:
           # Node 22 warns loudly about experimental webstorage during the
           # Electron build; the local build scripts disable it the same way.
           NODE_OPTIONS: --no-experimental-webstorage
-          # electron-builder publishes to GitHub when it detects a token.
-          # Releases are handled explicitly below, so keep that off.
-          GH_TOKEN: ''
-          # Signing — each is a no-op when the secret is absent, which is the
-          # normal case for internal builds.
+          # electron-builder auto-publishes when it detects CI. We attach
+          # artifacts to a release explicitly in the job below, so turn its
+          # implicit publishing off rather than racing it.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Signing secrets are passed ONLY when they exist. An empty CSC_LINK
+          # is not "no signing" to electron-builder — it treats the empty
+          # string as a certificate path and dies with "<dir> not a file",
+          # which is exactly how the first CI run failed.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: npm run ${{ matrix.script }}
+        run: |
+          # Strip empty signing vars so electron-builder takes its unsigned
+          # path instead of trying to open '' as a cert.
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          npm run ${{ matrix.script }} -- --publish never
 
       - name: Report what was produced
         if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform

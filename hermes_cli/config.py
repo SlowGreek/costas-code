@@ -8931,6 +8931,36 @@ def _validate_config_key(key: str) -> tuple[bool, Optional[str]]:
     return True, None
 
 
+def _coerce_list_value(value: str) -> list:
+    """Parse a CLI string into a YAML list for list-typed config keys.
+
+    Accepts the three shapes people actually type, in order:
+
+      hermes config set delegation.allowed_models 'copilot:a,copilot:b'
+      hermes config set delegation.allowed_models '["copilot:a","copilot:b"]'
+      hermes config set delegation.allowed_models copilot:a
+
+    JSON is tried first so a genuine array survives intact; otherwise the value
+    is split on commas. Model ids contain colons and slashes, so splitting on
+    anything but a comma would corrupt them.
+
+    An empty string yields ``[]`` — the documented way to clear a list setting.
+    """
+    text = (value or "").strip()
+    if not text:
+        return []
+
+    if text[0] in "[(" or text.startswith('"[') or text.startswith("'["):
+        try:
+            parsed = json.loads(text.strip("'\""))
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except (ValueError, TypeError):
+            pass  # fall through to comma splitting
+
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
 def set_config_value(key: str, value: str, force: bool = False):
     """Set a configuration value.
 
@@ -9001,7 +9031,15 @@ def set_config_value(key: str, value: str, force: bool = False):
     # such as approvals.mode="off" must not become YAML booleans.  Unknown keys
     # retain the historical best-effort coercion behavior.
     coerced_value: Any = value
-    if not isinstance(_default_value_for_key(key), str):
+    _default_for_key = _default_value_for_key(key)
+    if isinstance(_default_for_key, list):
+        # List-typed settings (delegation.allowed_models,
+        # gateway.media_delivery_allow_dirs, ...) previously fell through every
+        # branch below and were written as a STRING. The runtime then rejects
+        # them — _get_allowed_models() logs "is not a list" and returns [] — so
+        # the setting silently did nothing while `config set` reported success.
+        coerced_value = _coerce_list_value(value)
+    elif not isinstance(_default_for_key, str):
         if value.lower() in {'true', 'yes', 'on'}:
             coerced_value = True
         elif value.lower() in {'false', 'no', 'off'}:

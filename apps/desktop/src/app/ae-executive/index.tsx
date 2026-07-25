@@ -20,16 +20,17 @@ export function AeExecutiveWorkspace() {
     let active = true
     loadExecutiveScenes()
       .then(value => {
-        if (!active) return
+        if (!active) {return}
         setBatch(value)
         setError(null)
         setNotice(`Scene ready · ${value.projector} · authority ${value.authority}`)
       })
       .catch(reason => {
-        if (!active) return
+        if (!active) {return}
         setError(reason instanceof Error ? reason.message : 'ae-executive-projector-unavailable')
         setNotice('Scene unavailable · no local semantic fallback')
       })
+
     return () => {
       active = false
     }
@@ -38,10 +39,13 @@ export function AeExecutiveWorkspace() {
   const onAction = useCallback(
     (action: string) => {
       const route = action.match(/^quine-route:(.+)$/)?.[1]
+
       if (route && isAeExecutiveTabId(route)) {
         navigate(`/ae/${route}`)
+
         return
       }
+
       setNotice(`Intent captured · ${action} · no effect without Butler receipt`)
     },
     [navigate]

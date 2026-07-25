@@ -13,6 +13,7 @@ interface AeScenePainterProps {
 }
 
 const TEXT_SIZE: Record<string, string> = { s: 'text-[0.72rem]', m: 'text-sm', l: 'text-lg', xl: 'text-2xl' }
+
 const TOKEN_COLOR: Record<string, string> = {
   surface: 'var(--ui-chat-surface-background)',
   bg: 'var(--background)',
@@ -29,6 +30,7 @@ const TOKEN_COLOR: Record<string, string> = {
 
 const attr = (node: UgSceneNode, key: string) => node.a?.[key]
 const stringAttr = (node: UgSceneNode, key: string) => (typeof attr(node, key) === 'string' ? String(attr(node, key)) : '')
+
 const numberAttr = (node: UgSceneNode, key: string, fallback = 0) =>
   typeof attr(node, key) === 'number' ? Number(attr(node, key)) : fallback
 
@@ -38,7 +40,8 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
 
   const paint = (id: string): ReactNode => {
     const node = nodes.get(id)
-    if (!node) return <SceneRefusal code="node-unavailable" detail={id} key={id} />
+
+    if (!node) {return <SceneRefusal code="node-unavailable" detail={id} key={id} />}
 
     switch (node.p) {
       case 'column':
@@ -47,18 +50,21 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             {(node.kids ?? []).map(paint)}
           </div>
         )
+
       case 'row':
         return (
           <div className="flex min-w-0 flex-wrap items-center" key={node.id} style={{ gap: numberAttr(node, 'gap', 8) }}>
             {(node.kids ?? []).map(paint)}
           </div>
         )
+
       case 'stack':
         return (
           <div className="grid min-w-0 [&>*]:col-start-1 [&>*]:row-start-1" key={node.id}>
             {(node.kids ?? []).map(paint)}
           </div>
         )
+
       case 'text':
         return (
           <p
@@ -75,6 +81,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
         )
       case 'button': {
         const action = node.on?.tap || node.on?.key
+
         return (
           <Button
             className="w-fit justify-start font-mono"
@@ -88,8 +95,10 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
           </Button>
         )
       }
+
       case 'input': {
         const value = inputs[node.id] ?? stringAttr(node, 'value')
+
         return (
           <Input
             aria-label={stringAttr(node, 'name') || stringAttr(node, 'placeholder') || node.id}
@@ -102,8 +111,10 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
           />
         )
       }
+
       case 'select': {
         const options = Array.isArray(attr(node, 'options')) ? (attr(node, 'options') as unknown[]) : []
+
         return (
           <select
             aria-label={stringAttr(node, 'name') || node.id}
@@ -115,6 +126,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             {options.map((option, index) => {
               const value = typeof option === 'string' ? option : String((option as { value?: unknown }).value ?? index)
               const label = typeof option === 'string' ? option : String((option as { label?: unknown }).label ?? value)
+
               return (
                 <option key={`${node.id}-${value}`} value={value}>
                   {label}
@@ -124,6 +136,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
           </select>
         )
       }
+
       case 'progress':
         return (
           <Progress
@@ -132,10 +145,13 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             value={Math.min(1, Math.max(0, numberAttr(node, 'value')))}
           />
         )
+
       case 'divider':
         return <div className="h-px" key={node.id} role="separator" style={{ background: resolveColor(stringAttr(node, 'color')) }} />
+
       case 'spacer':
         return <div aria-hidden="true" key={node.id} style={{ height: numberAttr(node, 'size', 8) }} />
+
       case 'image':
         return (
           <img
@@ -145,10 +161,13 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             src={stringAttr(node, 'src')}
           />
         )
+
       case 'canvas':
         return <UguiCanvas key={node.id} node={node} />
+
       case 'native':
         return <SceneRefusal code="native-realization-unavailable" detail={stringAttr(node, 'catalog') || node.id} key={node.id} />
+
       default:
         return <SceneRefusal code="primitive-unavailable" detail={`${node.p}:${node.id}`} key={node.id} />
     }
@@ -172,12 +191,15 @@ function UguiCanvas({ node }: { node: UgSceneNode }) {
       <svg aria-label={alt || undefined} className="max-w-full" role={alt ? 'img' : undefined} viewBox={`0 0 ${width} ${height}`}>
         {operations.map((operation, index) => {
           const fill = resolveColor(String(operation.fill ?? 'text'))
+
           if (operation.op === 'rect') {
             return <rect fill={fill} height={Number(operation.h ?? 0)} key={`${node.id}-${index}`} width={Number(operation.w ?? 0)} x={Number(operation.x ?? 0)} y={Number(operation.y ?? 0)} />
           }
+
           if (operation.op === 'text') {
             return <text fill={fill} fontFamily="JetBrains Mono, monospace" fontSize={Number(operation.size ?? 12)} key={`${node.id}-${index}`} x={Number(operation.x ?? 0)} y={Number(operation.y ?? 0)}>{String(operation.text ?? '')}</text>
           }
+
           return null
         })}
       </svg>
@@ -187,8 +209,10 @@ function UguiCanvas({ node }: { node: UgSceneNode }) {
 }
 
 function resolveColor(value: string): string | undefined {
-  if (!value) return undefined
-  if (TOKEN_COLOR[value]) return TOKEN_COLOR[value]
+  if (!value) {return undefined}
+
+  if (TOKEN_COLOR[value]) {return TOKEN_COLOR[value]}
+
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : undefined
 }
 

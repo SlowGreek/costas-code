@@ -30,7 +30,7 @@ import {
 } from 'electron'
 import nodePty from 'node-pty'
 
-import { runAeExecutiveProjector, resolveAeExecutiveBinary } from './ae-executive'
+import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executive'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'

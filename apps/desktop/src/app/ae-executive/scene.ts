@@ -41,6 +41,7 @@ let batchPromise: Promise<AeExecutiveSceneBatch> | null = null
 
 export function loadExecutiveScenes(): Promise<AeExecutiveSceneBatch> {
   batchPromise ??= window.hermesDesktop.getAeExecutiveScenes().then(parseExecutiveBatch)
+
   return batchPromise
 }
 
@@ -50,20 +51,25 @@ export function resetExecutiveScenesForTests() {
 
 export function sceneForTab(batch: AeExecutiveSceneBatch, tab: AeExecutiveTabId): AeExecutiveScene {
   const found = batch.scenes.find(row => row.tab === tab)
-  if (!found) throw new Error(`ae-executive-scene-missing:${tab}`)
+
+  if (!found) {throw new Error(`ae-executive-scene-missing:${tab}`)}
+
   return found.scene
 }
 
 export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
-  if (!value || typeof value !== 'object') throw new Error('ae-executive-batch-invalid')
+  if (!value || typeof value !== 'object') {throw new Error('ae-executive-batch-invalid')}
   const batch = value as Partial<AeExecutiveSceneBatch>
+
   if (batch.schema !== 'ae-executive-scene-batch/1' || batch.authority !== 'none' || !Array.isArray(batch.scenes)) {
     throw new Error('ae-executive-batch-schema')
   }
+
   for (const row of batch.scenes) {
-    if (!row || typeof row !== 'object' || typeof row.tab !== 'string') throw new Error('ae-executive-row-invalid')
+    if (!row || typeof row !== 'object' || typeof row.tab !== 'string') {throw new Error('ae-executive-row-invalid')}
     validateExecutiveScene(row.scene)
   }
+
   return batch as AeExecutiveSceneBatch
 }
 
@@ -78,15 +84,20 @@ export function validateExecutiveScene(scene: AeExecutiveScene): readonly string
   for (const node of scene.nodes) {
     if (!node || typeof node.id !== 'string' || !node.id || ids.has(node.id)) {
       errors.push(`node-id:${node?.id || 'empty'}`)
+
       continue
     }
+
     ids.add(node.id)
   }
 
-  if (!ids.has(scene.root)) errors.push('root-missing')
+  if (!ids.has(scene.root)) {errors.push('root-missing')}
+
   for (const node of scene.nodes) {
-    if (node.kids?.some((id: string) => !ids.has(id))) errors.push(`child-missing:${node.id}`)
+    if (node.kids?.some((id: string) => !ids.has(id))) {errors.push(`child-missing:${node.id}`)}
   }
-  if (errors.length) throw new Error(`ae-executive-scene-invalid:${errors.join(',')}`)
+
+  if (errors.length) {throw new Error(`ae-executive-scene-invalid:${errors.join(',')}`)}
+
   return errors
 }

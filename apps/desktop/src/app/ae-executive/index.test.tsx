@@ -9,6 +9,7 @@ import { parseExecutiveBatch, resetExecutiveScenesForTests, validateExecutiveSce
 import { AeExecutiveWorkspace } from '.'
 
 const getAeExecutiveScenes = vi.fn()
+
 const EXPECTED_LABELS = [
   '[H]OME',
   '[D]ASHBOARD',
@@ -81,7 +82,8 @@ describe('Rust UGUI Scene batch', () => {
   it('admits the exact ordered batch and validates every closed Scene', () => {
     const value = parseExecutiveBatch(batch())
     expect(value.scenes).toHaveLength(9)
-    for (const row of value.scenes) expect(validateExecutiveScene(row.scene)).toEqual([])
+
+    for (const row of value.scenes) {expect(validateExecutiveScene(row.scene)).toEqual([])}
   })
 })
 

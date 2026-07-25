@@ -1398,7 +1398,9 @@ def _on_compute_host_turn_done(rid: str, sid: str, session: dict, frame: dict) -
         info = _session_info(session.get("agent"))
     if not frame.get("session_info_emitted"):
         _emit("session.info", sid, info)
-    _drain_queued_prompt(rid, sid, session)
+    if _drain_queued_prompt(rid, sid, session):
+        return
+    _drain_pending_goal(rid, sid, session)
 
 
 def _submit_prompt_to_compute_host(rid: str, sid: str, session: dict, text: Any) -> dict:
@@ -6047,6 +6049,76 @@ def _handle_busy_submit(
     return _ok(rid, {"status": "queued"})
 
 
+def _drain_pending_goal(rid, sid: str, session: dict) -> bool:
+    """Apply a goal that was set mid-run and kick off its first turn.
+
+    ``/goal <text>`` sent while a turn is running cannot mutate the goal state
+    without racing that turn's continuation judge, so ``command.dispatch``
+    parks the text on ``session["pending_goal"]``. Once the turn releases
+    ``session["running"]`` we persist it via GoalManager and submit the goal
+    text as the kickoff prompt — the same shape the idle path returns to the
+    client as ``{type: send, notice, message}``.
+
+    Returns True when a goal was applied and a turn dispatched, so the caller
+    skips lower-priority follow-ups (a stale continuation from the *previous*
+    goal must never outrank the goal the user just set).
+    """
+    with session["history_lock"]:
+        text = str(session.get("pending_goal") or "").strip()
+        if not text or session.get("running"):
+            return False
+        session["pending_goal"] = None
+        session["running"] = True
+
+    try:
+        from hermes_cli.goals import GoalManager
+
+        try:
+            goals_cfg = _load_cfg().get("goals") or {}
+            max_turns = int(goals_cfg.get("max_turns", 20) or 20)
+        except Exception:
+            max_turns = 20
+        sid_key = session.get("session_key") or ""
+        state = GoalManager(session_id=sid_key, default_max_turns=max_turns).set(text)
+    except Exception as exc:
+        with session["history_lock"]:
+            session["running"] = False
+        _emit("error", sid, {"message": f"queued goal failed: {exc}"})
+        return False
+
+    _emit(
+        "status.update",
+        sid,
+        {
+            "kind": "goal",
+            "text": f"⊙ Goal set ({state.max_turns}-turn budget): {state.goal}",
+        },
+    )
+    try:
+        _emit("message.start", sid)
+        if _session_uses_compute_host(session):
+            # Compute-host sessions run their turns out-of-process; reuse the
+            # same submit path _drain_queued_prompt uses rather than the
+            # in-process runner.
+            resp = _submit_prompt_to_compute_host(rid, sid, session, state.goal)
+            if resp.get("error"):
+                message = str(((resp.get("error") or {}).get("message")) or "queued goal failed")
+                with session["history_lock"]:
+                    session["running"] = False
+                    _clear_inflight_turn(session)
+                _emit("error", sid, {"message": message})
+        else:
+            _run_prompt_submit(rid, sid, session, state.goal)
+    except Exception as exc:
+        print(
+            f"[tui_gateway] queued goal dispatch failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        with session["history_lock"]:
+            session["running"] = False
+    return True
+
+
 def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
     """Fire a queued next-turn prompt if one is waiting and the session is idle.
 
@@ -6460,6 +6532,7 @@ def _deferred_session_record(
         "last_active": now,
         "lazy": lazy,
         "model_override": model_override,
+        "pending_goal": None,
         "pending_title": None,
         "profile_home": str(profile_home) if profile_home is not None else None,
         "resume_runtime_overrides": resume_runtime_overrides,
@@ -11192,6 +11265,11 @@ def _run_prompt_submit(
         if _drain_queued_prompt(rid, sid, session):
             return
 
+        # A goal set mid-run outranks the *previous* goal's continuation: the
+        # user replaced the standing objective, so apply it and start it now.
+        if _drain_pending_goal(rid, sid, session):
+            return
+
         # Chain a goal-continuation turn if the judge said so. We do
         # this AFTER the finally releases session["running"], so the
         # nested _run_prompt_submit doesn't deadlock on the busy
@@ -14417,9 +14495,24 @@ def _(rid, params: dict) -> dict:
         mgr = GoalManager(session_id=sid_key, default_max_turns=max_turns)
 
         lower = arg.strip().lower()
+        # A goal queued mid-run (see the `session["running"]` branch below) is
+        # not in the DB yet, so the control verbs have to consider it too —
+        # otherwise `/goal clear` "succeeds" and the queued goal still fires at
+        # turn end.
+        pending_goal = str(session.get("pending_goal") or "").strip()
         if not arg.strip() or lower == "status":
-            return _ok(rid, {"type": "exec", "output": mgr.status_line()})
+            status_out = mgr.status_line()
+            if pending_goal:
+                status_out = f"{status_out}\n⏳ Queued (starts at turn end): {pending_goal}"
+            return _ok(rid, {"type": "exec", "output": status_out})
         if lower == "pause":
+            if pending_goal:
+                with session["history_lock"]:
+                    session["pending_goal"] = None
+                return _ok(
+                    rid,
+                    {"type": "exec", "output": f"⏸ Queued goal dropped: {pending_goal}"},
+                )
             state = mgr.pause(reason="user-paused")
             out = "No goal set." if state is None else f"⏸ Goal paused: {state.goal}"
             return _ok(rid, {"type": "exec", "output": out})
@@ -14440,27 +14533,38 @@ def _(rid, params: dict) -> dict:
         if lower in {"clear", "stop", "done"}:
             had = mgr.has_goal()
             mgr.clear()
-            return _ok(
-                rid,
-                {
-                    "type": "exec",
-                    "output": "✓ Goal cleared." if had else "No active goal.",
-                },
-            )
-
-        # Otherwise — treat the remaining text as the new goal.
-        # Reject setting/replacing a goal DURING an active turn, with the same
-        # semantics as the messaging gateway: control verbs (status/pause/
-        # resume/clear/stop/done) already returned above and stay allowed
-        # mid-run; a new goal must not race the running turn's continuation.
-        if session.get("running"):
+            if pending_goal:
+                with session["history_lock"]:
+                    session["pending_goal"] = None
             return _ok(
                 rid,
                 {
                     "type": "exec",
                     "output": (
-                        "Agent is running — use /goal status / pause / clear "
-                        "mid-run, or /stop before setting a new goal."
+                        "✓ Goal cleared." if (had or pending_goal) else "No active goal."
+                    ),
+                },
+            )
+
+        # Otherwise — treat the remaining text as the new goal.
+        # A new goal must not race the running turn's continuation, so mid-run
+        # it is QUEUED rather than rejected: the turn-end hook in
+        # `_run_prompt_submit` applies it once the turn releases
+        # session["running"] and kicks it off. Control verbs (status/pause/
+        # resume/clear/stop/done) already returned above and stay allowed
+        # mid-run. Rejecting outright (the old behavior) looked like /goal did
+        # nothing, because the refusal only rendered as a local system line.
+        if session.get("running"):
+            with session["history_lock"]:
+                session["pending_goal"] = arg
+            return _ok(
+                rid,
+                {
+                    "type": "exec",
+                    "output": (
+                        f"⏳ Goal queued — starts when this turn finishes: {arg.strip()}\n"
+                        "Controls: /goal status · /goal pause · /goal clear (clear also "
+                        "drops a queued goal)"
                     ),
                 },
             )

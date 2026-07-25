@@ -361,20 +361,96 @@ def test_subgoal_clear(server, session):
     assert GoalManager(session_key).state.subgoals == []
 
 
-# ── mid-run goal-set guard (R6) ───────────────────────────────────────
+# ── mid-run goal-set queueing (R6) ────────────────────────────────────
 
 
-def test_goal_set_rejected_while_running(server, session):
-    """Setting a NEW goal during an active turn is rejected (gateway parity)."""
+def test_goal_set_queued_while_running(server, session):
+    """Setting a NEW goal during an active turn queues it instead of failing."""
     sid, session_key, s = session
     s["running"] = True
     r = _call(server, "command.dispatch", name="goal", arg="brand new goal", session_id=sid)
     assert r["result"]["type"] == "exec"
-    assert "Agent is running" in r["result"]["output"]
+    assert "queued" in r["result"]["output"].lower()
+    assert "brand new goal" in r["result"]["output"]
 
-    # No goal was set.
+    # Parked on the session, not yet persisted — the running turn's judge must
+    # not see it.
+    assert s["pending_goal"] == "brand new goal"
     from hermes_cli.goals import GoalManager
     assert GoalManager(session_key).state is None
+
+
+def test_goal_status_reports_queued_goal(server, session):
+    sid, _, s = session
+    s["running"] = True
+    _call(server, "command.dispatch", name="goal", arg="queued objective", session_id=sid)
+
+    r = _call(server, "command.dispatch", name="goal", arg="status", session_id=sid)
+    assert "queued objective" in r["result"]["output"]
+
+
+def test_goal_clear_drops_queued_goal(server, session):
+    sid, session_key, s = session
+    s["running"] = True
+    _call(server, "command.dispatch", name="goal", arg="doomed goal", session_id=sid)
+
+    r = _call(server, "command.dispatch", name="goal", arg="clear", session_id=sid)
+    assert "cleared" in r["result"]["output"].lower()
+    assert not s.get("pending_goal")
+
+    from hermes_cli.goals import GoalManager
+    assert GoalManager(session_key).state is None
+
+
+def test_goal_pause_drops_queued_goal(server, session):
+    sid, _, s = session
+    s["running"] = True
+    _call(server, "command.dispatch", name="goal", arg="doomed goal", session_id=sid)
+
+    r = _call(server, "command.dispatch", name="goal", arg="pause", session_id=sid)
+    assert "doomed goal" in r["result"]["output"]
+    assert not s.get("pending_goal")
+
+
+def test_drain_pending_goal_persists_and_dispatches(server, session, monkeypatch):
+    """At turn end the queued goal is persisted and submitted as a real turn."""
+    sid, session_key, s = session
+    s["running"] = True
+    _call(server, "command.dispatch", name="goal", arg="ship the feature", session_id=sid)
+
+    # Turn finished.
+    s["running"] = False
+    submitted = []
+    monkeypatch.setattr(
+        server,
+        "_run_prompt_submit",
+        lambda rid, _sid, _session, text: submitted.append(text),
+    )
+    monkeypatch.setattr(server, "_emit", lambda *a, **k: None)
+
+    assert server._drain_pending_goal(1, sid, s) is True
+    assert submitted == ["ship the feature"]
+    assert not s.get("pending_goal")
+
+    from hermes_cli.goals import GoalManager
+    state = GoalManager(session_key).state
+    assert state is not None
+    assert state.goal == "ship the feature"
+    assert state.status == "active"
+
+
+def test_drain_pending_goal_noop_when_nothing_queued(server, session):
+    sid, _, s = session
+    assert server._drain_pending_goal(1, sid, s) is False
+
+
+def test_drain_pending_goal_skips_while_running(server, session):
+    sid, _, s = session
+    s["running"] = True
+    _call(server, "command.dispatch", name="goal", arg="later", session_id=sid)
+    # Still running (e.g. a queued user prompt claimed the session first).
+    assert server._drain_pending_goal(1, sid, s) is False
+    assert s["pending_goal"] == "later"
 
 
 def test_goal_control_verbs_allowed_while_running(server, session):

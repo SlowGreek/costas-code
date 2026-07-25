@@ -143,28 +143,28 @@ const NON_SESSION_LOAD_STEP = 10
 const SIDEBAR_NAV: SidebarNavItem[] = [
   {
     id: 'new-session',
-    label: '',
+    label: '[N]EW SESSION',
     icon: props => <Codicon name="robot" {...props} />,
     action: 'new-session',
     keybindActionId: 'session.new'
   },
   {
     id: 'skills',
-    label: '',
+    label: '[C]APABILITIES',
     icon: props => <Codicon name="symbol-misc" {...props} />,
     route: SKILLS_ROUTE,
     keybindActionId: 'nav.skills'
   },
   {
     id: 'messaging',
-    label: '',
+    label: 'M[E]SSAGING',
     icon: props => <Codicon name="comment" {...props} />,
     route: MESSAGING_ROUTE,
     keybindActionId: 'nav.messaging'
   },
   {
     id: 'artifacts',
-    label: '',
+    label: '[A]RTIFACTS',
     icon: props => <Codicon name="files" {...props} />,
     route: ARTIFACTS_ROUTE,
     keybindActionId: 'nav.artifacts'
@@ -1150,15 +1150,18 @@ export function ChatSidebar({
                       item.keybindActionId
                         ? {
                             children: (
-                              <TipKeybindLabel actionId={item.keybindActionId} text={s.nav[item.id] ?? item.label} />
+                              <TipKeybindLabel
+                                actionId={item.keybindActionId}
+                                text={item.label || s.nav[item.id] || item.id}
+                              />
                             )
                           }
-                        : (s.nav[item.id] ?? item.label)
+                        : (item.label || s.nav[item.id] || item.id)
                     }
                     type="button"
                   >
                     <item.icon className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]" />
-                    <span className="min-w-0 flex-1 truncate">{s.nav[item.id] ?? item.label}</span>
+                    <span className="min-w-0 flex-1 truncate">{item.label || s.nav[item.id] || item.id}</span>
                     {isNewSession && (
                       <KbdGroup
                         className={cn('ml-auto opacity-55', newSessionKbdFlash && 'opacity-100!')}
@@ -1176,7 +1179,7 @@ export function ChatSidebar({
                     {isNewSession || item.route ? (
                       <ContextMenu>
                         <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
-                        <ContextMenuContent aria-label={s.nav[item.id] ?? item.label}>
+                        <ContextMenuContent aria-label={item.label || s.nav[item.id] || item.id}>
                           <SplitSubmenu
                             kit={CONTEXT_SPLIT_KIT}
                             label={s.row.openInSplit}

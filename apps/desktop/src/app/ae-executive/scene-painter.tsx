@@ -5,26 +5,32 @@ import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-import type { AeExecutiveScene } from './scene'
+import type { AeExecutiveScene, UgSceneNode } from './scene'
 
 interface AeScenePainterProps {
   scene: AeExecutiveScene
   onAction: (action: string) => void
 }
 
-const TEXT_SIZE = {
-  s: 'text-[0.72rem]',
-  m: 'text-sm',
-  l: 'text-lg',
-  xl: 'text-2xl tracking-tight'
-} as const
+const TEXT_SIZE: Record<string, string> = { s: 'text-[0.72rem]', m: 'text-sm', l: 'text-lg', xl: 'text-2xl' }
+const TOKEN_COLOR: Record<string, string> = {
+  surface: 'var(--ui-chat-surface-background)',
+  bg: 'var(--background)',
+  ink: 'var(--foreground)',
+  text: 'var(--foreground)',
+  line: 'var(--ui-stroke-tertiary)',
+  border: 'var(--ui-stroke-tertiary)',
+  accent: 'var(--theme-primary)',
+  primary: 'var(--theme-primary)',
+  muted: 'var(--ui-text-tertiary)',
+  danger: 'var(--destructive)',
+  error: 'var(--destructive)'
+}
 
-const TEXT_TONE = {
-  muted: 'text-(--ui-text-tertiary)',
-  normal: 'text-foreground',
-  positive: 'text-emerald-500 dark:text-emerald-400',
-  warning: 'text-amber-600 dark:text-amber-400'
-} as const
+const attr = (node: UgSceneNode, key: string) => node.a?.[key]
+const stringAttr = (node: UgSceneNode, key: string) => (typeof attr(node, key) === 'string' ? String(attr(node, key)) : '')
+const numberAttr = (node: UgSceneNode, key: string, fallback = 0) =>
+  typeof attr(node, key) === 'number' ? Number(attr(node, key)) : fallback
 
 export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
   const [inputs, setInputs] = useState<Record<string, string>>({})
@@ -32,138 +38,160 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
 
   const paint = (id: string): ReactNode => {
     const node = nodes.get(id)
-
-    if (!node) {
-      return (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive" key={id}>
-          Scene node unavailable · {id}
-        </div>
-      )
-    }
+    if (!node) return <SceneRefusal code="node-unavailable" detail={id} key={id} />
 
     switch (node.p) {
       case 'column':
         return (
-          <div className="flex min-w-0 flex-col" key={node.id} style={{ gap: node.a?.gap ?? 8 }}>
-            {node.kids.map(paint)}
+          <div className="flex min-w-0 flex-col" key={node.id} style={{ gap: numberAttr(node, 'gap', 8) }}>
+            {(node.kids ?? []).map(paint)}
           </div>
         )
-
       case 'row':
         return (
-          <div className="flex min-w-0 flex-wrap items-center" key={node.id} style={{ gap: node.a?.gap ?? 8 }}>
-            {node.kids.map(paint)}
+          <div className="flex min-w-0 flex-wrap items-center" key={node.id} style={{ gap: numberAttr(node, 'gap', 8) }}>
+            {(node.kids ?? []).map(paint)}
           </div>
         )
-
+      case 'stack':
+        return (
+          <div className="grid min-w-0 [&>*]:col-start-1 [&>*]:row-start-1" key={node.id}>
+            {(node.kids ?? []).map(paint)}
+          </div>
+        )
       case 'text':
         return (
           <p
             className={cn(
-              'min-w-0 whitespace-pre-wrap leading-relaxed',
-              TEXT_SIZE[node.a.size ?? 'm'],
-              TEXT_TONE[node.a.tone ?? 'normal'],
-              node.a.weight === 'bold' && 'font-semibold'
+              'min-w-0 whitespace-pre-wrap font-mono leading-relaxed',
+              TEXT_SIZE[stringAttr(node, 'size')] ?? TEXT_SIZE.m,
+              stringAttr(node, 'weight') === 'bold' && 'font-semibold'
             )}
             key={node.id}
+            style={{ color: resolveColor(stringAttr(node, 'color')) }}
           >
-            {node.a.text}
+            {stringAttr(node, 'text')}
           </p>
         )
-
-      case 'divider':
-        return <div className="h-px bg-(--ui-stroke-tertiary)" key={node.id} role="separator" />
-
-      case 'progress':
-        return (
-          <div className="grid gap-1.5" key={node.id}>
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-(--ui-text-secondary)">{node.a.label}</span>
-              <span className="font-mono text-(--ui-text-tertiary)">{Math.round(node.a.value * 100)}%</span>
-            </div>
-            <Progress aria-label={node.a.label} value={node.a.value} />
-          </div>
-        )
-
-      case 'button':
+      case 'button': {
+        const action = node.on?.tap || node.on?.key
         return (
           <Button
-            className="w-fit"
+            className="w-fit justify-start font-mono"
+            disabled={!action || attr(node, 'disabled') === true}
             key={node.id}
-            onClick={() => onAction(node.on.tap)}
+            onClick={() => action && onAction(action)}
             size="sm"
-            variant={node.a.primary ? 'default' : 'outline'}
+            variant={attr(node, 'primary') === true ? 'default' : 'outline'}
           >
-            {node.a.label}
+            {stringAttr(node, 'label')}
           </Button>
         )
-
-      case 'input':
-        return (
-          <label className="grid gap-1.5" key={node.id}>
-            <span className="text-xs font-medium text-(--ui-text-secondary)">{node.a.label}</span>
-            <Input
-              aria-label={node.a.label}
-              onChange={event => setInputs(current => ({ ...current, [node.id]: event.target.value }))}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && node.on?.change) {
-                  onAction(`${node.on.change}:${inputs[node.id] ?? ''}`)
-                }
-              }}
-              placeholder={node.a.placeholder}
-              value={inputs[node.id] ?? node.a.value ?? ''}
-            />
-          </label>
-        )
-      default: {
-        const exhaustive: never = node
-
-        return exhaustive
       }
+      case 'input': {
+        const value = inputs[node.id] ?? stringAttr(node, 'value')
+        return (
+          <Input
+            aria-label={stringAttr(node, 'name') || stringAttr(node, 'placeholder') || node.id}
+            key={node.id}
+            onChange={event => setInputs(current => ({ ...current, [node.id]: event.target.value }))}
+            onKeyDown={event => event.key === 'Enter' && node.on?.submit && onAction(node.on.submit)}
+            placeholder={stringAttr(node, 'placeholder')}
+            type={stringAttr(node, 'kind') || 'text'}
+            value={value}
+          />
+        )
+      }
+      case 'select': {
+        const options = Array.isArray(attr(node, 'options')) ? (attr(node, 'options') as unknown[]) : []
+        return (
+          <select
+            aria-label={stringAttr(node, 'name') || node.id}
+            className="h-8 rounded border border-(--ui-stroke-secondary) bg-background px-2 font-mono text-xs"
+            defaultValue={stringAttr(node, 'value')}
+            key={node.id}
+            onChange={() => node.on?.change && onAction(node.on.change)}
+          >
+            {options.map((option, index) => {
+              const value = typeof option === 'string' ? option : String((option as { value?: unknown }).value ?? index)
+              const label = typeof option === 'string' ? option : String((option as { label?: unknown }).label ?? value)
+              return (
+                <option key={`${node.id}-${value}`} value={value}>
+                  {label}
+                </option>
+              )
+            })}
+          </select>
+        )
+      }
+      case 'progress':
+        return (
+          <Progress
+            aria-label={stringAttr(node, 'name') || node.id}
+            key={node.id}
+            value={Math.min(1, Math.max(0, numberAttr(node, 'value')))}
+          />
+        )
+      case 'divider':
+        return <div className="h-px" key={node.id} role="separator" style={{ background: resolveColor(stringAttr(node, 'color')) }} />
+      case 'spacer':
+        return <div aria-hidden="true" key={node.id} style={{ height: numberAttr(node, 'size', 8) }} />
+      case 'image':
+        return (
+          <img
+            alt={stringAttr(node, 'alt') || stringAttr(node, 'text-alt')}
+            className="max-w-full rounded object-contain"
+            key={node.id}
+            src={stringAttr(node, 'src')}
+          />
+        )
+      case 'canvas':
+        return <UguiCanvas key={node.id} node={node} />
+      case 'native':
+        return <SceneRefusal code="native-realization-unavailable" detail={stringAttr(node, 'catalog') || node.id} key={node.id} />
+      default:
+        return <SceneRefusal code="primitive-unavailable" detail={`${node.p}:${node.id}`} key={node.id} />
     }
   }
 
   return (
-    <section
-      aria-label={`AE ${scene.tab} Scene`}
-      className="rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm"
-      data-scene-revision={scene.revision}
-      data-scene-version={scene.sceneVersion}
-    >
+    <section aria-label="UGUI Scene" className="rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm" data-scene-root={scene.root} data-scene-version={scene.sceneVersion}>
       {paint(scene.root)}
     </section>
   )
 }
 
-export function validateExecutiveScene(scene: AeExecutiveScene): readonly string[] {
-  const errors: string[] = []
-  const ids = new Set<string>()
+function UguiCanvas({ node }: { node: UgSceneNode }) {
+  const width = Math.max(1, numberAttr(node, 'w', 640))
+  const height = Math.max(1, numberAttr(node, 'h', 360))
+  const operations = Array.isArray(attr(node, 'ops')) ? (attr(node, 'ops') as Array<Record<string, unknown>>) : []
+  const alt = stringAttr(node, 'text-alt')
 
-  if (scene.sceneVersion !== '1.0.0') {
-    errors.push('scene-version')
-  }
+  return (
+    <figure className="grid gap-1.5 overflow-x-auto">
+      <svg aria-label={alt || undefined} className="max-w-full" role={alt ? 'img' : undefined} viewBox={`0 0 ${width} ${height}`}>
+        {operations.map((operation, index) => {
+          const fill = resolveColor(String(operation.fill ?? 'text'))
+          if (operation.op === 'rect') {
+            return <rect fill={fill} height={Number(operation.h ?? 0)} key={`${node.id}-${index}`} width={Number(operation.w ?? 0)} x={Number(operation.x ?? 0)} y={Number(operation.y ?? 0)} />
+          }
+          if (operation.op === 'text') {
+            return <text fill={fill} fontFamily="JetBrains Mono, monospace" fontSize={Number(operation.size ?? 12)} key={`${node.id}-${index}`} x={Number(operation.x ?? 0)} y={Number(operation.y ?? 0)}>{String(operation.text ?? '')}</text>
+          }
+          return null
+        })}
+      </svg>
+      {alt && <figcaption className="sr-only">{alt}</figcaption>}
+    </figure>
+  )
+}
 
-  for (const node of scene.nodes) {
-    if (!node.id || ids.has(node.id)) {
-      errors.push(`node-id:${node.id || 'empty'}`)
-    }
+function resolveColor(value: string): string | undefined {
+  if (!value) return undefined
+  if (TOKEN_COLOR[value]) return TOKEN_COLOR[value]
+  return /^#[0-9a-fA-F]{6}$/.test(value) ? value : undefined
+}
 
-    ids.add(node.id)
-  }
-
-  if (!ids.has(scene.root)) {
-    errors.push('root-missing')
-  }
-
-  for (const node of scene.nodes) {
-    if ((node.p === 'column' || node.p === 'row') && node.kids.some(id => !ids.has(id))) {
-      errors.push(`child-missing:${node.id}`)
-    }
-
-    if (node.p === 'progress' && (node.a.value < 0 || node.a.value > 1)) {
-      errors.push(`progress-bounds:${node.id}`)
-    }
-  }
-
-  return errors
+function SceneRefusal({ code, detail }: { code: string; detail: string }) {
+  return <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 font-mono text-xs text-destructive">UGUI refusal · {code} · {detail}</div>
 }

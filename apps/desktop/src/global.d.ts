@@ -12,6 +12,12 @@ export {}
 declare global {
   interface Window {
     hermesDesktop: {
+      getAeExecutiveScenes: () => Promise<{
+        schema: 'ae-executive-scene-batch/1'
+        authority: 'none'
+        projector: string
+        scenes: Array<{ tab: string; scene: Record<string, unknown> }>
+      }>
       // Resolve a backend connection. Omit `profile` (or pass the primary) for
       // the window's backend; pass a named profile to lazily spawn/reuse that
       // profile's backend from the pool.

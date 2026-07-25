@@ -2,7 +2,9 @@ import sys
 
 from tools.lucid_mcp_bridge import (
     HOST_CONTEXT_EXTENSION,
+    lucid_retry_disposition,
     lucid_host_context_meta,
+    project_lucid_receipt,
     public_lucid_bridge_status,
 )
 
@@ -82,3 +84,127 @@ def test_public_status_is_content_free_and_names_authority_owner(monkeypatch):
     assert "signature" not in wire
     assert "token" not in wire
     assert "session:" not in wire
+
+
+def test_lucid_receipt_projection_is_closed_and_content_free():
+    digest = "sha256:" + "a" * 64
+    structured = {
+        "envelope": {
+            "intent": {
+                "verb": "dispatch",
+                "args": {"intent": "private prose", "secret": "must-not-project"},
+            },
+            "capability": {"signature": "must-not-project"},
+            "escalation": {"needs_user": True, "reason": "private reason"},
+            "fidelity": {"level": "degraded", "preserved": [], "lost": []},
+            "refusal": {"code": "no-capability", "reason": "private reason"},
+            "receipt": {
+                "id": "lucid:abcdef0123456789",
+                "ts": "2026-07-25T20:00:00Z",
+                "trust": "untrusted",
+                "content_hash": digest,
+                "ran": False,
+                "effect": "private effect text",
+            },
+        },
+        "result": {"private": "must-not-project"},
+        "future_field": "must-not-project",
+    }
+
+    receipt = project_lucid_receipt(structured)
+
+    assert receipt == {
+        "schema": "hermes-lucid-receipt/1",
+        "id": "lucid:abcdef0123456789",
+        "timestamp": "2026-07-25T20:00:00Z",
+        "verb": "dispatch",
+        "ran": False,
+        "trust": "untrusted",
+        "content_hash": digest,
+        "refusal_code": "no-capability",
+        "needs_user": True,
+    }
+    wire = repr(receipt).lower()
+    for forbidden in (
+        "must-not-project",
+        "private prose",
+        "private reason",
+        "private effect text",
+        "signature",
+        "'result'",
+        "'reason'",
+    ):
+        assert forbidden not in wire
+
+
+def test_lucid_receipt_projection_rejects_malformed_or_open_shapes():
+    valid_hash = "sha256:" + "b" * 64
+    base = {
+        "envelope": {
+            "intent": {"verb": "get", "args": {}},
+            "capability": None,
+            "escalation": None,
+            "fidelity": {"level": "lossless", "preserved": [], "lost": []},
+            "refusal": None,
+            "receipt": {
+                "id": "lucid:abc",
+                "ts": "2026-07-25T20:00:00Z",
+                "trust": "verified",
+                "content_hash": valid_hash,
+                "ran": True,
+                "effect": "ok",
+            },
+        }
+    }
+    assert project_lucid_receipt(base) is not None
+    for mutate in (
+        lambda d: d["envelope"]["intent"].update(verb="unknown"),
+        lambda d: d["envelope"]["receipt"].update(id="contains space"),
+        lambda d: d["envelope"]["receipt"].update(trust="superuser"),
+        lambda d: d["envelope"]["receipt"].update(content_hash="sha256:short"),
+        lambda d: d["envelope"]["receipt"].update(ran="yes"),
+        lambda d: d["envelope"].update(refusal={"code": "open-ended", "reason": "x"}),
+    ):
+        import copy
+
+        candidate = copy.deepcopy(base)
+        mutate(candidate)
+        assert project_lucid_receipt(candidate) is None
+
+
+def test_retry_disposition_is_read_only_and_exact_provenance(monkeypatch):
+    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
+    config = {"command": "butler", "args": ["--mcp-stdio"]}
+
+    assert (
+        lucid_retry_disposition(
+            "lucid-quine", config, "lucid.get", resolved_command=butler
+        )
+        == "retry-safe-read"
+    )
+    for verb in ("show", "set", "morph", "dispatch", "steer", "cancel"):
+        assert (
+            lucid_retry_disposition(
+                "lucid-quine",
+                config,
+                f"lucid.{verb}",
+                resolved_command=butler,
+            )
+            == "outcome-unknown"
+        )
+    assert (
+        lucid_retry_disposition(
+            "foreign", config, "lucid.dispatch", resolved_command=butler
+        )
+        is None
+    )
+    assert (
+        lucid_retry_disposition(
+            "lucid-quine",
+            config,
+            "lucid.dispatch",
+            resolved_command="/tmp/attacker/butler",
+        )
+        is None
+    )

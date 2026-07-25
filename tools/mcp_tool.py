@@ -4651,11 +4651,50 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     res_text = getattr(getattr(block, "resource", None), "text", None)
                     if res_text:
                         error_text += str(res_text)
-                return json.dumps({
-                    "error": _sanitize_error(
-                        error_text or "MCP tool returned an error"
+                from tools.lucid_mcp_bridge import (
+                    lucid_retry_disposition,
+                    project_lucid_receipt,
+                )
+
+                disposition = lucid_retry_disposition(
+                    server_name,
+                    server._config,
+                    tool_name,
+                    resolved_command=server._resolved_command,
+                )
+                if disposition is not None:
+                    projected_receipt = project_lucid_receipt(
+                        getattr(result, "structuredContent", None)
                     )
-                }, ensure_ascii=False)
+                    if projected_receipt is not None:
+                        refusal_code = projected_receipt.get("refusal_code")
+                        return json.dumps(
+                            {
+                                "error": (
+                                    f"Butler refused LUCID call ({refusal_code})"
+                                    if refusal_code
+                                    else "Butler returned a LUCID error receipt"
+                                ),
+                                "lucid_receipt": projected_receipt,
+                            },
+                            ensure_ascii=False,
+                        )
+                    return json.dumps(
+                        {
+                            "error": "Butler returned an invalid LUCID refusal receipt",
+                            "code": "lucid-invalid-receipt",
+                            "retryable": False,
+                        },
+                        ensure_ascii=False,
+                    )
+                return json.dumps(
+                    {
+                        "error": _sanitize_error(
+                            error_text or "MCP tool returned an error"
+                        )
+                    },
+                    ensure_ascii=False,
+                )
 
             # Collect text from content blocks. MCP tool results can also
             # include ImageContent blocks (screenshot / Blockbench / Playwright
@@ -4729,7 +4768,10 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             try:
                 parsed = json.loads(result)
                 if "error" in parsed:
-                    _bump_server_error(server_name)
+                    if "lucid_receipt" in parsed:
+                        _reset_server_error(server_name)
+                    else:
+                        _bump_server_error(server_name)
                 else:
                     _reset_server_error(server_name)  # success — reset
             except (json.JSONDecodeError, TypeError):
@@ -4738,6 +4780,33 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
         except InterruptedError:
             return _interrupted_call_result()
         except Exception as exc:
+            from tools.lucid_mcp_bridge import lucid_retry_disposition
+
+            retry_disposition = lucid_retry_disposition(
+                server_name,
+                server._config,
+                tool_name,
+                resolved_command=server._resolved_command,
+            )
+            if retry_disposition == "outcome-unknown":
+                _bump_server_error(server_name)
+                _signal_reconnect(server)
+                logger.warning(
+                    "LUCID %s/%s transport failed after invocation; "
+                    "automatic retry disabled and outcome is unknown",
+                    server_name,
+                    tool_name,
+                )
+                return json.dumps(
+                    {
+                        "error": "LUCID call outcome is unknown; automatic retry is disabled",
+                        "code": "lucid-outcome-unknown",
+                        "retryable": False,
+                        "server": server_name,
+                        "tool": tool_name,
+                    },
+                    ensure_ascii=False,
+                )
             # Auth-specific recovery path: consult the manager, signal
             # reconnect if viable, retry once. Returns None to fall
             # through for non-auth exceptions.

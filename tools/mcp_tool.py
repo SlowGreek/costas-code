@@ -1823,7 +1823,7 @@ class MCPServerTask:
     __slots__ = (
         "name", "session", "tool_timeout",
         "_task", "_ready", "_shutdown_event", "_reconnect_event",
-        "_tools", "_error", "_config",
+        "_tools", "_error", "_config", "_resolved_command",
         "_sampling", "_elicitation",
         "_registered_tool_names", "_auth_type", "_refresh_lock",
         "_rpc_lock", "_pending_refresh_tasks",
@@ -1850,6 +1850,7 @@ class MCPServerTask:
         self._tools: list = []
         self._error: Optional[Exception] = None
         self._config: dict = {}
+        self._resolved_command: Optional[str] = None
         self._sampling: Optional[SamplingHandler] = None
         self._elicitation: Optional[ElicitationHandler] = None
         self._registered_tool_names: list[str] = []
@@ -2368,6 +2369,7 @@ class MCPServerTask:
 
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
+        self._resolved_command = command
 
         # Check package against OSV malware database before spawning.
         # Run off the event loop (the urllib HTTPS call is blocking) and bound
@@ -4615,7 +4617,19 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 # it and detect the gateway platform / session for routing.
                 server._pending_call_context = contextvars.copy_context()
                 try:
-                    result = await server.session.call_tool(tool_name, arguments=args)
+                    from tools.lucid_mcp_bridge import current_lucid_host_context_meta
+
+                    host_meta = current_lucid_host_context_meta(
+                        server_name,
+                        server._config,
+                        session_id=kwargs.get("session_id"),
+                        resolved_command=server._resolved_command,
+                    )
+                    result = await server.session.call_tool(
+                        tool_name,
+                        arguments=args,
+                        **({"meta": host_meta} if host_meta is not None else {}),
+                    )
                 finally:
                     server._pending_call_context = None
             # The RPC round-trip completed — the session is demonstrably

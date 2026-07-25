@@ -397,6 +397,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
 const AE_RUNTIME_BIN = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
+const LUCID_BUTLER_PATH = path.join(AE_RUNTIME_BIN, process.platform === 'win32' ? 'butler.exe' : 'butler')
 
 // Build-time install stamp -- the git ref this .exe was built against.
 //
@@ -7702,6 +7703,7 @@ async function spawnPoolBackend(profile, entry) {
         // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
         // can still point at the install dir even when spawn cwd is home.
         TERMINAL_CWD: hermesCwd,
+        HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         // Marks this dashboard backend as desktop-spawned so it runs the cron
         // scheduler tick loop (the gateway isn't running under the app).
@@ -7973,6 +7975,7 @@ async function startHermes() {
             { delimiter: path.delimiter }
           ),
           TERMINAL_CWD: hermesCwd,
+          HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron
           // scheduler tick loop (the gateway isn't running under the app).

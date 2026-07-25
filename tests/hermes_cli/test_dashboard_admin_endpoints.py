@@ -7,6 +7,8 @@ contract and the CLI-config parity (servers/keys written via the API are
 visible to the CLI data layer), not specific catalog values.
 """
 
+import json
+
 import pytest
 
 
@@ -199,7 +201,10 @@ class TestMcpEndpoints:
             "/api/mcp/servers/nope/enabled", json={"enabled": True}
         ).status_code == 404
 
-    def test_catalog_lists_entries(self):
+    def test_catalog_lists_entries(self, monkeypatch):
+        import sys
+
+        monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", sys.executable)
         r = self.client.get("/api/mcp/catalog")
         assert r.status_code == 200
         body = r.json()
@@ -230,6 +235,22 @@ class TestMcpEndpoints:
                 assert e["url"]
             elif e["transport"] == "stdio":
                 assert e["command"]
+
+        lucid = next(e for e in body["entries"] if e["name"] == "lucid-quine")
+        assert lucid["host_bridge"] == {
+            "schema": "hermes-lucid-host-bridge/1",
+            "server": "lucid-quine",
+            "transport_admitted": True,
+            "identity_binding": "request-scoped",
+            "authority": "butler-capability-required",
+            "capability_material_exposed": False,
+            "arguments_mutated": False,
+            "receipt_owner": "Butler/Envelope",
+        }
+        public_wire = json.dumps(lucid["host_bridge"]).lower()
+        assert "signature" not in public_wire
+        assert "token" not in public_wire
+        assert "session_id" not in public_wire
 
     def test_catalog_install_unknown_404(self):
         r = self.client.post("/api/mcp/catalog/install", json={"name": "no-such-mcp-xyz"})

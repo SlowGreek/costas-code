@@ -42,6 +42,16 @@ function entry(installed = false): McpCatalogEntry {
       'lucid.cancel'
     ],
     post_install: '',
+    host_bridge: {
+      schema: 'hermes-lucid-host-bridge/1',
+      server: 'lucid-quine',
+      transport_admitted: true,
+      identity_binding: 'request-scoped',
+      authority: 'butler-capability-required',
+      capability_material_exposed: false,
+      arguments_mutated: false,
+      receipt_owner: 'Butler/Envelope'
+    },
     needs_install: false,
     installed,
     enabled: installed
@@ -75,8 +85,13 @@ describe('first-class LUCID MCP Hub offering', () => {
     await renderCard()
     expect(screen.getByText('LUCID MCP')).toBeTruthy()
     expect(screen.getByText('butler --mcp-stdio · local transport · QUINE-governed')).toBeTruthy()
+    expect(screen.getByText('Host identity bound')).toBeTruthy()
+    expect(screen.getByText('Authority held')).toBeTruthy()
+    expect(screen.getByText('Receipts native')).toBeTruthy()
 
-    for (const verb of entry().default_enabled ?? []) {expect(screen.getByText(verb)).toBeTruthy()}
+    for (const verb of entry().default_enabled ?? []) {
+      expect(screen.getByText(verb)).toBeTruthy()
+    }
   })
 
   it('installs through MCP catalog and opens the MCP inspector', async () => {

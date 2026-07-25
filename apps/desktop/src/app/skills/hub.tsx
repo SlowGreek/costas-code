@@ -46,6 +46,8 @@ import {
 } from '@/store/hub-actions'
 import { notify, notifyError } from '@/store/notifications'
 
+import { LucidBridgeStatus } from './lucid-bridge-status'
+
 // Dedup rank when the same skill surfaces from multiple sources — higher trust
 // wins. Mirrors the backend's unified_search `_TRUST_RANK`.
 const TRUST_RANK: Record<string, number> = { builtin: 2, trusted: 1, community: 0 }
@@ -104,6 +106,7 @@ export function LucidMcpHubCard({ entry }: { entry: McpCatalogEntry }) {
           <p className="mt-3 font-mono text-[0.62rem] text-(--ui-text-quaternary)">
             {entry.command} {entry.args.join(' ')} · local transport · QUINE-governed
           </p>
+          {entry.host_bridge && <LucidBridgeStatus bridge={entry.host_bridge} />}
         </div>
         <Button disabled={installing} onClick={entry.installed ? open : () => void install()} size="sm">
           {installing ? (

@@ -12989,7 +12989,7 @@ async def list_mcp_catalog(profile: Optional[str] = None):
             auth = entry.auth
             transport = entry.transport
             install = entry.install
-            entries.append({
+            catalog_row = {
                 "name": entry.name,
                 "description": entry.description,
                 "source": entry.source,
@@ -13019,7 +13019,19 @@ async def list_mcp_catalog(profile: Optional[str] = None):
                 "needs_install": entry.install is not None,
                 "installed": installed_state.get(entry.name, (False, False))[0],
                 "enabled": installed_state.get(entry.name, (False, False))[1],
-            })
+            }
+            if entry.name == "lucid-quine":
+                from tools.lucid_mcp_bridge import public_lucid_bridge_status
+
+                catalog_row["host_bridge"] = public_lucid_bridge_status(
+                    entry.name,
+                    {
+                        "command": transport.command,
+                        "args": list(transport.args or []),
+                        **({"url": transport.url} if transport.url else {}),
+                    },
+                )
+            entries.append(catalog_row)
     except HTTPException:
         # Unknown/invalid profile → 404, not a silently-empty catalog.
         raise

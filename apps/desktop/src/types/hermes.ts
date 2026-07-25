@@ -1160,6 +1160,16 @@ export interface McpCatalogEntry {
   bootstrap: string[]
   default_enabled: string[] | null
   post_install: string
+  host_bridge?: {
+    schema: 'hermes-lucid-host-bridge/1'
+    server: 'lucid-quine'
+    transport_admitted: boolean
+    identity_binding: 'request-scoped' | 'unavailable'
+    authority: 'butler-capability-required'
+    capability_material_exposed: false
+    arguments_mutated: false
+    receipt_owner: 'Butler/Envelope'
+  }
   needs_install: boolean
   installed: boolean
   enabled: boolean

@@ -54,6 +54,8 @@ import { PanelAddButton, PanelEmpty } from '../overlays/panel'
 import { prettyName } from '../settings/helpers'
 import { useDeepLinkHighlight } from '../settings/use-deep-link-highlight'
 
+import { LucidBridgeStatus } from './lucid-bridge-status'
+
 type McpServers = Record<string, Record<string, unknown>>
 
 // The editor always speaks the ecosystem's mcp.json document format — names
@@ -439,6 +441,17 @@ export function McpTab({ gateway }: { gateway: HermesGateway | null }) {
     )
 
     return match?.description ?? null
+  }
+
+  const hostBridgeFor = (serverName: string, server: Record<string, unknown>) => {
+    const lower = serverName.toLowerCase()
+
+    return catalog.find(
+      entry =>
+        entry.name.toLowerCase() === lower ||
+        (entry.url && entry.url === server.url) ||
+        (entry.command && entry.command === server.command)
+    )?.host_bridge
   }
 
   const resetDraft = (entries: McpServers) => {
@@ -971,6 +984,7 @@ export function McpTab({ gateway }: { gateway: HermesGateway | null }) {
             authing={authing === selected}
             description={descriptionFor(selected, activeEntry)}
             entry={activeEntry}
+            hostBridge={hostBridgeFor(selected, activeEntry)}
             name={selected}
             onAuthenticate={() => void authenticate(selected)}
             onBack={() => setCursor(0)}
@@ -1097,6 +1111,7 @@ function ServerConfig({
   authing,
   description,
   entry,
+  hostBridge,
   name,
   onAuthenticate,
   onBack,
@@ -1111,6 +1126,7 @@ function ServerConfig({
   authing: boolean
   description: null | string
   entry: Record<string, unknown>
+  hostBridge: McpCatalogEntry['host_bridge']
   name: string
   onAuthenticate: () => void
   onBack: () => void
@@ -1196,6 +1212,8 @@ function ServerConfig({
           {description}
         </p>
       )}
+
+      {hostBridge && <LucidBridgeStatus bridge={hostBridge} compact />}
 
       {canAuth && saved && (
         <div className="mt-3 flex justify-end">

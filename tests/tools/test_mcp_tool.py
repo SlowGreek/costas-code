@@ -6,6 +6,7 @@ All tests use mocks -- no real MCP servers or subprocesses are started.
 import asyncio
 import concurrent.futures
 import json
+import os
 import threading
 import time
 from types import SimpleNamespace
@@ -737,6 +738,76 @@ class TestToolHandler:
             assert result["result"] == "hello world"
             mock_session.call_tool.assert_called_once_with("greet", arguments={"name": "world"})
         finally:
+            _servers.pop("test_srv", None)
+
+    def test_lucid_call_injects_host_context_outside_model_arguments(self):
+        from gateway.session_context import clear_session_vars, set_session_vars
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        mock_session = MagicMock()
+        mock_session.call_tool = AsyncMock(
+            return_value=_make_call_result("bounded receipt", is_error=False)
+        )
+        server = _make_mock_server("lucid-quine", session=mock_session)
+        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
+        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        _servers["lucid-quine"] = server
+        arguments = {"path": "fleet"}
+        tokens = set_session_vars(
+            platform="api_server",
+            chat_id="session:desktop-123",
+            session_id="internal-agent-id",
+        )
+        try:
+            handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
+            with patch.dict(
+                os.environ,
+                {
+                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+                },
+            ), self._patch_mcp_loop():
+                result = json.loads(handler(arguments, session_id="session:explicit-456"))
+            assert result["result"] == "bounded receipt"
+            assert arguments == {"path": "fleet"}
+            mock_session.call_tool.assert_called_once_with(
+                "lucid.get",
+                arguments={"path": "fleet"},
+                meta={
+                    "com.nous.lucid/host-context": {
+                        "session_id": "session:explicit-456",
+                    }
+                },
+            )
+            sent = mock_session.call_tool.call_args.kwargs
+            assert "capability" not in repr(sent).lower()
+            assert "signature" not in repr(sent).lower()
+        finally:
+            clear_session_vars(tokens)
+            _servers.pop("lucid-quine", None)
+
+    def test_ordinary_mcp_call_never_receives_lucid_metadata(self):
+        from gateway.session_context import clear_session_vars, set_session_vars
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        mock_session = MagicMock()
+        mock_session.call_tool = AsyncMock(
+            return_value=_make_call_result("ordinary", is_error=False)
+        )
+        server = _make_mock_server("test_srv", session=mock_session)
+        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
+        _servers["test_srv"] = server
+        tokens = set_session_vars(
+            platform="api_server", chat_id="session:desktop-123"
+        )
+        try:
+            handler = _make_tool_handler("test_srv", "greet", 120)
+            with self._patch_mcp_loop():
+                handler({"name": "world"})
+            mock_session.call_tool.assert_called_once_with(
+                "greet", arguments={"name": "world"}
+            )
+        finally:
+            clear_session_vars(tokens)
             _servers.pop("test_srv", None)
 
     def test_mcp_error_result(self):

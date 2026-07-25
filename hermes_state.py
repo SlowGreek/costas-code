@@ -15,6 +15,7 @@ Key design decisions:
 """
 
 import asyncio
+import enum
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ from pathlib import Path
 from agent.memory_manager import sanitize_context
 from agent.message_sanitization import _sanitize_surrogates
 from hermes_constants import get_hermes_home
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, TypeVar
 
 try:  # Hard dependency, but tolerate scaffold-phase imports before pip install.
     import psutil
@@ -210,7 +211,46 @@ T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
+
+
+class ExternalRoleSessionRole(str, enum.Enum):
+    """Closed external role labels admitted by the durable binding."""
+
+    EM = "em"
+    ENGINEER = "engineer"
+
+
+class ExternalRoleSessionAuthority(str, enum.Enum):
+    """Authority carried by an externally bound visible session."""
+
+    OBSERVE = "observe"
+
+
+class ExternalRoleSessionBinding(TypedDict):
+    """Content-free durable binding to an external role session."""
+
+    durable_session_id: str
+    namespace: str
+    external_role_session_id: str
+    external_parent_role_session_id: Optional[str]
+    role: str
+    authority: str
+    version: int
+
+
+class DelegateChildProjection(ExternalRoleSessionBinding):
+    """Allow-listed durable identity projection for one visible child."""
+
+    parent_durable_session_id: str
+    lineage_root_id: str
+
+
+EXTERNAL_ROLE_SESSION_BINDING_VERSION = 1
+MAX_EXTERNAL_ROLE_NAMESPACE_CHARS = 64
+MAX_EXTERNAL_ROLE_SESSION_ID_CHARS = 512
+MAX_DELEGATE_PARENT_IDS = 100
+MAX_DELEGATE_CHILDREN = 200
 
 # FTS storage-layout version, tracked INDEPENDENTLY of SCHEMA_VERSION in the
 # state_meta key ``fts_storage_version``. The main schema version advances
@@ -1193,6 +1233,24 @@ CREATE TABLE IF NOT EXISTS async_delegations (
     delivery_claimed_at REAL
 );
 
+CREATE TABLE IF NOT EXISTS external_role_session_bindings (
+    durable_session_id TEXT PRIMARY KEY
+        REFERENCES sessions(id) ON DELETE CASCADE,
+    namespace TEXT NOT NULL
+        CHECK (LENGTH(namespace) BETWEEN 1 AND 64),
+    external_role_session_id TEXT NOT NULL
+        CHECK (LENGTH(external_role_session_id) BETWEEN 1 AND 512),
+    external_parent_role_session_id TEXT
+        CHECK (
+            external_parent_role_session_id IS NULL
+            OR LENGTH(external_parent_role_session_id) BETWEEN 1 AND 512
+        ),
+    role TEXT NOT NULL CHECK (role IN ('em', 'engineer')),
+    authority TEXT NOT NULL CHECK (authority = 'observe'),
+    version INTEGER NOT NULL CHECK (version = 1),
+    UNIQUE (namespace, external_role_session_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_source_id ON sessions(source, id);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
@@ -1203,6 +1261,8 @@ CREATE INDEX IF NOT EXISTS idx_session_model_usage_session ON session_model_usag
 CREATE INDEX IF NOT EXISTS idx_session_model_usage_model ON session_model_usage(model);
 CREATE INDEX IF NOT EXISTS idx_async_delegations_delivery
     ON async_delegations(delivery_state, completed_at);
+CREATE INDEX IF NOT EXISTS idx_external_role_bindings_namespace
+    ON external_role_session_bindings(namespace, external_parent_role_session_id);
 """
 
 # Indexes that reference columns added in later schema versions must be
@@ -4816,6 +4876,286 @@ class SessionDB:
             )
             row = cursor.fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def _validate_external_binding_text(
+        field: str,
+        value: Any,
+        *,
+        max_chars: int,
+        namespace: bool = False,
+    ) -> str:
+        """Validate one content-free binding identifier without normalizing it."""
+        if not isinstance(value, str):
+            raise TypeError(f"{field} must be a string")
+        if not value or value != value.strip():
+            raise ValueError(f"{field} must be non-empty with no outer whitespace")
+        if len(value) > max_chars:
+            raise ValueError(f"{field} exceeds {max_chars} characters")
+        if any(
+            ord(char) < 32
+            or ord(char) == 127
+            or 0xD800 <= ord(char) <= 0xDFFF
+            for char in value
+        ):
+            raise ValueError(f"{field} contains a control or surrogate character")
+        if namespace and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value) is None:
+            raise ValueError(
+                "namespace must start with an alphanumeric character and contain "
+                "only alphanumerics, '.', '_', ':', or '-'"
+            )
+        return value
+
+    @staticmethod
+    def _external_binding_enum_value(
+        field: str,
+        value: Any,
+        enum_type: (
+            type[ExternalRoleSessionRole]
+            | type[ExternalRoleSessionAuthority]
+        ),
+    ) -> str:
+        raw = value.value if isinstance(value, enum_type) else value
+        if not isinstance(raw, str):
+            raise TypeError(f"{field} must be a string or {enum_type.__name__}")
+        try:
+            return str(enum_type(raw).value)
+        except ValueError as exc:
+            allowed = ", ".join(member.value for member in enum_type)
+            raise ValueError(f"{field} must be one of: {allowed}") from exc
+
+    def create_external_role_session_binding(
+        self,
+        durable_session_id: str,
+        *,
+        namespace: str,
+        external_role_session_id: str,
+        external_parent_role_session_id: Optional[str],
+        role: ExternalRoleSessionRole | str,
+        authority: ExternalRoleSessionAuthority | str,
+        version: int = EXTERNAL_ROLE_SESSION_BINDING_VERSION,
+    ) -> ExternalRoleSessionBinding:
+        """Create one immutable, observe-only external role-session binding.
+
+        This is deliberately a strict insert rather than an upsert: rebinding a
+        durable transcript or changing its external identity must be an explicit
+        delete followed by a create. No provider/runtime identity or authority
+        material is accepted by this surface.
+        """
+        durable_session_id = self._validate_external_binding_text(
+            "durable_session_id",
+            durable_session_id,
+            max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+        )
+        namespace = self._validate_external_binding_text(
+            "namespace",
+            namespace,
+            max_chars=MAX_EXTERNAL_ROLE_NAMESPACE_CHARS,
+            namespace=True,
+        )
+        external_role_session_id = self._validate_external_binding_text(
+            "external_role_session_id",
+            external_role_session_id,
+            max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+        )
+        if external_parent_role_session_id is not None:
+            external_parent_role_session_id = self._validate_external_binding_text(
+                "external_parent_role_session_id",
+                external_parent_role_session_id,
+                max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+            )
+        role_value = self._external_binding_enum_value(
+            "role", role, ExternalRoleSessionRole
+        )
+        authority_value = self._external_binding_enum_value(
+            "authority", authority, ExternalRoleSessionAuthority
+        )
+        if isinstance(version, bool) or not isinstance(version, int):
+            raise TypeError("version must be an integer")
+        if version != EXTERNAL_ROLE_SESSION_BINDING_VERSION:
+            raise ValueError(
+                "version must equal "
+                f"{EXTERNAL_ROLE_SESSION_BINDING_VERSION}"
+            )
+
+        binding: ExternalRoleSessionBinding = {
+            "durable_session_id": durable_session_id,
+            "namespace": namespace,
+            "external_role_session_id": external_role_session_id,
+            "external_parent_role_session_id": external_parent_role_session_id,
+            "role": role_value,
+            "authority": authority_value,
+            "version": version,
+        }
+
+        def _do(conn):
+            if conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (durable_session_id,)
+            ).fetchone() is None:
+                raise ValueError(
+                    f"durable session does not exist: {durable_session_id}"
+                )
+            try:
+                conn.execute(
+                    """INSERT INTO external_role_session_bindings (
+                           durable_session_id, namespace,
+                           external_role_session_id,
+                           external_parent_role_session_id,
+                           role, authority, version
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        durable_session_id,
+                        namespace,
+                        external_role_session_id,
+                        external_parent_role_session_id,
+                        role_value,
+                        authority_value,
+                        version,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    "external role-session binding already exists for the "
+                    "durable session or external identity"
+                ) from exc
+
+        self._execute_write(_do)
+        return binding
+
+    def get_external_role_session_binding(
+        self, durable_session_id: str
+    ) -> Optional[ExternalRoleSessionBinding]:
+        """Return the allow-listed binding for one durable session, if present."""
+        durable_session_id = self._validate_external_binding_text(
+            "durable_session_id",
+            durable_session_id,
+            max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+        )
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT durable_session_id, namespace,
+                          external_role_session_id,
+                          external_parent_role_session_id,
+                          role, authority, version
+                   FROM external_role_session_bindings
+                   WHERE durable_session_id = ?""",
+                (durable_session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ExternalRoleSessionBinding(
+            durable_session_id=row["durable_session_id"],
+            namespace=row["namespace"],
+            external_role_session_id=row["external_role_session_id"],
+            external_parent_role_session_id=row["external_parent_role_session_id"],
+            role=row["role"],
+            authority=row["authority"],
+            version=row["version"],
+        )
+
+    def delete_external_role_session_binding(self, durable_session_id: str) -> bool:
+        """Delete only the external binding; the durable session is untouched."""
+        durable_session_id = self._validate_external_binding_text(
+            "durable_session_id",
+            durable_session_id,
+            max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+        )
+
+        def _do(conn):
+            cursor = conn.execute(
+                "DELETE FROM external_role_session_bindings "
+                "WHERE durable_session_id = ?",
+                (durable_session_id,),
+            )
+            return cursor.rowcount > 0
+
+        return bool(self._execute_write(_do))
+
+    def list_delegate_children(
+        self,
+        parent_ids: List[str],
+        *,
+        limit: int = 100,
+    ) -> List[DelegateChildProjection]:
+        """List explicitly bound durable children for exact durable parents.
+
+        Ordinary list/count semantics remain untouched. The query is bounded by
+        both parent cardinality and result count, selects only the typed binding
+        plus durable relationship fields, and projects a compressed child to its
+        current durable tip while preserving its original external binding and
+        immediate durable parent.
+        """
+        if not isinstance(parent_ids, list):
+            raise TypeError("parent_ids must be a list")
+        if len(parent_ids) > MAX_DELEGATE_PARENT_IDS:
+            raise ValueError(
+                f"parent_ids exceeds the {MAX_DELEGATE_PARENT_IDS}-item bound"
+            )
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer")
+        if not 1 <= limit <= MAX_DELEGATE_CHILDREN:
+            raise ValueError(
+                f"limit must be between 1 and {MAX_DELEGATE_CHILDREN}"
+            )
+        if not parent_ids:
+            return []
+
+        validated: List[str] = []
+        seen: set[str] = set()
+        for parent_id in parent_ids:
+            parent_id = self._validate_external_binding_text(
+                "parent_id",
+                parent_id,
+                max_chars=MAX_EXTERNAL_ROLE_SESSION_ID_CHARS,
+            )
+            if parent_id not in seen:
+                seen.add(parent_id)
+                validated.append(parent_id)
+
+        placeholders = ",".join("?" for _ in validated)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT b.durable_session_id, b.namespace,
+                           b.external_role_session_id,
+                           b.external_parent_role_session_id,
+                           b.role, b.authority, b.version,
+                           child.parent_session_id AS parent_durable_session_id
+                    FROM external_role_session_bindings b
+                    JOIN sessions child ON child.id = b.durable_session_id
+                    WHERE child.parent_session_id IN ({placeholders})
+                      AND json_extract(
+                          COALESCE(child.model_config, '{{}}'),
+                          '$._delegate_from'
+                      ) IS NOT NULL
+                      AND json_extract(
+                          COALESCE(child.model_config, '{{}}'),
+                          '$._branched_from'
+                      ) IS NULL
+                    ORDER BY child.started_at DESC, child.id DESC
+                    LIMIT ?""",
+                (*validated, limit),
+            ).fetchall()
+
+        projected: List[DelegateChildProjection] = []
+        for row in rows:
+            bound_session_id = row["durable_session_id"]
+            tip_id = self.get_compression_tip(bound_session_id) or bound_session_id
+            projected.append(
+                DelegateChildProjection(
+                    durable_session_id=tip_id,
+                    parent_durable_session_id=row["parent_durable_session_id"],
+                    lineage_root_id=self.get_conversation_root(bound_session_id),
+                    namespace=row["namespace"],
+                    external_role_session_id=row["external_role_session_id"],
+                    external_parent_role_session_id=row[
+                        "external_parent_role_session_id"
+                    ],
+                    role=row["role"],
+                    authority=row["authority"],
+                    version=row["version"],
+                )
+            )
+        return projected
 
     def resolve_session_id(self, session_id_or_prefix: str) -> Optional[str]:
         """Resolve an exact or uniquely prefixed session ID to the full ID.

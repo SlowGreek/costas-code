@@ -13,6 +13,7 @@
 > **Costas success-projection checkpoint:** `8e48fab077116554add17832a0aaf714e816373f`<br>
 > **Costas lifecycle hardening checkpoint:** `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`<br>
 > **Costas receipt UI checkpoint:** `3cad879636f536d8cb28f6e361b04c1ddb170c28`<br>
+> **Costas clean packaged UI checkpoint:** `f7835a87d6ad3072d9a56305e88854132a4d9938`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -348,6 +349,28 @@ resources/read lucid://projects/system/current          GREEN, explicit unavaila
 prompts/get lucid.get                                   GREEN, non-authorizing recipe
 tools/call lucid.get path=fleet without capability     typed no-capability refusal
 ```
+
+After receipt UI checkpoint `3cad87963` was packaged into clean Desktop checkpoint `f7835a87d`, Catalyst was
+restarted and the installed MCP was invoked through the active Hermes session. The live tool boundary returned:
+
+```json
+{
+  "error": "Butler refused LUCID call (no-capability)",
+  "lucid_receipt": {
+    "schema": "hermes-lucid-receipt/1",
+    "verb": "get",
+    "ran": false,
+    "trust": "untrusted",
+    "refusal_code": "no-capability",
+    "needs_user": false
+  }
+}
+```
+
+The actual receipt also carried its bounded ID, timestamp, and SHA-256 content hash. They are omitted from this
+prose excerpt to avoid making one ephemeral receipt identity part of the protocol claim. The Desktop Thread
+parser accepted the same closed shape covered by its component/integration tests; malformed or foreign
+lookalikes remain on the generic fallback path.
 
 The enriched direct frame preserved the original arguments and returned:
 
@@ -721,7 +744,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, success-projection checkpoint
 `8e48fab077116554add17832a0aaf714e816373f`, lifecycle hardening checkpoint
 `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, receipt UI checkpoint
-`3cad879636f536d8cb28f6e361b04c1ddb170c28`, and this document hash:
+`3cad879636f536d8cb28f6e361b04c1ddb170c28`, clean packaged UI checkpoint
+`f7835a87d6ad3072d9a56305e88854132a4d9938`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -747,9 +771,11 @@ TTD hardening      9bb6e4f67697e6435056ed2b2b0fe56bc194a165
 success projection 8e48fab077116554add17832a0aaf714e816373f
 lifecycle hardening 7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d
 receipt UI          3cad879636f536d8cb28f6e361b04c1ddb170c28
+clean packaged UI   f7835a87d6ad3072d9a56305e88854132a4d9938
 ```
 
-Rollback receipt UI by reverting `3cad87963`; rollback lifecycle hardening separately by reverting
+Rollback packaged evidence by reverting `f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;
+rollback lifecycle hardening separately by reverting
 `7b5c0f22b`; rollback success projection separately by reverting
 `8e48fab07`; rollback TTD hardening separately by reverting
 `9bb6e4f67`; rollback identity enrichment separately by reverting

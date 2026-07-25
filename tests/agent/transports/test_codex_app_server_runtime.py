@@ -276,6 +276,10 @@ class TestSpawnEnvIsolation:
 
         monkeypatch.setattr(subprocess, "Popen", FakePopen)
         monkeypatch.setenv("HOME", "/users/alice")
+        # Model the dispatcher-owned worker even when this pytest process was
+        # itself launched from a delegated child. Descendants deliberately lose
+        # inherited Kanban identity and board-write authority.
+        monkeypatch.delenv("HERMES_DELEGATED_CHILD_CONTEXT", raising=False)
         monkeypatch.setenv("HERMES_HOME", "/users/alice/.hermes/profiles/backend-worker")
         monkeypatch.setenv("HERMES_KANBAN_TASK", "t_smoke")
         monkeypatch.setenv(
@@ -295,6 +299,51 @@ class TestSpawnEnvIsolation:
         )
         assert "sandbox_workspace_write.network_access=false" in cmd
         assert all("danger" not in part for part in cmd)
+
+    def test_delegated_child_cannot_inherit_parent_kanban_writable_root(self, monkeypatch):
+        """Only the dispatcher-owned worker receives board-write geometry."""
+        import subprocess
+        from agent.transports import codex_app_server as cas
+
+        captured = {}
+
+        class FakePopen:
+            def __init__(self, cmd, *args, **kwargs):
+                captured["cmd"] = list(cmd)
+                captured["env"] = kwargs.get("env", {}).copy()
+                self.stdin = None
+                self.stdout = None
+                self.stderr = None
+                self.pid = 1
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+        monkeypatch.setenv("HOME", "/users/alice")
+        monkeypatch.setenv("HERMES_DELEGATED_CHILD_CONTEXT", "1")
+        monkeypatch.setenv("HERMES_KANBAN_TASK", "t_parent")
+        monkeypatch.setenv(
+            "HERMES_KANBAN_DB",
+            "/users/alice/.hermes/kanban/boards/parent/kanban.db",
+        )
+
+        client = cas.CodexAppServerClient(codex_bin="codex")
+        client._closed = True
+
+        assert captured["cmd"] == ["codex", "app-server"]
+        assert "HERMES_KANBAN_TASK" not in captured["env"]
+        assert "HERMES_KANBAN_DB" not in captured["env"]
 
 
 class TestSpawnEnvSecretStripping:

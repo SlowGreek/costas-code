@@ -612,6 +612,22 @@ def make_codex_app_server_event_bridge(agent) -> Callable[[dict], None]:
     return on_event
 
 
+def _close_runtime_session_host(agent) -> None:
+    """Detach and close the agent-owned runtime host exactly once."""
+    host = getattr(agent, "_runtime_session_host", None)
+    if host is None:
+        return
+    agent._runtime_session_host = None
+    # Remove the old private alias if a partially upgraded test/object carries
+    # one. Production ownership is the provider-neutral host reference above.
+    if hasattr(agent, "_codex_session"):
+        agent._codex_session = None
+    try:
+        host.close()
+    except Exception:
+        logger.debug("runtime session host close failed", exc_info=True)
+
+
 def run_codex_app_server_turn(
     agent,
     *,
@@ -630,13 +646,13 @@ def run_codex_app_server_turn(
     """
     from agent.transports.codex_app_server_session import (
         CodexAppServerSession,
+        CodexRuntimeSessionHost,
         _ServerRequestRouting,
     )
 
-    # Lazy session: one CodexAppServerSession per AIAgent instance.
-    # Spawned on first turn, reused across turns, closed at AIAgent
-    # shutdown (see _cleanup hook).
-    if not hasattr(agent, "_codex_session") or agent._codex_session is None:
+    # Lazy host: one runtime session per AIAgent instance. Construction does not
+    # spawn; the first send starts the underlying process/session.
+    if getattr(agent, "_runtime_session_host", None) is None:
         from agent.runtime_cwd import resolve_agent_cwd
 
         cwd = getattr(agent, "session_cwd", None) or str(resolve_agent_cwd())

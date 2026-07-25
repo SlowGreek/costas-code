@@ -38,6 +38,11 @@ from agent.transports.codex_app_server import (
     CodexAppServerError,
 )
 from agent.transports.codex_event_projector import CodexEventProjector
+from agent.runtime_sessions import (
+    RuntimeSessionCapabilities,
+    RuntimeSessionClosedError,
+    RuntimeTurnResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +88,91 @@ class TurnResult:
     # of riding a CPU-spinning or auth-broken process. Mirrors openclaw
     # beta.8's "retire timed-out app-server clients" fix.
     should_retire: bool = False
+
+
+class CodexRuntimeSessionHost:
+    """Provider-neutral host facade over one lazy Codex session.
+
+    Raw thread/turn identity remains in the wrapped ``TurnResult`` and is only
+    available through the Codex-specific compatibility projection below.  The
+    generic host result contains only behavior consumed across runtimes.
+    """
+
+    _CAPABILITIES = RuntimeSessionCapabilities(
+        send=True,
+        steer_active_turn=True,
+        interrupt=True,
+        compact=True,
+        close=True,
+        resume_after_restart=False,
+        durable_replay=False,
+        external_control=False,
+        durable_close_proof=False,
+    )
+
+    def __init__(self, session: "CodexAppServerSession") -> None:
+        self._session = session
+        self._closed = False
+        self._legacy_result: tuple[RuntimeTurnResult, TurnResult] | None = None
+
+    @property
+    def capabilities(self) -> RuntimeSessionCapabilities:
+        return self._CAPABILITIES
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeSessionClosedError()
+
+    def send(self, message: Any) -> RuntimeTurnResult:
+        self._ensure_open()
+        return self._project_result(self._session.run_turn(user_input=message))
+
+    def steer_active_turn(self, text: str) -> bool:
+        self._ensure_open()
+        return self._session.request_steer(text)
+
+    def interrupt(self) -> None:
+        self._ensure_open()
+        self._session.request_interrupt()
+
+    def compact(self) -> RuntimeTurnResult:
+        self._ensure_open()
+        return self._project_result(self._session.compact_thread())
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._legacy_result = None
+        self._session.close()
+
+    def legacy_result_fields(self, result: RuntimeTurnResult) -> dict[str, str | None]:
+        """Codex-only compatibility fields for the existing outer result dict."""
+        pair = self._legacy_result
+        self._legacy_result = None
+        if pair is None or pair[0] is not result:
+            return {"codex_thread_id": None, "codex_turn_id": None}
+        legacy = pair[1]
+        return {
+            "codex_thread_id": legacy.thread_id,
+            "codex_turn_id": legacy.turn_id,
+        }
+
+    def _project_result(self, result: TurnResult) -> RuntimeTurnResult:
+        projected = RuntimeTurnResult(
+            final_text=result.final_text,
+            projected_messages=result.projected_messages,
+            tool_iterations=result.tool_iterations,
+            interrupted=result.interrupted,
+            error=result.error,
+            token_usage_last=result.token_usage_last,
+            token_usage_total=result.token_usage_total,
+            model_context_window=result.model_context_window,
+            compacted=result.compacted,
+            should_retire=result.should_retire,
+        )
+        self._legacy_result = (projected, result)
+        return projected
 
 
 # Markers we accept as terminal even when codex never emits turn/completed.

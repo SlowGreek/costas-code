@@ -101,6 +101,41 @@ Download the artifact for your platform from [GitHub Releases](https://github.co
 
 Local development builds are not Apple-notarized. On macOS, Control-click the app and choose **Open**, or approve it under **System Settings → Privacy & Security**.
 
+#### Requires the GitHub CLI
+
+Run `gh auth login` **before** first launch.
+
+The desktop app is an Electron frontend — it ships no Python. On first launch it
+downloads `scripts/install.sh` from this repo and builds a managed checkout at
+`~/.hermes/hermes-agent`, which provides the `hermes` CLI it spawns as its
+backend.
+
+Because this repo is **private**, that download needs credentials, so Catalyst
+reuses your `gh` session. Without it the app cannot bootstrap and will tell you
+so. (Anonymous HTTPS is still tried first, so nothing changes when the repo goes
+public.)
+
+#### Updates
+
+Once bootstrapped, Catalyst updates itself: it pulls the managed checkout,
+rebuilds the desktop bundle, and swaps it in place — no re-download.
+
+Two cases still need a manual install:
+
+- **First install**, since there's nothing to update from yet.
+- **Upgrading from a build before `be31aea55`**, whose bootstrapper predates the
+  private-repo fix and cannot fetch the install script at all.
+
+To check what you're running: **About Catalyst**, or
+
+```bash
+cat "/Applications/Catalyst.app/Contents/Resources/install-stamp.json"
+git -C ~/.hermes/hermes-agent log --oneline -1     # the managed backend
+```
+
+The app and the backend update independently, so they can drift — the app
+reports it when they do.
+
 ## Build from source
 
 Prerequisites: Git, Python 3.11–3.13, and Node.js 20.19+ (Node 22.12+ recommended).

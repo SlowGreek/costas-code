@@ -38,6 +38,7 @@ import fsp from 'node:fs/promises'
 import https from 'node:https'
 import path from 'node:path'
 
+import { fetchRepoFile, type GhProbe } from './private-repo-fetch'
 import { hiddenWindowsChildOptions } from './windows-child-options'
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -233,91 +234,95 @@ function installScriptUrl(ref, scriptName = installScriptName()) {
   return `https://raw.githubusercontent.com/${DISTRIBUTION_REPO}/${ref}/scripts/${scriptName}`
 }
 
-function downloadInstallScript(ref, destPath) {
+/** GitHub CLI probe used to reach a PRIVATE distribution repo. */
+const ghProbe: GhProbe = {
+  isAuthenticated() {
+    try {
+      execFileSync('gh', ['auth', 'status'], {
+        stdio: 'ignore',
+        timeout: 10_000,
+        ...hiddenWindowsChildOptions()
+      })
+
+      return true
+    } catch {
+      return false
+    }
+  },
+  fetchFile(repo, ref, filePath) {
+    // `gh api` returns base64 with embedded newlines; Buffer.from tolerates
+    // them, unlike .NET's FromBase64String (see the README's PowerShell form).
+    const raw = execFileSync(
+      'gh',
+      ['api', `repos/${repo}/contents/${filePath}?ref=${ref}`, '--jq', '.content'],
+      { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024, ...hiddenWindowsChildOptions() }
+    )
+
+    return Buffer.from(raw.replace(/\s/g, ''), 'base64')
+  }
+}
+
+/** Anonymous HTTPS GET that rejects with an `{status}`-bearing error. */
+function httpGetBuffer(url: string, redirectsLeft = 1): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, res => {
+        const status = res.statusCode
+
+        if ((status === 301 || status === 302) && res.headers.location && redirectsLeft > 0) {
+          res.resume()
+          httpGetBuffer(res.headers.location, redirectsLeft - 1).then(resolve, reject)
+
+          return
+        }
+
+        if (status !== 200) {
+          res.resume()
+          const err: any = new Error(`HTTP ${status} from ${url}`)
+          err.status = status
+          reject(err)
+
+          return
+        }
+
+        const chunks: Buffer[] = []
+        res.on('data', c => chunks.push(c))
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      })
+      .on('error', reject)
+  })
+}
+
+async function downloadInstallScript(ref, destPath) {
   // Fetch from GitHub raw at the install ref. Normal production builds pass a
   // pinned SHA (immutable). Non-git fallback builds pass an unpinned branch
   // ref so local builds can still bootstrap without pretending the all-zero
   // placeholder is a real GitHub commit.
+  //
+  // Anonymous raw.githubusercontent.com returns 404 for a PRIVATE repo, which
+  // previously made a DMG/EXE install unable to bootstrap at all: no managed
+  // checkout, no hermes CLI, no backend, no OTA. fetchRepoFile falls back to
+  // the user's existing `gh` credentials on 404/403 — nothing new to store,
+  // and still a plain anonymous GET once the repo goes public.
   const scriptName = installScriptName()
   const url = installScriptUrl(ref, scriptName)
 
-  return new Promise((resolve, reject) => {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true })
-    const tmpPath = destPath + '.tmp'
-    const out = fs.createWriteStream(tmpPath)
-    https
-      .get(url, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          // GitHub raw shouldn't redirect for a SHA URL, but follow once
-          // defensively.
-          out.close()
-          fs.unlinkSync(tmpPath)
-          https
-            .get(res.headers.location, res2 => {
-              if (res2.statusCode !== 200) {
-                reject(
-                  new Error(
-                    `Failed to download ${scriptName}: HTTP ${res2.statusCode} from redirect ${res.headers.location}`
-                  )
-                )
-
-                return
-              }
-
-              const out2 = fs.createWriteStream(tmpPath)
-              res2.pipe(out2)
-              out2.on('finish', () => {
-                out2.close()
-                fs.renameSync(tmpPath, destPath)
-                resolve(destPath)
-              })
-              out2.on('error', reject)
-            })
-            .on('error', reject)
-
-          return
-        }
-
-        if (res.statusCode !== 200) {
-          out.close()
-
-          try {
-            fs.unlinkSync(tmpPath)
-          } catch {
-            void 0
-          }
-
-          reject(new Error(`Failed to download ${scriptName}: HTTP ${res.statusCode} from ${url}`))
-
-          return
-        }
-
-        res.pipe(out)
-        out.on('finish', () => {
-          out.close()
-          fs.renameSync(tmpPath, destPath)
-          resolve(destPath)
-        })
-        out.on('error', err => {
-          try {
-            fs.unlinkSync(tmpPath)
-          } catch {
-            void 0
-          }
-
-          reject(err)
-        })
-      })
-      .on('error', err => {
-        try {
-          fs.unlinkSync(tmpPath)
-        } catch {
-          void 0
-        }
-
-        reject(err)
-      })
+  const body = await fetchRepoFile({
+    repo: DISTRIBUTION_REPO,
+    ref,
+    filePath: `scripts/${scriptName}`,
+    url,
+    httpGet: httpGetBuffer,
+    gh: ghProbe
   })
+
+  fs.mkdirSync(path.dirname(destPath), { recursive: true })
+  const tmpPath = destPath + '.tmp'
+  fs.writeFileSync(tmpPath, body)
+  fs.renameSync(tmpPath, destPath)
+
+  return destPath
 }
 
 async function resolveInstallScript({

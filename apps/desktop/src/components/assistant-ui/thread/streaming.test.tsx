@@ -272,6 +272,45 @@ function assistantTerminalMessage(): ThreadMessage {
   } as ThreadMessage
 }
 
+function assistantLucidMessage(): ThreadMessage {
+  return {
+    id: 'assistant-lucid-1',
+    role: 'assistant',
+    content: [
+      {
+        type: 'tool-call',
+        toolCallId: 'lucid-1',
+        toolName: 'mcp__lucid_quine__lucid_get',
+        args: { path: 'fleet' },
+        argsText: JSON.stringify({ path: 'fleet' }),
+        result: {
+          result: { status: 'GREEN', rows: 2 },
+          lucid_receipt: {
+            schema: 'hermes-lucid-receipt/1',
+            id: 'lucid:abc123',
+            timestamp: '2026-07-25T21:00:00Z',
+            verb: 'get',
+            ran: true,
+            trust: 'verified',
+            content_hash: `sha256:${'a'.repeat(64)}`,
+            refusal_code: null,
+            needs_user: false
+          }
+        }
+      }
+    ],
+    status: { type: 'complete', reason: 'stop' },
+    createdAt,
+    metadata: {
+      unstable_state: null,
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {}
+    }
+  } as ThreadMessage
+}
+
 interface StreamingControls {
   emitSecond: () => void
   complete: () => void
@@ -662,6 +701,15 @@ describe('assistant-ui streaming renderer', () => {
     })
     expect(container.querySelector('[data-slot="aui_generated-image"]')).toBeTruthy()
     expect(screen.queryByRole('status', { name: /rendering image/i })).toBeNull()
+  })
+
+  it('renders closed LUCID receipts as a first-class card', async () => {
+    const { container } = render(<MessageHarness message={assistantLucidMessage()} />)
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'LUCID receipt' })).toBeTruthy())
+    expect(screen.getByText('LUCID · GET')).toBeTruthy()
+    expect(screen.getByText('Executed')).toBeTruthy()
+    expect(container.querySelector('[data-tool-row]')).toBeNull()
   })
 
   it('uses the normal tool row for failed image generations instead of dropping their error payload', async () => {

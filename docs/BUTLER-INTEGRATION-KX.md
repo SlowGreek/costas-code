@@ -9,6 +9,7 @@
 > **To:** AgentExperiments EM / Butler / QUINE owners<br>
 > **Costas branch:** `users/brianhu/ideation`<br>
 > **Costas source checkpoint:** `415b82b34b7c6516decedd6f05d655025d11a0c2`<br>
+> **Costas TTD hardening checkpoint:** `9bb6e4f67697e6435056ed2b2b0fe56bc194a165`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -321,10 +322,11 @@ HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
   scripts/run_tests.sh \
   tests/tools/test_lucid_mcp_bridge.py \
   tests/tools/test_mcp_tool.py \
+  tests/hermes_cli/test_mcp_catalog.py \
   tests/hermes_cli/test_dashboard_admin_endpoints.py -q
 
-3 files
-314 passed
+4 files
+362 passed
 0 failed
 ```
 
@@ -337,6 +339,13 @@ Coverage includes:
 - explicit handler session identity preferred over ambient context;
 - ordinary MCP receives no LUCID metadata;
 - no capability/signature material attached;
+- closed content-free `hermes-lucid-receipt/1` projection;
+- raw Butler error text and raw Envelope fields omitted for admitted LUCID calls;
+- malformed LUCID structured errors fail closed as `lucid-invalid-receipt`;
+- policy refusals do not trip the MCP transport circuit breaker;
+- automatic retry disabled for SHOW/SET/MORPH/DISPATCH/STEER/CANCEL;
+- exact `lucid-outcome-unknown` on effect-capable transport ambiguity;
+- GET alone retains bounded generic transport recovery;
 - content-free public status;
 - Hub install/open behavior and trust ladder;
 - MCP catalog/API projection.
@@ -357,11 +366,13 @@ git diff --check            GREEN
 Current source hashes:
 
 ```text
-bedfdaa1d1d398706b4ab3f3081a2993991afa9c60baca0c4589472928135b9d  tools/lucid_mcp_bridge.py
-f5c627f71c0b21935b06847122b4213fc5034acd39ca86c288aaa802b6c56f34  tools/mcp_tool.py
+2185981336c7267328024e7f43251c5d3ee6a86d4a7666212f72dee8c963ce12  tools/lucid_mcp_bridge.py
+458e10700c11205a20623bab1ec33e793af6aa5095b9dce4a443ba98b5e2cf05  tools/mcp_tool.py
 b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web_server.py
 96ce91596e89e58f6b5cd7684bfa8e6b2930b68881b6aaf6f4ce700667df1244  apps/desktop/src/app/skills/lucid-bridge-status.tsx
 41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
+8ca0160475047b7cb841e63ab8e9d8d1d9d7c1a435bdccb977354a68b1911a17  tests/tools/test_lucid_mcp_bridge.py
+5a6db149b9e40d7d7596bbb01157547f63b8cbdd044924ae2a9cdecb4a63f620  tests/tools/test_mcp_tool.py
 ```
 
 ---
@@ -490,10 +501,20 @@ force `confirmed=true`, infer it from a click that was not bound to the call, or
 
 ### 5.6 Replay and outcome ambiguity
 
-Hermes' generic MCP client currently has bounded reconnect/auth/session retry paths. Consequential LUCID effects
-must not be retried merely because the response was lost.
+Hermes' generic MCP client has bounded reconnect/auth/session retry paths. Costas TTD hardening now intercepts
+the exact admitted LUCID tool before either generic retry helper:
 
-Before mutation-capable R1 is GREEN, define one of:
+```text
+lucid.get                                            bounded generic recovery remains eligible
+lucid.show|set|morph|dispatch|steer|cancel          automatic retry disabled
+transport exception after effect-capable invocation lucid-outcome-unknown; retryable=false
+```
+
+The no-retry decision requires the same exact packaged-Butler realpath admission as host identity. Foreign and
+same-name MCP servers retain generic behavior. This prevents one immediate duplicate-effect class but is not a
+durable outcome ledger.
+
+Before mutation-capable R1 is GREEN, Butler/QUINE should still define one of:
 
 ```text
 A. end-to-end idempotency key + durable outcome lookup; or
@@ -504,29 +525,41 @@ Local timeout/cancellation does not prove the Butler effect did not run.
 
 ### 5.7 Response projection
 
-The generic Hermes handler currently reduces MCP `isError` results to sanitized text. Butler's
-`structuredContent.envelope` remains available at the MCP layer but is not yet projected as a typed Desktop
-receipt.
-
-After R1 contract closure, Costas can add a closed receipt DTO that allowlists only fields approved by AE, for
-example:
+Costas TTD hardening now consumes Butler's `structuredContent.envelope` only through a closed validator and emits:
 
 ```text
+schema = hermes-lucid-receipt/1
 id
+timestamp
 verb
 ran
 trust
-effect
-refusal.code?
-needs_user?
 content_hash
+refusal_code
+needs_user
 ```
 
-Do not send raw Envelope objects, capability fields, private result payloads, session IDs, token paths, or
-unknown future fields through the generic Desktop API.
+The projector requires exact closed Envelope/intent/receipt/refusal/escalation shapes and canonical verb, trust,
+refusal-code, content-hash, timestamp, ID, and boolean forms. It structurally omits:
 
-AE EM should specify the exact receipt projection contract or identify an existing canonical projection for
-Costas to consume.
+```text
+intent.args
+capability
+fidelity
+receipt.effect
+refusal.reason
+escalation.reason
+result
+unknown fields
+session identity
+```
+
+For an admitted LUCID `isError`, raw Butler text is never forwarded. A valid receipt yields a generic bounded
+summary such as `Butler refused LUCID call (no-capability)` plus the closed DTO. An invalid receipt yields only
+`lucid-invalid-receipt` with `retryable=false`. Ordinary MCP errors retain generic behavior. Valid Butler policy
+refusals do not increment the MCP transport circuit breaker.
+
+AE EM should attest or revise `hermes-lucid-receipt/1`. Costas will not widen it without an AE-owned disposition.
 
 ---
 
@@ -613,8 +646,9 @@ not an incomplete claim of execution.
 
 ## 9 · Requested disposition
 
-AE EM / Butler / QUINE owners: return exactly one disposition bound to Costas checkpoint
-`415b82b34b7c6516decedd6f05d655025d11a0c2` and this document hash:
+AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costas identity checkpoint
+`415b82b34b7c6516decedd6f05d655025d11a0c2`, TTD hardening checkpoint
+`9bb6e4f67697e6435056ed2b2b0fe56bc194a165`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -632,14 +666,15 @@ It grants no role, lease, grant, scope, confirmation, mutation, retry, settlemen
 
 ## 10 · Rollback
 
-Costas source checkpoint:
+Costas checkpoints:
 
 ```text
-415b82b34b7c6516decedd6f05d655025d11a0c2
+identity bridge    415b82b34b7c6516decedd6f05d655025d11a0c2
+TTD hardening      9bb6e4f67697e6435056ed2b2b0fe56bc194a165
 ```
 
-Rollback of the identity enrichment is one Costas revert of that checkpoint. The prior first-class Hub/catalog
-install remains separately checkpointed at `6a5d26774`.
+Rollback TTD hardening by reverting `9bb6e4f67`; rollback identity enrichment separately by reverting
+`415b82b34`. The prior first-class Hub/catalog install remains separately checkpointed at `6a5d26774`.
 
 No AE file is modified by this handoff. AE may copy this document into its docs shelf or return disposition in a
 new AE-owned feedforward.

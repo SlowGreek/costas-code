@@ -191,6 +191,50 @@ describe('toChatMessages', () => {
       'background agent work finished'
     ])
   })
+
+  it('renders the delegation task count from object metadata', () => {
+    const messages = toChatMessages([
+      {
+        role: 'user',
+        content: 'opaque delegation context payload',
+        display_kind: 'async_delegation_complete',
+        display_metadata: { delegation_id: 'del-1', task_count: 3 },
+        timestamp: 1
+      }
+    ])
+
+    expect(messages.map(chatMessageText)).toEqual(['3 background agents finished'])
+  })
+
+  it('survives display_metadata arriving as a raw JSON string', () => {
+    // The REST message projection used to serve this column undecoded, and a
+    // property lookup on the resulting string threw, failing the whole resume.
+    const messages = toChatMessages([
+      {
+        role: 'user',
+        content: 'opaque delegation context payload',
+        display_kind: 'async_delegation_complete',
+        display_metadata: '{"delegation_id": "deleg_037014a2", "task_count": 1}',
+        timestamp: 1
+      }
+    ])
+
+    expect(messages.map(chatMessageText)).toEqual(['1 background agent finished'])
+  })
+
+  it('falls back to generic copy when display_metadata is unparseable', () => {
+    const messages = toChatMessages([
+      {
+        role: 'user',
+        content: 'opaque delegation context payload',
+        display_kind: 'async_delegation_complete',
+        display_metadata: 'not json at all',
+        timestamp: 1
+      }
+    ])
+
+    expect(messages.map(chatMessageText)).toEqual(['background agent work finished'])
+  })
 })
 
 describe('renderMediaTags', () => {

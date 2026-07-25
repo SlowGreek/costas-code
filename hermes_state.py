@@ -6169,6 +6169,20 @@ class SessionDB:
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("Failed to deserialize tool_calls in get_messages, falling back to []")
                     msg["tool_calls"] = []
+            # display_metadata is stored as a JSON TEXT column. Every other
+            # projection (_rows_to_conversation) decodes it; this one served
+            # `SELECT *` verbatim, so consumers of get_messages — notably the
+            # REST /api/sessions/{id}/messages endpoint the desktop resumes
+            # from — received a JSON *string* where the schema promises an
+            # object. The desktop's `'task_count' in message.display_metadata`
+            # check then threw "Cannot use 'in' operator to search for
+            # 'task_count'" and the whole resume failed.
+            if msg.get("display_metadata"):
+                try:
+                    msg["display_metadata"] = json.loads(msg["display_metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("Ignoring invalid display metadata in get_messages")
+                    msg["display_metadata"] = None
             result.append(msg)
         return result
 

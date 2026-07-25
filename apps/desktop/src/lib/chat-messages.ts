@@ -313,10 +313,7 @@ function timelineDisplayContent(message: SessionMessage, content: string): strin
   }
 
   if (message.display_kind === 'async_delegation_complete') {
-    const count =
-      message.display_metadata && 'task_count' in message.display_metadata
-        ? message.display_metadata.task_count
-        : undefined
+    const count = delegationTaskCount(message.display_metadata)
 
     return count === undefined
       ? 'background agent work finished'
@@ -324,6 +321,30 @@ function timelineDisplayContent(message: SessionMessage, content: string): strin
   }
 
   return content
+}
+
+// `display_metadata` is a JSON column. Older rows (and any backend serving the
+// raw `SELECT *` projection) hand it over as a JSON *string*, and `'x' in
+// aString` is a TypeError that used to abort the whole resume. Narrow
+// defensively so a malformed value degrades to generic copy.
+function delegationTaskCount(metadata: SessionMessage['display_metadata']): number | undefined {
+  const parsed = typeof metadata === 'string' ? tryParseJson(metadata) : metadata
+
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined
+  }
+
+  const count = (parsed as { task_count?: unknown }).task_count
+
+  return typeof count === 'number' && Number.isFinite(count) ? count : undefined
+}
+
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
 }
 
 const STREAM_PART: Record<'reasoning' | 'text', (text: string) => ChatMessagePart> = {

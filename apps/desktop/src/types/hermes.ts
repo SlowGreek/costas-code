@@ -442,7 +442,9 @@ export interface SessionMessage {
   reasoning_content?: null | string
   reasoning_details?: unknown
   display_kind?: 'async_delegation_complete' | 'hidden' | 'model_switch' | string
-  display_metadata?: TimelineDisplayMetadata
+  /** JSON column. Normally an object, but legacy/raw backend projections can
+   *  still serve the undecoded JSON string — always narrow before indexing. */
+  display_metadata?: TimelineDisplayMetadata | string
   role: 'assistant' | 'system' | 'tool' | 'user'
   text?: unknown
   timestamp?: number

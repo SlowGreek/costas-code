@@ -7203,6 +7203,25 @@ class TestDisplayMetadataPersistence:
         assert conv[0]["display_kind"] == "async_delegation_complete"
         assert conv[0]["display_metadata"] == meta
 
+    def test_get_messages_decodes_display_metadata(self, db):
+        """get_messages must decode the JSON column, not leak the raw string.
+
+        The REST /api/sessions/{id}/messages endpoint serves this projection
+        straight to the desktop, whose timeline does a property lookup on
+        display_metadata. A raw JSON string there threw "Cannot use 'in'
+        operator to search for 'task_count'" and failed the whole resume.
+        """
+        db.create_session("s1", source="cli")
+        meta = {"task_count": 1, "delegation_id": "del-9", "completed_count": 1}
+        db.append_message(
+            "s1", "user", "event text",
+            display_kind="async_delegation_complete",
+            display_metadata=meta,
+        )
+        rows = db.get_messages("s1")
+        assert rows[0]["display_metadata"] == meta
+        assert isinstance(rows[0]["display_metadata"], dict)
+
     def test_replace_messages_preserves_display_metadata(self, db):
         db.create_session("s1", source="cli")
         meta = {"task_count": 3, "delegation_id": "del-2", "duration_seconds": 12.5}

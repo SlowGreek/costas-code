@@ -571,13 +571,33 @@ export function nextSessionTileForWorkspace(): null | string {
   return null
 }
 
-/** If a session is already ON SCREEN — an open tile OR the one loaded in main —
- *  front its tab (and focus its zone) and return true. A sidebar click on an
- *  already-open chat JUMPS to its tab instead of reloading it; `false` means the
- *  caller must load it into main. Covers the two dead clicks: an open tile, and
- *  the main session while focus sits on a tile (route unchanged → no reload). */
-export function focusOpenSession(storedSessionId: string): boolean {
-  if ($sessionTiles.get().some(t => t.storedSessionId === storedSessionId)) {
+export type OpenSessionDisposition = 'load' | 'main' | 'tile'
+
+/** Classify a sidebar conversation click before applying layout effects.
+ * Main is distinct from tile: a full-page route may currently own the workspace,
+ * so fronting the workspace pane is insufficient — the caller must also navigate
+ * to the main session's chat route. */
+export function openSessionDisposition(
+  storedSessionId: string,
+  selectedStoredSessionId: null | string,
+  tiles: SessionTile[]
+): OpenSessionDisposition {
+  if (tiles.some(tile => tile.storedSessionId === storedSessionId)) {
+    return 'tile'
+  }
+
+  return storedSessionId === selectedStoredSessionId ? 'main' : 'load'
+}
+
+/** Front an already-open session and report where it lives. */
+export function focusOpenSession(storedSessionId: string): OpenSessionDisposition {
+  const disposition = openSessionDisposition(
+    storedSessionId,
+    $selectedStoredSessionId.get(),
+    $sessionTiles.get()
+  )
+
+  if (disposition === 'tile') {
     const paneId = `${TILE_PANE_PREFIX}${storedSessionId}`
     revealTreePane(paneId) // un-dismiss + adopt + front in its group
     const tree = $layoutTree.get()
@@ -587,19 +607,17 @@ export function focusOpenSession(storedSessionId: string): boolean {
       noteActiveTreeGroup(group.id)
     }
 
-    return true
+    return disposition
   }
 
-  // Already the main session: front the workspace tab and drop tile focus so
-  // the readouts + sidebar highlight come home (a no-op when main is focused).
-  if (storedSessionId === $selectedStoredSessionId.get()) {
+  // Already the main session: front the workspace tab and drop tile focus. The
+  // caller still navigates to this session's route so any full-page view yields.
+  if (disposition === 'main') {
     revealTreePane('workspace')
     noteActiveTreeGroup(null)
-
-    return true
   }
 
-  return false
+  return disposition
 }
 
 // Closed-tab stack for ⌘⇧T reopen (in-memory) — keyed PER PROFILE like the

@@ -805,10 +805,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onReload: reloadFromMessage,
     onRemoveAttachment: id => void composer.removeAttachment(id),
     onRestoreToMessage: restoreToMessage,
-    // Already on screen (open tile, or the main session)? Jump to its tab;
-    // otherwise load it into main.
+    // Open tiles own their own pane route. Main and unloaded sessions must both
+    // navigate: a full-page tab may currently own the workspace even when the
+    // clicked conversation is already selected underneath it.
     onResumeSession: sessionId => {
-      if (!focusOpenSession(sessionId)) {
+      if (focusOpenSession(sessionId) !== 'tile') {
         navigate(sessionRoute(sessionId))
       }
     },

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { group, split } from '@/components/pane-shell/tree/model'
 import type { SessionTile } from '@/store/session-states'
-import { orderTilesByTree, selectionHomesToWorkspace } from '@/store/session-states'
+import { openSessionDisposition, orderTilesByTree, selectionHomesToWorkspace } from '@/store/session-states'
 
 const tile = (storedSessionId: string): SessionTile => ({ storedSessionId })
 const tilePane = (id: string) => `session-tile:${id}`
@@ -42,5 +42,21 @@ describe('selectionHomesToWorkspace', () => {
 
   it('skips homing when the selected id is already an open tile', () => {
     expect(selectionHomesToWorkspace('a', tiles)).toBe(false)
+  })
+})
+
+describe('openSessionDisposition', () => {
+  const tiles = [tile('tile-a')]
+
+  it('focuses an open tile without replacing the workspace route', () => {
+    expect(openSessionDisposition('tile-a', 'main-a', tiles)).toBe('tile')
+  })
+
+  it('requires chat-route navigation for the main session', () => {
+    expect(openSessionDisposition('main-a', 'main-a', tiles)).toBe('main')
+  })
+
+  it('loads a session that is not already on screen', () => {
+    expect(openSessionDisposition('other', 'main-a', tiles)).toBe('load')
   })
 })

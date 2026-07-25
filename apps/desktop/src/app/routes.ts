@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 
 import { registry } from '@/contrib/registry'
 
+import { AE_EXECUTIVE_ROUTE_SET } from './ae-executive/contract'
+
 export const SESSION_ROUTE_PREFIX = '/'
 export const NEW_CHAT_ROUTE = '/'
 export const SETTINGS_ROUTE = '/settings'
@@ -17,6 +19,7 @@ export const STARMAP_ROUTE = '/starmap'
 
 export type AppView =
   | 'agents'
+  | 'ae-executive'
   | 'artifacts'
   | 'chat'
   | 'command-center'
@@ -133,7 +136,12 @@ export function isNewChatRoute(pathname: string): boolean {
 }
 
 export function routeSessionId(pathname: string): string | null {
-  if (!pathname.startsWith(SESSION_ROUTE_PREFIX) || RESERVED_PATHS.has(pathname) || isContributedPath(pathname)) {
+  if (
+    !pathname.startsWith(SESSION_ROUTE_PREFIX) ||
+    RESERVED_PATHS.has(pathname) ||
+    AE_EXECUTIVE_ROUTE_SET.has(pathname) ||
+    isContributedPath(pathname)
+  ) {
     return null
   }
 
@@ -153,6 +161,10 @@ export function appViewForPath(pathname: string): AppView {
 
   if (isContributedPath(pathname)) {
     return 'extension'
+  }
+
+  if (AE_EXECUTIVE_ROUTE_SET.has(pathname)) {
+    return 'ae-executive'
   }
 
   return APP_VIEW_BY_PATH.get(pathname) ?? 'chat'

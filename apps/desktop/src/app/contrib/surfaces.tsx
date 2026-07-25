@@ -18,6 +18,8 @@ import { $freshDraftReady, $gatewayState } from '@/store/session'
 
 import { ChatView } from '../chat'
 import { ChatSidebar } from '../chat/sidebar'
+import { AeExecutiveWorkspace } from '../ae-executive'
+import { AE_EXECUTIVE_TAB_IDS } from '../ae-executive/contract'
 import { TerminalPaneChrome } from '../right-sidebar/terminal/chrome'
 import { contributedRoutes, NEW_CHAT_ROUTE, ROUTES_AREA, sessionRoute } from '../routes'
 import { useStatusSnapshot } from '../shell/hooks/use-status-snapshot'
@@ -183,6 +185,9 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
       <Route element={page(<SkillsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="skills" />
       <Route element={page(<MessagingView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="messaging" />
       <Route element={page(<ArtifactsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="artifacts" />
+      {AE_EXECUTIVE_TAB_IDS.map(tab => (
+        <Route element={page(<AeExecutiveWorkspace />)} key={tab} path={`ae/${tab}`} />
+      ))}
       <Route element={null} path="agents" />
       <Route element={null} path="command-center" />
       <Route element={null} path="cron" />

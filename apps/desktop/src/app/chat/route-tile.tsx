@@ -14,18 +14,26 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { $routeTiles, closeRouteTile, type RouteTile } from '@/store/route-tiles'
 
 import { ARTIFACTS_ROUTE, contributedRoutes, MESSAGING_ROUTE, ROUTES_AREA, SKILLS_ROUTE } from '../routes'
+import { AE_EXECUTIVE_TABS } from '../ae-executive/contract'
 
 import { paneMirror } from './pane-mirror'
 
 const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
+const AeExecutiveWorkspace = lazy(async () => ({ default: (await import('../ae-executive')).AeExecutiveWorkspace }))
 
 // Built-in page views + their pane titles, keyed by route.
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
-  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' }
+  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' },
+  ...Object.fromEntries(
+    AE_EXECUTIVE_TABS.map(tab => [
+      tab.route,
+      { render: () => <AeExecutiveWorkspace />, title: `AE ${tab.label}` }
+    ])
+  )
 }
 
 /** Humanize a route path into a tab title: `/my-atlas` → `My Atlas`. */

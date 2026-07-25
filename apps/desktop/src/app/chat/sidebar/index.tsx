@@ -98,6 +98,7 @@ import {
 } from '@/store/session'
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 
+import { AE_EXECUTIVE_TABS } from '../../ae-executive/contract'
 import {
   type AppView,
   ARTIFACTS_ROUTE,
@@ -169,6 +170,13 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
     keybindActionId: 'nav.artifacts'
   }
 ]
+
+const AE_EXECUTIVE_NAV: SidebarNavItem[] = AE_EXECUTIVE_TABS.map(tab => ({
+  id: `ae-${tab.id}`,
+  label: tab.label,
+  icon: props => <Codicon name={tab.icon} {...props} />,
+  route: tab.route
+}))
 
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.
@@ -1098,7 +1106,7 @@ export function ChatSidebar({
         <SidebarGroup className="shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
-              {[...SIDEBAR_NAV, ...contributedNav].map(item => {
+              {[...SIDEBAR_NAV, ...AE_EXECUTIVE_NAV, ...contributedNav].map(item => {
                 const isInteractive = Boolean(item.action) || Boolean(item.route)
 
                 const active =

@@ -616,6 +616,16 @@ def _close_runtime_session_host(agent) -> None:
     """Detach and close the agent-owned runtime host exactly once."""
     host = getattr(agent, "_runtime_session_host", None)
     if host is None:
+        # Temporary compatibility for older tests/helpers that still inject the
+        # private Codex session directly. Production ownership is the neutral
+        # host, but teardown must not leak a legacy-injected subprocess.
+        legacy = getattr(agent, "_codex_session", None)
+        if legacy is not None:
+            agent._codex_session = None
+            try:
+                legacy.close()
+            except Exception:
+                logger.debug("legacy codex session close failed", exc_info=True)
         return
     agent._runtime_session_host = None
     # Remove the old private alias if a partially upgraded test/object carries
@@ -704,6 +714,9 @@ def run_codex_app_server_turn(
                 on_event=make_codex_app_server_event_bridge(agent),
             )
         )
+        # Private compatibility alias while existing tests/plugins migrate.
+        # Never expose this through the provider-neutral contract or renderer.
+        agent._codex_session = agent._runtime_session_host._session
 
     # NOTE: the user message is ALREADY appended to messages by the
     # standard run_conversation() flow (line ~11823) before the early
@@ -757,6 +770,11 @@ def run_codex_app_server_turn(
     if _user_interrupted:
         agent.clear_interrupt()
 
+    # Consume the Codex-only compatibility result before retirement closes the
+    # host and clears private identity state.
+    legacy_turn = runtime_host.take_legacy_result(turn)
+    legacy_result_fields = runtime_host.legacy_result_fields(legacy_turn)
+
     # If the turn signalled the underlying client is wedged (deadline
     # blown, post-tool watchdog tripped, OAuth refresh died, subprocess
     # exited), retire the session so the next turn respawns codex
@@ -768,9 +786,6 @@ def run_codex_app_server_turn(
             turn.error,
         )
         _close_runtime_session_host(agent)
-
-    legacy_turn = runtime_host.take_legacy_result(turn)
-    legacy_result_fields = runtime_host.legacy_result_fields(legacy_turn)
 
     # Splice projected messages into the conversation. The projector emits
     # standard {role, content, tool_calls, tool_call_id} entries, which

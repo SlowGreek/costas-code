@@ -2201,17 +2201,28 @@ def _compress_context_via_codex_app_server(
 
     runtime_host = getattr(agent, "_runtime_session_host", None)
     if runtime_host is None:
-        logger.info(
-            "runtime session compaction skipped: no active host "
-            "(session=%s messages=%d tokens=~%s)",
-            getattr(agent, "session_id", None) or "none",
-            len(messages),
-            f"{approx_tokens:,}" if approx_tokens else "unknown",
-        )
-        existing_prompt = getattr(agent, "_cached_system_prompt", None)
-        if not existing_prompt:
-            existing_prompt = agent._build_system_prompt(system_message)
-        return messages, existing_prompt
+        # Temporary compatibility for older tests/helpers that inject the
+        # private Codex session directly. Production creates and owns the
+        # provider-neutral host in codex_runtime.
+        legacy_session = getattr(agent, "_codex_session", None)
+        if legacy_session is not None:
+            from agent.transports.codex_app_server_session import (
+                CodexRuntimeSessionHost,
+            )
+
+            runtime_host = CodexRuntimeSessionHost(legacy_session)
+        else:
+            logger.info(
+                "runtime session compaction skipped: no active host "
+                "(session=%s messages=%d tokens=~%s)",
+                getattr(agent, "session_id", None) or "none",
+                len(messages),
+                f"{approx_tokens:,}" if approx_tokens else "unknown",
+            )
+            existing_prompt = getattr(agent, "_cached_system_prompt", None)
+            if not existing_prompt:
+                existing_prompt = agent._build_system_prompt(system_message)
+            return messages, existing_prompt
 
     logger.info(
         "codex app-server compaction started: session=%s messages=%d tokens=~%s",

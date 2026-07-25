@@ -2877,14 +2877,17 @@ class AIAgent:
         # interrupt event rather than Hermes' per-thread flag.
         if getattr(self, "api_mode", None) == "codex_app_server":
             runtime_host = getattr(self, "_runtime_session_host", None)
-            if runtime_host is not None:
-                try:
+            legacy_session = getattr(self, "_codex_session", None)
+            try:
+                if runtime_host is not None:
                     runtime_host.interrupt()
-                except Exception:
-                    logger.debug(
-                        "Failed to interrupt Codex app-server turn",
-                        exc_info=True,
-                    )
+                elif legacy_session is not None:
+                    legacy_session.request_interrupt()
+            except Exception:
+                logger.debug(
+                    "Failed to interrupt Codex app-server turn",
+                    exc_info=True,
+                )
 
         # A cron turn performs its API request on the conversation thread to
         # avoid the nested interrupt-worker deadlock.  Unlike the normal worker
@@ -3049,7 +3052,8 @@ class AIAgent:
         # active-turn steering protocol rather than interrupting the subprocess.
         if getattr(self, "api_mode", None) == "codex_app_server":
             runtime_host = getattr(self, "_runtime_session_host", None)
-            if runtime_host is not None:
+            legacy_session = getattr(self, "_codex_session", None)
+            if runtime_host is not None or legacy_session is not None:
                 _redirect_lock = getattr(self, "_pending_redirect_lock", None)
                 if _redirect_lock is not None:
                     with _redirect_lock:
@@ -3058,7 +3062,10 @@ class AIAgent:
                 elif self._interrupt_requested:
                     return False
                 try:
-                    return bool(runtime_host.steer_active_turn(cleaned))
+                    if runtime_host is not None:
+                        return bool(runtime_host.steer_active_turn(cleaned))
+                    assert legacy_session is not None
+                    return bool(legacy_session.request_steer(cleaned))
                 except Exception:
                     logger.debug("Codex app-server turn/steer failed", exc_info=True)
                     return False

@@ -6342,6 +6342,17 @@ def _(rid, params: dict) -> dict:
     )
 
 
+# Sources that are machine-generated runs, not human conversations. They must
+# never appear in the resume picker: a single dynamic-workflow fan-out or
+# delegate_task batch can create dozens of rows and bury the user's real
+# sessions.
+#
+# "subagent" is the source delegate_task/_build_child_agent stamps on children
+# (platform="subagent"); "tool" is the older label. Both are listed because
+# existing databases contain rows written under either.
+_NON_HUMAN_SESSION_SOURCES = frozenset({"tool", "subagent"})
+
+
 @method("session.list")
 def _(rid, params: dict) -> dict:
     db = _get_db()
@@ -6356,7 +6367,7 @@ def _(rid, params: dict) -> dict:
         # sources (``tool`` sub-agent runs) rather than allow-listing a
         # fixed set of platform names that goes stale whenever a new
         # platform is added or a user names their own source.
-        deny = frozenset({"tool"})
+        deny = _NON_HUMAN_SESSION_SOURCES
 
         limit = int(params.get("limit", 200) or 200)
         # Over-fetch modestly so per-source filtering doesn't leave us
@@ -6407,7 +6418,7 @@ def _(rid, params: dict) -> dict:
     if db is None:
         return _ok(rid, {"session_id": None})
     try:
-        deny = frozenset({"tool"})
+        deny = _NON_HUMAN_SESSION_SOURCES
         # Over-fetch by a generous bounded amount so heavy sub-agent
         # users (lots of recent ``tool`` rows) don't get a false
         # "no eligible session" answer.  ``session.list`` uses a

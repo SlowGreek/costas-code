@@ -1258,6 +1258,37 @@ def _build_child_agent(
         effective_api_mode = None  # force re-derivation from provider's defaults
     else:
         effective_api_mode = getattr(parent_agent, "api_mode", None)
+
+    # Copilot routes per MODEL, not per provider: GPT-5+/Codex slots are only
+    # served by /responses (codex_responses) while Claude slots are only served
+    # by /chat/completions.  The provider-change check above therefore misses a
+    # child that keeps provider=copilot but switches model family — it inherits
+    # the parent's mode and GitHub rejects the call with
+    # ``model "<id>" is not accessible via the /chat/completions endpoint``
+    # (or a 404 in the mirror case).  Re-derive from the child's own model,
+    # matching the resolution the interactive CLI already performs (cli.py:5621).
+    if (
+        override_api_mode is None
+        and effective_model
+        and effective_model != getattr(parent_agent, "model", None)
+        and (
+            str(effective_provider or "").lower() == "copilot"
+            or "githubcopilot.com" in str(effective_base_url or "").lower()
+        )
+    ):
+        try:
+            from hermes_cli.models import copilot_model_api_mode
+
+            effective_api_mode = copilot_model_api_mode(
+                effective_model, api_key=effective_api_key
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "Could not derive Copilot api_mode for child model %r: %s",
+                effective_model,
+                e,
+            )
+
     # Defensive: validate trusted delegation.command exists on PATH before
     # honoring it. Stale config should not force a child onto the ACP transport
     # and then fail at subprocess startup.

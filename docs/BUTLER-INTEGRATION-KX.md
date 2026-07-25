@@ -14,6 +14,7 @@
 > **Costas lifecycle hardening checkpoint:** `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`<br>
 > **Costas receipt UI checkpoint:** `3cad879636f536d8cb28f6e361b04c1ddb170c28`<br>
 > **Costas clean packaged UI checkpoint:** `f7835a87d6ad3072d9a56305e88854132a4d9938`<br>
+> **Costas safety-state UI checkpoint:** `e943c61bece7e6c8baa0e0fd4441f469b46bd59c`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -288,6 +289,22 @@ Verified · not run
 It shows only the intended result/error plus the already-closed receipt fields. It does not parse raw Envelopes,
 load capability state, or claim authority.
 
+Receipt-less hardening states are also first-class. Exact-provenance, exact-shape `lucid-outcome-unknown` and
+`lucid-invalid-receipt` DTOs render as a distinct safety card rather than a generic tool row:
+
+```text
+Outcome unknown
+  Do not retry automatically
+
+Invalid receipt
+  No effect status accepted from this response
+```
+
+Outcome unknown is rejected for `lucid.get` and requires exact server/tool echoes for one effect-capable verb.
+Invalid receipt accepts only the two exact backend messages for refusal/success receipt validation failure. Open,
+retryable, mismatched, foreign, and forged shapes stay on the generic fallback path. The safety card never claims
+execution or Butler refusal.
+
 ---
 
 ## 2 · Live observed evidence
@@ -438,7 +455,7 @@ Ruff focused paths          GREEN
 Desktop TypeScript          GREEN
 Desktop ESLint              GREEN, baseline unrelated warnings only
 Hub UI tests                GREEN
-Receipt parser/card/Thread  24 passed
+Receipt/safety UI + Thread  31 passed
 Production renderer build   GREEN
 Electron main/preload       GREEN
 Packaged Catalyst.app       GREEN
@@ -455,12 +472,13 @@ b89e1911232904751638ce2832667d940b85d897a317f4dbd12d3195a628ff2b  hermes_cli/web
 41001efad2646ca1b22ce1d150439f4ea59f3c0bdf27bb4f125d896437d5085f  optional-mcps/lucid-quine/manifest.yaml
 8ca0160475047b7cb841e63ab8e9d8d1d9d7c1a435bdccb977354a68b1911a17  tests/tools/test_lucid_mcp_bridge.py
 262ccac4a40eed120e23fbd0a4d86117d1886084826f5a5156c109517eea438e  tests/tools/test_mcp_tool.py
-529d925619317ca13b649943915b87ff4e6394f3e396c8b810b48e34c96107c8  apps/desktop/src/lib/lucid-receipt.ts
+708668edeb985a173f2d7bf30e01ae56a05aec30227389129b7c558c580b6ee3  apps/desktop/src/lib/lucid-receipt.ts
 1a0ebefcf4a13b993afb0e2acfb5a680ae8909828ff5727b093bd2aad14cc3c8  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.tsx
-28763c031655584f39a4abc4995751ff93940e416f95acf252ec27110e44839a  apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
-ea108f8f5175db9957ffc20a1203e4b1714b0f31d31cae38c97c831d9b74f878  apps/desktop/src/lib/lucid-receipt.test.ts
-01e15404412cdcfae6637511f4028167fd7d932dff2fae1b1f59bc08f7341957  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.test.tsx
-87ae80c8daa1b720cedf6053ea55a12af7c159554e65fe8d6f74bd2e644221ac  apps/desktop/src/components/assistant-ui/thread/streaming.test.tsx
+e64a389ccd67ef0b10c017ff3249eadbe28352523f344a6ef850c6736178fc90  apps/desktop/src/components/assistant-ui/tool/lucid-safety-state-card.tsx
+738240b5ffb2232a35640603707046251dd46f08c14b8c6f22c22dca6acc8643  apps/desktop/src/components/assistant-ui/thread/message-parts.tsx
+2dd43df0534cd3f3e783cc65ef921d37111f621faa15eb89c417c2b619356b53  apps/desktop/src/lib/lucid-receipt.test.ts
+7d8edae58402d0927df42f72ed03be04228f876e21d116cf34f6c813b78ffd93  apps/desktop/src/components/assistant-ui/tool/lucid-receipt-card.test.tsx
+05bc52313044d0b22fefed0d658107ab638cc0e2f550e5c296a7c0529e887bb9  apps/desktop/src/components/assistant-ui/thread/streaming.test.tsx
 ```
 
 ---
@@ -745,7 +763,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `8e48fab077116554add17832a0aaf714e816373f`, lifecycle hardening checkpoint
 `7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d`, receipt UI checkpoint
 `3cad879636f536d8cb28f6e361b04c1ddb170c28`, clean packaged UI checkpoint
-`f7835a87d6ad3072d9a56305e88854132a4d9938`, and this document hash:
+`f7835a87d6ad3072d9a56305e88854132a4d9938`, safety-state UI checkpoint
+`e943c61bece7e6c8baa0e0fd4441f469b46bd59c`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -772,9 +791,11 @@ success projection 8e48fab077116554add17832a0aaf714e816373f
 lifecycle hardening 7b5c0f22b4abcd007b9f29e7f74acd43adf10e5d
 receipt UI          3cad879636f536d8cb28f6e361b04c1ddb170c28
 clean packaged UI   f7835a87d6ad3072d9a56305e88854132a4d9938
+safety-state UI     e943c61bece7e6c8baa0e0fd4441f469b46bd59c
 ```
 
-Rollback packaged evidence by reverting `f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;
+Rollback safety-state UI by reverting `e943c61be`; rollback packaged evidence separately by reverting
+`f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;
 rollback lifecycle hardening separately by reverting
 `7b5c0f22b`; rollback success projection separately by reverting
 `8e48fab07`; rollback TTD hardening separately by reverting

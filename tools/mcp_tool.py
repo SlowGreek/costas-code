@@ -4696,6 +4696,41 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     ensure_ascii=False,
                 )
 
+            from tools.lucid_mcp_bridge import (
+                lucid_retry_disposition,
+                project_lucid_receipt,
+            )
+
+            success_disposition = lucid_retry_disposition(
+                server_name,
+                server._config,
+                tool_name,
+                resolved_command=server._resolved_command,
+            )
+            if success_disposition is not None:
+                structured = getattr(result, "structuredContent", None)
+                projected_receipt = project_lucid_receipt(structured)
+                if (
+                    projected_receipt is None
+                    or not isinstance(structured, dict)
+                    or "result" not in structured
+                ):
+                    return json.dumps(
+                        {
+                            "error": "Butler returned an invalid LUCID success receipt",
+                            "code": "lucid-invalid-receipt",
+                            "retryable": False,
+                        },
+                        ensure_ascii=False,
+                    )
+                return json.dumps(
+                    {
+                        "result": structured["result"],
+                        "lucid_receipt": projected_receipt,
+                    },
+                    ensure_ascii=False,
+                )
+
             # Collect text from content blocks. MCP tool results can also
             # include ImageContent blocks (screenshot / Blockbench / Playwright
             # etc.); cache those via the gateway's image-cache helper so they

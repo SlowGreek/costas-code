@@ -745,9 +745,26 @@ class TestToolHandler:
         from tools.mcp_tool import _make_tool_handler, _servers
 
         mock_session = MagicMock()
-        mock_session.call_tool = AsyncMock(
-            return_value=_make_call_result("bounded receipt", is_error=False)
-        )
+        call_result = _make_call_result("raw envelope text", is_error=False)
+        call_result.structuredContent = {
+            "envelope": {
+                "intent": {"verb": "get", "args": {"path": "fleet"}},
+                "capability": None,
+                "escalation": None,
+                "fidelity": {"level": "lossless", "preserved": [], "lost": []},
+                "refusal": None,
+                "receipt": {
+                    "id": "lucid:hostcontext",
+                    "ts": "2026-07-25T21:00:00Z",
+                    "trust": "verified",
+                    "content_hash": "sha256:" + "f" * 64,
+                    "ran": True,
+                    "effect": "bounded receipt",
+                },
+            },
+            "result": "bounded receipt",
+        }
+        mock_session.call_tool = AsyncMock(return_value=call_result)
         server = _make_mock_server("lucid-quine", session=mock_session)
         server._config = {"command": "butler", "args": ["--mcp-stdio"]}
         server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
@@ -925,6 +942,123 @@ class TestToolHandler:
             assert "private" not in json.dumps(projected)
         finally:
             _servers.pop("lucid-quine", None)
+
+    def test_lucid_success_projects_result_and_closed_receipt_without_raw_envelope(self):
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        digest = "sha256:" + "e" * 64
+        intended_result = {"status": "GREEN", "rows": [{"id": "bounded-row"}]}
+        result = _make_call_result(
+            '{"intent":{"args":{"secret":"must-not-project"}}}',
+            is_error=False,
+        )
+        result.structuredContent = {
+            "envelope": {
+                "intent": {"verb": "get", "args": {"path": "private/path"}},
+                "capability": {"signature": "must-not-project"},
+                "escalation": None,
+                "fidelity": {"level": "lossless", "preserved": [], "lost": []},
+                "refusal": None,
+                "receipt": {
+                    "id": "lucid:success1",
+                    "ts": "2026-07-25T21:00:00Z",
+                    "trust": "verified",
+                    "content_hash": digest,
+                    "ran": True,
+                    "effect": "private effect",
+                },
+            },
+            "result": intended_result,
+        }
+        mock_session = MagicMock()
+        mock_session.call_tool = AsyncMock(return_value=result)
+        server = _make_mock_server("lucid-quine", session=mock_session)
+        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
+        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        _servers["lucid-quine"] = server
+        try:
+            handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
+            with patch.dict(
+                os.environ,
+                {
+                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+                },
+            ), self._patch_mcp_loop():
+                projected = json.loads(handler({"path": "private/path"}, session_id="session:one"))
+            assert projected == {
+                "result": intended_result,
+                "lucid_receipt": {
+                    "schema": "hermes-lucid-receipt/1",
+                    "id": "lucid:success1",
+                    "timestamp": "2026-07-25T21:00:00Z",
+                    "verb": "get",
+                    "ran": True,
+                    "trust": "verified",
+                    "content_hash": digest,
+                    "refusal_code": None,
+                    "needs_user": False,
+                },
+            }
+            wire = json.dumps(projected)
+            assert "must-not-project" not in wire
+            assert "private/path" not in wire
+            assert "private effect" not in wire
+            assert "fidelity" not in wire
+        finally:
+            _servers.pop("lucid-quine", None)
+
+    def test_lucid_success_with_invalid_receipt_fails_closed_without_raw_text(self):
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        result = _make_call_result("raw private success payload", is_error=False)
+        result.structuredContent = {
+            "envelope": {"malformed": True},
+            "result": {"private": "must-not-project"},
+        }
+        mock_session = MagicMock()
+        mock_session.call_tool = AsyncMock(return_value=result)
+        server = _make_mock_server("lucid-quine", session=mock_session)
+        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
+        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        _servers["lucid-quine"] = server
+        try:
+            handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
+            with patch.dict(
+                os.environ,
+                {
+                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+                },
+            ), self._patch_mcp_loop():
+                projected = json.loads(handler({"path": "private"}, session_id="session:one"))
+            assert projected == {
+                "error": "Butler returned an invalid LUCID success receipt",
+                "code": "lucid-invalid-receipt",
+                "retryable": False,
+            }
+            assert "private" not in json.dumps(projected)
+        finally:
+            _servers.pop("lucid-quine", None)
+
+    def test_foreign_mcp_success_preserves_generic_content_and_structured_result(self):
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        result = _make_call_result("foreign content", is_error=False)
+        result.structuredContent = {"foreign": "structured"}
+        mock_session = MagicMock()
+        mock_session.call_tool = AsyncMock(return_value=result)
+        server = _make_mock_server("foreign", session=mock_session)
+        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
+        _servers["foreign"] = server
+        try:
+            handler = _make_tool_handler("foreign", "lucid.get", 120)
+            with self._patch_mcp_loop():
+                projected = json.loads(handler({}))
+            assert projected == {
+                "result": "foreign content",
+                "structuredContent": {"foreign": "structured"},
+            }
+        finally:
+            _servers.pop("foreign", None)
 
     def test_foreign_mcp_error_never_projects_lucid_receipt(self):
         from tools.mcp_tool import _make_tool_handler, _servers

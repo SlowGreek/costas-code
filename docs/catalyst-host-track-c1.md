@@ -17,7 +17,7 @@ The gate encodes these invariants:
 2. Generic host names, methods, result fields, and annotations contain no provider/thread/turn/process identity.
 3. `resume_after_restart`, `durable_replay`, `external_control`, and `durable_close_proof` remain literal false capability cells with no generic `resume` or `replay` emulation.
 4. AgentExperiments F1 remains `authority=none` with the exact `11 reduced / 5 externally observed / 3 explicitly unavailable` disposition.
-5. AgentExperiments F5 remains `PROVISIONAL`, `authority=none`, and `HOLD`; production executor dispatch is unwired and live cryptographic Costas proof plus F5c mediation remain residuals.
+5. AgentExperiments F5 remains provisional, `authority=none`, and semantically `HOLD`; deterministic integration may advance, while live cryptographic Costas proof and below-shell F5c mediation remain residuals.
 6. If `gateway/execution_host_protocol.py` exists, its AST contains no endpoint decorators and no agent/runtime/HTTP-server/socket imports.
 7. If `gateway/catalyst_session_bindings.py` exists, its AST contains the literal `observe`, does not store the binding in `model_config`, and does not expose Codex thread/turn identity.
 8. Fleet launch and mutation policy are false; the only proposed first canary is read-only and QUINE remains acceptance owner.
@@ -28,10 +28,10 @@ The gate encodes these invariants:
 | Contract | Current owner anchor | Gate treatment |
 |---|---|---|
 | provider-neutral runtime waist | `agent/runtime_sessions.py`; `agent/transports/codex_app_server_session.py`; `tests/agent/test_runtime_sessions.py` | imported and asserted now |
-| SessionDB child/listability baseline | `hermes_state.py:122-160,163-206,5256-5332`; `tests/test_hermes_state.py:4709-4757` | design anchor only; C2 production remains absent |
+| SessionDB child/listability foundation | `hermes_state.py`; `tests/hermes_state/test_external_role_session_binding.py` | typed observe-only binding and bounded child projection realized; live adapter remains absent |
 | F1 disposition | `../AgentExperiments/butler/conversation-core/F1-RECEIPT.json` | parsed and asserted now |
 | F5 live HOLD | `../AgentExperiments/docs/CATALYST-F5-PROVISIONAL-RECEIPT.json`; `../AgentExperiments/docs/CATALYST-F5-FEEDFORWARD.md:40-47` | parsed and asserted now |
-| R0 parser/verifier | `[CLAIMED] gateway/execution_host_protocol.py`; `[CLAIMED] tests/gateway/test_execution_host_protocol.py` | source AST is GREEN here; sibling-owned protocol fixtures are 36/36 GREEN |
+| R0 parser/verifier | `[CLAIMED] gateway/execution_host_protocol.py`; `[CLAIMED] tests/gateway/test_execution_host_protocol.py` | source AST is GREEN here; sibling-owned protocol fixtures are 37/37 GREEN |
 | C2 observe binding foundation | `hermes_state.py`; `tests/hermes_state/test_external_role_session_binding.py` | realized durable observe-only binding + bounded child projection; gateway/Desktop enforcement still pending |
 
 The C2 owner correctly landed the durable foundation in SessionDB rather than a parallel gateway store. This
@@ -104,10 +104,12 @@ production_files_changed: 0
 authority: none
 runtime_contract: realized
 r0_source_claim: GREEN static no-endpoint/no-runtime-import AST gate
-r0_fixture_claim: GREEN 36/36 sibling-owned focused tests
+r0_fixture_claim: GREEN 37/37 sibling-owned focused tests
 c2_binding_foundation: GREEN typed SessionDB observe binding; gateway/Desktop no-effect attachment PENDING
 f1_disposition: 11/5/3; authority none
-f5_live: HOLD
+ae_f1_receipt_sha256: fcbe71f1930994b3061fb656bff1146798308c51a403590db2d4c464d731b4da
+ae_f5_receipt_sha256: 6e4021d6b2cf85472fc20a10baebf682d2a5f582bea3f0396684dfbf163d4e8c
+f5_live: HOLD INDEPENDENT INTEGRATION REVIEW
 fleet_launch: false
 fleet_mutation: false
 rollback: remove the two C1-owned paths
@@ -119,12 +121,12 @@ Verification commands and observed results:
 HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
   scripts/run_tests.sh tests/catalyst_host/test_host_track_contract.py -q
 
-1 file; 8 passed; 1 pending owner-path skip; 0 failed
+1 file; 9 passed; 0 skipped; 0 failed
 
 HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
   scripts/run_tests.sh tests/gateway/test_execution_host_protocol.py -q
 
-1 file; 36 passed; 0 failed
+1 file; 37 passed; 0 failed
 ```
 
 R0 source exists and passes the no-endpoint/no-runtime-import AST assertion. The C2 durable binding foundation

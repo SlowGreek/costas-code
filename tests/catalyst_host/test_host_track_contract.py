@@ -269,19 +269,18 @@ def test_f1_receipt_preserves_exact_disposition_and_no_authority():
     }
 
 
-def test_f5_live_receipt_is_hold_and_production_dispatch_is_unwired():
+def test_f5_live_receipt_preserves_semantic_hold_after_deterministic_integration():
     receipt_path = AE_ROOT / "docs/CATALYST-F5-PROVISIONAL-RECEIPT.json"
     if not receipt_path.exists():
         pytest.skip(f"PENDING F5 sibling receipt: {receipt_path}")
     receipt = _read_json(receipt_path)
     residuals = set(receipt["residuals"])
     assert receipt["phase"] == "F5"
-    assert receipt["status"] == "PROVISIONAL"
+    assert "provisional" in receipt["status"].casefold()
     assert receipt["authority"] == "none"
-    assert receipt["disposition"] == "HOLD"
-    assert "shared production executor dispatch is intentionally unwired" in residuals
-    assert any("live cryptographic Costas host attestation" in item for item in residuals)
-    assert any("F5c mutation remains typed unavailable" in item for item in residuals)
+    assert receipt["disposition"].casefold().startswith("hold")
+    assert "live-cryptographic-costas-attestation-unavailable" in residuals
+    assert "below-shell-lease-mediation-unavailable" in residuals
 
 
 def test_r0_claim_has_no_endpoint_or_runtime_imports():
@@ -332,9 +331,13 @@ def test_fleet_policy_forbids_launch_and_mutation():
     receipt_path = AE_ROOT / "docs/CATALYST-F5-PROVISIONAL-RECEIPT.json"
     if receipt_path.exists():
         receipt = _read_json(receipt_path)
+        residuals = set(receipt["residuals"])
+        assert receipt["phase"] == "F5"
         assert receipt["authority"] == "none"
-        assert receipt["disposition"] == "HOLD"
-        assert "shared production executor dispatch is intentionally unwired" in receipt["residuals"]
+        assert "provisional" in receipt["status"].casefold()
+        assert receipt["disposition"].casefold().startswith("hold")
+        assert "live-cryptographic-costas-attestation-unavailable" in residuals
+        assert "below-shell-lease-mediation-unavailable" in residuals
 
 
 def test_dependency_and_order_graph_is_exact_and_parallel():

@@ -20,6 +20,8 @@
 > **Costas RUN-UGUI semantic consumer checkpoint:** `55fc59948c7cc5f94797d3214d1e33e8bd7d7958`<br>
 > **Costas structural UGUI admission checkpoint:** `c8a628d441d65fb311e780cb1dfbf8419bfd6217`<br>
 > **RUN-UGUI WITNESS audit:** `docs/RUN-UGUI-WITNESS-AUDIT.md`<br>
+> **UGUI Marketplace contract:** `docs/UGUI-MARKETPLACE-KX.md`<br>
+> **Costas dynamic workspace checkpoint:** `4b8b4b9df01b73800065675dbeb4a116404f77eb`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -322,8 +324,9 @@ authority:
 Neither repair changes LUCID identity, authority, capability, retry, or receipt semantics.
 
 The tab-by-tab WITNESS drilldown audit and prioritized enrichment backlog are maintained in
-`docs/RUN-UGUI-WITNESS-AUDIT.md`. Its disposition keeps the canonical nine tabs and adds a cross-cutting typed
-evidence ladder; a tenth WITNESS inbox is deferred unless durable cross-domain human dispositions require it.
+`docs/RUN-UGUI-WITNESS-AUDIT.md`. `docs/UGUI-MARKETPLACE-KX.md` generalizes the current nine into a BRIANHU
+workspace preset plus a Marketplace discovery/recovery anchor and profile-pinned qualified applets. A separate
+WITNESS decision inbox remains deferred unless durable cross-domain human dispositions require it.
 
 ### 1.7 RUN-UGUI semantic GUI alignment
 
@@ -840,7 +843,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`, chat navigation checkpoint
 `83eba5585b53b748ff1bae7f930deb3302597fdc`, RUN-UGUI consumer checkpoint
 `55fc59948c7cc5f94797d3214d1e33e8bd7d7958`, structural UGUI admission checkpoint
-`c8a628d441d65fb311e780cb1dfbf8419bfd6217`, and this document hash:
+`c8a628d441d65fb311e780cb1dfbf8419bfd6217`, dynamic workspace checkpoint
+`4b8b4b9df01b73800065675dbeb4a116404f77eb`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -872,9 +876,11 @@ CLI probe hardening a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb
 chat navigation     83eba5585b53b748ff1bae7f930deb3302597fdc
 RUN-UGUI consumer   55fc59948c7cc5f94797d3214d1e33e8bd7d7958
 UGUI admission      c8a628d441d65fb311e780cb1dfbf8419bfd6217
+dynamic workspace   4b8b4b9df01b73800065675dbeb4a116404f77eb
 ```
 
-Rollback structural UGUI admission by reverting `c8a628d44`; rollback RUN-UGUI consumer alignment separately by
+Rollback dynamic workspace support by reverting `4b8b4b9df`; rollback structural UGUI admission separately by
+reverting `c8a628d44`; rollback RUN-UGUI consumer alignment separately by
 reverting `55fc59948`; rollback chat navigation separately by reverting
 `83eba5585`; rollback CLI probe hardening separately by reverting
 `a5cb4a304`; rollback safety-state UI separately by reverting `e943c61be`; rollback packaged evidence separately by reverting

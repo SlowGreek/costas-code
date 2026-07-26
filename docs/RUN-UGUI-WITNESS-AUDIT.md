@@ -1,4 +1,4 @@
-# RUN-UGUI WITNESS audit — nine tabs, one evidence ladder
+# RUN-UGUI WITNESS audit — profile workspaces, one evidence ladder
 
 > **Kind:** Costas consumer audit and enrichment feedforward  
 > **Date:** 2026-07-25  
@@ -10,21 +10,19 @@
 
 ## 0 · Disposition
 
-Keep the canonical nine tabs:
+The current nine tabs remain a useful **WITNESS BRIANHU workspace preset**, but they are not a universal ontology.
+A generalized UGUI shell adds MARKETPLACE as the discovery/recovery anchor and permits profile-specific qualified
+applet tabs such as Calculator or Snake.
 
-1. HOME
-2. DASHBOARD
-3. LUCID
-4. QUINE
-5. SCORES
-6. METRICS
-7. LOGS
-8. STUDIO
-9. SETTINGS
+```text
+BRIANHU preset
+  HOME · DASHBOARD · LUCID · QUINE · SCORES · METRICS · LOGS · STUDIO · SETTINGS · MARKETPLACE
 
-The top-level information architecture is sound. A tenth tab would not repair the current deficit.
+compact example
+  HOME · MARKETPLACE · CALCULATOR · SNAKE
+```
 
-The missing capability is a cross-cutting WITNESS evidence ladder:
+The missing cross-cutting capability remains a WITNESS evidence ladder:
 
 ```text
 signal
@@ -514,7 +512,9 @@ WITNESS-ready executive
 ∧ no enabled control is inert
 ∧ no renderer owns domain or authority transitions
 ∧ stale results cannot overwrite newer state
-∧ all nine tabs preserve one UGUI semantic/GEOM authority
+∧ every pinned tab preserves one UGUI semantic/GEOM authority
+∧ Marketplace exposes only catalog-qualified applets and grants no authority
 ```
 
-The nine tabs are sufficient when this ladder exists.
+The current nine remain a preset. Marketplace and the qualified applet catalog generalize the workspace without
+weakening the evidence ladder.

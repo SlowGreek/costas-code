@@ -1,0 +1,3 @@
+
+# Transient backup written by scripts/apply-build-version.mjs during packaging
+.package.json.version-backup

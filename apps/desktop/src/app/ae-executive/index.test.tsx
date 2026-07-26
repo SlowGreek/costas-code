@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
+import { AE_EXECUTIVE_BATCH_TAB_IDS, AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
 import { parseExecutiveBatch, resetExecutiveScenesForTests, validateExecutiveScene } from './scene'
 
 import { AeExecutiveWorkspace } from '.'
@@ -26,7 +26,7 @@ const dynamicLabel = (tab: string) =>
   AE_EXECUTIVE_TABS.find(item => item.id === tab)?.label ??
   ({ calc: 'C[A]LCULATOR', marketplace: 'MA[R]KETPLACE', snake: 'S[N]AKE' }[tab] ?? tab.toUpperCase())
 
-function batch(tabs: readonly string[] = AE_EXECUTIVE_TAB_IDS) {
+function batch(tabs: readonly string[] = AE_EXECUTIVE_BATCH_TAB_IDS) {
   return {
     schema: 'ae-executive-scene-batch/1' as const,
     authority: 'none' as const,
@@ -100,9 +100,9 @@ afterEach(() => {
 
 describe('AE executive registry', () => {
   it('preserves the current WITNESS seed plus the Marketplace recovery anchor', () => {
-    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(10)
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.label)).toEqual([...EXPECTED_LABELS, 'MA[R]KETPLACE'])
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOTSR')
+    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(11)
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.label)).toEqual([...EXPECTED_LABELS, 'MA[R]KETPLACE', 'SH[E]LL'])
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOTSRE')
     expect(AE_EXECUTIVE_TABS.map(tab => tab.route)).toEqual(AE_EXECUTIVE_TAB_IDS.map(tab => `/ae/${tab}`))
   })
 
@@ -114,7 +114,7 @@ describe('AE executive registry', () => {
 describe('Rust UGUI Scene batch', () => {
   it('admits the exact ordered batch and validates every closed Scene', () => {
     const value = parseExecutiveBatch(batch())
-    expect(value.scenes).toHaveLength(AE_EXECUTIVE_TAB_IDS.length)
+    expect(value.scenes).toHaveLength(AE_EXECUTIVE_BATCH_TAB_IDS.length)
 
     for (const row of value.scenes) {expect(validateExecutiveScene(row.scene)).toEqual([])}
   })
@@ -127,13 +127,13 @@ describe('Rust UGUI Scene batch', () => {
       expect(scene.nodes.some(node => node.layout?.height === '*')).toBe(true)
       expect(
         scene.nodes.flatMap(node => Object.values(node.on ?? {})).filter(handler => handler.startsWith('shell.tab.'))
-      ).toEqual(AE_EXECUTIVE_TAB_IDS.map(id => `shell.tab.${id}`))
+      ).toEqual(AE_EXECUTIVE_BATCH_TAB_IDS.map(id => `shell.tab.${id}`))
     }
   })
 })
 
 describe('AE executive workspace', () => {
-  it.each(AE_EXECUTIVE_TABS)('redraws $label from its corresponding Rust Scene', async tab => {
+  it.each(AE_EXECUTIVE_TABS.filter(tab => tab.id !== 'shell'))('redraws $label from its corresponding Rust Scene', async tab => {
     const view = renderTab(tab.id)
     expect(await screen.findByText(`RUN ${tab.id.toUpperCase()}`)).toBeTruthy()
     expect(view.container.querySelector(`[data-ae-executive-tab="${tab.id}"]`)).toBeTruthy()

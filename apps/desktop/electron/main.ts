@@ -153,6 +153,7 @@ import {
   SESSION_WINDOW_MIN_HEIGHT,
   SESSION_WINDOW_MIN_WIDTH
 } from './session-windows'
+import { buildShellViewportModel, composeShellViewportScene, loadShellViewportSource } from './shell-viewport'
 import { resolveSkinSettingsBinary, runSkinSettingsProjector } from './skin-settings'
 import { ensureSpawnHelperExecutable } from './spawn-helper-perms'
 import { createBootstrapCoordinator, sshConfigFingerprint } from './ssh-bootstrap-coordinator'
@@ -8760,6 +8761,23 @@ ipcMain.handle('hermes:ugui-skins:preference:commit', (_event, request) =>
     idempotency_key: String(request?.idempotency_key || '')
   })
 )
+
+ipcMain.handle('hermes:shell-viewport:scene', (_event, request) => {
+  const source = loadShellViewportSource(path.join(AE_RUNTIME_BIN, 'shell-viewport'))
+
+  const model = buildShellViewportModel(source, {
+    shell_id: String(request?.shell_id || ''),
+    surface_profile_id: String(request?.surface_profile_id || ''),
+    target_id: String(request?.target_id || '')
+  })
+
+  return {
+    schema: 'ae-shell-viewport-scene/1',
+    authority: 'none',
+    model,
+    scene: composeShellViewportScene(model)
+  }
+})
 
 ipcMain.handle('hermes:connection', async (_event, profile) => ensureBackend(profile))
 // Reconnect-after-wake recovery. A REMOTE primary backend has no child process,

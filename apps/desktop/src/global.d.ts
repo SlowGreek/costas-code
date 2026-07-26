@@ -24,6 +24,11 @@ declare global {
       }>
       getUguiSkinCatalog: () => Promise<unknown>
       getUguiSkinSettingsScene: (request: { committed_id: string; preview_id: string }) => Promise<unknown>
+      getShellViewportScene: (request: {
+        shell_id: string
+        surface_profile_id: string
+        target_id: string
+      }) => Promise<unknown>
       renderProfilePreference: {
         get: (profile: string) => Promise<{
           schema: 'hermes-render-profile-preference/1'

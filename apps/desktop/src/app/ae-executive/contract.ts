@@ -8,10 +8,14 @@ export const AE_EXECUTIVE_TAB_IDS = [
   'logs',
   'studio',
   'settings',
-  'marketplace'
+  'marketplace',
+  'shell'
 ] as const
 
 export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
+export const AE_EXECUTIVE_BATCH_TAB_IDS = AE_EXECUTIVE_TAB_IDS.filter(
+  (id): id is Exclude<AeExecutiveTabId, 'shell'> => id !== 'shell'
+)
 
 export interface AeExecutiveTab {
   readonly id: AeExecutiveTabId
@@ -102,6 +106,14 @@ export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
     route: '/ae/marketplace',
     icon: 'extensions',
     summary: 'Discover, inspect, and pin qualified UGUI applets.'
+  },
+  {
+    id: 'shell',
+    label: 'SH[E]LL',
+    mnemonic: 'E',
+    route: '/ae/shell',
+    icon: 'device-desktop',
+    summary: 'Project one semantic experience through explicit shell, surface, and capability constraints.'
   }
 ] as const
 

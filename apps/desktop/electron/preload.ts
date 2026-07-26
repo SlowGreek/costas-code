@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   getAeExecutiveScenes: () => ipcRenderer.invoke('hermes:ae-executive:scenes'),
   getUguiSkinCatalog: () => ipcRenderer.invoke('hermes:ugui-skins:catalog'),
   getUguiSkinSettingsScene: request => ipcRenderer.invoke('hermes:ugui-skins:settings-scene', request),
+  getShellViewportScene: request => ipcRenderer.invoke('hermes:shell-viewport:scene', request),
   renderProfilePreference: {
     get: profile => ipcRenderer.invoke('hermes:ugui-skins:preference:get', profile),
     commit: request => ipcRenderer.invoke('hermes:ugui-skins:preference:commit', request)

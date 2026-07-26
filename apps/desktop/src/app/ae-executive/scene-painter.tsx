@@ -238,6 +238,10 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return <UguiCanvas key={node.id} node={node} />
 
       case 'native':
+        if (stringAttr(node, 'catalog') === 'shell-structural-viewport') {
+          return <ShellViewportFrame key={node.id} model={attr(node, 'model')} />
+        }
+
         return <SceneRefusal code="native-realization-unavailable" detail={stringAttr(node, 'catalog') || node.id} key={node.id} />
 
       default:
@@ -286,6 +290,52 @@ function resolveColor(value: string): string | undefined {
   if (TOKEN_COLOR[value]) {return TOKEN_COLOR[value]}
 
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : undefined
+}
+
+function ShellViewportFrame({ model }: { model: unknown }) {
+  if (!model || typeof model !== 'object' || Array.isArray(model)) {
+    return <SceneRefusal code="shell-viewport-model" detail="invalid" />
+  }
+
+  const row = model as Record<string, unknown>
+  const geometry = row.geometry && typeof row.geometry === 'object' ? (row.geometry as Record<string, unknown>) : {}
+  const viewport = geometry.viewport && typeof geometry.viewport === 'object' ? (geometry.viewport as Record<string, unknown>) : {}
+  const width = typeof viewport.width === 'number' && viewport.width > 0 ? viewport.width : 1280
+  const height = typeof viewport.height === 'number' && viewport.height > 0 ? viewport.height : 720
+  const ratio = Math.max(0.2, Math.min(5, width / height))
+  const formFactor = typeof row.form_factor === 'string' ? row.form_factor : 'desktop'
+  const shell = typeof row.shell_id === 'string' ? row.shell_id : 'unknown-shell'
+  const warning = typeof row.warning === 'string' ? row.warning : 'STRUCTURAL PROJECTION'
+  const chrome = Array.isArray(row.chrome) ? row.chrome.filter((item): item is string => typeof item === 'string') : []
+
+  return (
+    <div className="grid min-h-72 place-items-center overflow-auto rounded-(--morph-radius-md) border border-(--morph-border-color) bg-(--morph-desktop) p-(--morph-spacing)" data-shell-form-factor={formFactor} data-shell-target={shell}>
+      <div
+        className="relative grid max-h-[34rem] min-h-52 w-full max-w-4xl overflow-hidden border-[length:var(--morph-stroke-width)] border-(--morph-border-color) bg-(--morph-surface) text-(--morph-on-surface) shadow-[var(--morph-shadow)]"
+        style={{
+          aspectRatio: String(ratio),
+          borderRadius: formFactor === 'handset' ? 'min(12%, var(--morph-radius-lg))' : 'var(--morph-radius-md)'
+        }}
+      >
+        {chrome.includes('status-bar') || chrome.includes('title-bar') ? (
+          <div className="flex h-7 items-center justify-between bg-(--morph-titlebar) px-3 text-[0.65rem] font-semibold">
+            <span>{shell}</span>
+            <span>{Math.round(width)}×{Math.round(height)}</span>
+          </div>
+        ) : null}
+        <div className="grid min-h-0 place-items-center p-4">
+          <div className="grid max-w-sm gap-3 rounded-(--morph-radius-md) border border-(--morph-border-color) bg-(--morph-surface) p-4 shadow-[var(--morph-shadow)]">
+            <div className="text-sm font-semibold">Same semantic GenUI experience</div>
+            <div className="text-xs opacity-75">One identity and action set. Shell constraints alter projection, not meaning.</div>
+            <Button size="sm">Inspect evidence</Button>
+          </div>
+        </div>
+        <div className="border-t border-(--morph-border-color) px-2 py-1 text-center font-mono text-[0.6rem] uppercase tracking-wide">
+          STRUCTURE ONLY · AUTHORITY NONE · NOT RUN · {warning}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function SceneRefusal({ code, detail }: { code: string; detail: string }) {

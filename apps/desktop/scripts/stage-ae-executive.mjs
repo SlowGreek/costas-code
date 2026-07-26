@@ -99,3 +99,20 @@ cpSync(skinBindingsSource, skinBindingsDestination, {
   filter: source => source === skinBindingsSource || source.endsWith('.json')
 })
 console.log(`[stage-ae-executive] staged ${skinBindingsDestination}`)
+
+const shellViewportSources = [
+  ['shell-builds.json', path.join(aeRoot, 'run', 'SHELL-BUILDS.json')],
+  [
+    'shell-capability-parity.json',
+    path.join(aeRoot, 'envelope', 'capabilities', 'generated', 'SHELL-CAPABILITY-PARITY.json')
+  ],
+  ['surface-profiles.json', path.join(aeRoot, 'ugui', 'json', 'surface-profiles.json')]
+]
+const shellViewportDestination = path.join(destinationDir, 'shell-viewport')
+rmSync(shellViewportDestination, { force: true, recursive: true })
+mkdirSync(shellViewportDestination, { recursive: true })
+for (const [name, source] of shellViewportSources) {
+  if (!existsSync(source)) throw new Error(`[stage-ae-executive] missing SHELL viewport source: ${source}`)
+  copyFileSync(source, path.join(shellViewportDestination, name))
+}
+console.log(`[stage-ae-executive] staged ${shellViewportDestination}`)

@@ -17,6 +17,7 @@
 > **Costas safety-state UI checkpoint:** `e943c61bece7e6c8baa0e0fd4441f469b46bd59c`<br>
 > **Costas CLI probe hardening checkpoint:** `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`<br>
 > **Costas chat navigation repair checkpoint:** `83eba5585b53b748ff1bae7f930deb3302597fdc`<br>
+> **Costas RUN-UGUI semantic consumer checkpoint:** `55fc59948c7cc5f94797d3214d1e33e8bd7d7958`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -318,6 +319,40 @@ authority:
 
 Neither repair changes LUCID identity, authority, capability, retry, or receipt semantics.
 
+### 1.7 RUN-UGUI semantic GUI alignment
+
+Costas now consumes the architecture in `AgentExperiments/docs/RUN-UGUI-KX.md` rather than a literal port of
+RUN's terminal presentation. The accepted path is:
+
+```text
+typed RUN facts
+→ ugui::executive normalized card composition
+→ ugui::project Scene 1.0.0
+→ one generic Desktop Scene painter
+```
+
+The Desktop no longer authors a second executive tab strip or per-tab heading. UGUI-owned `shell.tab.*` Scene
+handlers are the sole executive navigation source. Scene `layout.height` is realized generically (`"*"` consumes
+the flex remainder; fixed extents remain shrink-only), with no tab-specific React layout branches. Costas rejects:
+
+- the obsolete `run::tui->ugui::project` provenance;
+- missing/reordered shared shell handlers;
+- mismatched `run-<tab>` card identity;
+- card Scenes without elastic layout intent;
+- ANSI or box-drawing terminal-shaped text.
+
+`asset://` images currently produce a named `asset-catalog-unavailable` painter loss with authored alt text; Costas
+does not invent or silently substitute art before a registered UGUI asset port exists.
+
+The staging freshness set now includes all four `ugui/src/executive/*.rs` composers, projection action/section/
+projector, GEOM Scene layout, and the Scene schema so a stale terminal-first adapter cannot survive a landed AE
+refactor.
+
+At observation time, AE's in-progress UGUI crate checks green and all nine semantic composers exist. The
+`ae-executive-scene` adapter itself remains temporarily unpackageable because it still calls the removed
+`ExecutiveTab::as_str`; Studio/QUINE cutover is also still being completed by AE EM. Costas therefore fails closed
+instead of repackaging the prior terminal-shaped batch.
+
 ---
 
 ## 2 · Live observed evidence
@@ -471,6 +506,8 @@ Hub UI tests                GREEN
 Receipt/safety UI + Thread  31 passed
 Chat route regression       56 passed
 CLI probe tests             11 passed
+UGUI semantic consumer UI   73 passed
+UGUI Electron boundary      15 passed
 Production renderer build   GREEN
 Electron main/preload       GREEN
 Packaged Catalyst.app       GREEN
@@ -499,6 +536,13 @@ b98b2eb698af7d01e10ab334c3d0b2678cba275eee94ffd8027982acc9bf80b6  apps/desktop/e
 7e41c7d2a18b50ab796856fbd1fe6975197a8502afdc1599055b913e84638d9f  apps/desktop/src/store/session-states.ts
 70ac25cc7df510b535af0115ccf3f195babd20276b2a8150903d1831960383e6  apps/desktop/src/store/session-states.test.ts
 fbb0fe6394c45e4d9869dc0c9c8fb34bba2c15d801d48ef5ca45470ba32cddb0  apps/desktop/src/app/contrib/wiring.tsx
+6f0cc30876d6a553744022dda93daea197169c4249065583e33a8f871f0d495e  apps/desktop/electron/ae-executive.ts
+4bd458bdcafc7a093c25bc2a090fa612451452d5557ba832d5edfdc2fb12c48e  apps/desktop/scripts/stage-ae-executive.mjs
+297580d44bddf79e374c2194c3f35cb415460bb534e47ed7d4672e30fb8f0899  apps/desktop/src/app/ae-executive/index.tsx
+07078a6eb8e4ac5c6f8e8a1e38db5e1742a4fad053e299c5420f1ed057fea917  apps/desktop/src/app/ae-executive/scene.ts
+a2e7e0ccfaed38a1d43abbbe4d3b0f5e3685540a99affd2be07d487a29e5a831  apps/desktop/src/app/ae-executive/scene-painter.tsx
+daf59af27222c3967a6461f32f791771566d51f00d8799aff8820f3aaca6a2ef  apps/desktop/src/app/ae-executive/index.test.tsx
+adf47cc9ef158d07e0448c42c5b84b9ee9f5c5190d131cc7b056c7d618d00c1f  apps/desktop/electron/ae-executive.test.ts
 ```
 
 ---
@@ -786,7 +830,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `f7835a87d6ad3072d9a56305e88854132a4d9938`, safety-state UI checkpoint
 `e943c61bece7e6c8baa0e0fd4441f469b46bd59c`, CLI probe checkpoint
 `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`, chat navigation checkpoint
-`83eba5585b53b748ff1bae7f930deb3302597fdc`, and this document hash:
+`83eba5585b53b748ff1bae7f930deb3302597fdc`, RUN-UGUI consumer checkpoint
+`55fc59948c7cc5f94797d3214d1e33e8bd7d7958`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -816,9 +861,11 @@ clean packaged UI   f7835a87d6ad3072d9a56305e88854132a4d9938
 safety-state UI     e943c61bece7e6c8baa0e0fd4441f469b46bd59c
 CLI probe hardening a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb
 chat navigation     83eba5585b53b748ff1bae7f930deb3302597fdc
+RUN-UGUI consumer   55fc59948c7cc5f94797d3214d1e33e8bd7d7958
 ```
 
-Rollback chat navigation by reverting `83eba5585`; rollback CLI probe hardening separately by reverting
+Rollback RUN-UGUI consumer alignment by reverting `55fc59948`; rollback chat navigation separately by reverting
+`83eba5585`; rollback CLI probe hardening separately by reverting
 `a5cb4a304`; rollback safety-state UI separately by reverting `e943c61be`; rollback packaged evidence separately by reverting
 `f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;
 rollback lifecycle hardening separately by reverting

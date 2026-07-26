@@ -99,10 +99,10 @@ afterEach(() => {
 })
 
 describe('AE executive registry', () => {
-  it('preserves the exact RUN tab order, mnemonics, and nine distinct routes', () => {
-    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(9)
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.label)).toEqual(EXPECTED_LABELS)
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOTS')
+  it('preserves the current WITNESS seed plus the Marketplace recovery anchor', () => {
+    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(10)
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.label)).toEqual([...EXPECTED_LABELS, 'MA[R]KETPLACE'])
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOTSR')
     expect(AE_EXECUTIVE_TABS.map(tab => tab.route)).toEqual(AE_EXECUTIVE_TAB_IDS.map(tab => `/ae/${tab}`))
   })
 
@@ -114,7 +114,7 @@ describe('AE executive registry', () => {
 describe('Rust UGUI Scene batch', () => {
   it('admits the exact ordered batch and validates every closed Scene', () => {
     const value = parseExecutiveBatch(batch())
-    expect(value.scenes).toHaveLength(9)
+    expect(value.scenes).toHaveLength(AE_EXECUTIVE_TAB_IDS.length)
 
     for (const row of value.scenes) {expect(validateExecutiveScene(row.scene)).toEqual([])}
   })

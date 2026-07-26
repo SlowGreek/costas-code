@@ -7,7 +7,8 @@ export const AE_EXECUTIVE_TAB_IDS = [
   'metrics',
   'logs',
   'studio',
-  'settings'
+  'settings',
+  'marketplace'
 ] as const
 
 export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
@@ -93,6 +94,14 @@ export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
     route: '/ae/settings',
     icon: 'settings-gear',
     summary: 'Profile-scoped executive presentation policy.'
+  },
+  {
+    id: 'marketplace',
+    label: 'MA[R]KETPLACE',
+    mnemonic: 'R',
+    route: '/ae/marketplace',
+    icon: 'extensions',
+    summary: 'Discover, inspect, and pin qualified UGUI applets.'
   }
 ] as const
 

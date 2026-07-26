@@ -19,6 +19,7 @@
 > **Costas chat navigation repair checkpoint:** `83eba5585b53b748ff1bae7f930deb3302597fdc`<br>
 > **Costas RUN-UGUI semantic consumer checkpoint:** `55fc59948c7cc5f94797d3214d1e33e8bd7d7958`<br>
 > **Costas structural UGUI admission checkpoint:** `c8a628d441d65fb311e780cb1dfbf8419bfd6217`<br>
+> **RUN-UGUI WITNESS audit:** `docs/RUN-UGUI-WITNESS-AUDIT.md`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -319,6 +320,10 @@ authority:
   `main`, and `load`, and both `main` and `load` navigate to the conversation route.
 
 Neither repair changes LUCID identity, authority, capability, retry, or receipt semantics.
+
+The tab-by-tab WITNESS drilldown audit and prioritized enrichment backlog are maintained in
+`docs/RUN-UGUI-WITNESS-AUDIT.md`. Its disposition keeps the canonical nine tabs and adds a cross-cutting typed
+evidence ladder; a tenth WITNESS inbox is deferred unless durable cross-domain human dispositions require it.
 
 ### 1.7 RUN-UGUI semantic GUI alignment
 

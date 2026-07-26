@@ -8,6 +8,21 @@ import { AE_EXECUTIVE_TABS, resolveAeExecutiveBinary, validateAeExecutiveBatch }
 
 const created: string[] = []
 
+const labels: Record<string, string> = {
+  home: '[H]OME',
+  dashboard: '[D]ASHBOARD',
+  lucid: '[L]UCID',
+  quine: '[Q]UINE',
+  scores: 'S[C]ORES',
+  metrics: '[M]ETRICS',
+  logs: 'L[O]GS',
+  studio: 'S[T]UDIO',
+  settings: '[S]ETTINGS',
+  marketplace: 'MA[R]KETPLACE',
+  calc: 'C[A]LCULATOR',
+  snake: 'S[N]AKE'
+}
+
 afterEach(() => {
   for (const item of created.splice(0)) {fs.rmSync(item, { force: true, recursive: true })}
 })
@@ -27,10 +42,11 @@ it('resolves only an existing exact override', () => {
   expect(resolveAeExecutiveBinary({ isPackaged: false, sourceRepoRoot: '/missing', override: `${file}.missing` })).toBeNull()
 })
 
-function semanticScene(tab: (typeof AE_EXECUTIVE_TABS)[number]) {
-  const tabNodes = AE_EXECUTIVE_TABS.map(id => ({
+function semanticScene(tab: string, tabs: readonly string[] = AE_EXECUTIVE_TABS) {
+  const tabNodes = tabs.map(id => ({
     id: `${tab}-tab-${id}`,
     p: 'button',
+    a: { label: labels[id] ?? id.toUpperCase(), role: 'tab' },
     on: { tap: `shell.tab.${id}` },
     layout: { height: 1 }
   }))
@@ -47,6 +63,15 @@ function semanticScene(tab: (typeof AE_EXECUTIVE_TABS)[number]) {
   }
 }
 
+function semanticBatch(tabs: readonly string[]) {
+  return {
+    schema: 'ae-executive-scene-batch/1',
+    authority: 'none',
+    projector: 'ugui::shell->ugui::project',
+    scenes: tabs.map(tab => ({ tab, scene: semanticScene(tab, tabs) }))
+  }
+}
+
 it('validates the closed ordered nine-scene semantic batch', () => {
   const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
 
@@ -58,6 +83,13 @@ it('validates the closed ordered nine-scene semantic batch', () => {
   })
 
   expect(batch.scenes.map(row => row.tab)).toEqual(AE_EXECUTIVE_TABS)
+})
+
+it('admits a profile-specific Marketplace workspace without the legacy nine-tab seed', () => {
+  const tabs = ['home', 'marketplace', 'calc', 'snake']
+  const batch = validateAeExecutiveBatch(semanticBatch(tabs))
+
+  expect(batch.scenes.map(row => row.tab)).toEqual(tabs)
 })
 
 describe('fail-closed batch validation', () => {
@@ -80,6 +112,31 @@ describe('fail-closed batch validation', () => {
         scenes: scenes.slice(1)
       })
     ).toThrow('ae-executive-batch-cardinality')
+  })
+
+  it('rejects unsafe, duplicate, and handler-mismatched dynamic tabs', () => {
+    expect(() => validateAeExecutiveBatch(semanticBatch(['marketplace', '../escape']))).toThrow(
+      'ae-executive-tab-id'
+    )
+    expect(() => validateAeExecutiveBatch(semanticBatch(['marketplace', 'calc', 'calc']))).toThrow(
+      'ae-executive-tab-duplicate'
+    )
+
+    const hotkeyCollision = semanticBatch(['marketplace', 'calc'])
+
+    for (const row of hotkeyCollision.scenes) {
+      const calc = row.scene.nodes.find(node => node.id === `${row.tab}-tab-calc`)
+
+      if (calc) {(calc as { a?: { label: string; role: string } }).a = { label: 'C[R]ALCULATOR', role: 'tab' }}
+    }
+
+    expect(() => validateAeExecutiveBatch(hotkeyCollision)).toThrow('ae-executive-hotkey-collision')
+
+    const mismatched = semanticBatch(['marketplace', 'calc'])
+    mismatched.scenes.at(-1)!.scene.nodes = mismatched.scenes
+      .at(-1)!
+      .scene.nodes.filter(node => node.id !== 'calc-tab-marketplace')
+    expect(() => validateAeExecutiveBatch(mismatched)).toThrow('ae-executive-shell-actions')
   })
 
   it('admits stale provenance labels only when the closed semantic structure is valid', () => {

@@ -22,12 +22,16 @@ const EXPECTED_LABELS = [
   '[S]ETTINGS'
 ]
 
-function batch() {
+const dynamicLabel = (tab: string) =>
+  AE_EXECUTIVE_TABS.find(item => item.id === tab)?.label ??
+  ({ calc: 'C[A]LCULATOR', marketplace: 'MA[R]KETPLACE', snake: 'S[N]AKE' }[tab] ?? tab.toUpperCase())
+
+function batch(tabs: readonly string[] = AE_EXECUTIVE_TAB_IDS) {
   return {
     schema: 'ae-executive-scene-batch/1' as const,
     authority: 'none' as const,
     projector: 'run::tui->ugui::project;quine->ugui::project_quine_applet_route',
-    scenes: AE_EXECUTIVE_TAB_IDS.map(tab => ({
+    scenes: tabs.map(tab => ({
       tab,
       scene: {
         sceneVersion: '1.0.0' as const,
@@ -55,13 +59,13 @@ function batch() {
           {
             id: `${tab}-tabs`,
             p: 'row' as const,
-            kids: AE_EXECUTIVE_TABS.map(item => `${tab}-tab-${item.id}`)
+            kids: tabs.map(item => `${tab}-tab-${item}`)
           },
-          ...AE_EXECUTIVE_TABS.map(item => ({
-            id: `${tab}-tab-${item.id}`,
+          ...tabs.map(item => ({
+            id: `${tab}-tab-${item}`,
             p: 'button' as const,
-            a: { label: item.label, primary: item.id === tab, role: 'tab' },
-            on: { tap: `shell.tab.${item.id}` },
+            a: { label: dynamicLabel(item), primary: item === tab, role: 'tab' },
+            on: { tap: `shell.tab.${item}` },
             layout: { height: 1 }
           }))
         ]
@@ -155,6 +159,17 @@ describe('AE executive workspace', () => {
     expect(screen.getAllByRole('button', { name: '[Q]UINE' })).toHaveLength(1)
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '[Q]UINE' })))
     expect(await screen.findByText('RUN QUINE')).toBeTruthy()
+  })
+
+  it('routes Marketplace-pinned applets from dynamic UGUI shell actions', async () => {
+    getAeExecutiveScenes.mockResolvedValueOnce(batch(['home', 'marketplace', 'calc', 'snake']))
+    const view = renderTab('marketplace')
+
+    expect(await screen.findByText('RUN MARKETPLACE')).toBeTruthy()
+    expect(view.container.querySelector('[data-ae-executive-tab="marketplace"]')).toBeTruthy()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'C[A]LCULATOR' })))
+    expect(await screen.findByText('RUN CALC')).toBeTruthy()
+    expect(view.container.querySelector('[data-ae-executive-tab="calc"]')).toBeTruthy()
   })
 
   it('realizes elastic and fixed Scene layout without tab-specific branches', async () => {

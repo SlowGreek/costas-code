@@ -3,14 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import { cn } from '@/lib/utils'
 
-import { aeExecutiveTab, isAeExecutiveTabId } from './contract'
+import { aeExecutiveTab } from './contract'
 import { type AeExecutiveSceneBatch, loadExecutiveScenes, sceneForTab } from './scene'
 import { AeScenePainter } from './scene-painter'
 
 export function AeExecutiveWorkspace() {
   const navigate = useNavigate()
   const params = useParams<{ tab?: string }>()
-  const tab = aeExecutiveTab(params.tab)
   const [batch, setBatch] = useState<AeExecutiveSceneBatch | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('Loading Rust UGUI projection…')
@@ -40,13 +39,13 @@ export function AeExecutiveWorkspace() {
       const shellTab = action.match(/^shell\.tab\.(.+)$/)?.[1]
       const route = action.match(/^quine-route:(.+)$/)?.[1]
 
-      if (shellTab && isAeExecutiveTabId(shellTab)) {
+      if (shellTab && batch?.scenes.some(row => row.tab === shellTab)) {
         navigate(`/ae/${shellTab}`)
 
         return
       }
 
-      if (route && isAeExecutiveTabId(route)) {
+      if (route && batch?.scenes.some(row => row.tab === route)) {
         navigate(`/ae/${route}`)
 
         return
@@ -54,13 +53,15 @@ export function AeExecutiveWorkspace() {
 
       setNotice(`Intent captured · ${action} · no effect without Butler receipt`)
     },
-    [navigate]
+    [batch, navigate]
   )
 
-  const scene = batch ? sceneForTab(batch, tab.id) : null
+  const requestedTab = params.tab ?? ''
+  const tabId = batch?.scenes.some(row => row.tab === requestedTab) ? requestedTab : aeExecutiveTab(requestedTab).id
+  const scene = batch ? sceneForTab(batch, tabId) : null
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tab.id}>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>
       <main className="min-h-0 flex-1 overflow-hidden p-3">
         <div className="mx-auto h-full min-h-0 w-full max-w-7xl">
           {scene ? (

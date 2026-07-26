@@ -1,4 +1,4 @@
-import type { AeExecutiveTabId } from './contract'
+import { AE_EXECUTIVE_TAB_IDS } from './contract'
 
 export type UgScenePrimitive =
   | 'button'
@@ -36,7 +36,7 @@ export interface AeExecutiveSceneBatch {
   readonly schema: 'ae-executive-scene-batch/1'
   readonly authority: 'none'
   readonly projector: string
-  readonly scenes: ReadonlyArray<{ readonly tab: AeExecutiveTabId; readonly scene: AeExecutiveScene }>
+  readonly scenes: ReadonlyArray<{ readonly tab: string; readonly scene: AeExecutiveScene }>
 }
 
 let batchPromise: Promise<AeExecutiveSceneBatch> | null = null
@@ -51,7 +51,7 @@ export function resetExecutiveScenesForTests() {
   batchPromise = null
 }
 
-export function sceneForTab(batch: AeExecutiveSceneBatch, tab: AeExecutiveTabId): AeExecutiveScene {
+export function sceneForTab(batch: AeExecutiveSceneBatch, tab: string): AeExecutiveScene {
   const found = batch.scenes.find(row => row.tab === tab)
 
   if (!found) {throw new Error(`ae-executive-scene-missing:${tab}`)}
@@ -67,56 +67,74 @@ export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
     throw new Error('ae-executive-batch-schema')
   }
 
-  if (typeof batch.projector !== 'string' || !batch.projector || batch.scenes.length !== 9) {
+  if (
+    typeof batch.projector !== 'string' ||
+    !batch.projector ||
+    batch.scenes.length < 1 ||
+    batch.scenes.length > 36
+  ) {
     throw new Error('ae-executive-batch-projector')
   }
 
-  const orderedTabs: readonly AeExecutiveTabId[] = [
-    'home',
-    'dashboard',
-    'lucid',
-    'quine',
-    'scores',
-    'metrics',
-    'logs',
-    'studio',
-    'settings'
-  ]
+  const observed = batch.scenes.map(row => row?.tab)
 
-  for (const [index, row] of batch.scenes.entries()) {
+  if (observed.some(tab => typeof tab !== 'string' || !/^[a-z0-9][a-z0-9-]{0,127}$/.test(tab))) {
+    throw new Error('ae-executive-tab-id')
+  }
+
+  if (new Set(observed).size !== observed.length) {throw new Error('ae-executive-tab-duplicate')}
+
+  const legacy = !observed.includes('marketplace')
+
+  if (legacy && observed.length !== AE_EXECUTIVE_TAB_IDS.length) {
+    throw new Error('ae-executive-batch-cardinality')
+  }
+
+  if (legacy && AE_EXECUTIVE_TAB_IDS.some((tab, index) => observed[index] !== tab)) {
+    throw new Error('ae-executive-batch-order')
+  }
+
+  let canonicalHotkeys: string[] | null = null
+
+  for (const row of batch.scenes) {
     if (!row || typeof row !== 'object' || typeof row.tab !== 'string') {throw new Error('ae-executive-row-invalid')}
-
-    if (row.tab !== orderedTabs[index]) {throw new Error('ae-executive-batch-order')}
     validateExecutiveScene(row.scene)
-    validateSemanticExecutiveScene(row.scene, row.tab)
+    const hotkeys = validateSemanticExecutiveScene(row.scene, row.tab, observed)
+
+    if (canonicalHotkeys && hotkeys.some((hotkey, index) => hotkey !== canonicalHotkeys?.[index])) {
+      throw new Error(`ae-executive-hotkey-drift:${row.tab}`)
+    }
+
+    canonicalHotkeys ??= hotkeys
   }
 
   return batch as AeExecutiveSceneBatch
 }
 
-const EXECUTIVE_HANDLERS = [
-  'shell.tab.home',
-  'shell.tab.dashboard',
-  'shell.tab.lucid',
-  'shell.tab.quine',
-  'shell.tab.scores',
-  'shell.tab.metrics',
-  'shell.tab.logs',
-  'shell.tab.studio',
-  'shell.tab.settings'
-] as const
-
-function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: AeExecutiveTabId) {
+function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: string, tabs: readonly string[]) {
   const handlers = scene.nodes
     .flatMap(node => Object.values(node.on ?? {}))
     .filter(handler => handler.startsWith('shell.tab.'))
 
   if (
-    handlers.length !== EXECUTIVE_HANDLERS.length ||
-    handlers.some((handler, index) => handler !== EXECUTIVE_HANDLERS[index])
+    handlers.length !== tabs.length ||
+    handlers.some((handler, index) => handler !== `shell.tab.${tabs[index]}`)
   ) {
     throw new Error(`ae-executive-shell-actions:${tab}`)
   }
+
+  const hotkeys = scene.nodes
+    .filter(node => node.p === 'button' && node.on?.tap?.startsWith('shell.tab.'))
+    .map(node => {
+      const label = node.a?.label
+      const matches = typeof label === 'string' ? [...label.matchAll(/\[([A-Z0-9])\]/g)] : []
+
+      if (matches.length !== 1) {throw new Error(`ae-executive-hotkey-label:${tab}`)}
+
+      return matches[0][1]
+    })
+
+  if (new Set(hotkeys).size !== hotkeys.length) {throw new Error(`ae-executive-hotkey-collision:${tab}`)}
 
   const cardScene = scene.id?.startsWith('run-') === true
 
@@ -132,6 +150,8 @@ function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: AeExecutiv
 
     if (terminalShaped) {throw new Error(`ae-executive-terminal-text:${tab}`)}
   }
+
+  return hotkeys
 }
 
 export function validateExecutiveScene(scene: AeExecutiveScene): readonly string[] {

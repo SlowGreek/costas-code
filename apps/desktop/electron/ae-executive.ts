@@ -5,12 +5,13 @@ import path from 'node:path'
 export const AE_EXECUTIVE_MAX_BYTES = 2 * 1024 * 1024
 export const AE_EXECUTIVE_TIMEOUT_MS = 15_000
 export const AE_EXECUTIVE_TABS = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'studio', 'settings'] as const
+export const AE_EXECUTIVE_MAX_TABS = 36
 
 export interface AeExecutiveSceneBatch {
   schema: 'ae-executive-scene-batch/1'
   authority: 'none'
   projector: string
-  scenes: Array<{ tab: (typeof AE_EXECUTIVE_TABS)[number]; scene: Record<string, unknown> }>
+  scenes: Array<{ tab: string; scene: Record<string, unknown> }>
 }
 
 export function resolveAeExecutiveBinary(options: {
@@ -46,7 +47,11 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
     throw new Error('ae-executive-batch-schema')
   }
 
-  if (!Array.isArray(batch.scenes) || batch.scenes.length !== AE_EXECUTIVE_TABS.length) {
+  if (
+    !Array.isArray(batch.scenes) ||
+    batch.scenes.length < 1 ||
+    batch.scenes.length > AE_EXECUTIVE_MAX_TABS
+  ) {
     throw new Error('ae-executive-batch-cardinality')
   }
 
@@ -56,9 +61,23 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
 
   const observed = batch.scenes.map(row => row?.tab)
 
-  if (observed.some((tab, index) => tab !== AE_EXECUTIVE_TABS[index])) {
+  if (observed.some(tab => typeof tab !== 'string' || !/^[a-z0-9][a-z0-9-]{0,127}$/.test(tab))) {
+    throw new Error('ae-executive-tab-id')
+  }
+
+  if (new Set(observed).size !== observed.length) {throw new Error('ae-executive-tab-duplicate')}
+
+  const legacy = !observed.includes('marketplace')
+
+  if (legacy && observed.length !== AE_EXECUTIVE_TABS.length) {
+    throw new Error('ae-executive-batch-cardinality')
+  }
+
+  if (legacy && AE_EXECUTIVE_TABS.some((tab, index) => observed[index] !== tab)) {
     throw new Error('ae-executive-batch-order')
   }
+
+  let canonicalHotkeys: string[] | null = null
 
   for (const row of batch.scenes) {
     if (!row.scene || typeof row.scene !== 'object') {throw new Error('ae-executive-scene-invalid')}
@@ -76,11 +95,34 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
       .flatMap(node => Object.values((node.on as Record<string, unknown> | undefined) ?? {}))
       .filter(handler => typeof handler === 'string' && handler.startsWith('shell.tab.'))
 
-    const expectedHandlers = AE_EXECUTIVE_TABS.map(tab => `shell.tab.${tab}`)
+    const expectedHandlers = observed.map(tab => `shell.tab.${tab}`)
 
     if (handlers.length !== expectedHandlers.length || handlers.some((handler, index) => handler !== expectedHandlers[index])) {
       throw new Error(`ae-executive-shell-actions:${row.tab}`)
     }
+
+    const hotkeys = nodes
+      .filter(node => {
+        const tap = (node.on as Record<string, unknown> | undefined)?.tap
+
+        return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
+      })
+      .map(node => {
+        const label = (node.a as Record<string, unknown> | undefined)?.label
+        const matches = typeof label === 'string' ? [...label.matchAll(/\[([A-Z0-9])\]/g)] : []
+
+        if (matches.length !== 1) {throw new Error(`ae-executive-hotkey-label:${row.tab}`)}
+
+        return matches[0][1]
+      })
+
+    if (new Set(hotkeys).size !== hotkeys.length) {throw new Error(`ae-executive-hotkey-collision:${row.tab}`)}
+
+    if (canonicalHotkeys && hotkeys.some((hotkey, index) => hotkey !== canonicalHotkeys?.[index])) {
+      throw new Error(`ae-executive-hotkey-drift:${row.tab}`)
+    }
+
+    canonicalHotkeys ??= hotkeys
 
     if (typeof scene.id === 'string' && scene.id.startsWith('run-')) {
       if (scene.id !== `run-${row.tab}`) {throw new Error(`ae-executive-card-identity:${row.tab}`)}

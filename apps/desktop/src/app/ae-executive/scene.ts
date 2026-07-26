@@ -67,8 +67,8 @@ export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
     throw new Error('ae-executive-batch-schema')
   }
 
-  if (batch.projector?.includes('run::tui->') || batch.scenes.length !== 9) {
-    throw new Error('ae-executive-batch-terminal-first')
+  if (typeof batch.projector !== 'string' || !batch.projector || batch.scenes.length !== 9) {
+    throw new Error('ae-executive-batch-projector')
   }
 
   const orderedTabs: readonly AeExecutiveTabId[] = [

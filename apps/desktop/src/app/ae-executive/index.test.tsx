@@ -26,7 +26,7 @@ function batch() {
   return {
     schema: 'ae-executive-scene-batch/1' as const,
     authority: 'none' as const,
-    projector: 'ugui::executive->ugui::project',
+    projector: 'run::tui->ugui::project;quine->ugui::project_quine_applet_route',
     scenes: AE_EXECUTIVE_TAB_IDS.map(tab => ({
       tab,
       scene: {

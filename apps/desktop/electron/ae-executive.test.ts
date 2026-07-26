@@ -82,16 +82,16 @@ describe('fail-closed batch validation', () => {
     ).toThrow('ae-executive-batch-cardinality')
   })
 
-  it('rejects terminal-first and structurally non-semantic batches', () => {
+  it('admits stale provenance labels only when the closed semantic structure is valid', () => {
     const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
-    expect(() =>
+    expect(
       validateAeExecutiveBatch({
         schema: 'ae-executive-scene-batch/1',
         authority: 'none',
         projector: 'run::tui->ugui::project',
         scenes
-      })
-    ).toThrow('ae-executive-batch-terminal-first')
+      }).scenes
+    ).toHaveLength(9)
 
     const missingShell = structuredClone(scenes)
     missingShell[0].scene.nodes = missingShell[0].scene.nodes.filter(node => !node.id.includes('-tab-'))
@@ -99,7 +99,7 @@ describe('fail-closed batch validation', () => {
       validateAeExecutiveBatch({
         schema: 'ae-executive-scene-batch/1',
         authority: 'none',
-        projector: 'ugui::executive->ugui::project',
+        projector: 'informational-label',
         scenes: missingShell
       })
     ).toThrow('ae-executive-shell-actions')

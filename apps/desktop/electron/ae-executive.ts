@@ -50,8 +50,8 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
     throw new Error('ae-executive-batch-cardinality')
   }
 
-  if (typeof batch.projector !== 'string' || batch.projector.includes('run::tui->')) {
-    throw new Error('ae-executive-batch-terminal-first')
+  if (typeof batch.projector !== 'string' || !batch.projector) {
+    throw new Error('ae-executive-batch-projector')
   }
 
   const observed = batch.scenes.map(row => row?.tab)

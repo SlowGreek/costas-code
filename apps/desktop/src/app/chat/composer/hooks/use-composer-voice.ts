@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/i18n'
 import { chatMessageText, collectUnspokenTurnSpeech } from '@/lib/chat-messages'
 import { triggerHaptic } from '@/lib/haptics'
+import { dispatchVoiceDevControl } from '@/lib/voice/dev-control'
 import { resetBrowseState } from '@/store/composer-input-history'
 import { notifyError } from '@/store/notifications'
 import { $messages } from '@/store/session'
@@ -100,13 +101,21 @@ export function useComposerVoice({
 
   const submitVoiceTurn = async (text: string) => {
     if (busy) {
-      return
+      return 'local' as const
+    }
+
+    if (dispatchVoiceDevControl(text)) {
+      triggerHaptic('selection')
+
+      return 'local' as const
     }
 
     triggerHaptic('submit')
     resetBrowseState(sessionId)
     clearDraft()
     await onSubmit(text)
+
+    return 'submitted' as const
   }
 
   const conversation = useVoiceConversation({

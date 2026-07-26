@@ -127,6 +127,7 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
 ]
 
 export const KEYBIND_ACTION_IDS: readonly string[] = KEYBIND_ACTIONS.map(action => action.id)
+export const KEYBIND_ACTION_EVENT = 'hermes:keybind-action'
 
 const ACTION_BY_ID = new Map(KEYBIND_ACTIONS.map(action => [action.id, action]))
 
@@ -171,6 +172,19 @@ export function allKeybindActions(): KeybindActionMeta[] {
 
 export function keybindAction(id: string): KeybindActionMeta | undefined {
   return ACTION_BY_ID.get(id) ?? allKeybindActions().find(action => action.id === id)
+}
+
+/** Request one existing keybind action through the mounted runtime. This is the
+ * modality-neutral action seam used by voice/reflex input; it carries only a
+ * registered id, never an arbitrary command or callback. */
+export function requestKeybindAction(id: string): boolean {
+  if (!keybindAction(id) || typeof window === 'undefined') {
+    return false
+  }
+
+  window.dispatchEvent(new CustomEvent<string>(KEYBIND_ACTION_EVENT, { detail: id }))
+
+  return true
 }
 
 /** The contributed handler for an action id (built-ins wire theirs in use-keybinds). */

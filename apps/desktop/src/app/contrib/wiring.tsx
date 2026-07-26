@@ -28,6 +28,7 @@ import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChat
 import { sessionMessagesSignature } from '@/lib/session-signatures'
 import { isMessagingSource } from '@/lib/session-source'
 import { latestSessionTodos } from '@/lib/todos'
+import { executeVoiceDevControlIntent, onVoiceDevControlIntent } from '@/lib/voice/dev-control'
 import { $billingSettingsRequest } from '@/store/billing-block'
 import { setCronFocusJobId } from '@/store/cron'
 import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/store/layout'
@@ -124,6 +125,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
+
+  useEffect(
+    () => onVoiceDevControlIntent(intent => void executeVoiceDevControlIntent(intent, navigate)),
+    [navigate]
+  )
 
   const busyRef = useRef(false)
   const creatingSessionRef = useRef(false)

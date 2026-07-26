@@ -25,7 +25,7 @@ interface VoiceConversationOptions {
   busy: boolean
   enabled: boolean
   onFatalError?: () => void
-  onSubmit: (text: string) => Promise<void> | void
+  onSubmit: (text: string) => Promise<'local' | 'submitted'> | 'local' | 'submitted'
   onTranscribeAudio?: (audio: Blob) => Promise<string>
   pendingResponse: () => PendingVoiceResponse | null
   consumePendingResponse: () => void
@@ -128,10 +128,17 @@ export function useVoiceConversation({
             return
           }
 
-          awaitingSpokenResponseRef.current = true
           dropSpeechSession()
-          await onSubmit(transcript)
-          setStatus('thinking')
+          const disposition = await onSubmit(transcript)
+
+          if (disposition === 'local') {
+            awaitingSpokenResponseRef.current = false
+            pendingStartRef.current = enabledRef.current && !mutedRef.current && !busyRef.current
+            setStatus('idle')
+          } else {
+            awaitingSpokenResponseRef.current = true
+            setStatus('thinking')
+          }
         } catch (error) {
           notifyError(error, voiceCopy.transcriptionFailed)
 
@@ -248,11 +255,18 @@ export function useVoiceConversation({
           return
         }
 
-        awaitingSpokenResponseRef.current = true
         dropSpeechSession()
         consumePendingResponse()
-        await onSubmit(transcript)
-        setStatus('thinking')
+        const disposition = await onSubmit(transcript)
+
+        if (disposition === 'local') {
+          awaitingSpokenResponseRef.current = false
+          pendingStartRef.current = enabledRef.current && !mutedRef.current && !busyRef.current
+          setStatus('idle')
+        } else {
+          awaitingSpokenResponseRef.current = true
+          setStatus('thinking')
+        }
       } catch (error) {
         notifyError(error, voiceCopy.transcriptionFailed)
         resumeListening()

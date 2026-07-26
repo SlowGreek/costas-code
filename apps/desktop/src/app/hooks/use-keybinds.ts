@@ -5,7 +5,13 @@ import { closeActiveTab } from '@/app/chat/close-tab'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { closeActiveTerminal, createTerminal, cycleTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { activateTreeTabSlot, cycleTreeTabInFocusedZone, layoutHasRootSide } from '@/components/pane-shell/tree/store'
-import { contributedKeybindHandler, PROFILE_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
+import {
+  contributedKeybindHandler,
+  KEYBIND_ACTION_EVENT,
+  keybindAction,
+  PROFILE_SLOT_COUNT,
+  SESSION_SLOT_COUNT
+} from '@/lib/keybinds/actions'
 import { comboAllowedInInput, comboFromEvent, isEditableTarget } from '@/lib/keybinds/combo'
 import { composerFocusKeysAllowed, isComposerFocusSoftCombo, typeToFocusChar } from '@/lib/keybinds/composer-focus-keys'
 import { $repoStatus } from '@/store/coding-status'
@@ -167,7 +173,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
       layoutHasRootSide('right') ? toggleFileBrowserOpen() : setTerminalTakeover(!$terminalTakeover.get()),
     'view.toggleReview': toggleReview,
     'view.showFiles': showFiles,
-    'view.showTerminal': () => setTerminalTakeover(!$terminalTakeover.get()),
+    'view.showTerminal': () => setTerminalTakeover(true),
     // Create first so the pane's open-effect ensure sees a non-empty set and
     // doesn't also spawn one — net effect is exactly one fresh terminal.
     'view.newTerminal': () => {
@@ -200,6 +206,18 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
   }
 
   useEffect(() => {
+    const onActionRequest = (event: Event) => {
+      const actionId = (event as CustomEvent<unknown>).detail
+
+      if (typeof actionId !== 'string' || !keybindAction(actionId)) {
+        return
+      }
+
+      const handler = handlersRef.current[actionId] ?? contributedKeybindHandler(actionId)
+
+      handler?.()
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       // Capture mode: the next real key becomes the binding. Swallow everything
       // so e.g. ⌘K rebinds instead of opening the palette.
@@ -310,12 +328,14 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     }
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener(KEYBIND_ACTION_EVENT, onActionRequest)
     window.addEventListener('keyup', onKeyUp, { capture: true })
     window.addEventListener('blur', onBlur)
     window.addEventListener('contextmenu', onContextMenu, { capture: true })
 
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true })
+      window.removeEventListener(KEYBIND_ACTION_EVENT, onActionRequest)
       window.removeEventListener('keyup', onKeyUp, { capture: true })
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('contextmenu', onContextMenu, { capture: true })

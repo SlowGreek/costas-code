@@ -79,6 +79,36 @@ describe('UGUI SHELL viewport model', () => {
     ).toThrow('shell-viewport-id')
   })
 
+  it('keeps the semantic demo invariant across compatible shell projections', () => {
+    const sources = source()
+
+    const android = composeShellViewportScene(
+      buildShellViewportModel(sources, {
+        shell_id: 'android-shell',
+        surface_profile_id: 'google-pixel-9',
+        target_id: 'android-arm64-v8a'
+      })
+    )
+
+    const macos = composeShellViewportScene(
+      buildShellViewportModel(sources, {
+        shell_id: 'macos-shell',
+        surface_profile_id: 'macos-desktop',
+        target_id: 'macos-arm64'
+      })
+    )
+
+    const semantic = (scene: typeof android) =>
+      scene.nodes
+        .filter(node => node.id.startsWith('viewport-demo-'))
+        .map(node => ({ id: node.id, text: node.a?.text, label: node.a?.label, action: node.on?.tap }))
+
+    expect(semantic(android)).toEqual(semantic(macos))
+    expect(android.nodes.find(node => node.id === 'viewport-native')?.a?.model).not.toEqual(
+      macos.nodes.find(node => node.id === 'viewport-native')?.a?.model
+    )
+  })
+
   it('composes a closed Scene with read-only selection actions and no authority verbs', () => {
     const model = buildShellViewportModel(source(), {
       shell_id: 'android-shell',

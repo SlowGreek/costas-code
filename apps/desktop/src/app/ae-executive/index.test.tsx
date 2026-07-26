@@ -166,6 +166,14 @@ describe('AE executive workspace', () => {
     expect(screen.getByText('UGUI refusal · asset-catalog-unavailable · home semantic image')).toBeTruthy()
   })
 
+  it('does not present structural Scene admission as freshness or trust', async () => {
+    const view = renderTab('home')
+
+    expect(await screen.findByText('Rendered · structure valid · authority none · freshness unverified')).toBeTruthy()
+    expect(screen.queryByText(/Scene ready/)).toBeNull()
+    expect(view.container.querySelector('[data-ugui-structural-status]')?.className).not.toContain('bg-emerald-500')
+  })
+
   it('shows an explicit unavailable state instead of synthesizing content', async () => {
     getAeExecutiveScenes.mockRejectedValueOnce(new Error('projector-unavailable'))
     renderTab('home')

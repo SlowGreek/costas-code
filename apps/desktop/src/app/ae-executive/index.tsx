@@ -22,7 +22,7 @@ export function AeExecutiveWorkspace() {
         if (!active) {return}
         setBatch(value)
         setError(null)
-        setNotice(`Scene ready · ${value.projector} · authority ${value.authority}`)
+        setNotice(`Rendered · structure valid · authority ${value.authority} · freshness unverified`)
       })
       .catch(reason => {
         if (!active) {return}
@@ -78,7 +78,11 @@ export function AeExecutiveWorkspace() {
       </main>
 
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-(--ui-stroke-tertiary) px-4 text-[0.65rem] text-(--ui-text-quaternary)">
-        <span aria-hidden="true" className={cn('size-1.5 rounded-full', scene ? 'bg-emerald-500' : 'bg-amber-500')} />
+        <span
+          aria-hidden="true"
+          className={cn('size-1.5 rounded-full', scene ? 'bg-sky-500' : 'bg-amber-500')}
+          data-ugui-structural-status
+        />
         <span aria-live="polite">{notice}</span>
         <span className="ml-auto">RUN facts · UGUI composition/layout · Desktop paint</span>
       </footer>

@@ -31,7 +31,6 @@ import {
 import nodePty from 'node-pty'
 
 import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executive'
-import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
@@ -145,6 +144,7 @@ import { decideProfileDeleteAction, profileNameFromDeleteRequest, resolveRoutePr
 import { resolveRebuiltMacBundle } from './rebuilt-bundle'
 import * as remoteLifecycle from './remote-lifecycle'
 import { RemoteLivenessTracker, RemoteRevalidationCoordinator, revalidateRemoteConnection } from './remote-liveness'
+import { RenderProfilePreferenceStore } from './render-profile-prefs'
 import {
   buildSessionWindowUrl,
   chatWindowWebPreferences,
@@ -153,6 +153,7 @@ import {
   SESSION_WINDOW_MIN_HEIGHT,
   SESSION_WINDOW_MIN_WIDTH
 } from './session-windows'
+import { resolveSkinSettingsBinary, runSkinSettingsProjector } from './skin-settings'
 import { ensureSpawnHelperExecutable } from './spawn-helper-perms'
 import { createBootstrapCoordinator, sshConfigFingerprint } from './ssh-bootstrap-coordinator'
 import { collectSshConfigHosts, parseSshGOutput } from './ssh-config'
@@ -165,6 +166,7 @@ import {
 } from './ssh-connection'
 import { staleBundlePaths } from './stale-bundles'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
+import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 import { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits } from './update-count'
 import { readLiveUpdateMarker, writeUpdateMarker } from './update-marker'
 import { runRebuildWithRetry } from './update-rebuild'
@@ -403,6 +405,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling')
 const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
 const AE_RUNTIME_BIN = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
 const LUCID_BUTLER_PATH = path.join(AE_RUNTIME_BIN, process.platform === 'win32' ? 'butler.exe' : 'butler')
+const renderProfilePreferences = new RenderProfilePreferenceStore(path.join(RESOLVED_USER_DATA, 'render-profiles.json'))
 
 // Build-time install stamp -- the git ref this .exe was built against.
 //
@@ -8729,6 +8732,34 @@ ipcMain.handle('hermes:ugui-skins:catalog', () => {
     profiles: catalog.profiles.map(normalizeUguiSkinBinding)
   }
 })
+
+ipcMain.handle('hermes:ugui-skins:settings-scene', (_event, request) => {
+  const binary = resolveSkinSettingsBinary({
+    appRoot: APP_ROOT,
+    isPackaged: IS_PACKAGED,
+    resourcesPath: process.resourcesPath
+  })
+
+  if (!binary) {throw new Error('skin-settings-projector-unavailable')}
+
+  return runSkinSettingsProjector(binary, {
+    committed_id: String(request?.committed_id || ''),
+    preview_id: String(request?.preview_id || '')
+  })
+})
+
+ipcMain.handle('hermes:ugui-skins:preference:get', (_event, profile) =>
+  renderProfilePreferences.get(String(profile || 'default'))
+)
+
+ipcMain.handle('hermes:ugui-skins:preference:commit', (_event, request) =>
+  renderProfilePreferences.commit({
+    profile: String(request?.profile || ''),
+    profile_id: String(request?.profile_id || ''),
+    expected_revision: Number(request?.expected_revision),
+    idempotency_key: String(request?.idempotency_key || '')
+  })
+)
 
 ipcMain.handle('hermes:connection', async (_event, profile) => ensureBackend(profile))
 // Reconnect-after-wake recovery. A REMOTE primary backend has no child process,

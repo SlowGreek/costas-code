@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const GENERATOR = 'ugui-codegen/skin-bindings/1'
+
 const SLOT_ORDER = [
   'palette',
   'typography',
@@ -26,6 +27,7 @@ const TOP_LEVEL_KEYS = new Set([
   'coverage',
   'source_sha256'
 ])
+
 const SAFE_ID_RE = /^[a-z0-9][a-z0-9-]{0,95}$/
 const SHA_RE = /^[0-9a-f]{64}$/
 const MAX_PROFILES = 64
@@ -258,15 +260,20 @@ const numberList = (value: string | undefined): number[] =>
   value ? [...value.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0])).filter(Number.isFinite) : []
 
 function borderModel(binding: Binding['border-model']): HermesRenderProfile['axes']['border']['model'] {
-  if (binding.bevel || binding['raised-delta'] || binding['sunken-delta']) return 'bevel'
-  if (binding['box-drawing']) return 'box-drawing'
-  if (binding.underline) return 'underline'
-  if (binding.outline || binding['reveal-highlight']) return 'outline'
+  if (binding.bevel || binding['raised-delta'] || binding['sunken-delta']) {return 'bevel'}
+
+  if (binding['box-drawing']) {return 'box-drawing'}
+
+  if (binding.underline) {return 'underline'}
+
+  if (binding.outline || binding['reveal-highlight']) {return 'outline'}
+
   return 'flat'
 }
 
 function frameModel(value: string | undefined): HermesRenderProfile['axes']['chrome']['frame'] {
-  if (!value || value === 'none') return 'none'
+  if (!value || value === 'none') {return 'none'}
+
   return /bevel|raised|sunken/i.test(value) ? 'beveled' : 'standard'
 }
 

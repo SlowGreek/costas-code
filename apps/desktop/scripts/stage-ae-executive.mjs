@@ -14,6 +14,21 @@ const suffix = process.platform === 'win32' ? '.exe' : ''
 const artifacts = [
   {
     manifest: path.join(aeRoot, 'run', 'Cargo.toml'),
+    bin: 'ae-skin-settings-scene',
+    source: path.join(aeRoot, 'run', 'target', 'debug', `ae-skin-settings-scene${suffix}`),
+    inputs: [
+      path.join(aeRoot, 'run', 'src', 'bin', 'ae-skin-settings-scene.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'theme.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'theme_catalog.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'theme_core.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'nested.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'projection_projector.rs'),
+      path.join(aeRoot, 'ugui', 'skins', 'skins.json'),
+      path.join(aeRoot, 'ugui', 'skins', 'binding-values.json')
+    ]
+  },
+  {
+    manifest: path.join(aeRoot, 'run', 'Cargo.toml'),
     bin: 'ae-executive-scene',
     source: path.join(aeRoot, 'run', 'target', 'debug', `ae-executive-scene${suffix}`),
     inputs: [

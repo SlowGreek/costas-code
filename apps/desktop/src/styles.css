@@ -346,6 +346,32 @@
     --radius: 0.75rem;
     --radius-scalar: 0.6;
 
+    /* UGUI StyleModel projection — defaults preserve today's glass-oriented
+       host until the generated catalog loads. The active profile rewrites only
+       this closed variable set; no skin may inject selectors or arbitrary CSS. */
+    --morph-surface: var(--ui-bg-chrome);
+    --morph-on-surface: var(--ui-text-primary);
+    --morph-accent: var(--theme-primary);
+    --morph-border-color: var(--ui-stroke-secondary);
+    --morph-desktop: var(--ui-bg-chrome);
+    --morph-titlebar: var(--ui-bg-chrome);
+    --morph-translucency: 0;
+    --morph-font-family: var(--dt-font-sans);
+    --morph-radius-sm: 0.3125rem;
+    --morph-radius-md: 0.625rem;
+    --morph-radius-lg: 1rem;
+    --morph-stroke-width: 1px;
+    --morph-grid-unit: 8px;
+    --morph-spacing: 8px;
+    --morph-control-height: 2rem;
+    --morph-hit-target: 2rem;
+    --morph-shadow: var(--shadow-md);
+    --morph-backdrop-blur: 0.75rem;
+    --morph-motion-duration: 150ms;
+    --morph-motion-easing: ease-out;
+    --morph-scrollbar-width: 0.5rem;
+    --morph-titlebar-height: 1.75rem;
+
     /* Space under last message vs overlay composer — driven by the measured composer height (see composer/index.tsx)
        plus the out-of-flow status stack's measured height (see status-stack/index.tsx) when one is showing. */
     --status-stack-measured-height: 0px;
@@ -483,6 +509,51 @@
     -webkit-user-select: none;
     user-select: none;
     -webkit-font-smoothing: antialiased;
+  }
+
+  :root[data-ugui-skin] {
+    --radius-scalar: 1;
+    --radius-xs: var(--morph-radius-sm);
+    --radius-sm: var(--morph-radius-sm);
+    --radius-md: var(--morph-radius-md);
+    --radius-lg: var(--morph-radius-md);
+    --radius-xl: var(--morph-radius-lg);
+    --radius-2xl: var(--morph-radius-lg);
+    --radius-3xl: var(--morph-radius-lg);
+    --radius-4xl: var(--morph-radius-lg);
+    --titlebar-height: var(--morph-titlebar-height);
+    --dt-font-sans: var(--morph-font-family);
+    --dt-background: var(--morph-surface);
+    --dt-foreground: var(--morph-on-surface);
+    --dt-card: var(--morph-surface);
+    --dt-card-foreground: var(--morph-on-surface);
+    --dt-popover: var(--morph-surface);
+    --dt-popover-foreground: var(--morph-on-surface);
+    --dt-primary: var(--morph-accent);
+    --dt-border: var(--morph-border-color);
+    --dt-input: var(--morph-border-color);
+    --dt-ring: var(--morph-accent);
+    --dt-midground: var(--morph-accent);
+    --ui-base: var(--morph-on-surface);
+    --ui-accent: var(--morph-accent);
+    --ui-bg-chrome: var(--morph-surface);
+    --ui-bg-sidebar: var(--morph-surface);
+    --ui-bg-editor: var(--morph-surface);
+    --ui-bg-elevated: var(--morph-surface);
+    --ui-chat-surface-background: var(--morph-desktop);
+    --ui-editor-surface-background: var(--morph-surface);
+    --ui-sidebar-surface-background: var(--morph-surface);
+    --ui-stroke-primary: var(--morph-border-color);
+    --ui-stroke-secondary: var(--morph-border-color);
+    --ui-stroke-tertiary: var(--morph-border-color);
+    --stroke-nous: var(--morph-border-color);
+  }
+
+  :root[data-ugui-skin] body {
+    background: var(--morph-desktop);
+    transition:
+      background-color var(--morph-motion-duration) var(--morph-motion-easing),
+      color var(--morph-motion-duration) var(--morph-motion-easing);
   }
 
   button,
@@ -757,6 +828,84 @@ button {
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(0.75rem) saturate(1.08);
   -webkit-backdrop-filter: blur(0.75rem) saturate(1.08);
+}
+
+/* StyleModel realization over shared semantic slots. The same controls and
+   actions stay mounted while the UGUI render profile changes paint, shape,
+   density, motion, and chrome. */
+:root[data-ugui-skin] :where(
+    [data-slot='button'],
+    [data-slot='input'],
+    [data-slot='input-group'],
+    [data-slot='select-trigger'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='select-content'],
+    [data-slot='dialog-content'],
+    [data-slot='thread-timeline-popover'],
+    [data-scene-root]
+  ) {
+  border-radius: var(--morph-radius-md);
+  border-width: var(--morph-stroke-width);
+  border-color: var(--morph-border-color);
+  transition-duration: var(--morph-motion-duration);
+  transition-timing-function: var(--morph-motion-easing);
+}
+
+:root[data-ugui-skin] :where([data-slot='button'], [role='tab']) {
+  min-height: min(var(--morph-control-height), var(--morph-hit-target));
+}
+
+:root[data-ugui-skin] :where(
+    [data-slot='dropdown-menu-content'],
+    [data-slot='select-content'],
+    [data-slot='dialog-content'],
+    [data-slot='thread-timeline-popover'],
+    [data-scene-root]
+  ) {
+  background: var(--morph-surface);
+  color: var(--morph-on-surface);
+  box-shadow: var(--morph-shadow);
+  backdrop-filter: blur(var(--morph-backdrop-blur)) saturate(1.08);
+  -webkit-backdrop-filter: blur(var(--morph-backdrop-blur)) saturate(1.08);
+}
+
+:root[data-ugui-border='bevel'] :where(
+    [data-slot='button'],
+    [data-slot='input'],
+    [data-slot='input-group'],
+    [data-slot='select-trigger'],
+    [data-slot='dialog-content'],
+    [data-scene-root]
+  ) {
+  border-style: solid;
+  box-shadow: var(--morph-shadow);
+}
+
+:root[data-ugui-border='bevel'] :where([data-slot='button']:active, [aria-pressed='true']) {
+  box-shadow: inset -1px -1px 0 #ffffff, inset 1px 1px 0 #808080;
+  transform: translate(1px, 1px);
+}
+
+:root[data-ugui-motion='instant'] *,
+:root[data-ugui-motion='instant'] *::before,
+:root[data-ugui-motion='instant'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+:root[data-ugui-skin='windows-95'] :where([data-slot='button'], [role='tab']) {
+  padding-block: 2px;
+  font-weight: 400;
+}
+
+:root[data-ugui-skin='windows-95'] :where([data-slot='dialog-content'], [data-scene-root]) {
+  padding: var(--morph-spacing);
+}
+
+:root[data-ugui-skin='glassmorphism'] :where([data-slot='dialog-content'], [data-scene-root]) {
+  background: color-mix(in srgb, var(--morph-surface) 88%, transparent);
 }
 
 [data-slot='dropdown-menu-item']:focus,

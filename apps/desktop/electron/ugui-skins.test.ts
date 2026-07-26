@@ -74,10 +74,14 @@ describe('UGUI generated skin catalog admission', () => {
     const catalog = loadUguiSkinCatalog(bindingsDir)
     const source = catalog.profiles.find(profile => profile.id === 'windows-95')!
 
-    expect(() => normalizeUguiSkinBinding({ ...source, _generator: 'react' })).toThrow('ugui-skin-generator')
+    expect(() =>
+      normalizeUguiSkinBinding({ ...source, _generator: 'react' } as unknown as typeof source)
+    ).toThrow('ugui-skin-generator')
     expect(() => normalizeUguiSkinBinding({ ...source, binding: { ...source.binding, chrome: undefined } })).toThrow(
       'ugui-skin-binding'
     )
-    expect(() => normalizeUguiSkinBinding({ ...source, authority: 'skin' })).toThrow('ugui-skin-unknown-field')
+    expect(() =>
+      normalizeUguiSkinBinding({ ...source, authority: 'skin' } as unknown as typeof source)
+    ).toThrow('ugui-skin-unknown-field')
   })
 })

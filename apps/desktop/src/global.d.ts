@@ -23,6 +23,28 @@ declare global {
         scenes: Array<{ tab: string; scene: Record<string, unknown> }>
       }>
       getUguiSkinCatalog: () => Promise<unknown>
+      getUguiSkinSettingsScene: (request: { committed_id: string; preview_id: string }) => Promise<unknown>
+      renderProfilePreference: {
+        get: (profile: string) => Promise<{
+          schema: 'hermes-render-profile-preference/1'
+          revision: number
+          profile: string
+          profile_id: string
+        }>
+        commit: (request: {
+          profile: string
+          profile_id: string
+          expected_revision: number
+          idempotency_key: string
+        }) => Promise<{
+          schema: 'hermes-render-profile-commit/1'
+          revision: number
+          profile: string
+          profile_id: string
+          receipt_sha256: string
+          idempotent: boolean
+        }>
+      }
       // Resolve a backend connection. Omit `profile` (or pass the primary) for
       // the window's backend; pass a named profile to lazily spawn/reuse that
       // profile's backend from the pool.

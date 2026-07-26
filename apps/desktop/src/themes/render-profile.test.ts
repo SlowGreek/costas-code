@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 
-import { applyRenderProfile, parseRenderProfileCatalog, renderProfileCss, type RenderProfile } from './render-profile'
+import { applyRenderProfile, parseRenderProfileCatalog, type RenderProfile, renderProfileCss } from './render-profile'
 
 const profile = (id: 'glassmorphism' | 'windows-95'): RenderProfile => ({
   schema: 'hermes-render-profile/1',

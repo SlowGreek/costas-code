@@ -26,6 +26,7 @@ import { $marketplaceInstalls, isUserTheme, removeUserTheme } from '@/themes/use
 import { MODE_OPTIONS } from './constants'
 import { PetSettings } from './pet-settings'
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
+import { UguiSkinSettings } from './ugui-skin-settings'
 
 function ThemePreview({ name, mode }: { name: string; mode: 'light' | 'dark' }) {
   // Preview in the *current* mode: the dark palette in Dark, and the light
@@ -304,6 +305,10 @@ export function AppearanceSettings() {
         <p className="max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
           {a.intro}
         </p>
+
+        <div className="mt-4">
+          <UguiSkinSettings />
+        </div>
 
         <div className="mt-2">
           <ListRow

@@ -9,7 +9,18 @@ import type { AeExecutiveScene, UgSceneNode } from './scene'
 
 interface AeScenePainterProps {
   scene: AeExecutiveScene
-  onAction: (action: string) => void
+  onAction?: (action: string) => void
+  onEvent?: (event: UguiSceneEvent) => void
+}
+
+export interface UguiSceneEvent {
+  schema: 'ugui-scene-event/1'
+  scene_id: string
+  revision: number
+  node_id: string
+  gesture: 'change' | 'key' | 'submit' | 'tap'
+  action: string
+  payload: null | { value: string }
 }
 
 const TEXT_SIZE: Record<string, string> = { s: 'text-[0.72rem]', m: 'text-sm', l: 'text-lg', xl: 'text-2xl' }
@@ -42,9 +53,22 @@ const layoutClass = (node: UgSceneNode) =>
 const layoutData = (node: UgSceneNode) =>
   ({ 'data-ugui-height': layoutHeight(node) === undefined ? undefined : String(layoutHeight(node)) }) as const
 
-export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
+export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps) {
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const nodes = useMemo(() => new Map(scene.nodes.map(node => [node.id, node])), [scene])
+
+  const emit = (node: UgSceneNode, gesture: UguiSceneEvent['gesture'], action: string, payload: UguiSceneEvent['payload']) => {
+    onEvent?.({
+      schema: 'ugui-scene-event/1',
+      scene_id: scene.id ?? scene.root,
+      revision: typeof scene.receipt?.revision === 'number' ? scene.receipt.revision : 0,
+      node_id: node.id,
+      gesture,
+      action,
+      payload
+    })
+    onAction?.(action)
+  }
 
   const paint = (id: string): ReactNode => {
     const node = nodes.get(id)
@@ -113,7 +137,7 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             className={cn('w-fit justify-start font-mono', layoutClass(node))}
             disabled={!action || attr(node, 'disabled') === true}
             key={node.id}
-            onClick={() => action && onAction(action)}
+            onClick={() => action && emit(node, 'tap', action, null)}
             size="sm"
             variant={attr(node, 'primary') === true ? 'default' : 'outline'}
           >
@@ -132,7 +156,9 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             className={layoutClass(node)}
             key={node.id}
             onChange={event => setInputs(current => ({ ...current, [node.id]: event.target.value }))}
-            onKeyDown={event => event.key === 'Enter' && node.on?.submit && onAction(node.on.submit)}
+            onKeyDown={event =>
+              event.key === 'Enter' && node.on?.submit && emit(node, 'submit', node.on.submit, { value })
+            }
             placeholder={stringAttr(node, 'placeholder')}
             type={stringAttr(node, 'kind') || 'text'}
             value={value}
@@ -153,7 +179,9 @@ export function AeScenePainter({ scene, onAction }: AeScenePainterProps) {
             )}
             defaultValue={stringAttr(node, 'value')}
             key={node.id}
-            onChange={() => node.on?.change && onAction(node.on.change)}
+            onChange={event =>
+              node.on?.change && emit(node, 'change', node.on.change, { value: event.target.value })
+            }
           >
             {options.map((option, index) => {
               const value = typeof option === 'string' ? option : String((option as { value?: unknown }).value ?? index)

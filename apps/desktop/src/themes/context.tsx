@@ -16,10 +16,12 @@ import { $registryVersion } from '@/contrib/registry'
 import { matchesQuery, useMediaQuery } from '@/hooks/use-media-query'
 import { persistString, persistStringRecord, storedString, storedStringRecord } from '@/lib/storage'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
+import { $activeRenderProfile, reconcileRenderProfile } from '@/store/render-profile'
 
 import { $backendThemes, $pendingSkinApply } from './backend-sync'
 import { hexToRgb, mix, readableOn } from './color'
 import { BUILTIN_THEME_LIST, DEFAULT_SKIN_NAME, DEFAULT_TYPOGRAPHY, nousTheme } from './presets'
+import { applyRenderProfile } from './render-profile'
 import type { DesktopTheme, DesktopThemeColors } from './types'
 import { $userThemes, listAllThemes, resolveTheme } from './user-themes'
 
@@ -322,6 +324,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const userThemes = useStore($userThemes)
   const backendThemes = useStore($backendThemes)
   const registryVersion = useStore($registryVersion)
+  const activeRenderProfile = useStore($activeRenderProfile)
 
   const availableThemes = useMemo(
     () =>
@@ -366,7 +369,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // What actually gets painted (matches the `.dark` class applyTheme toggles).
   const renderedMode = useMemo(() => renderedModeFor(activeTheme.colors, resolvedMode), [activeTheme, resolvedMode])
 
-  useEffect(() => applyTheme(activeTheme, resolvedMode), [activeTheme, resolvedMode])
+  useEffect(() => {
+    applyTheme(activeTheme, resolvedMode)
+
+    if (activeRenderProfile) {applyRenderProfile(activeRenderProfile)}
+  }, [activeRenderProfile, activeTheme, resolvedMode])
+
+  useEffect(() => {
+    void reconcileRenderProfile().catch(() => undefined)
+  }, [profileKey])
 
   // Keep the native window appearance pinned to the app theme (vibrancy
   // material, titlebar, new-window pre-paint background).

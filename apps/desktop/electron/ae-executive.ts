@@ -7,6 +7,14 @@ export const AE_EXECUTIVE_TIMEOUT_MS = 15_000
 export const AE_EXECUTIVE_TABS = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'studio', 'settings'] as const
 export const AE_EXECUTIVE_MAX_TABS = 36
 
+const SCENE_PRIMITIVES = new Set([
+  'button', 'canvas', 'column', 'divider', 'image', 'input', 'native',
+  'progress', 'row', 'select', 'spacer', 'stack', 'text'
+])
+
+const CONTAINER_PRIMITIVES = new Set(['column', 'row', 'stack'])
+const SCENE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
 export interface AeExecutiveSceneBatch {
   schema: 'ae-executive-scene-batch/1'
   authority: 'none'
@@ -89,7 +97,7 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
 
     if (scene.nodes.length === 0 || scene.nodes.length > 4096) {throw new Error('ae-executive-scene-bounds')}
 
-    const nodes = scene.nodes as Array<Record<string, unknown>>
+    const nodes = validateExecutiveSceneGraph(scene, String(row.tab))
 
     const handlers = nodes
       .flatMap(node => Object.values((node.on as Record<string, unknown> | undefined) ?? {}))
@@ -126,14 +134,85 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
 
     if (typeof scene.id === 'string' && scene.id.startsWith('run-')) {
       if (scene.id !== `run-${row.tab}`) {throw new Error(`ae-executive-card-identity:${row.tab}`)}
-
-      if (!nodes.some(node => (node.layout as Record<string, unknown> | undefined)?.height === '*')) {
-        throw new Error(`ae-executive-elastic-layout:${row.tab}`)
-      }
     }
   }
 
   return batch as AeExecutiveSceneBatch
+}
+
+function validateExecutiveSceneGraph(scene: Record<string, unknown>, tab: string): Array<Record<string, unknown>> {
+  const nodes = scene.nodes as Array<Record<string, unknown>>
+  const byId = new Map<string, Record<string, unknown>>()
+
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {throw new Error(`ae-executive-node:${tab}`)}
+
+    if (typeof node.id !== 'string' || !SCENE_ID_RE.test(node.id) || byId.has(node.id)) {
+      throw new Error(`ae-executive-node-id:${tab}`)
+    }
+
+    if (typeof node.p !== 'string' || !SCENE_PRIMITIVES.has(node.p)) {
+      throw new Error(`ae-executive-primitive:${tab}`)
+    }
+
+    if (node.layout !== undefined) {
+      if (!node.layout || typeof node.layout !== 'object' || Array.isArray(node.layout)) {
+        throw new Error(`ae-executive-layout:${tab}`)
+      }
+
+      const layout = node.layout as Record<string, unknown>
+
+      if (Object.keys(layout).some(key => key !== 'height')) {throw new Error(`ae-executive-layout:${tab}`)}
+
+      if (
+        layout.height !== undefined &&
+        layout.height !== '*' &&
+        (!Number.isSafeInteger(layout.height) || Number(layout.height) < 1 || Number(layout.height) > 4096)
+      ) {throw new Error(`ae-executive-layout-height:${tab}`)}
+    }
+
+    if (node.kids !== undefined) {
+      if (!Array.isArray(node.kids) || node.kids.some(id => typeof id !== 'string')) {
+        throw new Error(`ae-executive-children:${tab}`)
+      }
+
+      if (!CONTAINER_PRIMITIVES.has(String(node.p)) && node.kids.length > 0) {
+        throw new Error(`ae-executive-leaf-children:${tab}`)
+      }
+    }
+
+    byId.set(node.id, node)
+  }
+
+  if (!byId.has(String(scene.root))) {throw new Error(`ae-executive-root-missing:${tab}`)}
+
+  for (const node of nodes) {
+    for (const child of (node.kids as string[] | undefined) ?? []) {
+      if (!byId.has(child)) {throw new Error(`ae-executive-child-missing:${tab}`)}
+    }
+  }
+
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+
+  const walk = (id: string, depth: number) => {
+    if (depth > 64) {throw new Error(`ae-executive-scene-depth:${tab}`)}
+
+    if (visiting.has(id)) {throw new Error(`ae-executive-scene-cycle:${tab}`)}
+
+    if (visited.has(id)) {return}
+    visiting.add(id)
+
+    for (const child of (byId.get(id)?.kids as string[] | undefined) ?? []) {walk(child, depth + 1)}
+    visiting.delete(id)
+    visited.add(id)
+  }
+
+  walk(String(scene.root), 0)
+
+  if (visited.size !== nodes.length) {throw new Error(`ae-executive-node-unreachable:${tab}`)}
+
+  return nodes
 }
 
 export function runAeExecutiveProjector(binary: string): Promise<AeExecutiveSceneBatch> {

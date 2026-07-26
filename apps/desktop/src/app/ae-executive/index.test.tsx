@@ -119,16 +119,35 @@ describe('Rust UGUI Scene batch', () => {
     for (const row of value.scenes) {expect(validateExecutiveScene(row.scene)).toEqual([])}
   })
 
-  it('requires semantic card identity, layout intent, and one shared shell action row', () => {
+  it('requires semantic card identity and one shared shell action row without prescribing block extent', () => {
     const value = parseExecutiveBatch(batch())
 
     for (const { scene, tab } of value.scenes) {
       expect(scene.id).toBe(`run-${tab}`)
-      expect(scene.nodes.some(node => node.layout?.height === '*')).toBe(true)
       expect(
         scene.nodes.flatMap(node => Object.values(node.on ?? {})).filter(handler => handler.startsWith('shell.tab.'))
       ).toEqual(AE_EXECUTIVE_BATCH_TAB_IDS.map(id => `shell.tab.${id}`))
     }
+  })
+
+  it('admits and paints intrinsic nested Dashboard structure without remaining-height layout', async () => {
+    const value = batch()
+    const dashboard = value.scenes.find(row => row.tab === 'dashboard')!.scene
+    const nodes = dashboard.nodes as Array<Record<string, any>>
+    dashboard.nodes = nodes.filter(node => node.id !== 'dashboard-elastic') as typeof dashboard.nodes
+    const root = dashboard.nodes.find(node => node.id === 'dashboard-root') as { kids: string[] }
+    root.kids = root.kids.filter((id: string) => id !== 'dashboard-elastic')
+    ;(dashboard.nodes as Array<Record<string, unknown>>).push(
+      { id: 'dashboard-nested', p: 'column' as const, kids: ['dashboard-nested-text'] },
+      { id: 'dashboard-nested-text', p: 'text' as const, a: { text: 'Nested intrinsic evidence', size: 's' } }
+    )
+    root.kids.splice(1, 0, 'dashboard-nested')
+    getAeExecutiveScenes.mockResolvedValue(value)
+    resetExecutiveScenesForTests()
+
+    const view = renderTab('dashboard')
+    expect(await screen.findByText('Nested intrinsic evidence')).toBeTruthy()
+    expect(view.container.querySelector('[data-ugui-height="*"]')).toBeNull()
   })
 })
 

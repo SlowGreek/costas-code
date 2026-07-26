@@ -92,6 +92,25 @@ it('admits a profile-specific Marketplace workspace without the legacy nine-tab 
   expect(batch.scenes.map(row => row.tab)).toEqual(tabs)
 })
 
+it('admits a nested content-sized Dashboard with no remaining-height node', () => {
+  const batch = semanticBatch(AE_EXECUTIVE_TABS)
+  const dashboard = batch.scenes.find(row => row.tab === 'dashboard')!.scene
+
+  const body = dashboard.nodes.find(node => node.id === 'dashboard-body') as {
+    kids?: string[]
+    layout?: { height: '*' | number }
+  }
+
+  body.layout = { height: 4 }
+  body.kids = ['dashboard-nested-parent']
+  ;(dashboard.nodes as Array<Record<string, unknown>>).push(
+    { id: 'dashboard-nested-parent', p: 'column', kids: ['dashboard-nested-child'] },
+    { id: 'dashboard-nested-child', p: 'text', a: { text: 'Nested intrinsic evidence' } }
+  )
+
+  expect(validateAeExecutiveBatch(batch).scenes.find(row => row.tab === 'dashboard')?.scene).toBe(dashboard)
+})
+
 describe('fail-closed batch validation', () => {
   it('rejects reordered and missing scenes', () => {
     const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
@@ -136,7 +155,29 @@ describe('fail-closed batch validation', () => {
     mismatched.scenes.at(-1)!.scene.nodes = mismatched.scenes
       .at(-1)!
       .scene.nodes.filter(node => node.id !== 'calc-tab-marketplace')
-    expect(() => validateAeExecutiveBatch(mismatched)).toThrow('ae-executive-shell-actions')
+    expect(() => validateAeExecutiveBatch(mismatched)).toThrow('ae-executive-child-missing')
+  })
+
+  it('rejects malformed Scene graphs and layout values without requiring elastic layout', () => {
+    const malformed = semanticBatch(['home', 'marketplace'])
+
+    const mutate = (change: (scene: Record<string, any>) => void) => {
+      const candidate = structuredClone(malformed)
+      change(candidate.scenes[0].scene)
+
+      return () => validateAeExecutiveBatch(candidate)
+    }
+
+    expect(mutate(scene => {scene.nodes[0].kids = ['missing']})).toThrow('ae-executive-child-missing')
+    expect(mutate(scene => {scene.nodes[1].p = 'iframe'})).toThrow('ae-executive-primitive')
+    expect(mutate(scene => {scene.nodes[2].kids = [scene.nodes[0].id]})).toThrow('ae-executive-leaf-children')
+    expect(mutate(scene => {scene.nodes[1].layout = { height: 0 }})).toThrow('ae-executive-layout-height')
+    expect(
+      mutate(scene => {
+        scene.nodes[1].kids = [scene.nodes[0].id]
+        scene.nodes[1].p = 'column'
+      })
+    ).toThrow('ae-executive-scene-cycle')
   })
 
   it('admits stale provenance labels only when the closed semantic structure is valid', () => {
@@ -159,6 +200,6 @@ describe('fail-closed batch validation', () => {
         projector: 'informational-label',
         scenes: missingShell
       })
-    ).toThrow('ae-executive-shell-actions')
+    ).toThrow('ae-executive-child-missing')
   })
 })

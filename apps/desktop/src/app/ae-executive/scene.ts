@@ -1,5 +1,13 @@
 import { AE_EXECUTIVE_TAB_IDS } from './contract'
 
+const SCENE_PRIMITIVES = new Set<UgScenePrimitive>([
+  'button', 'canvas', 'column', 'divider', 'image', 'input', 'native',
+  'progress', 'row', 'select', 'spacer', 'stack', 'text'
+])
+
+const CONTAINER_PRIMITIVES = new Set<UgScenePrimitive>(['column', 'row', 'stack'])
+const SCENE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
 export type UgScenePrimitive =
   | 'button'
   | 'canvas'
@@ -140,10 +148,6 @@ function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: string, ta
 
   if (cardScene && scene.id !== `run-${tab}`) {throw new Error(`ae-executive-card-identity:${tab}`)}
 
-  if (cardScene && !scene.nodes.some(node => node.layout?.height === '*')) {
-    throw new Error(`ae-executive-elastic-layout:${tab}`)
-  }
-
   for (const node of scene.nodes) {
     const text = typeof node.a?.text === 'string' ? node.a.text : ''
     const terminalShaped = text.includes(`${String.fromCharCode(27)}[`) || /[┌┐└┘├┤┬┴┼─│]/u.test(text)
@@ -156,26 +160,72 @@ function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: string, ta
 
 export function validateExecutiveScene(scene: AeExecutiveScene): readonly string[] {
   const errors: string[] = []
-  const ids = new Set<string>()
+  const nodes = Array.isArray(scene?.nodes) ? scene.nodes : []
+  const byId = new Map<string, UgSceneNode>()
 
   if (!scene || scene.sceneVersion !== '1.0.0' || typeof scene.root !== 'string' || !Array.isArray(scene.nodes)) {
-    return ['scene-schema']
+    throw new Error('ae-executive-scene-invalid:scene-schema')
   }
 
-  for (const node of scene.nodes) {
-    if (!node || typeof node.id !== 'string' || !node.id || ids.has(node.id)) {
+  if (nodes.length < 1 || nodes.length > 4096) {throw new Error('ae-executive-scene-invalid:scene-bounds')}
+
+  for (const node of nodes) {
+    if (!node || typeof node.id !== 'string' || !SCENE_ID_RE.test(node.id) || byId.has(node.id)) {
       errors.push(`node-id:${node?.id || 'empty'}`)
 
       continue
     }
 
-    ids.add(node.id)
+    if (!SCENE_PRIMITIVES.has(node.p)) {errors.push(`primitive:${node.id}`)}
+
+    if (node.layout !== undefined) {
+      if (Object.keys(node.layout).some(key => key !== 'height')) {errors.push(`layout:${node.id}`)}
+      const height = node.layout.height
+
+      if (
+        height !== undefined &&
+        height !== '*' &&
+        (!Number.isSafeInteger(height) || Number(height) < 1 || Number(height) > 4096)
+      ) {errors.push(`layout-height:${node.id}`)}
+    }
+
+    if (node.kids !== undefined) {
+      if (!Array.isArray(node.kids) || node.kids.some((id: unknown) => typeof id !== 'string')) {
+        errors.push(`children:${node.id}`)
+      } else if (!CONTAINER_PRIMITIVES.has(node.p) && node.kids.length > 0) {
+        errors.push(`leaf-children:${node.id}`)
+      }
+    }
+
+    byId.set(node.id, node)
   }
 
-  if (!ids.has(scene.root)) {errors.push('root-missing')}
+  if (!byId.has(scene.root)) {errors.push('root-missing')}
 
-  for (const node of scene.nodes) {
-    if (node.kids?.some((id: string) => !ids.has(id))) {errors.push(`child-missing:${node.id}`)}
+  for (const node of nodes) {
+    if (node.kids?.some((id: string) => !byId.has(id))) {errors.push(`child-missing:${node.id}`)}
+  }
+
+  if (!errors.length) {
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+
+    const walk = (id: string, depth: number) => {
+      if (depth > 64) {throw new Error('ae-executive-scene-invalid:scene-depth')}
+
+      if (visiting.has(id)) {throw new Error('ae-executive-scene-invalid:scene-cycle')}
+
+      if (visited.has(id)) {return}
+      visiting.add(id)
+
+      for (const child of byId.get(id)?.kids ?? []) {walk(child, depth + 1)}
+      visiting.delete(id)
+      visited.add(id)
+    }
+
+    walk(scene.root, 0)
+
+    if (visited.size !== nodes.length) {errors.push('node-unreachable')}
   }
 
   if (errors.length) {throw new Error(`ae-executive-scene-invalid:${errors.join(',')}`)}

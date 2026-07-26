@@ -180,6 +180,12 @@ jobs:
           for v in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
+          # Stamp a unique SemVer 2.0.0 version so two builds are never
+          # indistinguishable by filename or About box. Restored afterwards so
+          # the tree isn't left dirty — electron-builder reads the version from
+          # package.json and has no override flag.
+          node scripts/apply-build-version.mjs
+          trap 'node scripts/apply-build-version.mjs --restore' EXIT
           npm run ${{ matrix.script }} -- --publish never
 
       - name: Report what was produced

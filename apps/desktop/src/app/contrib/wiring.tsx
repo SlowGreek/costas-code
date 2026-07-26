@@ -63,6 +63,7 @@ import { useSkinCommand } from '@/themes/use-skin-command'
 
 import { requestComposerInsert } from '../chat/composer/focus'
 import { useComposerActions } from '../chat/hooks/use-composer-actions'
+import { ClipboardLensOverlay } from '../clipboard-lens-overlay'
 import { CommandPalette } from '../command-palette'
 import { useGatewayBoot } from '../gateway/hooks/use-gateway-boot'
 import { useGatewayRequest } from '../gateway/hooks/use-gateway-request'
@@ -969,6 +970,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       <GatewayConnectingOverlay />
       <BootFailureOverlay />
       <CommandPalette />
+      <ClipboardLensOverlay />
       <PetGenerateOverlay />
       <SessionSwitcher />
       <FileActionDialogs />

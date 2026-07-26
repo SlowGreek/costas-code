@@ -67,6 +67,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   readFileText: filePath => ipcRenderer.invoke('hermes:readFileText', filePath),
   selectPaths: options => ipcRenderer.invoke('hermes:selectPaths', options),
   writeClipboard: text => ipcRenderer.invoke('hermes:writeClipboard', text),
+  clipboardLens: {
+    inspect: () => ipcRenderer.invoke('hermes:clipboard-lens:inspect'),
+    consumeText: expectedHash => ipcRenderer.invoke('hermes:clipboard-lens:consume-text', expectedHash)
+  },
   saveImageFromUrl: url => ipcRenderer.invoke('hermes:saveImageFromUrl', url),
   saveImageBuffer: (data, ext) => ipcRenderer.invoke('hermes:saveImageBuffer', { data, ext }),
   saveClipboardImage: () => ipcRenderer.invoke('hermes:saveClipboardImage'),

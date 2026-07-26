@@ -18,6 +18,7 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  Clipboard,
   Clock,
   Cpu,
   Download,
@@ -48,6 +49,7 @@ import {
 } from '@/lib/icons'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
+import { openClipboardLens } from '@/store/clipboard-lens'
 import { $repoWorktrees } from '@/store/coding-status'
 import {
   $commandPaletteOpen,
@@ -434,6 +436,14 @@ export function CommandPalette() {
             keywords: ['terminal', 'shell', 'console'],
             label: t.keybinds.actions['view.showTerminal'],
             run: () => setTerminalTakeover(true)
+          },
+          {
+            action: 'clipboard.lens',
+            icon: Clipboard,
+            id: 'clipboard-lens',
+            keywords: ['clipboard', 'paste', 'inspect', 'ai', 'context'],
+            label: 'Inspect clipboard with Clipboard Lens',
+            run: () => void openClipboardLens()
           },
           {
             action: 'nav.settings',

@@ -234,6 +234,7 @@ export const en: Translations = {
       'nav.artifacts': 'Open artifacts',
       'nav.cron': 'Open scheduled jobs',
       'nav.agents': 'Open agents',
+      'clipboard.lens': 'Inspect clipboard with Clipboard Lens',
       'session.new': 'New session',
       'session.newTab': 'New session tab',
       'session.newWindow': 'New window',

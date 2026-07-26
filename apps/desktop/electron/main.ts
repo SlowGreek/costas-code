@@ -45,6 +45,10 @@ import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { shouldLatchBackendStartFailure } from './backend-start-failure'
 import { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } from './bootstrap-platform'
 import { runBootstrap } from './bootstrap-runner'
+import {
+  buildClipboardLensSnapshot,
+  consumeClipboardLensText
+} from './clipboard-lens'
 import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
 import {
   authModeFromStatus,
@@ -9638,6 +9642,17 @@ ipcMain.handle('hermes:writeClipboard', (_event, text) => {
 
   return true
 })
+
+function readClipboardLensCapture() {
+  return { text: clipboard.readText('clipboard') }
+}
+
+ipcMain.handle('hermes:clipboard-lens:inspect', () => buildClipboardLensSnapshot(readClipboardLensCapture()))
+
+ipcMain.handle('hermes:clipboard-lens:consume-text', (_event, expectedHash) =>
+  consumeClipboardLensText(readClipboardLensCapture(), String(expectedHash || ''))
+)
+
 
 ipcMain.handle('hermes:saveImageFromUrl', (_event, url) => saveImageFromUrl(String(url || '')))
 

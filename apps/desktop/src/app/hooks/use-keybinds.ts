@@ -14,6 +14,7 @@ import {
 } from '@/lib/keybinds/actions'
 import { comboAllowedInInput, comboFromEvent, isEditableTarget } from '@/lib/keybinds/combo'
 import { composerFocusKeysAllowed, isComposerFocusSoftCombo, typeToFocusChar } from '@/lib/keybinds/composer-focus-keys'
+import { openClipboardLens } from '@/store/clipboard-lens'
 import { $repoStatus } from '@/store/coding-status'
 import { toggleCommandPalette } from '@/store/command-palette'
 import { $capture, $comboIndex, endCapture, setBinding } from '@/store/keybinds'
@@ -142,6 +143,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'nav.artifacts': () => navigate(ARTIFACTS_ROUTE),
     'nav.cron': () => navigate(CRON_ROUTE),
     'nav.agents': () => navigate(AGENTS_ROUTE),
+    'clipboard.lens': () => void openClipboardLens(),
 
     'session.new': () => {
       // Match the sidebar New Session button. A plain keyboard new chat should

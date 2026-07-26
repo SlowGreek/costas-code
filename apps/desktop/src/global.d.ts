@@ -1,6 +1,10 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 
 import type {
+  HermesClipboardLensSnapshot,
+  HermesClipboardLensTextResult
+} from './lib/clipboard-lens'
+import type {
   PetOverlayBounds,
   PetOverlayControl,
   PetOverlayOpenRequest,
@@ -94,6 +98,10 @@ declare global {
       readFileText: (filePath: string) => Promise<HermesReadFileTextResult>
       selectPaths: (options?: HermesSelectPathsOptions) => Promise<string[]>
       writeClipboard: (text: string) => Promise<boolean>
+      clipboardLens: {
+        inspect: () => Promise<HermesClipboardLensSnapshot>
+        consumeText: (expectedHash: string) => Promise<HermesClipboardLensTextResult>
+      }
       saveImageFromUrl: (url: string) => Promise<boolean>
       saveImageBuffer: (data: ArrayBuffer | Uint8Array, ext: string) => Promise<string>
       saveClipboardImage: () => Promise<string>

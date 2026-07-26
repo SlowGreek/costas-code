@@ -42,6 +42,11 @@ describe('voice-first developer Twitch', () => {
     expect(matchVoiceDevControl(phrase)).toMatchObject({ action: 'invoke', action_id: actionId, lane: 'twitch' })
   })
 
+  it('does not permit voice-triggered clipboard inspection', () => {
+    expect(matchVoiceDevControl('open clipboard lens')).toBeNull()
+    expect(matchVoiceDevControl('show clipboard lens')).toBeNull()
+  })
+
   it('executes invoke intents only through the registered keybind event seam', () => {
     const actions: string[] = []
     window.addEventListener('hermes:keybind-action', event => actions.push((event as CustomEvent<string>).detail), {

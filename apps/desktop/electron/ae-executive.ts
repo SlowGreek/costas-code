@@ -101,9 +101,31 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
 
     const nodes = validateExecutiveSceneGraph(scene, String(row.tab))
 
-    const handlers = nodes
-      .flatMap(node => Object.values((node.on as Record<string, unknown> | undefined) ?? {}))
-      .filter((handler): handler is string => typeof handler === 'string' && handler.startsWith('shell.tab.'))
+    const tabNodes = nodes.filter(node => {
+      const tap = (node.on as Record<string, unknown> | undefined)?.tap
+
+      return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
+    })
+
+    const handlers = tabNodes.map(node => (node.on as Record<string, string>).tap)
+
+    for (const node of nodes) {
+      const events = (node.on as Record<string, unknown> | undefined) ?? {}
+
+      const shellEvents = Object.entries(events).filter(([, handler]) =>
+        typeof handler === 'string' && handler.startsWith('shell.tab.')
+      )
+
+      if (!shellEvents.length) {continue}
+
+      if (node.p !== 'button' || typeof events.tap !== 'string') {
+        throw new Error(`ae-executive-shell-action-node:${row.tab}`)
+      }
+
+      if (shellEvents.some(([gesture, handler]) => !['key', 'tap'].includes(gesture) || handler !== events.tap)) {
+        throw new Error(`ae-executive-shell-action-gesture:${row.tab}`)
+      }
+    }
 
     const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
     const allowedWorkspace = [...observed, ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(tab => !observed.includes(tab))]

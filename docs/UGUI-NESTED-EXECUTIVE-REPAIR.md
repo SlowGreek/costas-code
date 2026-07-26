@@ -83,6 +83,10 @@ Admission now distinguishes batch tabs from workspace actions. It accepts the ex
 host-derived `shell` suffix, requires the same action list and hotkeys in every Scene, rejects unknown extras/drift, and
 routes `shell.tab.shell` to `/ae/shell`. Older ten-action producers remain compatible.
 
+QUINE also binds each semantic tab button through both `tap` and `key` gestures. Workspace cardinality is therefore
+derived from one button's `tap` identity, not from every handler occurrence. An optional `key` alias is admitted only
+when it equals that button's `tap`; conflicting aliases, non-button shell handlers, and other shell gestures refuse.
+
 `runAeExecutiveProjector` now retains a bounded exact admission code:
 
 ```text

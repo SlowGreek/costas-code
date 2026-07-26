@@ -93,6 +93,28 @@ it('admits a profile-specific Marketplace workspace without the legacy nine-tab 
   expect(batch.scenes.map(row => row.tab)).toEqual(tabs)
 })
 
+it('admits key and tap aliases on one semantic tab button', () => {
+  const batch = semanticBatch([...AE_EXECUTIVE_TABS, 'marketplace'])
+  const quine = batch.scenes.find(row => row.tab === 'quine')!
+
+  for (const node of quine.scene.nodes) {
+    const on = (node as { on?: Record<string, string> }).on
+
+    if (on?.tap?.startsWith('shell.tab.')) {on.key = on.tap}
+  }
+
+  expect(validateAeExecutiveBatch(batch).scenes).toHaveLength(10)
+
+  const invalid = structuredClone(batch)
+
+  const button = invalid.scenes.find(row => row.tab === 'quine')!.scene.nodes.find(
+    node => (node as { on?: Record<string, string> }).on?.key
+  ) as { on: Record<string, string> }
+
+  button.on.key = 'shell.tab.dashboard'
+  expect(() => validateAeExecutiveBatch(invalid)).toThrow('ae-executive-shell-action-gesture')
+})
+
 it('admits a registered host-derived SHELL action without requiring a duplicate batch Scene', () => {
   const batch = semanticBatch([...AE_EXECUTIVE_TABS, 'marketplace'])
 

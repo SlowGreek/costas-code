@@ -140,9 +140,25 @@ function validateSemanticExecutiveScene(
   tab: string,
   tabs: readonly string[]
 ): { handlers: string[]; hotkeys: string[] } {
-  const handlers = scene.nodes
-    .flatMap(node => Object.values(node.on ?? {}))
-    .filter(handler => handler.startsWith('shell.tab.'))
+  const tabNodes = scene.nodes.filter(
+    node => node.p === 'button' && node.on?.tap?.startsWith('shell.tab.')
+  )
+
+  const handlers = tabNodes.map(node => node.on!.tap!)
+
+  for (const node of scene.nodes) {
+    const shellEvents = Object.entries(node.on ?? {}).filter(([, handler]) => handler.startsWith('shell.tab.'))
+
+    if (!shellEvents.length) {continue}
+
+    if (node.p !== 'button' || !node.on?.tap?.startsWith('shell.tab.')) {
+      throw new Error(`ae-executive-shell-action-node:${tab}`)
+    }
+
+    if (shellEvents.some(([gesture, handler]) => !['key', 'tap'].includes(gesture) || handler !== node.on?.tap)) {
+      throw new Error(`ae-executive-shell-action-gesture:${tab}`)
+    }
+  }
 
   const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
 

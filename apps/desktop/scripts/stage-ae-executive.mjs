@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -70,3 +70,17 @@ for (const artifact of artifacts) {
   }
   console.log(`[stage-ae-executive] staged ${destination}`)
 }
+
+const skinBindingsSource = path.join(aeRoot, 'ugui', 'skins', 'bindings')
+const skinBindingsDestination = path.join(destinationDir, 'skins')
+
+if (!existsSync(skinBindingsSource)) {
+  throw new Error(`[stage-ae-executive] missing generated UGUI skin bindings: ${skinBindingsSource}`)
+}
+
+rmSync(skinBindingsDestination, { force: true, recursive: true })
+cpSync(skinBindingsSource, skinBindingsDestination, {
+  recursive: true,
+  filter: source => source === skinBindingsSource || source.endsWith('.json')
+})
+console.log(`[stage-ae-executive] staged ${skinBindingsDestination}`)

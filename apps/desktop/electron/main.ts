@@ -31,6 +31,7 @@ import {
 import nodePty from 'node-pty'
 
 import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executive'
+import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
@@ -8717,6 +8718,16 @@ ipcMain.handle('hermes:ae-executive:scenes', async () => {
   }
 
   return runAeExecutiveProjector(binary)
+})
+
+ipcMain.handle('hermes:ugui-skins:catalog', () => {
+  const catalog = loadUguiSkinCatalog(path.join(AE_RUNTIME_BIN, 'skins'))
+
+  return {
+    schema: 'hermes-render-profile-catalog/1',
+    authority: 'none',
+    profiles: catalog.profiles.map(normalizeUguiSkinBinding)
+  }
 })
 
 ipcMain.handle('hermes:connection', async (_event, profile) => ensureBackend(profile))

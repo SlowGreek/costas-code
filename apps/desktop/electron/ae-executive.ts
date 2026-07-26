@@ -6,6 +6,7 @@ export const AE_EXECUTIVE_MAX_BYTES = 2 * 1024 * 1024
 export const AE_EXECUTIVE_TIMEOUT_MS = 15_000
 export const AE_EXECUTIVE_TABS = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'studio', 'settings'] as const
 export const AE_EXECUTIVE_MAX_TABS = 36
+export const AE_EXECUTIVE_HOST_DERIVED_TABS = ['shell'] as const
 
 const SCENE_PRIMITIVES = new Set([
   'button', 'canvas', 'column', 'divider', 'image', 'input', 'native',
@@ -85,6 +86,7 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
     throw new Error('ae-executive-batch-order')
   }
 
+  let canonicalHandlers: string[] | null = null
   let canonicalHotkeys: string[] | null = null
 
   for (const row of batch.scenes) {
@@ -101,13 +103,28 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
 
     const handlers = nodes
       .flatMap(node => Object.values((node.on as Record<string, unknown> | undefined) ?? {}))
-      .filter(handler => typeof handler === 'string' && handler.startsWith('shell.tab.'))
+      .filter((handler): handler is string => typeof handler === 'string' && handler.startsWith('shell.tab.'))
 
-    const expectedHandlers = observed.map(tab => `shell.tab.${tab}`)
+    const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
+    const allowedWorkspace = [...observed, ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(tab => !observed.includes(tab))]
 
-    if (handlers.length !== expectedHandlers.length || handlers.some((handler, index) => handler !== expectedHandlers[index])) {
+    if (
+      handlers.length < observed.length ||
+      handlers.length > allowedWorkspace.length ||
+      new Set(workspaceTabs).size !== workspaceTabs.length ||
+      workspaceTabs.some((tab, index) => tab !== allowedWorkspace[index])
+    ) {
       throw new Error(`ae-executive-shell-actions:${row.tab}`)
     }
+
+    if (
+      canonicalHandlers &&
+      (handlers.length !== canonicalHandlers.length || handlers.some((handler, index) => handler !== canonicalHandlers[index]))
+    ) {
+      throw new Error(`ae-executive-shell-action-drift:${row.tab}`)
+    }
+
+    canonicalHandlers ??= handlers
 
     const hotkeys = nodes
       .filter(node => {
@@ -226,8 +243,13 @@ export function runAeExecutiveProjector(binary: string): Promise<AeExecutiveScen
 
         try {
           resolve(validateAeExecutiveBatch(JSON.parse(String(stdout))))
-        } catch {
-          reject(new Error('ae-executive-projector-invalid'))
+        } catch (cause) {
+          const code =
+            cause instanceof Error && /^ae-executive-[a-z0-9:-]{1,160}$/.test(cause.message)
+              ? cause.message
+              : 'admission-refused'
+
+          reject(new Error(`ae-executive-projector-invalid:${code}`))
         }
       }
     )

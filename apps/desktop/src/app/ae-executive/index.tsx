@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import { cn } from '@/lib/utils'
 
-import { aeExecutiveTab } from './contract'
+import { aeExecutiveTab, isAeExecutiveTabId } from './contract'
 import { type AeExecutiveSceneBatch, loadExecutiveScenes, sceneForTab } from './scene'
 import { AeScenePainter } from './scene-painter'
 import { AeShellViewport } from './shell-viewport'
@@ -40,7 +40,7 @@ export function AeExecutiveWorkspace() {
       const shellTab = action.match(/^shell\.tab\.(.+)$/)?.[1]
       const route = action.match(/^quine-route:(.+)$/)?.[1]
 
-      if (shellTab && batch?.scenes.some(row => row.tab === shellTab)) {
+      if (shellTab && (batch?.scenes.some(row => row.tab === shellTab) || isAeExecutiveTabId(shellTab))) {
         navigate(`/ae/${shellTab}`)
 
         return

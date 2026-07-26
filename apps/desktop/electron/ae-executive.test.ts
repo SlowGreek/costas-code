@@ -20,7 +20,8 @@ const labels: Record<string, string> = {
   settings: '[S]ETTINGS',
   marketplace: 'MA[R]KETPLACE',
   calc: 'C[A]LCULATOR',
-  snake: 'S[N]AKE'
+  snake: 'S[N]AKE',
+  shell: 'SH[E]LL'
 }
 
 afterEach(() => {
@@ -90,6 +91,24 @@ it('admits a profile-specific Marketplace workspace without the legacy nine-tab 
   const batch = validateAeExecutiveBatch(semanticBatch(tabs))
 
   expect(batch.scenes.map(row => row.tab)).toEqual(tabs)
+})
+
+it('admits a registered host-derived SHELL action without requiring a duplicate batch Scene', () => {
+  const batch = semanticBatch([...AE_EXECUTIVE_TABS, 'marketplace'])
+
+  for (const row of batch.scenes) {
+    const id = `${row.tab}-tab-shell`
+    row.scene.nodes.push({
+      id,
+      p: 'button',
+      a: { label: labels.shell, role: 'tab' },
+      on: { tap: 'shell.tab.shell' },
+      layout: { height: 1 }
+    })
+    ;(row.scene.nodes[0] as { kids: string[] }).kids.push(id)
+  }
+
+  expect(validateAeExecutiveBatch(batch).scenes).toHaveLength(10)
 })
 
 it('admits a nested content-sized Dashboard with no remaining-height node', () => {

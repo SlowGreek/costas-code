@@ -63,6 +63,34 @@ ae-executive-projector-invalid
 
 This made the surface symptom look like a schema/version failure even though Scene 1.0.0 and nested resolution were valid.
 
+## Second migration shape: host-derived SHELL
+
+After the first package was cut, AE's executive action row advanced again:
+
+```text
+batch Scenes      10 · home through marketplace
+workspace actions 11 · home through marketplace plus shell
+```
+
+`SH[E]LL` is a registered host-derived destination whose Scene comes from the dedicated SHELL IPC, not from the RUN
+batch. Costas previously required shell action cardinality to equal batch Scene cardinality, producing:
+
+```text
+ae-executive-shell-actions:home
+```
+
+Admission now distinguishes batch tabs from workspace actions. It accepts the exact batch prefix plus the registered
+host-derived `shell` suffix, requires the same action list and hotkeys in every Scene, rejects unknown extras/drift, and
+routes `shell.tab.shell` to `/ae/shell`. Older ten-action producers remain compatible.
+
+`runAeExecutiveProjector` now retains a bounded exact admission code:
+
+```text
+ae-executive-projector-invalid:<safe-admission-code>
+```
+
+so future schema drift is no longer opaque.
+
 ## Repair
 
 The stale universal remaining-height requirement was removed from both Electron semantics and renderer tests.

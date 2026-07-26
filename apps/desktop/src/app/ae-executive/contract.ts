@@ -13,6 +13,7 @@ export const AE_EXECUTIVE_TAB_IDS = [
 ] as const
 
 export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
+export const AE_EXECUTIVE_HOST_DERIVED_TAB_IDS = ['shell'] as const
 export const AE_EXECUTIVE_BATCH_TAB_IDS = AE_EXECUTIVE_TAB_IDS.filter(
   (id): id is Exclude<AeExecutiveTabId, 'shell'> => id !== 'shell'
 )

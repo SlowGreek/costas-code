@@ -1,4 +1,4 @@
-import { AE_EXECUTIVE_TAB_IDS } from './contract'
+import { AE_EXECUTIVE_HOST_DERIVED_TAB_IDS, AE_EXECUTIVE_TAB_IDS } from './contract'
 
 const SCENE_PRIMITIVES = new Set<UgScenePrimitive>([
   'button', 'canvas', 'column', 'divider', 'image', 'input', 'native',
@@ -102,31 +102,60 @@ export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
     throw new Error('ae-executive-batch-order')
   }
 
+  let canonicalHandlers: string[] | null = null
   let canonicalHotkeys: string[] | null = null
 
   for (const row of batch.scenes) {
     if (!row || typeof row !== 'object' || typeof row.tab !== 'string') {throw new Error('ae-executive-row-invalid')}
     validateExecutiveScene(row.scene)
-    const hotkeys = validateSemanticExecutiveScene(row.scene, row.tab, observed)
+    const { handlers, hotkeys } = validateSemanticExecutiveScene(row.scene, row.tab, observed)
 
-    if (canonicalHotkeys && hotkeys.some((hotkey, index) => hotkey !== canonicalHotkeys?.[index])) {
+    const priorHandlers = canonicalHandlers
+
+    if (
+      priorHandlers &&
+      (handlers.length !== priorHandlers.length || handlers.some((handler, index) => handler !== priorHandlers[index]))
+    ) {
+      throw new Error(`ae-executive-shell-action-drift:${row.tab}`)
+    }
+
+    const priorHotkeys = canonicalHotkeys
+
+    if (
+      priorHotkeys &&
+      (hotkeys.length !== priorHotkeys.length || hotkeys.some((hotkey, index) => hotkey !== priorHotkeys[index]))
+    ) {
       throw new Error(`ae-executive-hotkey-drift:${row.tab}`)
     }
 
+    canonicalHandlers ??= handlers
     canonicalHotkeys ??= hotkeys
   }
 
   return batch as AeExecutiveSceneBatch
 }
 
-function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: string, tabs: readonly string[]) {
+function validateSemanticExecutiveScene(
+  scene: AeExecutiveScene,
+  tab: string,
+  tabs: readonly string[]
+): { handlers: string[]; hotkeys: string[] } {
   const handlers = scene.nodes
     .flatMap(node => Object.values(node.on ?? {}))
     .filter(handler => handler.startsWith('shell.tab.'))
 
+  const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
+
+  const allowedWorkspace = [
+    ...tabs,
+    ...AE_EXECUTIVE_HOST_DERIVED_TAB_IDS.filter(hostTab => !tabs.includes(hostTab))
+  ]
+
   if (
-    handlers.length !== tabs.length ||
-    handlers.some((handler, index) => handler !== `shell.tab.${tabs[index]}`)
+    handlers.length < tabs.length ||
+    handlers.length > allowedWorkspace.length ||
+    new Set(workspaceTabs).size !== workspaceTabs.length ||
+    workspaceTabs.some((workspaceTab, index) => workspaceTab !== allowedWorkspace[index])
   ) {
     throw new Error(`ae-executive-shell-actions:${tab}`)
   }
@@ -155,7 +184,7 @@ function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: string, ta
     if (terminalShaped) {throw new Error(`ae-executive-terminal-text:${tab}`)}
   }
 
-  return hotkeys
+  return { handlers, hotkeys }
 }
 
 export function validateExecutiveScene(scene: AeExecutiveScene): readonly string[] {

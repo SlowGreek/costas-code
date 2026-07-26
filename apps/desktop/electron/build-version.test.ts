@@ -65,6 +65,7 @@ describe('SemVer 2.0.0 conformance', () => {
       { baseVersion: '2.3.4' },
       { baseVersion: '0.17.0', runNumber: 0, commitSha: SHA }
     ]
+
     for (const input of inputs) {
       const v = buildVersion(input)
       assert.ok(isValidSemver(v), `${JSON.stringify(input)} -> ${v}`)
@@ -93,6 +94,7 @@ describe('buildVersionFromEnv', () => {
       GITHUB_RUN_NUMBER: '77',
       GITHUB_SHA: SHA
     })
+
     assert.equal(v, '0.17.0-ci.77+sha.be31aea5')
   })
 

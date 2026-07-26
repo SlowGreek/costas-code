@@ -60,7 +60,7 @@ export function AeExecutiveWorkspace() {
   const requestedTab = params.tab ?? ''
   const shellRequested = requestedTab === 'shell'
   const tabId = batch?.scenes.some(row => row.tab === requestedTab) ? requestedTab : aeExecutiveTab(requestedTab).id
-  const scene = batch ? sceneForTab(batch, tabId) : null
+  const scene = batch && !shellRequested ? sceneForTab(batch, tabId) : null
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>

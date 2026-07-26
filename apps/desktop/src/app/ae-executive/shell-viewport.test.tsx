@@ -8,6 +8,38 @@ import { resetExecutiveScenesForTests } from './scene'
 import { AeExecutiveWorkspace } from '.'
 
 const getShellViewportScene = vi.fn()
+const getAeExecutiveScenes = vi.fn()
+
+const batchTabs = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'studio', 'settings', 'marketplace']
+
+const executiveBatch = {
+  schema: 'ae-executive-scene-batch/1',
+  authority: 'none',
+  projector: 'test',
+  scenes: batchTabs.map(tab => ({
+    tab,
+    scene: {
+      sceneVersion: '1.0.0',
+      id: `run-${tab}`,
+      root: `${tab}-root`,
+      nodes: [
+        { id: `${tab}-root`, p: 'column', kids: [`${tab}-tabs`] },
+        { id: `${tab}-tabs`, p: 'row', kids: batchTabs.map(id => `${tab}-tab-${id}`) },
+        ...batchTabs.map(id => ({
+          id: `${tab}-tab-${id}`,
+          p: 'button',
+          a: { label: ({
+            home: '[H]OME', dashboard: '[D]ASHBOARD', lucid: '[L]UCID', quine: '[Q]UINE',
+            scores: 'S[C]ORES', metrics: '[M]ETRICS', logs: 'L[O]GS', studio: 'S[T]UDIO',
+            settings: '[S]ETTINGS', marketplace: 'MA[R]KETPLACE'
+          } as Record<string, string>)[id], role: 'tab' },
+          on: { tap: `shell.tab.${id}` },
+          layout: { height: 1 }
+        }))
+      ]
+    }
+  }))
+}
 
 const shellResponse = {
   schema: 'ae-shell-viewport-scene/1',
@@ -50,11 +82,12 @@ const shellResponse = {
 
 beforeEach(() => {
   resetExecutiveScenesForTests()
+  getAeExecutiveScenes.mockReset().mockResolvedValue(executiveBatch)
   getShellViewportScene.mockReset().mockResolvedValue(shellResponse)
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
     value: {
-      getAeExecutiveScenes: vi.fn(() => new Promise(() => undefined)),
+      getAeExecutiveScenes,
       getShellViewportScene
     }
   })
@@ -80,5 +113,7 @@ describe('SH[E]LL developer viewport', () => {
       })
     )
     expect(screen.getByText(/physical evidence not implied/i)).toBeTruthy()
+    await waitFor(() => expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(/ae-executive-scene-missing:shell/)).toBeNull()
   })
 })

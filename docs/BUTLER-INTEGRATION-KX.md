@@ -18,6 +18,7 @@
 > **Costas CLI probe hardening checkpoint:** `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`<br>
 > **Costas chat navigation repair checkpoint:** `83eba5585b53b748ff1bae7f930deb3302597fdc`<br>
 > **Costas RUN-UGUI semantic consumer checkpoint:** `55fc59948c7cc5f94797d3214d1e33e8bd7d7958`<br>
+> **Costas structural UGUI admission checkpoint:** `c8a628d441d65fb311e780cb1dfbf8419bfd6217`<br>
 > **Checkpoint date:** `2026-07-25T13:27:01-07:00`<br>
 > **Authority:** none<br>
 > **Requested disposition:** `ATTEST BUTLER-R1-INPUT`, `REVISE BUTLER-R1-<named invariant>`, or `HOLD BUTLER-R1`<br>
@@ -333,9 +334,10 @@ typed RUN facts
 
 The Desktop no longer authors a second executive tab strip or per-tab heading. UGUI-owned `shell.tab.*` Scene
 handlers are the sole executive navigation source. Scene `layout.height` is realized generically (`"*"` consumes
-the flex remainder; fixed extents remain shrink-only), with no tab-specific React layout branches. Costas rejects:
+the flex remainder; fixed extents remain shrink-only), with no tab-specific React layout branches. Costas admits
+an informational projector label only when the closed semantic structure is valid, and rejects:
 
-- the obsolete `run::tui->ugui::project` provenance;
+- empty projector provenance or semantic structure inconsistent with the claimed batch;
 - missing/reordered shared shell handlers;
 - mismatched `run-<tab>` card identity;
 - card Scenes without elastic layout intent;
@@ -348,10 +350,11 @@ The staging freshness set now includes all four `ugui/src/executive/*.rs` compos
 projector, GEOM Scene layout, and the Scene schema so a stale terminal-first adapter cannot survive a landed AE
 refactor.
 
-At observation time, AE's in-progress UGUI crate checks green and all nine semantic composers exist. The
-`ae-executive-scene` adapter itself remains temporarily unpackageable because it still calls the removed
-`ExecutiveTab::as_str`; Studio/QUINE cutover is also still being completed by AE EM. Costas therefore fails closed
-instead of repackaging the prior terminal-shaped batch.
+The packaged adapter now emits nine semantic Scenes accepted by the exact Electron validator. Every Scene has the
+nine ordered `shell.tab.*` handlers, one elastic layout region, and zero ANSI/box-drawing terminal text. HOME,
+DASHBOARD, LUCID, SCORES, METRICS, LOGS, STUDIO, and SETTINGS carry stable `run-<tab>` card identity; QUINE
+retains its canonical hosted Scene identity. The adapter's projector label still names the historical route, but
+closed structural evidence—not that informational string—controls admission.
 
 ---
 
@@ -831,7 +834,8 @@ AE EM / Butler / QUINE owners: return exactly one disposition bound to the Costa
 `e943c61bece7e6c8baa0e0fd4441f469b46bd59c`, CLI probe checkpoint
 `a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb`, chat navigation checkpoint
 `83eba5585b53b748ff1bae7f930deb3302597fdc`, RUN-UGUI consumer checkpoint
-`55fc59948c7cc5f94797d3214d1e33e8bd7d7958`, and this document hash:
+`55fc59948c7cc5f94797d3214d1e33e8bd7d7958`, structural UGUI admission checkpoint
+`c8a628d441d65fb311e780cb1dfbf8419bfd6217`, and this document hash:
 
 ```text
 ATTEST BUTLER-R1-INPUT
@@ -862,9 +866,11 @@ safety-state UI     e943c61bece7e6c8baa0e0fd4441f469b46bd59c
 CLI probe hardening a5cb4a304b1e70c5ab6cb6b705cdb775a7dd8bdb
 chat navigation     83eba5585b53b748ff1bae7f930deb3302597fdc
 RUN-UGUI consumer   55fc59948c7cc5f94797d3214d1e33e8bd7d7958
+UGUI admission      c8a628d441d65fb311e780cb1dfbf8419bfd6217
 ```
 
-Rollback RUN-UGUI consumer alignment by reverting `55fc59948`; rollback chat navigation separately by reverting
+Rollback structural UGUI admission by reverting `c8a628d44`; rollback RUN-UGUI consumer alignment separately by
+reverting `55fc59948`; rollback chat navigation separately by reverting
 `83eba5585`; rollback CLI probe hardening separately by reverting
 `a5cb4a304`; rollback safety-state UI separately by reverting `e943c61be`; rollback packaged evidence separately by reverting
 `f7835a87d`; rollback receipt UI separately by reverting `3cad87963`;

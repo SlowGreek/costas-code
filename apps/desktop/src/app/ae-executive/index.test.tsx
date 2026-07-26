@@ -26,15 +26,44 @@ function batch() {
   return {
     schema: 'ae-executive-scene-batch/1' as const,
     authority: 'none' as const,
-    projector: 'run::tui->ugui::project',
+    projector: 'ugui::executive->ugui::project',
     scenes: AE_EXECUTIVE_TAB_IDS.map(tab => ({
       tab,
       scene: {
         sceneVersion: '1.0.0' as const,
+        id: `run-${tab}`,
         root: `${tab}-root`,
         nodes: [
-          { id: `${tab}-root`, p: 'column' as const, kids: [`${tab}-text`] },
-          { id: `${tab}-text`, p: 'text' as const, a: { text: `RUN ${tab.toUpperCase()}`, size: 'l' } }
+          {
+            id: `${tab}-root`,
+            p: 'column' as const,
+            kids: [`${tab}-text`, `${tab}-elastic`, `${tab}-fixed`, `${tab}-tabs`]
+          },
+          { id: `${tab}-text`, p: 'text' as const, a: { text: `RUN ${tab.toUpperCase()}`, size: 'l' } },
+          {
+            id: `${tab}-elastic`,
+            p: 'image' as const,
+            a: { src: `asset://run/home/${tab}.svg`, alt: `${tab} semantic image` },
+            layout: { height: '*' as const }
+          },
+          {
+            id: `${tab}-fixed`,
+            p: 'text' as const,
+            a: { text: 'Fixed semantic status', size: 's' },
+            layout: { height: 1 }
+          },
+          {
+            id: `${tab}-tabs`,
+            p: 'row' as const,
+            kids: AE_EXECUTIVE_TABS.map(item => `${tab}-tab-${item.id}`)
+          },
+          ...AE_EXECUTIVE_TABS.map(item => ({
+            id: `${tab}-tab-${item.id}`,
+            p: 'button' as const,
+            a: { label: item.label, primary: item.id === tab, role: 'tab' },
+            on: { tap: `shell.tab.${item.id}` },
+            layout: { height: 1 }
+          }))
         ]
       }
     }))
@@ -85,6 +114,18 @@ describe('Rust UGUI Scene batch', () => {
 
     for (const row of value.scenes) {expect(validateExecutiveScene(row.scene)).toEqual([])}
   })
+
+  it('requires semantic card identity, layout intent, and one shared shell action row', () => {
+    const value = parseExecutiveBatch(batch())
+
+    for (const { scene, tab } of value.scenes) {
+      expect(scene.id).toBe(`run-${tab}`)
+      expect(scene.nodes.some(node => node.layout?.height === '*')).toBe(true)
+      expect(
+        scene.nodes.flatMap(node => Object.values(node.on ?? {})).filter(handler => handler.startsWith('shell.tab.'))
+      ).toEqual(AE_EXECUTIVE_TAB_IDS.map(id => `shell.tab.${id}`))
+    }
+  })
 })
 
 describe('AE executive workspace', () => {
@@ -104,6 +145,25 @@ describe('AE executive workspace', () => {
     expect(await screen.findByText('RUN QUINE')).toBeTruthy()
     expect(screen.queryByText('RUN HOME')).toBeNull()
     expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the UGUI shell actions as the only executive tab navigation', async () => {
+    const view = renderTab('home')
+    await screen.findByText('RUN HOME')
+
+    expect(view.container.querySelector('nav[aria-label="AgentExperiments executive tabs"]')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '[Q]UINE' })).toHaveLength(1)
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '[Q]UINE' })))
+    expect(await screen.findByText('RUN QUINE')).toBeTruthy()
+  })
+
+  it('realizes elastic and fixed Scene layout without tab-specific branches', async () => {
+    const view = renderTab('home')
+    await screen.findByText('RUN HOME')
+
+    expect(view.container.querySelector('[data-ugui-height="*"]')?.className).toContain('flex-1')
+    expect(view.container.querySelector('[data-ugui-height="1"]')?.className).toContain('shrink-0')
+    expect(screen.getByText('UGUI refusal · asset-catalog-unavailable · home semantic image')).toBeTruthy()
   })
 
   it('shows an explicit unavailable state instead of synthesizing content', async () => {

@@ -20,6 +20,16 @@ const artifacts = [
       path.join(aeRoot, 'run', 'src', 'tui.rs'),
       path.join(aeRoot, 'run', 'src', 'bin', 'ae-executive-scene.rs'),
       path.join(aeRoot, 'ugui', 'src', 'lib.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'executive.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'executive', 'dashboard_metrics.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'executive', 'lucid_logs.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'executive', 'quine_studio.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'executive', 'scores_settings.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'geom_scene.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'projection_action.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'projection_projector.rs'),
+      path.join(aeRoot, 'ugui', 'src', 'projection_section.rs'),
+      path.join(aeRoot, 'ugui', 'json', 'scene.schema.json'),
       path.join(aeRoot, 'quine', 'src', 'executive_applet.rs')
     ]
   },

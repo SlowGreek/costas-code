@@ -27,16 +27,33 @@ it('resolves only an existing exact override', () => {
   expect(resolveAeExecutiveBinary({ isPackaged: false, sourceRepoRoot: '/missing', override: `${file}.missing` })).toBeNull()
 })
 
-it('validates the closed ordered nine-scene batch', () => {
-  const scenes = AE_EXECUTIVE_TABS.map(tab => ({
-    tab,
-    scene: { sceneVersion: '1.0.0', root: `${tab}-root`, nodes: [{ id: `${tab}-root`, p: 'column', kids: [] }] }
+function semanticScene(tab: (typeof AE_EXECUTIVE_TABS)[number]) {
+  const tabNodes = AE_EXECUTIVE_TABS.map(id => ({
+    id: `${tab}-tab-${id}`,
+    p: 'button',
+    on: { tap: `shell.tab.${id}` },
+    layout: { height: 1 }
   }))
+
+  return {
+    sceneVersion: '1.0.0',
+    id: `run-${tab}`,
+    root: `${tab}-root`,
+    nodes: [
+      { id: `${tab}-root`, p: 'column', kids: [`${tab}-body`, ...tabNodes.map(node => node.id)] },
+      { id: `${tab}-body`, p: 'column', kids: [], layout: { height: '*' } },
+      ...tabNodes
+    ]
+  }
+}
+
+it('validates the closed ordered nine-scene semantic batch', () => {
+  const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
 
   const batch = validateAeExecutiveBatch({
     schema: 'ae-executive-scene-batch/1',
     authority: 'none',
-    projector: 'test',
+    projector: 'ugui::executive->ugui::project',
     scenes
   })
 
@@ -45,16 +62,13 @@ it('validates the closed ordered nine-scene batch', () => {
 
 describe('fail-closed batch validation', () => {
   it('rejects reordered and missing scenes', () => {
-    const scenes = AE_EXECUTIVE_TABS.map(tab => ({
-      tab,
-      scene: { sceneVersion: '1.0.0', root: tab, nodes: [{ id: tab, p: 'column' }] }
-    }))
+    const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
 
     expect(() =>
       validateAeExecutiveBatch({
         schema: 'ae-executive-scene-batch/1',
         authority: 'none',
-        projector: 'test',
+        projector: 'ugui::executive->ugui::project',
         scenes: [...scenes].reverse()
       })
     ).toThrow('ae-executive-batch-order')
@@ -62,9 +76,32 @@ describe('fail-closed batch validation', () => {
       validateAeExecutiveBatch({
         schema: 'ae-executive-scene-batch/1',
         authority: 'none',
-        projector: 'test',
+        projector: 'ugui::executive->ugui::project',
         scenes: scenes.slice(1)
       })
     ).toThrow('ae-executive-batch-cardinality')
+  })
+
+  it('rejects terminal-first and structurally non-semantic batches', () => {
+    const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
+    expect(() =>
+      validateAeExecutiveBatch({
+        schema: 'ae-executive-scene-batch/1',
+        authority: 'none',
+        projector: 'run::tui->ugui::project',
+        scenes
+      })
+    ).toThrow('ae-executive-batch-terminal-first')
+
+    const missingShell = structuredClone(scenes)
+    missingShell[0].scene.nodes = missingShell[0].scene.nodes.filter(node => !node.id.includes('-tab-'))
+    expect(() =>
+      validateAeExecutiveBatch({
+        schema: 'ae-executive-scene-batch/1',
+        authority: 'none',
+        projector: 'ugui::executive->ugui::project',
+        scenes: missingShell
+      })
+    ).toThrow('ae-executive-shell-actions')
   })
 })

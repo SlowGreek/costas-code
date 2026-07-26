@@ -50,6 +50,10 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
     throw new Error('ae-executive-batch-cardinality')
   }
 
+  if (typeof batch.projector !== 'string' || batch.projector.includes('run::tui->')) {
+    throw new Error('ae-executive-batch-terminal-first')
+  }
+
   const observed = batch.scenes.map(row => row?.tab)
 
   if (observed.some((tab, index) => tab !== AE_EXECUTIVE_TABS[index])) {
@@ -65,6 +69,26 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
     }
 
     if (scene.nodes.length === 0 || scene.nodes.length > 4096) {throw new Error('ae-executive-scene-bounds')}
+
+    const nodes = scene.nodes as Array<Record<string, unknown>>
+
+    const handlers = nodes
+      .flatMap(node => Object.values((node.on as Record<string, unknown> | undefined) ?? {}))
+      .filter(handler => typeof handler === 'string' && handler.startsWith('shell.tab.'))
+
+    const expectedHandlers = AE_EXECUTIVE_TABS.map(tab => `shell.tab.${tab}`)
+
+    if (handlers.length !== expectedHandlers.length || handlers.some((handler, index) => handler !== expectedHandlers[index])) {
+      throw new Error(`ae-executive-shell-actions:${row.tab}`)
+    }
+
+    if (typeof scene.id === 'string' && scene.id.startsWith('run-')) {
+      if (scene.id !== `run-${row.tab}`) {throw new Error(`ae-executive-card-identity:${row.tab}`)}
+
+      if (!nodes.some(node => (node.layout as Record<string, unknown> | undefined)?.height === '*')) {
+        throw new Error(`ae-executive-elastic-layout:${row.tab}`)
+      }
+    }
   }
 
   return batch as AeExecutiveSceneBatch

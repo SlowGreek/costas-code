@@ -20,11 +20,13 @@ export interface UgSceneNode {
   readonly p: UgScenePrimitive
   readonly a?: Readonly<Record<string, unknown>>
   readonly kids?: readonly string[]
+  readonly layout?: Readonly<{ height?: '*' | number }>
   readonly on?: Readonly<Record<string, string>>
 }
 
 export interface AeExecutiveScene {
   readonly sceneVersion: '1.0.0'
+  readonly id?: string
   readonly root: string
   readonly nodes: readonly UgSceneNode[]
   readonly receipt?: Readonly<Record<string, unknown>>
@@ -65,12 +67,71 @@ export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
     throw new Error('ae-executive-batch-schema')
   }
 
-  for (const row of batch.scenes) {
+  if (batch.projector?.includes('run::tui->') || batch.scenes.length !== 9) {
+    throw new Error('ae-executive-batch-terminal-first')
+  }
+
+  const orderedTabs: readonly AeExecutiveTabId[] = [
+    'home',
+    'dashboard',
+    'lucid',
+    'quine',
+    'scores',
+    'metrics',
+    'logs',
+    'studio',
+    'settings'
+  ]
+
+  for (const [index, row] of batch.scenes.entries()) {
     if (!row || typeof row !== 'object' || typeof row.tab !== 'string') {throw new Error('ae-executive-row-invalid')}
+
+    if (row.tab !== orderedTabs[index]) {throw new Error('ae-executive-batch-order')}
     validateExecutiveScene(row.scene)
+    validateSemanticExecutiveScene(row.scene, row.tab)
   }
 
   return batch as AeExecutiveSceneBatch
+}
+
+const EXECUTIVE_HANDLERS = [
+  'shell.tab.home',
+  'shell.tab.dashboard',
+  'shell.tab.lucid',
+  'shell.tab.quine',
+  'shell.tab.scores',
+  'shell.tab.metrics',
+  'shell.tab.logs',
+  'shell.tab.studio',
+  'shell.tab.settings'
+] as const
+
+function validateSemanticExecutiveScene(scene: AeExecutiveScene, tab: AeExecutiveTabId) {
+  const handlers = scene.nodes
+    .flatMap(node => Object.values(node.on ?? {}))
+    .filter(handler => handler.startsWith('shell.tab.'))
+
+  if (
+    handlers.length !== EXECUTIVE_HANDLERS.length ||
+    handlers.some((handler, index) => handler !== EXECUTIVE_HANDLERS[index])
+  ) {
+    throw new Error(`ae-executive-shell-actions:${tab}`)
+  }
+
+  const cardScene = scene.id?.startsWith('run-') === true
+
+  if (cardScene && scene.id !== `run-${tab}`) {throw new Error(`ae-executive-card-identity:${tab}`)}
+
+  if (cardScene && !scene.nodes.some(node => node.layout?.height === '*')) {
+    throw new Error(`ae-executive-elastic-layout:${tab}`)
+  }
+
+  for (const node of scene.nodes) {
+    const text = typeof node.a?.text === 'string' ? node.a.text : ''
+    const terminalShaped = text.includes(`${String.fromCharCode(27)}[`) || /[┌┐└┘├┤┬┴┼─│]/u.test(text)
+
+    if (terminalShaped) {throw new Error(`ae-executive-terminal-text:${tab}`)}
+  }
 }
 
 export function validateExecutiveScene(scene: AeExecutiveScene): readonly string[] {

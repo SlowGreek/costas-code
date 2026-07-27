@@ -89,13 +89,28 @@ jobs:
             exit 0
           fi
 
-          last=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/desktop-build.yml/runs?status=success&per_page=1" \
-            --jq '.workflow_runs[0].head_sha // ""')
+          # Ask what was actually BUILT, not what merely ran. A dispatch with
+          # platforms=macos succeeds with the same head_sha while the Windows
+          # job is skipped; matching on sha alone would then let tonight's
+          # schedule skip too, and that commit would never get a Windows
+          # artifact. So require a prior run whose mac AND windows jobs both
+          # concluded 'success'.
+          last=""
+          for run_id in $(gh api \
+            "repos/${{ github.repository }}/actions/workflows/desktop-build.yml/runs?status=success&per_page=10" \
+            --jq '.workflow_runs[].id'); do
+            complete=$(gh api "repos/${{ github.repository }}/actions/runs/$run_id/jobs" \
+              --jq '[.jobs[] | select(.name | test("macOS|Windows")) | .conclusion]
+                    | length == 2 and all(. == "success")')
+            if [ "$complete" = "true" ]; then
+              last=$(gh api "repos/${{ github.repository }}/actions/runs/$run_id" --jq .head_sha)
+              break
+            fi
+          done
 
           if [ "$last" = "${{ github.sha }}" ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::${GITHUB_SHA:0:8} already built successfully — skipping."
+            echo "::notice::${GITHUB_SHA:0:8} already built — nothing changed, skipping."
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
             echo "::notice::New commits since ${last:-'(no prior run)'} — building."

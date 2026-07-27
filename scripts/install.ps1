@@ -143,7 +143,16 @@ $PythonVersion = "3.11"
 # available, in preference order.  uv discovers both uv-managed and system
 # interpreters, so this list also matches a pre-existing system Python.  Single
 # source of truth shared by Test-Python's fallback and Resolve-AvailablePythonVersion.
-$PythonFallbackVersions = @("3.12", "3.13", "3.10")
+#
+# MUST stay inside pyproject.toml's `requires-python` (currently >=3.11,<3.14).
+# 3.10 used to be listed here, which made the installer happily build a venv on
+# an interpreter the project excludes: `uv venv` succeeds, then EVERY install
+# tier fails -- including "core only (no extras)" -- because the package's own
+# requires-python rejects 3.10.  The user just sees "Failed to install
+# hermes-agent package even with no extras", with the actual cause (an
+# unsupported interpreter) never named.  tests/test_install_ps1_python_supported_range.py
+# pins this list to requires-python so the two can't drift again.
+$PythonFallbackVersions = @("3.12", "3.13")
 $NodeVersion = "22"
 
 # Stage-protocol version.  Bumped only for genuinely breaking changes to the
@@ -688,9 +697,20 @@ function Test-Python {
                 $ErrorActionPreference = "Continue"
                 $sysVer = & python --version 2>&1
                 $ErrorActionPreference = $prevEAP2
-                if ($sysVer -match "Python 3\.(1[0-9]|[1-9][0-9])") {
-                    Write-Success "Using system Python: $sysVer"
-                    return $true
+                # Range-check against pyproject's requires-python (>=3.11,<3.14).
+                # The old pattern was `3\.(1[0-9]|[1-9][0-9])`, which accepted
+                # 3.10 (excluded) and 3.14+ (excluded, and with no wheels for
+                # the Rust transitives yet).  Accepting one of those produces a
+                # venv that every install tier then fails against, surfacing as
+                # "Failed to install hermes-agent package even with no extras"
+                # instead of naming the real problem.
+                if ($sysVer -match "Python 3\.(\d+)") {
+                    $sysMinor = [int]$Matches[1]
+                    if ($sysMinor -ge 11 -and $sysMinor -le 13) {
+                        Write-Success "Using system Python: $sysVer"
+                        return $true
+                    }
+                    Write-Warn "System Python ($sysVer) is outside the supported range (3.11-3.13); ignoring it."
                 }
             } catch {
                 if ($prevEAP2) { $ErrorActionPreference = $prevEAP2 }
@@ -2125,7 +2145,21 @@ except Exception:
         }
     }
     if (-not $installed) {
-        throw "Failed to install hermes-agent package even with no extras. Inspect the uv pip install output above."
+        # Name the most common real cause instead of only reporting the last
+        # tier's failure.  Every tier -- including "core only (no extras)" --
+        # fails identically when the venv's interpreter is outside pyproject's
+        # requires-python, because the failure is the package's own metadata
+        # gate, not a flaky transitive.  Reporting the interpreter turns an
+        # opaque "even with no extras" into an actionable message.
+        $venvVer = ""
+        try {
+            $venvPy = Join-Path $InstallDir "venv\Scripts\python.exe"
+            if (Test-Path $venvPy) {
+                $venvVer = (& $venvPy --version 2>&1) -join " "
+            }
+        } catch { }
+        $detail = if ($venvVer) { " The venv is using $venvVer; Hermes requires Python 3.11-3.13." } else { "" }
+        throw "Failed to install hermes-agent package even with no extras.$detail Inspect the uv pip install output above."
     }
 
     # Baseline-import gate. Even if a tier reported success above, the
@@ -3152,7 +3186,7 @@ function New-DesktopShortcuts {
                 $sc.TargetPath = $TargetExe
                 $sc.WorkingDirectory = $workDir
                 $sc.IconLocation = $iconLocation
-                $sc.Description = 'Catalyst — powered by Hermes Agent'
+                $sc.Description = 'Catalyst -- powered by Hermes Agent'
                 $sc.Save()
                 Write-Success "Shortcut created: $lnkPath"
             } catch {

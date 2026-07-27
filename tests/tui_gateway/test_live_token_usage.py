@@ -148,3 +148,44 @@ class TestLazyResumeInfoCarriesUsage:
         info = server._lazy_resume_info("/tmp", session_key="sess-1")
 
         assert "usage" not in info
+
+
+class TestToolCompleteEmitsUsage:
+    """The wiring, not just the helper.
+
+    The other tests here call ``_emit_usage_update`` directly, so they all keep
+    passing if the CALL SITE in ``_on_tool_complete`` is deleted — the mid-turn
+    counter would silently freeze again with a green suite. This pins the wiring
+    itself.
+    """
+
+    def test_tool_completion_pushes_a_usage_update(self, monkeypatch):
+        emitted = []
+        monkeypatch.setattr(server, "_emit", lambda ev, sid, payload=None: emitted.append(ev))
+        monkeypatch.setitem(server._sessions, "s9", {"agent": object()})
+        monkeypatch.setattr(server, "_session_usage_snapshot", lambda _s: {"input": 7, "total": 9})
+        # Isolate the usage emit from the tool.complete payload machinery.
+        monkeypatch.setattr(server, "_tool_progress_enabled", lambda _sid: False)
+        monkeypatch.setattr(server, "_tool_lifecycle_required_for_ui", lambda _n: False)
+
+        server._on_tool_complete("s9", "call-1", "terminal", {}, "ok")
+
+        assert "usage.update" in emitted, "tool completion no longer refreshes the token counter"
+
+    def test_usage_update_is_not_gated_on_tool_progress(self, monkeypatch):
+        """Turning OFF tool-progress display must not freeze the counter.
+
+        tool.complete is deliberately gated on that setting; the usage emit sits
+        after the gate precisely so the gauge stays live either way.
+        """
+        emitted = []
+        monkeypatch.setattr(server, "_emit", lambda ev, sid, payload=None: emitted.append(ev))
+        monkeypatch.setitem(server._sessions, "s10", {"agent": object()})
+        monkeypatch.setattr(server, "_session_usage_snapshot", lambda _s: {"input": 1, "total": 2})
+        monkeypatch.setattr(server, "_tool_progress_enabled", lambda _sid: False)
+        monkeypatch.setattr(server, "_tool_lifecycle_required_for_ui", lambda _n: False)
+
+        server._on_tool_complete("s10", "call-2", "terminal", {}, "ok")
+
+        assert "tool.complete" not in emitted
+        assert "usage.update" in emitted

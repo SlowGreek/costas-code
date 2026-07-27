@@ -14,10 +14,19 @@ type BrowserAudioContext = typeof AudioContext
 
 interface ElementAnalyser {
   analyser: AnalyserNode
+  source: MediaElementAudioSourceNode
 }
 
 const elementAnalysers = new WeakMap<HTMLAudioElement, ElementAnalyser>()
 let playbackAudioContext: AudioContext | null = null
+
+// Number of live waveform renderers. A MediaElementSource permanently binds an
+// element to the context that created it, so the context itself must outlive
+// any single playback — but it must NOT stay `running` while nothing is being
+// drawn. A running context holds the CoreAudio output device open, which keeps
+// `coreaudiod` asserting PreventUserIdleSystemSleep against BuiltInSpeakerDevice
+// for the life of the app. Suspending on the last release drops that assertion.
+let activeAnalyserConsumers = 0
 
 function getPlaybackAudioContext(): AudioContext | null {
   if (playbackAudioContext && playbackAudioContext.state !== 'closed') {
@@ -34,6 +43,22 @@ function getPlaybackAudioContext(): AudioContext | null {
   playbackAudioContext = new AudioContextCtor()
 
   return playbackAudioContext
+}
+
+function releasePlaybackAudioContext() {
+  activeAnalyserConsumers = Math.max(0, activeAnalyserConsumers - 1)
+
+  if (activeAnalyserConsumers > 0) {
+    return
+  }
+
+  const context = playbackAudioContext
+
+  if (!context || context.state !== 'running') {
+    return
+  }
+
+  void context.suspend().catch(() => undefined)
 }
 
 function formatElapsed(seconds: number) {
@@ -85,10 +110,11 @@ function getElementAnalyser(audioElement: HTMLAudioElement): ElementAnalyser | n
     analyser.smoothingTimeConstant = 0.65
     source.connect(analyser)
     analyser.connect(context.destination)
-    entry = { analyser }
+    entry = { analyser, source }
     elementAnalysers.set(audioElement, entry)
   }
 
+  activeAnalyserConsumers += 1
   void playbackAudioContext?.resume()
 
   return entry
@@ -102,7 +128,7 @@ const STEP = BAR_W + BAR_GAP
 const BARS = Math.floor((WAVE_W + BAR_GAP) / STEP)
 const X0 = Math.round((WAVE_W - (BARS * STEP - BAR_GAP)) / 2)
 
-function PlaybackWaveform({ audioElement }: { audioElement: HTMLAudioElement | null }) {
+export function PlaybackWaveform({ audioElement }: { audioElement: HTMLAudioElement | null }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -113,9 +139,18 @@ function PlaybackWaveform({ audioElement }: { audioElement: HTMLAudioElement | n
     }
 
     const entry = getElementAnalyser(audioElement)
+
+    if (!entry) {
+      return
+    }
+
     const ctx = canvas.getContext('2d')
 
-    if (!entry || !ctx) {
+    if (!ctx) {
+      // The consumer count was already incremented by getElementAnalyser, so
+      // bailing out here must release it or the context never suspends again.
+      releasePlaybackAudioContext()
+
       return
     }
 
@@ -133,8 +168,18 @@ function PlaybackWaveform({ audioElement }: { audioElement: HTMLAudioElement | n
     ctx.fillStyle = getComputedStyle(canvas).color
 
     let raf = 0
+    let stopped = false
 
     const tick = () => {
+      // A paused/ended element produces a flat spectrum forever. Parking the
+      // loop here (instead of re-arming at 60Hz for the life of the app) is
+      // what lets the renderer actually go idle between utterances.
+      if (stopped || audioElement.paused || audioElement.ended) {
+        raf = 0
+
+        return
+      }
+
       analyser.getByteFrequencyData(buf)
       ctx.clearRect(0, 0, WAVE_W, WAVE_H)
 
@@ -155,9 +200,25 @@ function PlaybackWaveform({ audioElement }: { audioElement: HTMLAudioElement | n
       raf = requestAnimationFrame(tick)
     }
 
+    const start = () => {
+      if (stopped || raf !== 0) {
+        return
+      }
+
+      raf = requestAnimationFrame(tick)
+    }
+
+    audioElement.addEventListener('play', start)
+    audioElement.addEventListener('playing', start)
     tick()
 
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      audioElement.removeEventListener('play', start)
+      audioElement.removeEventListener('playing', start)
+      releasePlaybackAudioContext()
+    }
   }, [audioElement])
 
   return <canvas aria-hidden="true" className="block h-4 w-[88px]" ref={canvasRef} />

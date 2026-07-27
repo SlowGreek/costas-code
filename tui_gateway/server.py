@@ -9654,11 +9654,30 @@ def _(rid, params: dict) -> dict:
             parent_session_id=old_key,
             cwd=_session_cwd(session),
         )
+        from agent.turn_context import extract_api_content_sidecar
+
         for msg in history:
+            # Full-fidelity copy. Persisting only role/content/timestamp made a
+            # branch look "shrunk": tool calls lost their linkage, reasoning was
+            # dropped, and — because the api_content sidecar went missing — the
+            # branch's first turn paid a full cold prefill instead of replaying
+            # the parent's exact wire bytes against a warm provider cache.
+            # Mirrors the CLI branch path (hermes_cli/cli_commands_mixin.py).
             db.append_message(
                 session_id=new_key,
                 role=msg.get("role", "user"),
                 content=msg.get("content"),
+                tool_name=msg.get("tool_name") or msg.get("name"),
+                tool_calls=msg.get("tool_calls"),
+                tool_call_id=msg.get("tool_call_id"),
+                reasoning=msg.get("reasoning"),
+                reasoning_content=msg.get("reasoning_content"),
+                reasoning_details=msg.get("reasoning_details"),
+                codex_reasoning_items=msg.get("codex_reasoning_items"),
+                codex_message_items=msg.get("codex_message_items"),
+                display_kind=msg.get("display_kind"),
+                display_metadata=msg.get("display_metadata"),
+                api_content=extract_api_content_sidecar(msg),
                 timestamp=msg.get("timestamp"),
             )
         db.set_session_title(new_key, title)

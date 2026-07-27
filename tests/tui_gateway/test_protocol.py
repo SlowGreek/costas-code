@@ -1349,6 +1349,96 @@ def test_session_branch_forwards_original_timestamps(server, monkeypatch):
     assert [c.get("timestamp") for c in append_calls] == original_ts
 
 
+def test_session_branch_copies_full_message_fidelity(server, monkeypatch):
+    """TUI /branch must copy a message's STRUCTURE, not just its text.
+
+    The branch previously persisted role/content/timestamp only, so a branched
+    session lost tool-call linkage and reasoning: an assistant row's
+    tool_calls, the matching tool result's tool_call_id/tool_name, and any
+    reasoning payload were all dropped at INSERT. The transcript still *read*
+    correctly, which is why it went unnoticed — but the model was handed a
+    conversation whose tool structure no longer existed, and the user sees a
+    branch whose context has visibly shrunk.
+    """
+    append_calls = []
+
+    class _DB:
+        def get_session_title(self, _key):
+            return "parent-title"
+
+        def get_next_title_in_lineage(self, base):
+            return f"{base} 2"
+
+        def create_session(self, new_key, **kwargs):
+            return new_key
+
+        def append_message(self, **kwargs):
+            append_calls.append(kwargs)
+            return None
+
+        def set_session_title(self, _key, _title):
+            return None
+
+    monkeypatch.setattr(server, "_get_db", lambda: _DB())
+    monkeypatch.setattr(server, "_resolve_model", lambda: "test/model")
+    monkeypatch.setattr(server, "_new_session_key", lambda: "20260101_000001_child9")
+    monkeypatch.setattr(
+        server,
+        "_make_agent",
+        lambda _sid, key, session_id=None, session_db=None, **_kwargs: types.SimpleNamespace(
+            model="test/model", session_id=session_id or key
+        ),
+    )
+    monkeypatch.setattr(server, "_init_session", lambda *_a, **_k: None)
+    monkeypatch.setattr(server, "_set_session_context", lambda *_a, **_k: [])
+    monkeypatch.setattr(server, "_clear_session_context", lambda *_a, **_k: None)
+    monkeypatch.setattr(server, "_session_cwd", lambda _s: "/tmp/branch-cwd")
+
+    tool_calls = [{"id": "call_1", "function": {"name": "terminal", "arguments": "{}"}}]
+    parent_sid = "parent09"
+    server._sessions[parent_sid] = {
+        "session_key": "20260101_000000_parent9",
+        "history": [
+            {"role": "user", "content": "run it", "timestamp": 1.0},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "reasoning": "thinking about it",
+                "codex_reasoning_items": [{"type": "reasoning"}],
+                "timestamp": 2.0,
+            },
+            {
+                "role": "tool",
+                "content": "ok",
+                "tool_call_id": "call_1",
+                "tool_name": "terminal",
+                "timestamp": 3.0,
+            },
+        ],
+        "history_lock": threading.Lock(),
+        "cols": 80,
+    }
+
+    resp = server.handle_request(
+        {"id": "b9", "method": "session.branch", "params": {"session_id": parent_sid}}
+    )
+
+    assert "error" not in resp, resp
+    assert len(append_calls) == 3
+
+    assistant = append_calls[1]
+    assert assistant["tool_calls"] == tool_calls, "assistant tool_calls dropped"
+    assert assistant["reasoning"] == "thinking about it", "reasoning dropped"
+    assert assistant["codex_reasoning_items"] == [{"type": "reasoning"}]
+
+    # Without the id/name the result cannot be paired with the call that made
+    # it — the branch keeps the text but loses the conversation's shape.
+    result = append_calls[2]
+    assert result["tool_call_id"] == "call_1", "tool_call_id dropped"
+    assert result["tool_name"] == "terminal", "tool_name dropped"
+
+
 def test_persist_branch_seed_forwards_original_timestamps(server, monkeypatch):
     """First-turn branch seed persist must carry each copied message's
     original timestamp through to append_message (#28841)."""

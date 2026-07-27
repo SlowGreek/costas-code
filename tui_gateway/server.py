@@ -4380,6 +4380,36 @@ def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result
         pass
     if _tool_progress_enabled(sid) or payload.get("inline_diff") or _tool_lifecycle_required_for_ui(name):
         _emit("tool.complete", sid, payload)
+    # Live token counter. `session.info` only fires in the turn-end `finally`,
+    # so a long multi-tool turn froze the status bar's context gauge at the
+    # value it had BEFORE the turn started, then jumped at the end. Every tool
+    # call is preceded by an API response that already updated the agent's
+    # usage counters, so this is a real measurement, not an estimate. Emitted
+    # ungated (unlike tool.complete above, which respects the tool-progress
+    # display setting) because the counter must stay live regardless of whether
+    # the user wants tool chatter.
+    _emit_usage_update(sid)
+
+
+def _emit_usage_update(sid: str) -> None:
+    """Push a mid-turn usage snapshot to the UI.
+
+    Deliberately a separate lightweight event rather than a full
+    ``session.info``: session.info carries model/tools/skills/cwd/title and the
+    desktop reacts to those fields (re-arming busy state, adopting model
+    defaults), so replaying it mid-turn risks clobbering live turn state. This
+    carries usage only.
+    """
+    session = _sessions.get(sid)
+    if session is None:
+        return
+    try:
+        usage = _session_usage_snapshot(session)
+    except Exception:
+        logger.debug("usage snapshot failed", exc_info=True)
+        return
+    if usage:
+        _emit("usage.update", sid, {"usage": usage})
 
 
 def _on_tool_progress(
@@ -6485,7 +6515,48 @@ def _(rid, params: dict) -> dict:
         return _ok(rid, {"verification": {"status": "unknown", "evidence": None}})
 
 
-def _lazy_resume_info(cwd: str, *, model: str = "", provider: str = "") -> dict:
+def _stored_usage_for_session(session_key: str) -> dict:
+    """Historical token usage for a session that has no live agent yet.
+
+    A freshly-constructed AIAgent zeroes its ``session_*_tokens`` counters
+    (run_agent.py), so a resumed or branched session reported 0 tokens until
+    its first turn completed — even with hundreds of messages of real history
+    behind it. The per-session totals are already persisted on the sessions
+    row, so seed the gauge from there.
+
+    Returns the ``_get_usage`` shape (minus the context gauge, which needs a
+    live compressor) so the desktop's usage merge is a no-op on unknown keys.
+    """
+    if not str(session_key or "").strip():
+        return {}
+    try:
+        from hermes_state import SessionDB
+
+        record = SessionDB().get_session(session_key)
+    except Exception:
+        logger.debug("stored usage lookup failed", exc_info=True)
+        return {}
+    if not record:
+        return {}
+    inp = int(record.get("input_tokens") or 0)
+    out = int(record.get("output_tokens") or 0)
+    if not (inp or out):
+        return {}
+    return {
+        "input": inp,
+        "output": out,
+        "prompt": inp,
+        "completion": out,
+        "reasoning": int(record.get("reasoning_tokens") or 0),
+        "total": inp + out,
+        "calls": int(record.get("api_call_count") or 0),
+        "model": str(record.get("model") or ""),
+    }
+
+
+def _lazy_resume_info(
+    cwd: str, *, model: str = "", provider: str = "", session_key: str = ""
+) -> dict:
     """session.info for a not-yet-built session (the shape session.create
     returns). tools/skills land later when the deferred build emits session.info."""
     info = {
@@ -6501,6 +6572,12 @@ def _lazy_resume_info(cwd: str, *, model: str = "", provider: str = "") -> dict:
     }
     if provider:
         info["provider"] = provider
+    # Seed the token counter from persisted totals so a resumed/branched/
+    # subagent session shows its real usage immediately instead of 0 until the
+    # first turn lands.
+    stored = _stored_usage_for_session(session_key)
+    if stored:
+        info["usage"] = stored
     return info
 
 
@@ -6750,7 +6827,7 @@ def _(rid, params: dict) -> dict:
                 "resumed": target,
                 "message_count": len(messages),
                 "messages": messages,
-                "info": _lazy_resume_info(cwd),
+                "info": _lazy_resume_info(cwd, session_key=target),
                 "inflight": None,
                 "running": child_running,
                 "session_key": target,
@@ -6837,6 +6914,7 @@ def _(rid, params: dict) -> dict:
                     cwd,
                     model=model_override.get("model") or "",
                     provider=overrides.get("provider_override") or "",
+                    session_key=target,
                 ),
                 "inflight": None,
                 "running": False,

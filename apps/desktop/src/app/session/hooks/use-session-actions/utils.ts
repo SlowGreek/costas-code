@@ -540,7 +540,7 @@ export async function resolveSessionProfile(storedSessionId: null | string): Pro
 type SessionRuntimeStatePatch = Partial<
   Pick<
     ClientSessionState,
-    'branch' | 'cwd' | 'fast' | 'model' | 'personality' | 'provider' | 'reasoningEffort' | 'serviceTier' | 'yolo'
+    'branch' | 'cwd' | 'fast' | 'model' | 'personality' | 'provider' | 'reasoningEffort' | 'serviceTier' | 'usage' | 'yolo'
   >
 >
 
@@ -609,6 +609,11 @@ export function applyRuntimeInfo(info: SessionRuntimeInfo | undefined): SessionR
 
   if (info.usage) {
     setCurrentUsage(current => ({ ...current, ...info.usage }))
+    // Also seed the per-session twin. Callers spread the returned sessionState
+    // into updateSessionState, and the statusbar reads THAT for focused tiles —
+    // setting only the global mirror left a resumed/branched session's tile
+    // reading 0 tokens until its first turn completed.
+    sessionState.usage = { calls: 0, input: 0, output: 0, total: 0, ...info.usage }
   }
 
   return sessionState

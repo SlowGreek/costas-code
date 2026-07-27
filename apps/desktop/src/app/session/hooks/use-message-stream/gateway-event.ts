@@ -603,6 +603,24 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
             setCurrentUsage(current => ({ ...current, ...payload.usage }))
           }
         }
+      } else if (event.type === 'usage.update') {
+        // Mid-turn token counter. The backend emits this after every tool call
+        // so the context gauge tracks a long turn live instead of freezing at
+        // its pre-turn value and jumping at message.complete. Same write shape
+        // as the message.complete branch below — per-session twin first (the
+        // statusbar reads it for focused tiles), then the primary-only global
+        // mirror, gated on isActiveEvent so a background session's turn can't
+        // overwrite the focused session's count.
+        if (payload?.usage && sessionId) {
+          updateSessionState(sessionId, state => ({
+            ...state,
+            usage: { calls: 0, input: 0, output: 0, total: 0, ...state.usage, ...payload.usage }
+          }))
+
+          if (isActiveEvent) {
+            setCurrentUsage(current => ({ ...current, ...payload.usage }))
+          }
+        }
       } else if (event.type === 'session.title') {
         // Live auto-title push (titler runs async, after the turn's refresh).
         const storedId = typeof payload?.session_id === 'string' ? payload.session_id : ''

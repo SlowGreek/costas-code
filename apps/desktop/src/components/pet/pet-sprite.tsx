@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 
+import { startPausableRaf } from '@/lib/raf-visibility'
 import { $petState, type PetInfo, type PetState } from '@/store/pet'
 
 const DEFAULT_FRAME_W = 192
@@ -174,7 +175,6 @@ function PetSpriteImpl({ info, zoom = 1, stateOverride, rowOverride }: PetSprite
       stateRef.current = next
     })
 
-    let raf = 0
     let frame = 0
     let lastStep = performance.now()
     let drawnFrame = -1
@@ -255,13 +255,15 @@ function PetSpriteImpl({ info, zoom = 1, stateOverride, rowOverride }: PetSprite
         drawnRow = row
       }
 
-      raf = requestAnimationFrame(render)
     }
 
-    raf = requestAnimationFrame(render)
+    // Park while the window is hidden/occluded. The redraw guard above already
+    // skips ~90% of canvas work, but the LOOP itself still woke the GPU 60x a
+    // second with nothing on screen — that is the ~34% idle GPU cost.
+    const loop = startPausableRaf({ tick: render })
 
     return () => {
-      cancelAnimationFrame(raf)
+      loop.stop()
       unsubState()
     }
   }, [image, frameW, frameH, frames, framesByState, framesByRow, loopMs, drawW, drawH, rows])

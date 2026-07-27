@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 
+import { startPausableRaf } from '@/lib/raf-visibility'
+
 /**
  * Canvas hatch celebration layered over a freshly revealed pet: a one-shot
  * sunburst of rotating god-rays, a fast radial star burst (confetti physics —
@@ -124,13 +126,11 @@ export function PetStarShower() {
 
     const rays = { life: 0, ttl: 0.9, rot: Math.random() * 6.28 }
 
-    let raf = 0
     let last = performance.now()
     let acc = 0
     let raysAlive = true
 
     const tick = (now: number) => {
-      raf = requestAnimationFrame(tick)
       const ms = now - last
       last = now
       const dt = Math.min(0.05, ms / 1000)
@@ -229,10 +229,11 @@ export function PetStarShower() {
       ctx.globalCompositeOperation = 'source-over'
     }
 
-    raf = requestAnimationFrame(tick)
+    // A particle shower nobody can see is pure GPU burn.
+    const loop = startPausableRaf({ tick })
 
     return () => {
-      cancelAnimationFrame(raf)
+      loop.stop()
       ro.disconnect()
     }
   }, [])

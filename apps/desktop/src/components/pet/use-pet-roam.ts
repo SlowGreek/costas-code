@@ -1,5 +1,6 @@
 import { type RefObject, useEffect } from 'react'
 
+import { startPausableRaf } from '@/lib/raf-visibility'
 import { $petMotion, $petRoamDir, type PetState } from '@/store/pet'
 
 import { chooseMove, dwellMs, PAUSE_DWELL, pickStrollTarget } from './roam-behavior'
@@ -113,7 +114,6 @@ export function usePetRoam({
     let phase: Phase = 'pause'
     let pauseUntil = performance.now() + rand(400, 1200)
     let last = performance.now()
-    let raf = 0
 
     let walkTargetX = cur.x
     let curLedge: Ledge | null = null
@@ -223,8 +223,9 @@ export function usePetRoam({
         // Short settle so the pet falls right after you drop it, not seconds later.
         pauseUntil = now + DROP_SETTLE_MS
         signal(null, 0)
-        raf = requestAnimationFrame(step)
 
+        // The pausable loop re-arms itself; returning here just skips the rest
+        // of this frame.
         return
       }
 
@@ -300,13 +301,13 @@ export function usePetRoam({
         }
       }
 
-      raf = requestAnimationFrame(step)
     }
 
-    raf = requestAnimationFrame(step)
+    // Roaming while the window is hidden animates a pet nobody can see.
+    const loop = startPausableRaf({ tick: step })
 
     return () => {
-      cancelAnimationFrame(raf)
+      loop.stop()
       signal(null, 0)
       // Hand the final position back to React so its `style` matches the DOM once
       // the loop stops re-asserting it.

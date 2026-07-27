@@ -1,5 +1,7 @@
 import { type CSSProperties, useEffect, useRef } from 'react'
 
+import { startPausableRaf } from '@/lib/raf-visibility'
+
 import eggSheetUrl from './pet-egg-sheet.png'
 
 /**
@@ -161,7 +163,6 @@ export function PixelEggSprite({ mode, size, index = 0, className, style, onDone
       ctx.drawImage(off, 0, 0, FRAME, FRAME, 0, 0, dim, dim)
     }
 
-    let raf = 0
     let step = 0
     let finished = false
     // bounce: `nextAt` is when the next thing happens — the next bounce frame, or
@@ -171,7 +172,6 @@ export function PixelEggSprite({ mode, size, index = 0, className, style, onDone
     let lastHatch = 0
 
     const tick = (now: number) => {
-      raf = requestAnimationFrame(tick)
 
       if (!sheet) {
         return
@@ -242,10 +242,11 @@ export function PixelEggSprite({ mode, size, index = 0, className, style, onDone
       nextAt = now + frameMs
     }
 
-    raf = requestAnimationFrame(tick)
+    // Same idle-GPU cost as the other pet sprites.
+    const loop = startPausableRaf({ tick })
 
     return () => {
-      cancelAnimationFrame(raf)
+      loop.stop()
     }
   }, [mode, size, index])
 

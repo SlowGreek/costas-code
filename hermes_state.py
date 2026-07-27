@@ -208,6 +208,21 @@ def _delete_delegate_children(conn, parent_ids: List[str]) -> List[str]:
 
 T = TypeVar("T")
 
+def default_db_path() -> Path:
+    """Resolve the session DB path at CALL time, not import time.
+
+    A module-level constant freezes whatever HERMES_HOME happened to be when
+    this module was first imported. pytest's autouse isolation fixture
+    redirects HERMES_HOME per test, but that runs *after* import — so a
+    ``SessionDB()`` with no explicit path wrote to the developer's real
+    ``~/.hermes/state.db``, and test fixtures showed up in their session list.
+    """
+    return get_hermes_home() / "state.db"
+
+
+# Backwards-compatible alias. Deliberately still evaluated at import for the
+# handful of callers that compare against it; new code should call
+# ``default_db_path()`` so it tracks HERMES_HOME.
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
 SCHEMA_VERSION = 23
@@ -1608,7 +1623,9 @@ class SessionDB:
     _IMPORT_MAX_TOTAL_BYTES = 25 * 1024 * 1024
 
     def __init__(self, db_path: Path = None, read_only: bool = False):
-        self.db_path = db_path or DEFAULT_DB_PATH
+        # Resolve lazily so a redirected HERMES_HOME (pytest isolation, a
+        # profile switch) is honoured instead of whatever was current at import.
+        self.db_path = db_path or default_db_path()
         self.read_only = read_only
 
         self._lock = threading.Lock()

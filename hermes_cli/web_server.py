@@ -1630,12 +1630,12 @@ def _count_status_active_sessions() -> int:
     connection so /api/status never tries to initialise or migrate state.db
     while another Hermes process is writing to it.
     """
-    from hermes_state import DEFAULT_DB_PATH, SessionDB
+    from hermes_state import SessionDB, default_db_path
 
     # read_only opens require the DB to already exist (see SessionDB.__init__
     # read_only contract) — on a fresh install every /api/status poll would
     # otherwise pay an OperationalError until the first session is written.
-    if not DEFAULT_DB_PATH.exists():
+    if not default_db_path().exists():
         return 0
 
     db = SessionDB(read_only=True)

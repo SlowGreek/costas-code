@@ -37,10 +37,11 @@ function executable(name = 'ae-executive-scene') {
   return file
 }
 
-it('resolves only an existing exact override', () => {
+it('resolves only the selected immutable generation executable', () => {
   const file = executable()
-  expect(resolveAeExecutiveBinary({ isPackaged: false, sourceRepoRoot: '/missing', override: file })).toBe(file)
-  expect(resolveAeExecutiveBinary({ isPackaged: false, sourceRepoRoot: '/missing', override: `${file}.missing` })).toBeNull()
+  expect(resolveAeExecutiveBinary({ generationRoot: path.dirname(file) })).toBe(file)
+  fs.rmSync(file)
+  expect(resolveAeExecutiveBinary({ generationRoot: path.dirname(file) })).toBeNull()
 })
 
 function semanticScene(tab: string, tabs: readonly string[] = AE_EXECUTIVE_TABS) {

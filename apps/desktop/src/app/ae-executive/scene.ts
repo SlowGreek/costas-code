@@ -55,6 +55,10 @@ export function loadExecutiveScenes(): Promise<AeExecutiveSceneBatch> {
   return batchPromise
 }
 
+export function loadFreshExecutiveScenes(): Promise<AeExecutiveSceneBatch> {
+  return window.hermesDesktop.getAeExecutiveScenes().then(parseExecutiveBatch)
+}
+
 export function resetExecutiveScenesForTests() {
   batchPromise = null
 }

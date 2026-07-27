@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { listPackage } from '@electron/asar'
 
@@ -322,6 +323,44 @@ function validateBundle() {
   if (!stamp.branch || typeof stamp.branch !== 'string') {
     die(`install-stamp.json is missing the branch field: ${JSON.stringify(stamp)}`)
   }
+
+  const aeStore = path.join(APP.resourcesPath, 'ae')
+  const currentPath = path.join(aeStore, 'CURRENT.json')
+  if (!exists(currentPath)) die(`Missing immutable AE CURRENT.json: ${currentPath}`)
+  const current = JSON.parse(fs.readFileSync(currentPath, 'utf8'))
+  if (
+    current.schema !== 'costas-ae-current/1' ||
+    !/^sha256:[0-9a-f]{64}$/.test(current.generation_id || '') ||
+    !/^sha256:[0-9a-f]{64}$/.test(current.manifest_sha256 || '')
+  ) die(`Malformed immutable AE CURRENT.json: ${JSON.stringify(current)}`)
+  const generationName = current.generation_id.slice('sha256:'.length)
+  const generation = path.join(aeStore, 'generations', generationName)
+  const manifestPath = path.join(generation, 'generation.json')
+  if (!exists(manifestPath)) die(`Selected AE generation is missing: ${manifestPath}`)
+  const manifestBytes = fs.readFileSync(manifestPath)
+  const manifestHash = `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`
+  if (manifestHash !== current.manifest_sha256) die('Packaged AE generation manifest hash mismatch')
+  const aeRootEntries = fs.readdirSync(aeStore).sort()
+  const generationEntries = fs.readdirSync(path.join(aeStore, 'generations')).sort()
+  if (JSON.stringify(aeRootEntries) !== JSON.stringify(['CURRENT.json', 'generations'])) {
+    die(`Packaged AE store contains unselected files: ${aeRootEntries.join(',')}`)
+  }
+  if (JSON.stringify(generationEntries) !== JSON.stringify([generationName])) {
+    die(`Packaged AE store contains more than the selected generation: ${generationEntries.join(',')}`)
+  }
+  const producer = path.join(
+    generation,
+    PLATFORM === 'win32' ? 'ae-executive-scene.exe' : 'ae-executive-scene'
+  )
+  const producerRun = spawnSync(producer, [], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 15_000 })
+  if (producerRun.error || producerRun.status !== 0) die('Packaged AE executive producer smoke failed')
+  const producerOutput = JSON.parse(producerRun.stdout)
+  if (
+    producerOutput.schema !== 'ae-executive-scene-batch/1' ||
+    producerOutput.authority !== 'none' ||
+    !Array.isArray(producerOutput.scenes) ||
+    producerOutput.scenes.length < 1
+  ) die('Packaged AE executive producer emitted an invalid envelope')
 
   // Positive assertion: node-pty native deps shipped
   const native = expectedNativeDepPaths()

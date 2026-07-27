@@ -31,6 +31,7 @@ import {
 import nodePty from 'node-pty'
 
 import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executive'
+import { resolveAeGenerationRoot } from './ae-generation'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
@@ -404,7 +405,9 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 
 const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
-const AE_RUNTIME_BIN = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
+const AE_STORE_ROOT = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
+const AE_GENERATION = resolveAeGenerationRoot(AE_STORE_ROOT)
+const AE_RUNTIME_BIN = AE_GENERATION.root
 const LUCID_BUTLER_PATH = path.join(AE_RUNTIME_BIN, process.platform === 'win32' ? 'butler.exe' : 'butler')
 const renderProfilePreferences = new RenderProfilePreferenceStore(path.join(RESOLVED_USER_DATA, 'render-profiles.json'))
 
@@ -8710,12 +8713,7 @@ function createWindow() {
 }
 
 ipcMain.handle('hermes:ae-executive:scenes', async () => {
-  const binary = resolveAeExecutiveBinary({
-    isPackaged: IS_PACKAGED,
-    resourcesPath: process.resourcesPath,
-    sourceRepoRoot: SOURCE_REPO_ROOT,
-    override: process.env.HERMES_DESKTOP_AE_EXECUTIVE_BINARY
-  })
+  const binary = resolveAeExecutiveBinary({ generationRoot: AE_RUNTIME_BIN })
 
   if (!binary) {
     throw new Error('ae-executive-projector-unavailable')
@@ -8735,11 +8733,7 @@ ipcMain.handle('hermes:ugui-skins:catalog', () => {
 })
 
 ipcMain.handle('hermes:ugui-skins:settings-scene', (_event, request) => {
-  const binary = resolveSkinSettingsBinary({
-    appRoot: APP_ROOT,
-    isPackaged: IS_PACKAGED,
-    resourcesPath: process.resourcesPath
-  })
+  const binary = resolveSkinSettingsBinary(AE_RUNTIME_BIN)
 
   if (!binary) {throw new Error('skin-settings-projector-unavailable')}
 

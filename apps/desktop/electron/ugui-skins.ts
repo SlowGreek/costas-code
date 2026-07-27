@@ -259,6 +259,16 @@ const firstNumber = (value: string | undefined, fallback = 0): number => {
 const numberList = (value: string | undefined): number[] =>
   value ? [...value.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0])).filter(Number.isFinite) : []
 
+const normalizedEasing = (value: string | undefined): string => {
+  const first = (value ?? 'linear').split(';', 1)[0].trim()
+  const candidate = first.includes(':') ? first.slice(first.indexOf(':') + 1).trim() : first
+
+  return candidate.length <= 128 &&
+    /^(?:linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end|cubic-bezier\([-0-9., ]+\)|steps\([0-9A-Za-z, -]+\))$/.test(candidate)
+    ? candidate
+    : 'linear'
+}
+
 function borderModel(binding: Binding['border-model']): HermesRenderProfile['axes']['border']['model'] {
   if (binding.bevel || binding['raised-delta'] || binding['sunken-delta']) {return 'bevel'}
 
@@ -330,7 +340,7 @@ export function normalizeUguiSkinBinding(value: UguiSkinBinding): HermesRenderPr
       motion: {
         mode: b.motion.none !== undefined ? 'instant' : 'animated',
         durations_ms: durations.length ? durations : [0],
-        easing: b.motion['easing-set'] ?? 'linear'
+        easing: normalizedEasing(b.motion['easing-set'])
       },
       chrome: {
         frame: frameModel(b.chrome['window-frame']),

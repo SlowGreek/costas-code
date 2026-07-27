@@ -6,6 +6,7 @@ export const AE_EXECUTIVE_TAB_IDS = [
   'scores',
   'metrics',
   'logs',
+  'github',
   'studio',
   'settings',
   'marketplace',
@@ -83,6 +84,14 @@ export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
     route: '/ae/logs',
     icon: 'output',
     summary: 'Bounded operational journal and fault evidence.'
+  },
+  {
+    id: 'github',
+    label: '[G]ITHUB',
+    mnemonic: 'G',
+    route: '/ae/github',
+    icon: 'github',
+    summary: 'Fixture-backed repository intent shelf and held realization pipeline.'
   },
   {
     id: 'studio',

@@ -70,6 +70,19 @@ describe('UGUI generated skin catalog admission', () => {
     }
   })
 
+  it('normalizes every generated easing set to one bounded CSS value', () => {
+    const profiles = loadUguiSkinCatalog(bindingsDir).profiles.map(normalizeUguiSkinBinding)
+
+    for (const profile of profiles) {
+      expect(profile.axes.motion.easing, profile.id).not.toMatch(/[;{}]/)
+      expect(profile.axes.motion.easing.length, profile.id).toBeLessThanOrEqual(128)
+    }
+
+    expect(profiles.find(profile => profile.id === 'carbon')?.axes.motion.easing).toBe(
+      'cubic-bezier(0.2,0,0.38,0.9)'
+    )
+  })
+
   it('rejects hand-shaped, incomplete, and authority-expanding bindings', () => {
     const catalog = loadUguiSkinCatalog(bindingsDir)
     const source = catalog.profiles.find(profile => profile.id === 'windows-95')!

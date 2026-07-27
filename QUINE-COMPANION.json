@@ -1,0 +1,55 @@
+{
+  "$schema": "quine-companion/v1",
+  "watched_roots": [
+    "apps/desktop/src",
+    "apps/desktop/electron",
+    "apps/desktop/scripts",
+    "apps/desktop/package.json",
+    "apps/desktop/tsconfig.json",
+    "apps/desktop/tsconfig.electron.json",
+    "apps/desktop/tsconfig.e2e.json",
+    "apps/desktop/vite.config.ts"
+  ],
+  "gates": [
+    {
+      "id": "ae-generation",
+      "program": "npm",
+      "argv": ["run", "check:ae-generation"],
+      "workdir": "apps/desktop",
+      "timeout_seconds": 300,
+      "max_output_bytes": 1048576
+    },
+    {
+      "id": "desktop-platforms",
+      "program": "npm",
+      "argv": ["run", "check:test:desktop:platforms"],
+      "workdir": "apps/desktop",
+      "timeout_seconds": 900,
+      "max_output_bytes": 1048576
+    },
+    {
+      "id": "ui",
+      "program": "npm",
+      "argv": ["run", "check:test:ui"],
+      "workdir": "apps/desktop",
+      "timeout_seconds": 900,
+      "max_output_bytes": 1048576
+    },
+    {
+      "id": "desktop-all",
+      "program": "npm",
+      "argv": ["run", "check:test:desktop:all"],
+      "workdir": "apps/desktop",
+      "timeout_seconds": 900,
+      "max_output_bytes": 1048576
+    },
+    {
+      "id": "lint",
+      "program": "npm",
+      "argv": ["run", "check:lint"],
+      "workdir": "apps/desktop",
+      "timeout_seconds": 900,
+      "max_output_bytes": 1048576
+    }
+  ]
+}

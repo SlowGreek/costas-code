@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import { validateSkinSettingsScene } from './skin-settings'
 
-const scene = () => ({
+interface TestNode {
+  id: string
+  p: string
+  kids?: string[]
+  a?: Record<string, unknown>
+  on?: Record<string, string>
+}
+
+const scene = (): { sceneVersion: string; root: string; nodes: TestNode[] } => ({
   sceneVersion: '1.0.0',
   root: 'root',
   nodes: [
@@ -23,6 +31,28 @@ describe('skin settings Scene admission', () => {
     }
 
     expect(validateSkinSettingsScene(value)).toEqual(value)
+  })
+
+  it('admits closed nested presentation toggles only when their targets exist', () => {
+    const nested = scene()
+    nested.nodes[0].kids.push('nested')
+    nested.nodes.push({
+      id: 'nested',
+      p: 'button',
+      a: { label: 'Evidence' },
+      on: { tap: 'nested.toggle:skin-active-profile' }
+    })
+
+    const value = {
+      schema: 'ae-skin-settings-scene/1',
+      authority: 'none',
+      projector: 'ugui::theme::CATALOG->nested-card->ugui::project_checked',
+      scene: nested
+    }
+
+    expect(validateSkinSettingsScene(value)).toEqual(value)
+    nested.nodes[4].on!.tap = 'nested.toggle:missing'
+    expect(() => validateSkinSettingsScene(value)).toThrow('skin-settings-actions')
   })
 
   it('rejects authority expansion, unsafe actions, invalid roots, and unknown primitives', () => {

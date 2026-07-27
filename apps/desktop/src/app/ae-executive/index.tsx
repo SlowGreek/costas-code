@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { cn } from '@/lib/utils'
 
 import { aeExecutiveTab, isAeExecutiveTabId } from './contract'
-import { type AeExecutiveSceneBatch, loadExecutiveScenes, sceneForTab } from './scene'
+import {
+  type AeExecutiveSceneBatch,
+  loadExecutiveScenes,
+  loadFreshExecutiveScenes,
+  sceneForTab
+} from './scene'
 import { AeScenePainter } from './scene-painter'
 import { AeShellViewport } from './shell-viewport'
+
+const LOGS_REFRESH_INTERVAL_MS = 1_000
+const LOGS_REFRESH_DEGRADED_NOTICE = 'Logs refresh degraded · showing last valid Scene'
 
 export function AeExecutiveWorkspace() {
   const navigate = useNavigate()
@@ -14,6 +22,9 @@ export function AeExecutiveWorkspace() {
   const [batch, setBatch] = useState<AeExecutiveSceneBatch | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('Loading Rust UGUI projection…')
+  const refreshGenerationRef = useRef(0)
+  const refreshInFlightRef = useRef(false)
+  const selectedTabRef = useRef('')
 
   useEffect(() => {
     let active = true
@@ -34,6 +45,75 @@ export function AeExecutiveWorkspace() {
       active = false
     }
   }, [])
+
+  const requestedTab = params.tab ?? ''
+  const shellRequested = requestedTab === 'shell'
+  const tabId = batch?.scenes.some(row => row.tab === requestedTab) ? requestedTab : aeExecutiveTab(requestedTab).id
+  const scene = batch && !shellRequested ? sceneForTab(batch, tabId) : null
+  const logsSelected = !shellRequested && tabId === 'logs'
+  const hasBatch = batch !== null
+
+  selectedTabRef.current = tabId
+
+  useEffect(() => {
+    if (!hasBatch || !logsSelected) {return}
+
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const schedule = () => {
+      if (!active) {return}
+      timer = setTimeout(refresh, LOGS_REFRESH_INTERVAL_MS)
+    }
+
+    const refresh = () => {
+      if (!active) {return}
+
+      if (refreshInFlightRef.current) {
+        schedule()
+
+        return
+      }
+
+      refreshInFlightRef.current = true
+      const requestGeneration = ++refreshGenerationRef.current
+
+      loadFreshExecutiveScenes()
+        .then(value => {
+          if (
+            !active ||
+            refreshGenerationRef.current !== requestGeneration ||
+            selectedTabRef.current !== 'logs'
+          ) {return}
+
+          setBatch(value)
+          setError(null)
+          setNotice(`Rendered · structure valid · authority ${value.authority} · Logs refreshed`)
+        })
+        .catch(() => {
+          if (
+            !active ||
+            refreshGenerationRef.current !== requestGeneration ||
+            selectedTabRef.current !== 'logs'
+          ) {return}
+
+          setNotice(LOGS_REFRESH_DEGRADED_NOTICE)
+        })
+        .finally(() => {
+          refreshInFlightRef.current = false
+          schedule()
+        })
+    }
+
+    schedule()
+
+    return () => {
+      active = false
+      refreshGenerationRef.current += 1
+
+      if (timer !== null) {clearTimeout(timer)}
+    }
+  }, [hasBatch, logsSelected])
 
   const onAction = useCallback(
     (action: string) => {
@@ -56,11 +136,6 @@ export function AeExecutiveWorkspace() {
     },
     [batch, navigate]
   )
-
-  const requestedTab = params.tab ?? ''
-  const shellRequested = requestedTab === 'shell'
-  const tabId = batch?.scenes.some(row => row.tab === requestedTab) ? requestedTab : aeExecutiveTab(requestedTab).id
-  const scene = batch && !shellRequested ? sceneForTab(batch, tabId) : null
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>

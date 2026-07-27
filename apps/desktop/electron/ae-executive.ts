@@ -23,21 +23,10 @@ export interface AeExecutiveSceneBatch {
   scenes: Array<{ tab: string; scene: Record<string, unknown> }>
 }
 
-export function resolveAeExecutiveBinary(options: {
-  isPackaged: boolean
-  resourcesPath?: string
-  sourceRepoRoot: string
-  override?: string
-}): string | null {
+export function resolveAeExecutiveBinary(options: { generationRoot: string }): string | null {
   const executable = process.platform === 'win32' ? 'ae-executive-scene.exe' : 'ae-executive-scene'
 
-  const candidates = [
-    options.override ? path.resolve(options.override) : null,
-    options.isPackaged && options.resourcesPath ? path.join(options.resourcesPath, 'ae', executable) : null,
-    !options.isPackaged
-      ? path.resolve(options.sourceRepoRoot, '..', 'AgentExperiments', 'run', 'target', 'debug', executable)
-      : null
-  ].filter((candidate): candidate is string => Boolean(candidate))
+  const candidates = [path.join(options.generationRoot, executable)]
 
   return candidates.find(candidate => {
     try {

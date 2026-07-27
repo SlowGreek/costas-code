@@ -24,7 +24,7 @@
     "profile:main:cpu": "tsc --build tsconfig.electron.json && wait-on http://127.0.0.1:5174 && node scripts/bundle-electron-main.mjs --dev && cross-env XCURSOR_SIZE=24 NODE_OPTIONS=--cpu-prof HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron .",
     "start": "npm run build && electron .",
     "prebuild": "npm run clean",
-    "build": "node scripts/assert-root-install.mjs && node scripts/stage-ae-shell-viewport.mjs && node scripts/stage-ae-executive.mjs && node scripts/write-build-stamp.mjs && vite build && node scripts/bundle-electron-main.mjs && node scripts/stage-native-deps.mjs",
+    "build": "node scripts/assert-root-install.mjs && node scripts/stage-ae-executive.mjs && tsx scripts/prepare-ae-package.mjs && node scripts/write-build-stamp.mjs && vite build && node scripts/bundle-electron-main.mjs && node scripts/stage-native-deps.mjs",
     "postbuild": "node scripts/assert-dist-built.mjs",
     "prebuilder": "node scripts/patch-electron-builder-mac-binary.mjs",
     "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/run-electron-builder.mjs",
@@ -54,11 +54,12 @@
     "test:desktop:platforms": "vitest run --project electron",
     "test": "vitest run",
     "preview": "node scripts/assert-root-install.mjs && vite preview --host 127.0.0.1 --port 4174",
+    "check:ae-generation": "node scripts/stage-ae-executive.mjs && tsx scripts/smoke-ae-generation.ts build/ae",
     "check:test:desktop:platforms": "npm run test:desktop:platforms",
     "check:test:ui": "npm run test:ui",
     "check:test:desktop:all": "npm run test:desktop:all",
     "check:lint": "npm run typecheck && npm run lint",
-    "check": "npm run check:lint && npm run check:test:ui && npm run test:desktop:platforms && npm run test:desktop:all",
+    "check": "npm run check:lint && npm run check:ae-generation && npm run check:test:ui && npm run test:desktop:platforms && npm run test:desktop:all",
     "test:e2e": "npm run build && playwright test e2e/",
     "test:e2e:visual": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list",
     "test:e2e:update-snapshots": "npm run build && WLR_BACKENDS=headless WLR_NO_HARDWARE_CURSORS=1 cage -- npx playwright test e2e/ --reporter=list --update-snapshots"
@@ -200,7 +201,7 @@
         "to": "install-stamp.json"
       },
       {
-        "from": "build/ae",
+        "from": "build/ae-package",
         "to": "ae"
       },
       {

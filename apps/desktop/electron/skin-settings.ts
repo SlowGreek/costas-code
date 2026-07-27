@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const SAFE_ID_RE = /^[a-z0-9][a-z0-9-]{0,95}$/
+const SAFE_NESTED_TARGET_RE = /^skin-(?:active-profile|profile-picker|evidence-[a-z0-9][a-z0-9-]{0,95})$/
 const MAX_OUTPUT_BYTES = 1024 * 1024
 
 const SCENE_PRIMITIVES = new Set([
@@ -28,17 +29,9 @@ export interface SkinSettingsSceneResponse {
   scene: Record<string, unknown>
 }
 
-export function resolveSkinSettingsBinary(options: {
-  isPackaged: boolean
-  resourcesPath?: string
-  appRoot: string
-}): string | null {
+export function resolveSkinSettingsBinary(generationRoot: string): string | null {
   const name = process.platform === 'win32' ? 'ae-skin-settings-scene.exe' : 'ae-skin-settings-scene'
-
-  const candidate =
-    options.isPackaged && options.resourcesPath
-      ? path.join(options.resourcesPath, 'ae', name)
-      : path.join(options.appRoot, 'build', 'ae', name)
+  const candidate = path.join(generationRoot, name)
 
   try {
     return fs.statSync(candidate).isFile() ? candidate : null
@@ -154,11 +147,20 @@ export function validateSkinSettingsScene(value: unknown): SkinSettingsSceneResp
     .flatMap(node => Object.values((node as { on?: Record<string, unknown> }).on ?? {}))
     .filter((action): action is string => typeof action === 'string')
 
+  const skinActions = actions.filter(action => action.startsWith('skin.'))
+  const presentationActions = actions.filter(action => action.startsWith('nested.toggle:'))
+
   if (
-    !actions.includes('skin.apply') ||
-    !actions.includes('skin.revert') ||
-    !actions.some(action => action.startsWith('skin.preview.')) ||
-    actions.some(action => !/^skin\.(?:apply|revert|preview\.[a-z0-9][a-z0-9-]{0,95})$/.test(action))
+    !skinActions.includes('skin.apply') ||
+    !skinActions.includes('skin.revert') ||
+    !skinActions.some(action => action.startsWith('skin.preview.')) ||
+    skinActions.some(action => !/^skin\.(?:apply|revert|preview\.[a-z0-9][a-z0-9-]{0,95})$/.test(action)) ||
+    presentationActions.some(action => {
+      const target = action.slice('nested.toggle:'.length)
+
+      return !SAFE_NESTED_TARGET_RE.test(target)
+    }) ||
+    actions.length !== skinActions.length + presentationActions.length
   ) {
     throw new Error('skin-settings-actions')
   }

@@ -10,7 +10,7 @@ import { AeExecutiveWorkspace } from '.'
 const getShellViewportScene = vi.fn()
 const getAeExecutiveScenes = vi.fn()
 
-const batchTabs = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'studio', 'settings', 'marketplace']
+const batchTabs = ['home', 'dashboard', 'lucid', 'quine', 'scores', 'metrics', 'logs', 'github', 'studio', 'settings', 'marketplace']
 
 const executiveBatch = {
   schema: 'ae-executive-scene-batch/1',
@@ -30,7 +30,7 @@ const executiveBatch = {
           p: 'button',
           a: { label: ({
             home: '[H]OME', dashboard: '[D]ASHBOARD', lucid: '[L]UCID', quine: '[Q]UINE',
-            scores: 'S[C]ORES', metrics: '[M]ETRICS', logs: 'L[O]GS', studio: 'S[T]UDIO',
+            scores: 'S[C]ORES', metrics: '[M]ETRICS', logs: 'L[O]GS', github: '[G]ITHUB', studio: 'S[T]UDIO',
             settings: '[S]ETTINGS', marketplace: 'MA[R]KETPLACE'
           } as Record<string, string>)[id], role: 'tab' },
           on: { tap: `shell.tab.${id}` },

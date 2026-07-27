@@ -1,6 +1,10 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 
 import type {
+  LucidActionIntent,
+  LucidActionResult
+} from './app/ae-executive/lucid-actions'
+import type {
   HermesClipboardLensSnapshot,
   HermesClipboardLensTextResult
 } from './lib/clipboard-lens'
@@ -16,12 +20,33 @@ export {}
 declare global {
   interface Window {
     hermesDesktop: {
-      getAeExecutiveScenes: () => Promise<{
-        schema: 'ae-executive-scene-batch/1'
-        authority: 'none'
-        projector: string
-        scenes: Array<{ tab: string; scene: Record<string, unknown> }>
-      }>
+      getAeExecutiveScenes: () => Promise<
+        | {
+            schema: 'ae-executive-scene-batch/1'
+            authority: 'none'
+            projector: string
+            artifact_generation: string
+            scenes: Array<{ tab: string; scene: Record<string, unknown> }>
+          }
+        | {
+            schema: 'ae-executive-scene-batch/2'
+            authority: 'none'
+            projector: string
+            generation: number
+            document_hash: string
+            source_set_hash: string
+            observed_ms: number
+            freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
+            artifact_generation: string
+            scenes: Array<{
+              tab: string
+              state: 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
+              scene?: Record<string, unknown>
+              reason?: string
+            }>
+          }
+      >
+      executeLucidExecutiveIntent: (request: LucidActionIntent) => Promise<LucidActionResult>
       getUguiSkinCatalog: () => Promise<unknown>
       getUguiSkinSettingsScene: (request: { committed_id: string; preview_id: string }) => Promise<unknown>
       getShellViewportScene: (request: {

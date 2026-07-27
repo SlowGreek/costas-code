@@ -8,6 +8,8 @@ never synthesize, persist, log, or expose capability material.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 from typing import Any, Mapping, Optional
@@ -36,6 +38,7 @@ _REFUSAL_CODES = frozenset(
 _NO_AUTOMATIC_RETRY = frozenset(
     {"lucid.show", "lucid.set", "lucid.morph", "lucid.dispatch", "lucid.steer", "lucid.cancel"}
 )
+_EXACT_CONFIRMATION_SCHEMA = "lucid-exact-confirmation/1"
 
 
 def _declared_lucid_transport(server_name: str, config: Mapping[str, Any]) -> bool:
@@ -81,7 +84,8 @@ def lucid_host_context_meta(
     *,
     session_id: object = None,
     resolved_command: object = None,
-) -> Optional[dict[str, dict[str, str]]]:
+    exact_confirmation: object = None,
+) -> Optional[dict[str, dict[str, Any]]]:
     """Return bounded MCP request metadata for an admitted LUCID call."""
 
     if not _canonical_lucid_transport(
@@ -91,7 +95,21 @@ def lucid_host_context_meta(
     admitted = _bounded_session_id(session_id)
     if admitted is None:
         return None
-    return {HOST_CONTEXT_EXTENSION: {"session_id": admitted}}
+    fields: dict[str, Any] = {"session_id": admitted}
+    if exact_confirmation is not None:
+        confirmation = _closed_object(
+            exact_confirmation, {"schema", "verb", "arguments_hash"}
+        )
+        if (
+            confirmation is None
+            or confirmation.get("schema") != _EXACT_CONFIRMATION_SCHEMA
+            or confirmation.get("verb") != "cancel"
+            or not isinstance(confirmation.get("arguments_hash"), str)
+            or _CONTENT_HASH_RE.fullmatch(confirmation["arguments_hash"]) is None
+        ):
+            return None
+        fields["exact_confirmation"] = dict(confirmation)
+    return {HOST_CONTEXT_EXTENSION: fields}
 
 
 def current_lucid_host_context_meta(
@@ -100,7 +118,8 @@ def current_lucid_host_context_meta(
     *,
     session_id: object = None,
     resolved_command: object = None,
-) -> Optional[dict[str, dict[str, str]]]:
+    exact_confirmation: object = None,
+) -> Optional[dict[str, dict[str, Any]]]:
     """Resolve host identity without reading model arguments.
 
     Modern dispatch passes an immutable ``session_id`` handler kwarg. Older
@@ -113,6 +132,7 @@ def current_lucid_host_context_meta(
             config,
             session_id=session_id,
             resolved_command=resolved_command,
+            exact_confirmation=exact_confirmation,
         )
 
     from gateway.session_context import get_session_env
@@ -125,7 +145,34 @@ def current_lucid_host_context_meta(
         config,
         session_id=fallback,
         resolved_command=resolved_command,
+        exact_confirmation=exact_confirmation,
     )
+
+
+def lucid_exact_confirmation(
+    verb: str, arguments: object, *, confirmed: bool
+) -> Optional[dict[str, str]]:
+    """Bind an explicit host decision to the one currently confirmable call."""
+
+    if verb != "cancel" or confirmed is not True or not isinstance(arguments, dict):
+        return None
+    try:
+        canonical = json.dumps(
+            arguments,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return None
+    if len(canonical) > 131_072:
+        return None
+    return {
+        "schema": _EXACT_CONFIRMATION_SCHEMA,
+        "verb": verb,
+        "arguments_hash": "sha256:" + hashlib.sha256(canonical).hexdigest(),
+    }
 
 
 def public_lucid_bridge_status(
@@ -264,4 +311,72 @@ def project_lucid_receipt(structured_content: object) -> Optional[dict[str, obje
         "content_hash": content_hash,
         "refusal_code": refusal_code,
         "needs_user": needs_user,
+    }
+
+
+def project_lucid_tool_result(
+    structured_content: object,
+    *,
+    expected_verb: str,
+    is_error: bool,
+) -> dict[str, object]:
+    """Project a received MCP result without any raw-text or Envelope fallback."""
+
+    if expected_verb not in _LUCID_VERBS:
+        return {
+            "error": "LUCID request verb is not registered",
+            "code": "lucid-invalid-request",
+            "retryable": False,
+        }
+    receipt = project_lucid_receipt(structured_content)
+    if receipt is None or receipt.get("verb") != expected_verb:
+        return {
+            "error": (
+                "Butler returned an invalid LUCID refusal receipt"
+                if is_error
+                else "Butler returned an invalid LUCID success receipt"
+            ),
+            "code": "lucid-invalid-receipt",
+            "retryable": False,
+        }
+    if not isinstance(structured_content, dict):
+        return {
+            "error": "Butler returned an invalid LUCID success receipt",
+            "code": "lucid-invalid-receipt",
+            "retryable": False,
+        }
+    if is_error or receipt.get("refusal_code") is not None:
+        refusal = receipt.get("refusal_code")
+        return {
+            "error": (
+                f"Butler refused LUCID call ({refusal})"
+                if refusal
+                else "Butler returned a LUCID error receipt"
+            ),
+            "lucid_receipt": receipt,
+        }
+    if "result" not in structured_content:
+        return {
+            "error": "Butler returned an invalid LUCID success receipt",
+            "code": "lucid-invalid-receipt",
+            "retryable": False,
+        }
+    return {"result": structured_content["result"], "lucid_receipt": receipt}
+
+
+def lucid_outcome_unknown(verb: str) -> dict[str, object]:
+    """Closed no-retry posture for an ambiguous consequential call."""
+
+    if f"lucid.{verb}" not in _NO_AUTOMATIC_RETRY:
+        return {
+            "error": "LUCID request verb is not registered for consequential execution",
+            "code": "lucid-invalid-request",
+            "retryable": False,
+        }
+    return {
+        "error": "LUCID call outcome is unknown; automatic retry is disabled",
+        "code": "lucid-outcome-unknown",
+        "retryable": False,
+        "server": LUCID_SERVER_NAME,
+        "tool": f"lucid.{verb}",
     }

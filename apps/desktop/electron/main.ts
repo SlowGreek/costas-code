@@ -129,6 +129,12 @@ import {
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
+import {
+  callInstalledButler,
+  createLucidExecutiveHandler,
+  LUCID_EXECUTIVE_CHANNEL,
+  lucidExecutiveStateFromBatch
+} from './lucid-executive'
 import { ensureMainWindow } from './main-window-lifecycle'
 import { oauthSessionIsLive, resolveJsonBody, resolveOauthRestAuth } from './native-auth-decisions'
 import {
@@ -8719,7 +8725,50 @@ ipcMain.handle('hermes:ae-executive:scenes', async () => {
     throw new Error('ae-executive-projector-unavailable')
   }
 
-  return runAeExecutiveProjector(binary)
+  return runAeExecutiveProjector(binary, AE_GENERATION.generationId)
+})
+
+ipcMain.handle(LUCID_EXECUTIVE_CHANNEL, async (event, request) => {
+  const sessionId = `desktop:${desktopInstallationId}:${event.sender.id}`.replace(/[^A-Za-z0-9._:-]/g, '-')
+
+  const currentState = async () => {
+    const binary = resolveAeExecutiveBinary({ generationRoot: AE_RUNTIME_BIN })
+
+    if (!binary) {return lucidExecutiveStateFromBatch(null, sessionId)}
+
+    return lucidExecutiveStateFromBatch(
+      await runAeExecutiveProjector(binary, AE_GENERATION.generationId),
+      sessionId
+    )
+  }
+
+  const handler = createLucidExecutiveHandler({
+    currentState,
+    callBridge: call => callInstalledButler(LUCID_BUTLER_PATH, LUCID_BUTLER_PATH, call),
+    confirmationFor: async intent => {
+      if (intent.verb !== 'cancel') {return false}
+      const owner = BrowserWindow.fromWebContents(event.sender)
+
+      const options = {
+        type: 'warning' as const,
+        title: 'Confirm LUCID cancellation',
+        message: 'Confirm this exact LUCID cancellation operation?',
+        detail: 'Butler will independently verify the owner role-session, capability, scope, and bound confirmation.',
+        buttons: ['Cancel', 'Confirm cancellation'],
+        cancelId: 0,
+        defaultId: 0,
+        noLink: true
+      }
+
+      const decision = owner && !owner.isDestroyed()
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options)
+
+      return decision.response === 1
+    }
+  })
+
+  return handler(request)
 })
 
 ipcMain.handle('hermes:ugui-skins:catalog', () => {

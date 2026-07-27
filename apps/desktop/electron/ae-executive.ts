@@ -15,13 +15,45 @@ const SCENE_PRIMITIVES = new Set([
 
 const CONTAINER_PRIMITIVES = new Set(['column', 'row', 'stack'])
 const SCENE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+const TAB_ID_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
+const HASH_RE = /^sha256:[0-9a-f]{64}$/
+const ARTIFACT_GENERATION_RE = /^sha256:[0-9a-f]{64}$/
+const FRESHNESS = new Set(['fresh', 'degraded', 'stale', 'unavailable'])
+const TAB_STATES = new Set(['fresh', 'stale', 'unavailable', 'fixture', 'structural'])
 
-export interface AeExecutiveSceneBatch {
+export type AeExecutiveFreshness = 'fresh' | 'degraded' | 'stale' | 'unavailable'
+export type AeExecutiveTabState = 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
+
+export interface AeExecutiveLegacySceneBatch {
   schema: 'ae-executive-scene-batch/1'
   authority: 'none'
   projector: string
   scenes: Array<{ tab: string; scene: Record<string, unknown> }>
+  artifact_generation?: string
 }
+
+export interface AeExecutiveSceneRow {
+  tab: string
+  state: AeExecutiveTabState
+  scene?: Record<string, unknown>
+  reason?: string
+}
+
+export interface AeExecutiveSceneBatch {
+  schema: 'ae-executive-scene-batch/2'
+  authority: 'none'
+  projector: string
+  generation: number
+  document_hash: string
+  source_set_hash: string
+  observed_ms: number
+  freshness: AeExecutiveFreshness
+  scenes: AeExecutiveSceneRow[]
+  artifact_generation?: string
+}
+
+export type AeExecutiveProjectorBatch = AeExecutiveLegacySceneBatch | AeExecutiveSceneBatch
+export type AeExecutiveBoundBatch = AeExecutiveProjectorBatch & { artifact_generation: string }
 
 export function resolveAeExecutiveBinary(options: { generationRoot: string }): string | null {
   const executable = process.platform === 'win32' ? 'ae-executive-scene.exe' : 'ae-executive-scene'
@@ -37,34 +69,24 @@ export function resolveAeExecutiveBinary(options: { generationRoot: string }): s
   }) ?? null
 }
 
-export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
-  if (!value || typeof value !== 'object') {throw new Error('ae-executive-batch-invalid')}
-  const batch = value as Partial<AeExecutiveSceneBatch>
+export function validateAeExecutiveBatch(value: unknown): AeExecutiveProjectorBatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {throw new Error('ae-executive-batch-invalid')}
+  const schema = (value as { schema?: unknown }).schema
+
+  if (schema === 'ae-executive-scene-batch/1') {return validateLegacyBatch(value)}
+
+  if (schema === 'ae-executive-scene-batch/2') {return validateGenerationBatch(value)}
+  throw new Error('ae-executive-batch-schema')
+}
+
+function validateLegacyBatch(value: unknown): AeExecutiveLegacySceneBatch {
+  const batch = value as Partial<AeExecutiveLegacySceneBatch>
 
   if (batch.schema !== 'ae-executive-scene-batch/1' || batch.authority !== 'none') {
     throw new Error('ae-executive-batch-schema')
   }
 
-  if (
-    !Array.isArray(batch.scenes) ||
-    batch.scenes.length < 1 ||
-    batch.scenes.length > AE_EXECUTIVE_MAX_TABS
-  ) {
-    throw new Error('ae-executive-batch-cardinality')
-  }
-
-  if (typeof batch.projector !== 'string' || !batch.projector) {
-    throw new Error('ae-executive-batch-projector')
-  }
-
-  const observed = batch.scenes.map(row => row?.tab)
-
-  if (observed.some(tab => typeof tab !== 'string' || !/^[a-z0-9][a-z0-9-]{0,127}$/.test(tab))) {
-    throw new Error('ae-executive-tab-id')
-  }
-
-  if (new Set(observed).size !== observed.length) {throw new Error('ae-executive-tab-duplicate')}
-
+  const observed = validateBatchHeader(batch.projector, batch.scenes)
   const legacy = !observed.includes('marketplace')
 
   if (legacy && observed.length !== AE_EXECUTIVE_TABS.length) {
@@ -78,55 +100,12 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
   let canonicalHandlers: string[] | null = null
   let canonicalHotkeys: string[] | null = null
 
-  for (const row of batch.scenes) {
-    if (!row.scene || typeof row.scene !== 'object') {throw new Error('ae-executive-scene-invalid')}
-    const scene = row.scene as Record<string, unknown>
-
-    if (scene.sceneVersion !== '1.0.0' || typeof scene.root !== 'string' || !Array.isArray(scene.nodes)) {
-      throw new Error('ae-executive-scene-schema')
+  for (const row of batch.scenes!) {
+    if (!row.scene || typeof row.scene !== 'object' || Array.isArray(row.scene)) {
+      throw new Error('ae-executive-scene-invalid')
     }
 
-    if (scene.nodes.length === 0 || scene.nodes.length > 4096) {throw new Error('ae-executive-scene-bounds')}
-
-    const nodes = validateExecutiveSceneGraph(scene, String(row.tab))
-
-    const tabNodes = nodes.filter(node => {
-      const tap = (node.on as Record<string, unknown> | undefined)?.tap
-
-      return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
-    })
-
-    const handlers = tabNodes.map(node => (node.on as Record<string, string>).tap)
-
-    for (const node of nodes) {
-      const events = (node.on as Record<string, unknown> | undefined) ?? {}
-
-      const shellEvents = Object.entries(events).filter(([, handler]) =>
-        typeof handler === 'string' && handler.startsWith('shell.tab.')
-      )
-
-      if (!shellEvents.length) {continue}
-
-      if (node.p !== 'button' || typeof events.tap !== 'string') {
-        throw new Error(`ae-executive-shell-action-node:${row.tab}`)
-      }
-
-      if (shellEvents.some(([gesture, handler]) => !['key', 'tap'].includes(gesture) || handler !== events.tap)) {
-        throw new Error(`ae-executive-shell-action-gesture:${row.tab}`)
-      }
-    }
-
-    const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
-    const allowedWorkspace = [...observed, ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(tab => !observed.includes(tab))]
-
-    if (
-      handlers.length < observed.length ||
-      handlers.length > allowedWorkspace.length ||
-      new Set(workspaceTabs).size !== workspaceTabs.length ||
-      workspaceTabs.some((tab, index) => tab !== allowedWorkspace[index])
-    ) {
-      throw new Error(`ae-executive-shell-actions:${row.tab}`)
-    }
+    const { handlers, hotkeys } = validateExecutiveScene(row.scene, row.tab, observed)
 
     if (
       canonicalHandlers &&
@@ -135,37 +114,199 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveSceneBatch 
       throw new Error(`ae-executive-shell-action-drift:${row.tab}`)
     }
 
-    canonicalHandlers ??= handlers
-
-    const hotkeys = nodes
-      .filter(node => {
-        const tap = (node.on as Record<string, unknown> | undefined)?.tap
-
-        return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
-      })
-      .map(node => {
-        const label = (node.a as Record<string, unknown> | undefined)?.label
-        const matches = typeof label === 'string' ? [...label.matchAll(/\[([A-Z0-9])\]/g)] : []
-
-        if (matches.length !== 1) {throw new Error(`ae-executive-hotkey-label:${row.tab}`)}
-
-        return matches[0][1]
-      })
-
-    if (new Set(hotkeys).size !== hotkeys.length) {throw new Error(`ae-executive-hotkey-collision:${row.tab}`)}
-
-    if (canonicalHotkeys && hotkeys.some((hotkey, index) => hotkey !== canonicalHotkeys?.[index])) {
+    if (
+      canonicalHotkeys &&
+      (hotkeys.length !== canonicalHotkeys.length || hotkeys.some((hotkey, index) => hotkey !== canonicalHotkeys[index]))
+    ) {
       throw new Error(`ae-executive-hotkey-drift:${row.tab}`)
     }
 
+    canonicalHandlers ??= handlers
     canonicalHotkeys ??= hotkeys
+  }
 
-    if (typeof scene.id === 'string' && scene.id.startsWith('run-')) {
-      if (scene.id !== `run-${row.tab}`) {throw new Error(`ae-executive-card-identity:${row.tab}`)}
+  return {
+    schema: 'ae-executive-scene-batch/1',
+    authority: 'none',
+    projector: batch.projector!,
+    scenes: batch.scenes!
+  }
+}
+
+function validateGenerationBatch(value: unknown): AeExecutiveSceneBatch {
+  const batch = value as Partial<AeExecutiveSceneBatch>
+
+  if (batch.schema !== 'ae-executive-scene-batch/2' || batch.authority !== 'none') {
+    throw new Error('ae-executive-batch-schema')
+  }
+
+  if (!Number.isSafeInteger(batch.generation) || Number(batch.generation) < 1) {
+    throw new Error('ae-executive-batch-generation')
+  }
+
+  if (typeof batch.document_hash !== 'string' || !HASH_RE.test(batch.document_hash)) {
+    throw new Error('ae-executive-batch-document-hash')
+  }
+
+  if (typeof batch.source_set_hash !== 'string' || !HASH_RE.test(batch.source_set_hash)) {
+    throw new Error('ae-executive-batch-source-set-hash')
+  }
+
+  if (!Number.isSafeInteger(batch.observed_ms) || Number(batch.observed_ms) < 0) {
+    throw new Error('ae-executive-batch-observed')
+  }
+
+  if (typeof batch.freshness !== 'string' || !FRESHNESS.has(batch.freshness)) {
+    throw new Error('ae-executive-batch-freshness')
+  }
+
+  const observed = validateBatchHeader(batch.projector, batch.scenes)
+  const scenes = batch.scenes!.map(row => admitGenerationRow(row, observed))
+
+  return {
+    schema: 'ae-executive-scene-batch/2',
+    authority: 'none',
+    projector: batch.projector!,
+    generation: batch.generation!,
+    document_hash: batch.document_hash!,
+    source_set_hash: batch.source_set_hash!,
+    observed_ms: batch.observed_ms!,
+    freshness: batch.freshness as AeExecutiveFreshness,
+    scenes
+  }
+}
+
+function validateBatchHeader(
+  projector: unknown,
+  scenes: unknown
+): string[] {
+  if (!Array.isArray(scenes) || scenes.length < 1 || scenes.length > AE_EXECUTIVE_MAX_TABS) {
+    throw new Error('ae-executive-batch-cardinality')
+  }
+
+  if (typeof projector !== 'string' || !projector) {
+    throw new Error('ae-executive-batch-projector')
+  }
+
+  const observed = scenes.map(row =>
+    row && typeof row === 'object' && !Array.isArray(row) ? (row as { tab?: unknown }).tab : undefined
+  )
+
+  if (observed.some(tab => typeof tab !== 'string' || !TAB_ID_RE.test(tab))) {
+    throw new Error('ae-executive-tab-id')
+  }
+
+  if (new Set(observed).size !== observed.length) {throw new Error('ae-executive-tab-duplicate')}
+
+  return observed as string[]
+}
+
+function admitGenerationRow(row: AeExecutiveSceneRow, observed: readonly string[]): AeExecutiveSceneRow {
+  if (typeof row.state !== 'string' || !TAB_STATES.has(row.state)) {
+    return { tab: row.tab, state: 'unavailable', reason: 'ae-executive-row-state' }
+  }
+
+  if (row.reason !== undefined && (typeof row.reason !== 'string' || row.reason.length > 256)) {
+    return { tab: row.tab, state: 'unavailable', reason: 'ae-executive-row-reason' }
+  }
+
+  if (row.state === 'unavailable' && row.scene === undefined) {
+    return { tab: row.tab, state: row.state, ...(row.reason ? { reason: row.reason } : {}) }
+  }
+
+  if (!row.scene || typeof row.scene !== 'object' || Array.isArray(row.scene)) {
+    return { tab: row.tab, state: 'unavailable', reason: 'ae-executive-scene-invalid' }
+  }
+
+  try {
+    validateExecutiveScene(row.scene, row.tab, observed)
+
+    return {
+      tab: row.tab,
+      state: row.state,
+      scene: row.scene,
+      ...(row.reason ? { reason: row.reason } : {})
+    }
+  } catch (cause) {
+    return {
+      tab: row.tab,
+      state: 'unavailable',
+      reason: boundedExecutiveError(cause)
+    }
+  }
+}
+
+function validateExecutiveScene(
+  scene: Record<string, unknown>,
+  tab: string,
+  observed: readonly string[]
+): { handlers: string[]; hotkeys: string[] } {
+  if (scene.sceneVersion !== '1.0.0' || typeof scene.root !== 'string' || !Array.isArray(scene.nodes)) {
+    throw new Error('ae-executive-scene-schema')
+  }
+
+  if (scene.nodes.length === 0 || scene.nodes.length > 4096) {
+    throw new Error('ae-executive-scene-bounds')
+  }
+
+  const nodes = validateExecutiveSceneGraph(scene, tab)
+
+  const tabNodes = nodes.filter(node => {
+    const tap = (node.on as Record<string, unknown> | undefined)?.tap
+
+    return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
+  })
+
+  const handlers = tabNodes.map(node => (node.on as Record<string, string>).tap)
+
+  for (const node of nodes) {
+    const events = (node.on as Record<string, unknown> | undefined) ?? {}
+
+    const shellEvents = Object.entries(events).filter(([, handler]) =>
+      typeof handler === 'string' && handler.startsWith('shell.tab.')
+    )
+
+    if (!shellEvents.length) {continue}
+
+    if (node.p !== 'button' || typeof events.tap !== 'string') {
+      throw new Error(`ae-executive-shell-action-node:${tab}`)
+    }
+
+    if (shellEvents.some(([gesture, handler]) => !['key', 'tap'].includes(gesture) || handler !== events.tap)) {
+      throw new Error(`ae-executive-shell-action-gesture:${tab}`)
     }
   }
 
-  return batch as AeExecutiveSceneBatch
+  const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
+  const allowedWorkspace = [...observed, ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(hostTab => !observed.includes(hostTab))]
+
+  if (
+    handlers.length < observed.length ||
+    handlers.length > allowedWorkspace.length ||
+    new Set(workspaceTabs).size !== workspaceTabs.length ||
+    workspaceTabs.some((workspaceTab, index) => workspaceTab !== allowedWorkspace[index])
+  ) {
+    throw new Error(`ae-executive-shell-actions:${tab}`)
+  }
+
+  const hotkeys = tabNodes.map(node => {
+    const label = (node.a as Record<string, unknown> | undefined)?.label
+    const matches = typeof label === 'string' ? [...label.matchAll(/\[([A-Z0-9])\]/g)] : []
+
+    if (matches.length !== 1) {throw new Error(`ae-executive-hotkey-label:${tab}`)}
+
+    return matches[0][1]
+  })
+
+  if (new Set(hotkeys).size !== hotkeys.length) {
+    throw new Error(`ae-executive-hotkey-collision:${tab}`)
+  }
+
+  if (typeof scene.id === 'string' && scene.id.startsWith('run-') && scene.id !== `run-${tab}`) {
+    throw new Error(`ae-executive-card-identity:${tab}`)
+  }
+
+  return { handlers, hotkeys }
 }
 
 function validateExecutiveSceneGraph(scene: Record<string, unknown>, tab: string): Array<Record<string, unknown>> {
@@ -243,7 +384,20 @@ function validateExecutiveSceneGraph(scene: Record<string, unknown>, tab: string
   return nodes
 }
 
-export function runAeExecutiveProjector(binary: string): Promise<AeExecutiveSceneBatch> {
+function boundedExecutiveError(cause: unknown): string {
+  return cause instanceof Error && /^ae-executive-[a-z0-9:-]{1,160}$/.test(cause.message)
+    ? cause.message
+    : 'admission-refused'
+}
+
+export function runAeExecutiveProjector(
+  binary: string,
+  artifactGeneration: string
+): Promise<AeExecutiveBoundBatch> {
+  if (!ARTIFACT_GENERATION_RE.test(artifactGeneration)) {
+    return Promise.reject(new Error('ae-executive-artifact-generation'))
+  }
+
   return new Promise((resolve, reject) => {
     execFile(
       binary,
@@ -253,14 +407,10 @@ export function runAeExecutiveProjector(binary: string): Promise<AeExecutiveScen
         if (error) {return reject(new Error('ae-executive-projector-failed'))}
 
         try {
-          resolve(validateAeExecutiveBatch(JSON.parse(String(stdout))))
+          const batch = validateAeExecutiveBatch(JSON.parse(String(stdout)))
+          resolve({ ...batch, artifact_generation: artifactGeneration } as AeExecutiveBoundBatch)
         } catch (cause) {
-          const code =
-            cause instanceof Error && /^ae-executive-[a-z0-9:-]{1,160}$/.test(cause.message)
-              ? cause.message
-              : 'admission-refused'
-
-          reject(new Error(`ae-executive-projector-invalid:${code}`))
+          reject(new Error(`ae-executive-projector-invalid:${boundedExecutiveError(cause)}`))
         }
       }
     )

@@ -4,7 +4,12 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { AE_EXECUTIVE_TABS, resolveAeExecutiveBinary, validateAeExecutiveBatch } from './ae-executive'
+import {
+  AE_EXECUTIVE_TABS,
+  resolveAeExecutiveBinary,
+  runAeExecutiveProjector,
+  validateAeExecutiveBatch
+} from './ae-executive'
 
 const created: string[] = []
 
@@ -74,6 +79,23 @@ function semanticBatch(tabs: readonly string[]) {
   }
 }
 
+const artifactGeneration = `sha256:${'a'.repeat(64)}`
+const generationHash = (digit: string) => `sha256:${digit.repeat(64)}`
+
+function generationBatch(tabs: readonly string[], generation = 1) {
+  return {
+    schema: 'ae-executive-scene-batch/2',
+    authority: 'none',
+    projector: 'ugui::shell->ugui::project',
+    generation,
+    document_hash: generationHash(String(generation % 10)),
+    source_set_hash: generationHash(String((generation + 5) % 10)),
+    observed_ms: 1_000 + generation,
+    freshness: 'fresh',
+    scenes: tabs.map(tab => ({ tab, state: 'fresh', scene: semanticScene(tab, tabs) }))
+  }
+}
+
 it('validates the closed ordered nine-scene semantic batch', () => {
   const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
 
@@ -92,6 +114,42 @@ it('admits a profile-specific Marketplace workspace without the legacy nine-tab 
   const batch = validateAeExecutiveBatch(semanticBatch(tabs))
 
   expect(batch.scenes.map(row => row.tab)).toEqual(tabs)
+})
+
+it('validates generation provenance while isolating a malformed unrelated tab row', () => {
+  const value = generationBatch(['home', 'marketplace'], 7)
+
+  const marketplace = value.scenes.find(row => row.tab === 'marketplace')!
+
+  ;(marketplace.scene.nodes[0] as { kids: string[] }).kids = ['missing']
+  const batch = validateAeExecutiveBatch(value)
+
+  expect(batch).toMatchObject({
+    schema: 'ae-executive-scene-batch/2',
+    generation: 7,
+    document_hash: generationHash('7'),
+    source_set_hash: generationHash('2'),
+    observed_ms: 1_007,
+    freshness: 'fresh'
+  })
+  expect(batch.scenes.find(row => row.tab === 'home')).toMatchObject({ state: 'fresh' })
+  expect(batch.scenes.find(row => row.tab === 'marketplace')).toMatchObject({
+    state: 'unavailable',
+    reason: expect.stringContaining('child-missing')
+  })
+})
+
+it.skipIf(process.platform === 'win32')('binds the immutable Electron artifact generation instead of producer input', async () => {
+  const file = executable()
+  const value = { ...generationBatch(['home', 'marketplace']), artifact_generation: generationHash('f') }
+
+  fs.writeFileSync(file, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(value)}'\n`)
+  fs.chmodSync(file, 0o700)
+
+  await expect(runAeExecutiveProjector(file, artifactGeneration)).resolves.toMatchObject({
+    schema: 'ae-executive-scene-batch/2',
+    artifact_generation: artifactGeneration
+  })
 })
 
 it('admits key and tap aliases on one semantic tab button', () => {

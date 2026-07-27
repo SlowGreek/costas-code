@@ -2,9 +2,12 @@ import sys
 
 from tools.lucid_mcp_bridge import (
     HOST_CONTEXT_EXTENSION,
-    lucid_retry_disposition,
+    lucid_exact_confirmation,
     lucid_host_context_meta,
+    lucid_outcome_unknown,
+    lucid_retry_disposition,
     project_lucid_receipt,
+    project_lucid_tool_result,
     public_lucid_bridge_status,
 )
 
@@ -208,3 +211,78 @@ def test_retry_disposition_is_read_only_and_exact_provenance(monkeypatch):
         )
         is None
     )
+
+
+def test_exact_confirmation_is_host_bound_and_never_accepts_a_caller_digest(monkeypatch):
+    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
+    arguments = {"id": "dispatch:" + "a" * 64, "mode": "graceful"}
+    confirmation = lucid_exact_confirmation("cancel", arguments, confirmed=True)
+
+    assert confirmation is not None
+    assert confirmation["schema"] == "lucid-exact-confirmation/1"
+    assert confirmation["verb"] == "cancel"
+    assert confirmation["arguments_hash"].startswith("sha256:")
+    assert lucid_exact_confirmation("cancel", arguments, confirmed=False) is None
+    assert lucid_exact_confirmation("dispatch", arguments, confirmed=True) is None
+    assert lucid_host_context_meta(
+        "lucid-quine",
+        {"command": "butler", "args": ["--mcp-stdio"]},
+        session_id="session:desktop",
+        resolved_command=butler,
+        exact_confirmation=confirmation,
+    ) == {
+        HOST_CONTEXT_EXTENSION: {
+            "session_id": "session:desktop",
+            "exact_confirmation": confirmation,
+        }
+    }
+
+
+def test_closed_tool_result_parsing_requires_matching_receipt_and_result():
+    digest = "sha256:" + "c" * 64
+    structured = {
+        "envelope": {
+            "intent": {"verb": "get", "args": {"private": "omitted"}},
+            "capability": None,
+            "escalation": None,
+            "fidelity": {"level": "lossless", "preserved": [], "lost": []},
+            "refusal": None,
+            "receipt": {
+                "id": "lucid:result",
+                "ts": "2026-07-27T01:02:03Z",
+                "trust": "verified",
+                "content_hash": digest,
+                "ran": True,
+                "effect": "private",
+            },
+        },
+        "result": {"status": "ok"},
+    }
+
+    projected = project_lucid_tool_result(
+        structured, expected_verb="get", is_error=False
+    )
+    assert projected["result"] == {"status": "ok"}
+    receipt = projected["lucid_receipt"]
+    assert isinstance(receipt, dict)
+    assert receipt["schema"] == "hermes-lucid-receipt/1"
+    assert "envelope" not in repr(projected).lower()
+    assert project_lucid_tool_result(
+        structured, expected_verb="show", is_error=False
+    ) == {
+        "error": "Butler returned an invalid LUCID success receipt",
+        "code": "lucid-invalid-receipt",
+        "retryable": False,
+    }
+
+
+def test_consequential_unknown_outcome_is_closed_and_nonretryable():
+    assert lucid_outcome_unknown("dispatch") == {
+        "error": "LUCID call outcome is unknown; automatic retry is disabled",
+        "code": "lucid-outcome-unknown",
+        "retryable": False,
+        "server": "lucid-quine",
+        "tool": "lucid.dispatch",
+    }
+    assert lucid_outcome_unknown("get")["code"] == "lucid-invalid-request"

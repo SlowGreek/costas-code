@@ -9741,6 +9741,58 @@ def _claude_code_only_status() -> Dict[str, Any]:
     return {"logged_in": False, "source": None}
 
 
+def _copilot_status() -> Dict[str, Any]:
+    """Status for the Copilot device-code login.
+
+    Distinct from ``copilot-acp``: that card shells out to the separate Copilot
+    CLI binary, while this is Hermes' own device-code flow — the one that mints
+    the ``ghu_`` token the Copilot API accepts.
+
+    The distinction is load-bearing. ``gh auth login`` yields ``gho_``/``ghp_``
+    tokens that the Copilot endpoint rejects with "403 Access to this endpoint
+    is forbidden", which reads like a subscription or permissions problem and
+    sends people hunting for header workarounds. Surfacing the token's actual
+    source here is what makes that diagnosable at a glance.
+    """
+    try:
+        from hermes_cli.copilot_auth import resolve_copilot_token
+
+        token, source = resolve_copilot_token()
+    except Exception:
+        return {
+            "logged_in": False,
+            "source": None,
+            "source_label": "Not connected",
+            "token_preview": None,
+            "expires_at": None,
+            "has_refresh_token": False,
+        }
+
+    if not token:
+        return {
+            "logged_in": False,
+            "source": None,
+            "source_label": "Not connected",
+            "token_preview": None,
+            "expires_at": None,
+            "has_refresh_token": False,
+        }
+
+    # A gh-sourced token usually works for the repo but NOT for Copilot; say so
+    # rather than reporting a green "connected" that fails on the first call.
+    from_gh = source == "gh auth token"
+    label = "Signed in (device code)" if not from_gh else "Using `gh` token — may not work for Copilot"
+
+    return {
+        "logged_in": True,
+        "source": source,
+        "source_label": label,
+        "token_preview": f"{token[:4]}…{token[-4:]}" if len(token) > 8 else None,
+        "expires_at": None,
+        "has_refresh_token": False,
+    }
+
+
 def _copilot_acp_status() -> Dict[str, Any]:
     """Status for copilot-acp — credentials are owned by the Copilot CLI.
 
@@ -9819,6 +9871,17 @@ _OAUTH_PROVIDER_CATALOG: tuple[Dict[str, Any], ...] = (
         "cli_command": "hermes auth add xai-oauth",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/guides/xai-grok-oauth",
         "status_fn": None,  # dispatched via auth.get_xai_oauth_auth_status
+    },
+    {
+        "id": "copilot",
+        "name": "GitHub Copilot",
+        "flow": "external",
+        # Device code, NOT `gh auth login`. A gh token is scoped to the GitHub
+        # API and the Copilot endpoint rejects it — the two logins are not
+        # interchangeable, which is the single most common setup failure.
+        "cli_command": "hermes model",
+        "docs_url": "https://docs.github.com/en/copilot",
+        "status_fn": _copilot_status,
     },
     {
         "id": "copilot-acp",

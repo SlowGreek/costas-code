@@ -15,8 +15,13 @@ name: Build desktop artifacts
 #
 # Runs daily at 06:00 UTC, but only when HEAD differs from the last successful
 # run — an unchanged repo costs one API call instead of two 20-minute runners.
-# Building on every push was never worth it for artifacts nobody asked for.
-# Manual dispatch and v* tags bypass the gate: those are explicit intent.
+# Builds on every push to costas-code, so the newest artifact always matches the
+# newest code — chasing "which build has my fix?" cost more than the runner
+# minutes do. The daily schedule stays as a safety net for a day with no pushes.
+#
+# `concurrency` below is what makes per-push affordable: a rapid series of
+# pushes cancels its own in-flight builds, so a burst costs one build, not one
+# per commit.
 
 on:
   schedule:
@@ -36,8 +41,16 @@ on:
         type: boolean
         default: false
   push:
+    branches:
+      - costas-code
     tags:
       - 'v*'
+    paths-ignore:
+      # A docs-only push cannot change the artifact, so it should not spend two
+      # 20-minute runners producing a byte-identical one.
+      - '**/*.md'
+      - 'website/**'
+      - '.github/ISSUE_TEMPLATE/**'
 
 permissions:
   contents: write   # needed to create a Release; harmless otherwise
@@ -52,11 +65,12 @@ jobs:
   gate:
     # Answers one question: is there anything new to build?
     #
-    # A scheduled build that re-packages an unchanged commit produces an
-    # artifact identical to yesterday's, so we compare HEAD against the SHA of
-    # the last successful run of this workflow. Manual dispatches and tag
-    # pushes bypass the check — those are explicit intent, and second-guessing
-    # them is just surprising.
+    # Only the SCHEDULED run needs asking: it fires whether or not anything
+    # changed, and re-packaging an unchanged commit produces an artifact
+    # identical to yesterday's, so it compares HEAD against the SHA of the last
+    # successful run. Pushes, manual dispatches and tags always build — a push
+    # is by definition new code, and second-guessing explicit intent is just
+    # surprising.
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.decide.outputs.build }}
@@ -222,13 +236,17 @@ jobs:
   release:
     name: Attach to release
     needs: build
-    # Only for a tag push or an explicit request — and never when `build` was
-    # skipped, since `needs: build` alone is satisfied by a skipped job and
-    # would publish an empty release.
+    # A TAG push or an explicit request — not an ordinary branch push. Now that
+    # every push builds, `event_name == 'push'` alone would cut a release per
+    # commit; ref_type narrows it back to deliberate releases. Branch-push
+    # artifacts still upload and are downloadable from the run itself.
+    #
+    # Never when `build` was skipped either: `needs: build` alone is satisfied
+    # by a skipped job and would publish an empty release.
     if: >-
       !cancelled() &&
       needs.build.result == 'success' &&
-      (github.event_name == 'push' || inputs.make_release)
+      (github.ref_type == 'tag' || inputs.make_release)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4

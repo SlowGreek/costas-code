@@ -198,7 +198,10 @@ function validateCandidate(directory) {
     throw new Error('[stage-ae-executive] resource read-back mismatch')
   }
   const smoke = smokeCandidate(directory)
-  if (JSON.stringify(smoke) !== JSON.stringify(manifest.smoke)) {
+  if (
+    smoke.executive_scenes !== manifest.smoke.executive_scenes ||
+    smoke.skin_settings_nodes !== manifest.smoke.skin_settings_nodes
+  ) {
     throw new Error('[stage-ae-executive] smoke read-back mismatch')
   }
 }

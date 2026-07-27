@@ -80,7 +80,7 @@ describe('useComposerSubmit busy-turn routing', () => {
       hook.result.current.submitDraft()
     })
 
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course'))
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course', []))
     expect(queueCurrentDraft).not.toHaveBeenCalled()
     expect(onCancel).not.toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
@@ -137,6 +137,47 @@ describe('useComposerSubmit busy-turn routing', () => {
     expect(onSteer).not.toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
     expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it('steers an image-bearing follow-up instead of queueing it', async () => {
+    // Images CAN ride a correction: session.redirect converts them to content
+    // parts. Queueing them (the old behaviour) delivered the screenshot after
+    // the work it was meant to correct.
+    const image: ComposerAttachment = { id: 'shot', kind: 'image', label: 'screen.png', path: '/tmp/screen.png' }
+
+    const { hook, onSteer, queueCurrentDraft } = renderSubmitHook({
+      attachments: [image],
+      busy: true,
+      text: 'look at this'
+    })
+
+    act(() => {
+      hook.result.current.submitDraft()
+    })
+
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('look at this', [image]))
+    expect(queueCurrentDraft).not.toHaveBeenCalled()
+  })
+
+  it('queues a mixed image + file follow-up rather than steering', () => {
+    // A @file/@folder/terminal ref is resolved by the turn-setup path that a
+    // mid-turn redirect bypasses, so one non-image attachment sends the whole
+    // submission to the queue.
+    const image: ComposerAttachment = { id: 'shot', kind: 'image', label: 'screen.png' }
+    const doc: ComposerAttachment = { id: 'doc', kind: 'file', label: 'notes.txt' }
+
+    const { hook, onSteer, queueCurrentDraft } = renderSubmitHook({
+      attachments: [image, doc],
+      busy: true,
+      text: 'read both'
+    })
+
+    act(() => {
+      hook.result.current.submitDraft()
+    })
+
+    expect(queueCurrentDraft).toHaveBeenCalledTimes(1)
+    expect(onSteer).not.toHaveBeenCalled()
   })
 
   it('stops an active turn only with an empty composer', () => {

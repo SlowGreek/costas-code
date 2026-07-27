@@ -230,9 +230,14 @@ export function ChatBar({
   const hasComposerPayload = hasText || attachments.length > 0
   const canSubmit = busy || hasComposerPayload
 
-  // Steer only makes sense mid-turn, text-only (the gateway can't carry images
-  // into a tool result) and never for a slash command (those execute inline).
-  const canSteer = busy && !compacting && !!onSteer && attachments.length === 0 && isSteerableText
+  // Steer only makes sense mid-turn, and never for a slash command (those
+  // execute inline). Images CAN ride a correction now — session.redirect
+  // converts them to content parts using the same routing a normal turn uses
+  // — but only image attachments: a @file/@folder/terminal ref is resolved by
+  // the turn-setup path, which a mid-turn redirect bypasses, so those still
+  // queue for the next turn.
+  const steerableAttachments = attachments.every(a => a.kind === 'image')
+  const canSteer = busy && !compacting && !!onSteer && steerableAttachments && isSteerableText
 
   // While busy: text redirects the live turn (Cursor-style stop-and-correct),
   // attachments queue for the next turn, an empty composer stops.

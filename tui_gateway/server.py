@@ -10109,15 +10109,95 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"status": "queued" if accepted else "rejected", "text": text})
 
 
+
+def _redirect_payload_with_images(agent: Any, text: str, images: list[str]) -> Any:
+    """Build a redirect correction that carries images.
+
+    Mirrors the decision a normal turn makes (see the image-routing block in
+    the prompt runner) so a correction reaches the model the same way a fresh
+    message would:
+
+      native → OpenAI-style content parts; adapters translate per provider
+      text   → vision_analyze pre-pass, prepended as plain text
+
+    Every failure path degrades to the text form rather than raising: losing
+    the pixels is recoverable, but dropping the user's correction mid-turn is
+    not.
+    """
+    try:
+        from agent.image_routing import (
+            build_native_content_parts,
+            decide_image_input_mode,
+        )
+        from hermes_cli.config import load_config as _load_cfg_for_images
+
+        provider, model = _active_image_routing_identity(agent)
+        mode = decide_image_input_mode(
+            provider,
+            model,
+            _load_cfg_for_images(),
+            requested_provider=getattr(agent, "requested_provider", ""),
+        )
+        # Codex owns its own turn loop and takes steering as plain text.
+        if getattr(agent, "api_mode", "") == "codex_app_server":
+            mode = "text"
+    except Exception as exc:
+        print(
+            f"[tui_gateway] redirect image routing failed, using text: {exc}",
+            file=sys.stderr,
+        )
+        return _enrich_with_attached_images(text, images)
+
+    if mode != "native":
+        return _enrich_with_attached_images(text, images)
+
+    try:
+        parts, skipped = build_native_content_parts(text, images)
+        if skipped:
+            print(
+                f"[tui_gateway] redirect skipped {len(skipped)} unreadable image(s)",
+                file=sys.stderr,
+            )
+        # No image part survived (all unreadable) — the parts list would carry
+        # no pixels, so the text form is strictly more informative.
+        if any(p.get("type") == "image_url" for p in parts):
+            return parts
+    except Exception as exc:
+        print(
+            f"[tui_gateway] redirect native attach failed, using text: {exc}",
+            file=sys.stderr,
+        )
+
+    return _enrich_with_attached_images(text, images)
+
+
 @method("session.redirect")
 def _(rid, params: dict) -> dict:
     """Redirect the active model turn while preserving valid work/context."""
     text = (params.get("text") or "").strip()
-    if not text:
-        return _err(rid, 4002, "text is required")
+    # A correction may carry images. The desktop stages them and passes their
+    # paths explicitly; `image.attach` stages them into the session queue. Both
+    # sources are accepted, params first (they belong to THIS correction).
+    param_images = [str(p) for p in (params.get("images") or []) if str(p).strip()]
+    if not text and not param_images:
+        return _err(rid, 4002, "text or images required")
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    # Take ownership of anything image.attach staged. Draining here (rather
+    # than reading) matters: images left in the queue would silently ride the
+    # NEXT turn instead, long after the user attached them to this correction.
+    with session["history_lock"]:
+        staged = [str(p) for p in (session.get("attached_images") or []) if str(p).strip()]
+        if staged:
+            session["attached_images"] = []
+    # De-duplicate while preserving order: the desktop may pass a path that
+    # image.attach also staged, and sending the same picture twice burns tokens
+    # and reads to the model as two separate images.
+    images: list[str] = []
+    for path in [*param_images, *staged]:
+        if path not in images:
+            images.append(path)
     agent = session.get("agent")
     # Turn-build window: a fresh turn flips running=True and kicks off an async
     # agent build, so session["agent"] is briefly None. That is not an
@@ -10125,7 +10205,10 @@ def _(rid, params: dict) -> dict:
     # model as the next turn, instead of a misleading 4010 the client silently
     # swallows into a lost follow-up.
     if agent is None and session.get("running"):
-        _enqueue_prompt(session, text, current_transport() or _stdio_transport)
+        # No agent yet, so no routing decision is possible — fall back to the
+        # same text enrichment a normal turn uses when native images are off.
+        queued: Any = _enrich_with_attached_images(text, images) if images else text
+        _enqueue_prompt(session, queued, current_transport() or _stdio_transport)
         session["last_active"] = time.time()
         return _ok(rid, {"status": "queued", "text": text})
     if (
@@ -10134,8 +10217,11 @@ def _(rid, params: dict) -> dict:
         or not hasattr(agent, "redirect")
     ):
         return _err(rid, 4010, "agent does not support active-turn redirect")
+    payload: Any = text
+    if images:
+        payload = _redirect_payload_with_images(agent, text, images)
     try:
-        accepted = agent.redirect(text)
+        accepted = agent.redirect(payload)
     except Exception as exc:
         return _err(rid, 5000, f"redirect failed: {exc}")
     if accepted:

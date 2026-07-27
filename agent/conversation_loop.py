@@ -114,7 +114,23 @@ _API_CALL_MODULES = frozenset({
 })
 
 
-def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text: str) -> None:
+def _redirect_display_text(text: Any) -> str:
+    """Flatten a correction to plain text for logs/summaries.
+
+    A correction may be an OpenAI-style parts list carrying images. Anywhere we
+    need a string (the original-user-message summary below) must read the text
+    parts rather than ``str()``-ing the list into ``"[{'type': 'text'...}]"``.
+    """
+    if isinstance(text, list):
+        return "\n".join(
+            str(part.get("text") or "")
+            for part in text
+            if isinstance(part, dict) and part.get("type") == "text"
+        ).strip()
+    return str(text or "").strip()
+
+
+def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text: Any) -> None:
     """Append a provider-safe checkpoint and correction to the live turn.
 
     Incomplete provider reasoning blocks are not valid replay items (Anthropic
@@ -145,12 +161,17 @@ def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text
     # by the correction preserves strict alternation. If a transport already
     # committed an assistant item, attribute the checkpoint inside the user
     # correction instead of creating assistant→assistant.
+    prefix = f"[Context from the interrupted assistant response]\n{checkpoint}"
+
     if messages and messages[-1].get("role") == "assistant":
-        correction = (
-            "[Context from the interrupted assistant response]\n"
-            f"{checkpoint}\n\n"
-            f"{text}"
-        )
+        # An assistant item is already committed, so fold the checkpoint into
+        # the correction rather than creating assistant→assistant. With a parts
+        # list the prefix becomes its own text part — string-formatting it
+        # would stringify the list and drop the images.
+        if isinstance(text, list):
+            correction: Any = [{"type": "text", "text": prefix}, *text]
+        else:
+            correction = f"{prefix}\n\n{text}"
         messages.append({"role": "user", "content": correction})
     else:
         messages.append({"role": "assistant", "content": checkpoint})
@@ -878,7 +899,8 @@ def run_conversation(
             if isinstance(original_user_message, str):
                 original_user_message = (
                     f"{original_user_message}\n\n"
-                    f"User correction during the turn: {_redirect_text}"
+                    "User correction during the turn: "
+                    f"{_redirect_display_text(_redirect_text)}"
                 )
             agent._persist_session(messages, conversation_history)
 

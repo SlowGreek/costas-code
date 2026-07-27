@@ -151,14 +151,17 @@ export function useComposerSubmit({
         triggerHaptic('submit')
         clearDraft()
         dispatchSubmit(text)
-      } else if (!compacting && !attachments.length && text.trim()) {
+      } else if (!compacting && attachments.every(a => a.kind === 'image') && text.trim()) {
         // Cursor-style stop-and-correct: interrupt the live turn and redirect
         // it with this text. redirect() preserves the shown reasoning/work; if
         // the turn already ended, steerDraft re-queues so nothing is lost.
+        // Images ride along as content parts; a @file/@folder/terminal ref
+        // cannot, because it's resolved by the turn-setup path a redirect
+        // bypasses — those fall through to the queue below.
         steerDraft()
       } else if (payloadPresent) {
-        // Attachments can't ride a redirect (no tool-result image carriage) —
-        // queue the whole payload for the next turn.
+        // A non-image attachment (or a compacting turn) — queue the whole
+        // payload for the next turn.
         queueCurrentDraft()
       } else {
         // Stop button (the only way to reach here while busy with an empty
@@ -188,16 +191,24 @@ export function useComposerSubmit({
 
     // Guard on live editor state, not the render-lagged `canSteer`: a redirect
     // fired on a fast Enter must not be dropped because state hasn't synced.
-    if (!onSteer || !text || attachments.length > 0 || SLASH_COMMAND_RE.test(text)) {
+    // Images can ride a correction; a @file/@folder/terminal ref cannot,
+    // because those are resolved by the turn-setup path a redirect bypasses.
+    const steerable = attachments.every(a => a.kind === 'image')
+
+    if (!onSteer || !text || !steerable || SLASH_COMMAND_RE.test(text)) {
       return
     }
+
+    const sent = cloneAttachments(attachments)
 
     triggerHaptic('submit')
     clearDraft()
 
-    void Promise.resolve(onSteer(text)).then(accepted => {
+    void Promise.resolve(onSteer(text, sent)).then(accepted => {
       if (!accepted && activeQueueSessionKey) {
-        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: [] })
+        // Rejected (no live turn) — the words AND the images fall through to
+        // the next-turn queue rather than being dropped.
+        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: sent })
       }
     })
   }

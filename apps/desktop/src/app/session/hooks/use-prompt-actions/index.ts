@@ -643,9 +643,14 @@ export function usePromptActions({
   // completed work intact. During a tool it waits for the safe result boundary.
   // Returns false when the turn raced to completion so the composer can queue.
   const redirectPrompt = useCallback(
-    async (rawText: string): Promise<boolean> => {
+    async (rawText: string, attachments?: ComposerAttachment[]): Promise<boolean> => {
       const text = sanitizeComposerInput(rawText).trim()
       const sessionId = activeSessionId || activeSessionIdRef.current
+
+      // Only images ride a correction. A @file/@folder/terminal ref is resolved
+      // by the turn-setup path a redirect bypasses, so the composer keeps those
+      // on the queue path and they must never reach here.
+      const imageAttachments = (attachments ?? []).filter(a => a?.kind === 'image')
 
       if (!text || !sessionId) {
         return false
@@ -657,6 +662,19 @@ export function usePromptActions({
       // message after the interrupted checkpoint, matching the durable core
       // transcript rather than a system note that changes role after reload.
       const send = async (id: string): Promise<boolean> => {
+        // Stage images exactly as a normal submit does: syncAttachmentsForSubmit
+        // uploads via image.attach_bytes, appending to the gateway's per-session
+        // queue that session.redirect then drains. Nothing extra crosses the
+        // wire. A staging failure costs only the pixels — never the correction,
+        // which is the part the user cannot afford to lose mid-turn.
+        if (imageAttachments.length) {
+          try {
+            await syncAttachmentsForSubmit(id, imageAttachments)
+          } catch (err) {
+            console.warn('[redirect] image staging failed; sending text only', err)
+          }
+        }
+
         // Redirect aborts the model request, so the completion event can race
         // its RPC response. Insert before the live reply *before* awaiting the
         // gateway; appending after the response leaves the correction below a
@@ -679,7 +697,31 @@ export function usePromptActions({
           })
 
         try {
-          const result = await requestGateway<SessionRedirectResponse>('session.redirect', { session_id: id, text })
+          // Stage the images into the session workspace first — the gateway
+          // reads them off disk to build the content parts, so an unstaged
+          // local path (or a remote-mode path the backend can't see) would
+          // silently yield a text-only correction.
+          let images: string[] = []
+
+          if (imageAttachments.length) {
+            try {
+              const synced = await syncAttachmentsForSubmit(id, imageAttachments, {
+                updateComposerAttachments: false
+              })
+
+              images = synced.map(a => a.path).filter((p): p is string => Boolean(p))
+            } catch (uploadErr) {
+              // Staging failed — send the words anyway. Losing the pixels is
+              // recoverable; dropping the correction mid-turn is not.
+              console.warn('[redirect] image staging failed, sending text only', uploadErr)
+            }
+          }
+
+          const result = await requestGateway<SessionRedirectResponse>('session.redirect', {
+            session_id: id,
+            text,
+            ...(images.length ? { images } : {})
+          })
 
           if (result?.status === 'redirected') {
             triggerHaptic('submit')
@@ -743,6 +785,7 @@ export function usePromptActions({
       appendSessionTextMessage,
       requestGateway,
       selectedStoredSessionIdRef,
+      syncAttachmentsForSubmit,
       updateSessionState
     ]
   )

@@ -2,9 +2,9 @@ import type { ReactNode } from 'react'
 
 import type { SubmitTextOptions } from '@/app/session/hooks/use-prompt-actions/utils'
 import type { HermesGateway } from '@/hermes'
+import type { ComposerAttachment } from '@/store/composer'
 
 import type { DroppedFile } from '../hooks/use-composer-actions'
-import type { ComposerAttachment } from '@/store/composer'
 
 export interface ContextSuggestion {
   text: string

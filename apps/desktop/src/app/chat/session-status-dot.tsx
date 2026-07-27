@@ -3,7 +3,7 @@ import { useStore } from '@nanostores/react'
 import { type Translations, useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { $backgroundRunningSessionIds } from '@/store/composer-status'
-import { $unreadFinishedSessionIds } from '@/store/session'
+import { $erroredSessionIds, $unreadFinishedSessionIds } from '@/store/session'
 import { $sessionColorById, sessionColorFor } from '@/store/session-color'
 import { $attentionSessionIds, $stalledSessionIds, $workingSessionIds } from '@/store/session-states'
 import type { SessionInfo } from '@/types/hermes'
@@ -29,40 +29,62 @@ const DOT_BASE = 'relative size-1.5 rounded-full'
 // complete static strings, so a `before:bg-${color}` template never emits.
 const PING = "before:absolute before:inset-0 before:animate-ping before:rounded-full before:content-['']"
 
+// Status colours are FIXED, never themed. `--ui-accent` follows the user's
+// theme (blue on Nous, but orange, grey, or green on others), so a "working"
+// dot changed colour with the skin and stopped meaning anything — the reported
+// "sometimes blue, sometimes white, and flashing" confusion. A status signal
+// has to mean the same thing in every theme, so these are literal:
+//
+//   blue    working      pulsing, a turn is running
+//   amber   needs-input  steady, blocked on you (question or permission)
+//   red     error        steady, the turn failed
+//   green   unread       steady, finished and you haven't looked
+//   grey    background   pulsing, a detached process while the turn is idle
+//
+// Only `idle` still inherits the project colour, since it carries no status.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // Amber steady — a clarify/approval is blocking the turn. Steady (not
-  // pulsing) reads as "your turn", distinct from the accent pulse of a turn.
+  // pulsing) reads as "your turn", distinct from the pulse of a running turn.
   'needs-input': {
     ariaLabel: r => r.needsInput,
     className: `${DOT_BASE} quest-glow bg-amber-500`,
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Accent pulse — the LLM turn is actively running.
+  // Red steady — the turn ended in an error. Steady because it is over:
+  // pulsing would suggest work still in flight.
+  error: {
+    ariaLabel: r => r.sessionError,
+    className: `${DOT_BASE} bg-red-500 shadow-[0_0_0.5rem_rgb(239_68_68_/_0.5)]`,
+    role: 'status',
+    title: r => r.sessionError
+  },
+  // Blue pulse — the LLM turn is actively running.
   working: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-(--ui-accent) shadow-[0_0_0.625rem_color-mix(in_srgb,var(--ui-accent)_55%,transparent)] ${PING} before:bg-(--ui-accent) before:opacity-70`,
+    className: `${DOT_BASE} bg-blue-500 shadow-[0_0_0.625rem_rgb(59_130_246_/_0.55)] ${PING} before:bg-blue-500 before:opacity-70`,
     role: 'status'
   },
-  // Quiet accent pulse — the turn is still authoritative-running, but no
-  // stream activity has arrived for the watchdog window.
+  // Quiet blue pulse — still authoritatively running, but no stream activity
+  // has arrived for the watchdog window. Same colour, lower intensity: it is
+  // the same state, not a different one.
   stalled: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-(--ui-accent) opacity-70 ${PING} before:bg-(--ui-accent) before:opacity-40`,
+    className: `${DOT_BASE} bg-blue-500 opacity-70 ${PING} before:bg-blue-500 before:opacity-40`,
     role: 'status',
     title: r => r.sessionRunning
   },
-  // Pulsing gray — a terminal(background=true) process is alive while the LLM
-  // is idle. Gray (not accent) reads as "something chugging along". Brighter
-  // than muted-foreground so it's visible against the surface.
+  // Pulsing grey — a terminal(background=true) process is alive while the LLM
+  // is idle. Grey (not blue) reads as "something chugging along" without
+  // claiming the agent is thinking.
   background: {
     ariaLabel: r => r.backgroundRunning,
     className: `${DOT_BASE} bg-muted-foreground/80 ${PING} before:bg-muted-foreground/80 before:opacity-60`,
     role: 'status',
     title: r => r.backgroundRunning
   },
-  // Steady green — a background session's turn completed and the user hasn't
-  // opened it since. "Something new here, go look."
+  // Steady green — the turn completed and the user hasn't opened it since.
+  // "Something new here, go look."
   unread: {
     ariaLabel: r => r.finishedUnread,
     className: `${DOT_BASE} bg-emerald-500`,
@@ -116,8 +138,9 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
   const isStalled = useStore($stalledSessionIds).includes(storedSessionId)
   const isUnread = useStore($unreadFinishedSessionIds).includes(storedSessionId)
   const hasBackground = useStore($backgroundRunningSessionIds).includes(storedSessionId)
+  const hasError = useStore($erroredSessionIds).includes(storedSessionId)
 
-  const dotState = sessionDotState({ hasBackground, isStalled, isUnread, isWorking, needsInput })
+  const dotState = sessionDotState({ hasBackground, hasError, isStalled, isUnread, isWorking, needsInput })
 
   return (
     <span className={cn('flex items-center gap-0.5', className)}>

@@ -393,6 +393,28 @@ export const setActiveSessionStoredIdRotation = (next: Updater<ActiveSessionStor
 // Written by session-states.ts (handleTransition), cleared here on session open.
 export const $unreadFinishedSessionIds = atom<string[]>([])
 
+// Transient: a session's last turn ended in an error and the user hasn't opened
+// it since. Same lifecycle as unread — this is "you don't know yet", not a
+// durable property of the session, so opening the row clears it. Written by the
+// gateway `error` event handler.
+export const $erroredSessionIds = atom<string[]>([])
+
+export const markSessionErrored = (storedSessionId: null | string | undefined) => {
+  if (!storedSessionId || $erroredSessionIds.get().includes(storedSessionId)) {
+    return
+  }
+
+  $erroredSessionIds.set([...$erroredSessionIds.get(), storedSessionId])
+}
+
+export const clearSessionError = (storedSessionId: null | string | undefined) => {
+  if (!storedSessionId || !$erroredSessionIds.get().includes(storedSessionId)) {
+    return
+  }
+
+  $erroredSessionIds.set($erroredSessionIds.get().filter(x => x !== storedSessionId))
+}
+
 export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
   updateAtom($selectedStoredSessionId, next)
   // Opening a session clears its unread state — the user is now looking at it.
@@ -401,6 +423,9 @@ export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
   if (id && $unreadFinishedSessionIds.get().includes(id)) {
     $unreadFinishedSessionIds.set($unreadFinishedSessionIds.get().filter(x => x !== id))
   }
+
+  // Same for a failed turn: the red dot means "you don't know yet".
+  clearSessionError(id)
 }
 
 export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)

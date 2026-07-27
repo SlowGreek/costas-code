@@ -1469,6 +1469,7 @@ export interface Translations {
       actionsFor: (title: string) => string
       sessionActions: string
       sessionRunning: string
+      sessionError: string
       needsInput: string
       waitingForAnswer: string
       finishedUnread: string

@@ -34,6 +34,8 @@ import {
   $currentCwd,
   $currentModel,
   $currentProvider,
+  clearSessionError,
+  markSessionErrored,
   sessionMatchesStoredId,
   setCurrentBranch,
   setCurrentCwd,
@@ -435,6 +437,9 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         setSessionCompacting(sessionId, false)
         compactedTurnRef.current.delete(sessionId)
         nativeSubagentSessionsRef.current.delete(sessionId)
+        // A new turn supersedes the previous failure: the dot should go back to
+        // the working pulse rather than staying red while work is in flight.
+        clearSessionError(sessionId)
         // A fresh turn on this session optimistically clears its billing wall;
         // if credits are still exhausted the next failure re-raises it.
         clearBillingBlock(sessionId)
@@ -915,6 +920,10 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           clearActiveSessionTodos(sessionId)
           setSessionCompacting(sessionId, false)
           compactedTurnRef.current.delete(sessionId)
+          // Red dot on the row until the user opens it. A toast is missable and
+          // a background session's failure otherwise leaves no trace in the
+          // sidebar at all.
+          markSessionErrored(sessionId)
         }
 
         if (isActiveEvent) {

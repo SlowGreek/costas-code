@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   $subagentsBySession,
+  $subagentWaitingSessionIds,
   activeSubagentCount,
   allSubagents,
   buildSubagentTree,
@@ -130,5 +131,46 @@ describe('subagent store', () => {
 
     expect($subagentsBySession.get().s1).toBeUndefined()
     expect($subagentsBySession.get().s2).toHaveLength(1)
+  })
+})
+
+describe('$subagentWaitingSessionIds', () => {
+  beforeEach(() => {
+    $subagentsBySession.set({})
+  })
+
+  it('lists sessions with queued or running subagents', () => {
+    $subagentsBySession.set({
+      's1': [{ id: 'a', status: 'running' } as never],
+      's2': [{ id: 'b', status: 'queued' } as never]
+    })
+
+    expect([...$subagentWaitingSessionIds.get()].sort()).toEqual(['s1', 's2'])
+  })
+
+  it('drops a session once its subagents finish', () => {
+    // The dot must clear on its own; a session whose fan-out completed is not
+    // still waiting.
+    $subagentsBySession.set({ 's1': [{ id: 'a', status: 'completed' } as never] })
+    expect($subagentWaitingSessionIds.get()).toEqual([])
+  })
+
+  it('ignores failed and interrupted subagents', () => {
+    $subagentsBySession.set({
+      's1': [{ id: 'a', status: 'failed' } as never, { id: 'b', status: 'interrupted' } as never]
+    })
+
+    expect($subagentWaitingSessionIds.get()).toEqual([])
+  })
+
+  it('keeps a stable reference when membership is unchanged', () => {
+    // Subagent progress ticks constantly. A fresh array each time would
+    // re-render every sidebar row for nothing.
+    $subagentsBySession.set({ 's1': [{ id: 'a', status: 'running', pct: 10 } as never] })
+    const first = $subagentWaitingSessionIds.get()
+
+    $subagentsBySession.set({ 's1': [{ id: 'a', status: 'running', pct: 90 } as never] })
+
+    expect($subagentWaitingSessionIds.get()).toBe(first)
   })
 })

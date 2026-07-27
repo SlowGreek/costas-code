@@ -6,6 +6,7 @@ import { $backgroundRunningSessionIds } from '@/store/composer-status'
 import { $erroredSessionIds, $unreadFinishedSessionIds } from '@/store/session'
 import { $sessionColorById, sessionColorFor } from '@/store/session-color'
 import { $attentionSessionIds, $stalledSessionIds, $workingSessionIds } from '@/store/session-states'
+import { $subagentWaitingSessionIds } from '@/store/subagents'
 import type { SessionInfo } from '@/types/hermes'
 
 import { type SessionDotState, sessionDotState } from './sidebar/session-row-state'
@@ -36,6 +37,7 @@ const PING = "before:absolute before:inset-0 before:animate-ping before:rounded-
 // has to mean the same thing in every theme, so these are literal:
 //
 //   blue    working      pulsing, a turn is running
+//   pink    subagent     pulsing + glow, waiting on delegated work
 //   amber   needs-input  steady, blocked on you (question or permission)
 //   red     error        steady, the turn failed
 //   green   unread       steady, finished and you haven't looked
@@ -64,6 +66,18 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     ariaLabel: r => r.sessionRunning,
     className: `${DOT_BASE} bg-blue-500 shadow-[0_0_0.625rem_rgb(59_130_246_/_0.55)] ${PING} before:bg-blue-500 before:opacity-70`,
     role: 'status'
+  },
+  // Pink pulse with a wider glow — the turn is running, but the wait is
+  // delegated work rather than the model thinking. Distinct from the grey
+  // background dot on purpose: that one means a detached process is alive while
+  // the turn is IDLE, which is a different situation and shouldn't share a
+  // colour. The extra glow radius is what makes it readable at a glance in a
+  // long sidebar.
+  subagent: {
+    ariaLabel: r => r.subagentRunning,
+    className: `${DOT_BASE} bg-pink-500 shadow-[0_0_0.75rem_rgb(236_72_153_/_0.7)] ${PING} before:bg-pink-500 before:opacity-75`,
+    role: 'status',
+    title: r => r.subagentRunning
   },
   // Quiet blue pulse — still authoritatively running, but no stream activity
   // has arrived for the watchdog window. Same colour, lower intensity: it is
@@ -139,8 +153,9 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
   const isUnread = useStore($unreadFinishedSessionIds).includes(storedSessionId)
   const hasBackground = useStore($backgroundRunningSessionIds).includes(storedSessionId)
   const hasError = useStore($erroredSessionIds).includes(storedSessionId)
+  const hasSubagents = useStore($subagentWaitingSessionIds).includes(storedSessionId)
 
-  const dotState = sessionDotState({ hasBackground, hasError, isStalled, isUnread, isWorking, needsInput })
+  const dotState = sessionDotState({ hasBackground, hasError, hasSubagents, isStalled, isUnread, isWorking, needsInput })
 
   return (
     <span className={cn('flex items-center', branchStem ? 'gap-1' : 'gap-0.5', className)}>

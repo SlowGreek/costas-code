@@ -1690,6 +1690,7 @@ export const ja = defineLocale({
       actionsFor: title => `${title} のアクション`,
       sessionActions: 'セッションアクション',
       sessionRunning: 'セッション実行中',
+      subagentRunning: 'サブエージェント待機中',
       sessionError: 'ターン失敗 — 未読',
       needsInput: '入力が必要です',
       waitingForAnswer: '回答を待っています',

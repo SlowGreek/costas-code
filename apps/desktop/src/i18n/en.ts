@@ -1757,6 +1757,7 @@ export const en: Translations = {
       actionsFor: title => `Actions for ${title}`,
       sessionActions: 'Session actions',
       sessionRunning: 'Session running',
+      subagentRunning: 'Waiting on subagents',
       sessionError: 'Turn failed — unread',
       needsInput: 'Needs your input',
       waitingForAnswer: 'Waiting for your answer',

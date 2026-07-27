@@ -1,8 +1,17 @@
-export type SessionDotState = 'background' | 'error' | 'idle' | 'needs-input' | 'stalled' | 'unread' | 'working'
+export type SessionDotState =
+  | 'background'
+  | 'error'
+  | 'idle'
+  | 'needs-input'
+  | 'stalled'
+  | 'subagent'
+  | 'unread'
+  | 'working'
 
 interface SessionRowState {
   hasBackground: boolean
   hasError: boolean
+  hasSubagents: boolean
   isStalled: boolean
   isUnread: boolean
   isWorking: boolean
@@ -14,16 +23,23 @@ interface SessionRowState {
  * Priority reflects urgency, because only one colour can show:
  *   needs-input  you are blocking the turn — nothing moves until you act
  *   error        it stopped and you probably don't know
+ *   subagent     the turn is running, and it is waiting on delegated work
  *   working      it is running
  *   background   a detached process is alive while the turn is idle
  *   unread       it finished and you haven't looked
  *
  * needs-input outranks error: a blocked prompt is actionable right now, while
  * an error is already over.
+ *
+ * `subagent` outranks plain `working` because it is strictly more specific —
+ * both mean "running", but only one tells you the wait is fan-out rather than
+ * the model thinking. It sits ABOVE working for that reason and BELOW error so
+ * a failure is never masked by delegated work still in flight.
  */
 export function sessionDotState({
   hasBackground,
   hasError,
+  hasSubagents,
   isStalled,
   isUnread,
   isWorking,
@@ -38,6 +54,10 @@ export function sessionDotState({
   }
 
   if (isWorking) {
+    if (hasSubagents) {
+      return 'subagent'
+    }
+
     return isStalled ? 'stalled' : 'working'
   }
 

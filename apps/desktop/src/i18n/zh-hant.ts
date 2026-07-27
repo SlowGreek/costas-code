@@ -1636,6 +1636,7 @@ export const zhHant = defineLocale({
       actionsFor: title => `${title} 的動作`,
       sessionActions: '工作階段動作',
       sessionRunning: '工作階段執行中',
+      subagentRunning: '等待子代理程式',
       sessionError: '回合失敗 — 未讀',
       needsInput: '需要您的輸入',
       waitingForAnswer: '等待您的回答',

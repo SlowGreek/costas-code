@@ -1,5 +1,6 @@
-import { atom } from 'nanostores'
+import { atom, computed } from 'nanostores'
 
+import { stableArray } from '@/lib/stable-array'
 import { capitalize } from '@/lib/text'
 
 export type SubagentStatus = 'completed' | 'failed' | 'interrupted' | 'queued' | 'running'
@@ -258,6 +259,25 @@ export function buildSubagentTree(items: readonly SubagentProgress[]): SubagentN
 
 export const activeSubagentCount = (items: readonly SubagentProgress[]) =>
   items.filter(item => item.status === 'queued' || item.status === 'running').length
+
+/** Sessions currently waiting on at least one subagent.
+ *
+ * Keyed by the same stored session id as the other row-state atoms, so the
+ * sidebar dot can read it directly rather than being handed a prop — a second
+ * source of truth is how the dot and the row arc drifted apart before.
+ *
+ * `stableArray` keeps the previous reference when membership is unchanged;
+ * without it every subagent progress tick would emit a fresh array and
+ * re-render every row in the sidebar.
+ */
+let subagentWaitingIds: readonly string[] = []
+export const $subagentWaitingSessionIds = computed($subagentsBySession, bySession => {
+  const next = Object.entries(bySession)
+    .filter(([, items]) => activeSubagentCount(items) > 0)
+    .map(([sid]) => sid)
+
+  return (subagentWaitingIds = stableArray(subagentWaitingIds, next))
+})
 
 export const failedSubagentCount = (items: readonly SubagentProgress[]) =>
   items.filter(item => item.status === 'failed' || item.status === 'interrupted').length

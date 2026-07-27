@@ -246,4 +246,65 @@ describe('parked queue sessions', () => {
 
     expect(isQueueParked('rt-new')).toBe(false)
   })
+
+})
+
+describe('queue persistence', () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(QUEUE_STORAGE_KEY)
+    $queuedPromptsBySession.set({})
+  })
+
+  it('does not persist base64 image previews', () => {
+    // A screenshot's data URL is >1MB encoded and the whole queue is one
+    // localStorage string against a ~5MB quota. Persisting previews threw
+    // QuotaExceededError, which the best-effort catch swallowed: the in-memory
+    // queue looked fine while nothing survived, so the drained entry arrived
+    // with no attachment and no sendable payload.
+    const bigPreview = `data:image/png;base64,${'A'.repeat(200_000)}`
+
+    enqueueQueuedPrompt(SESSION_KEY, {
+      text: 'look at this',
+      attachments: [
+        { id: 'img-1', kind: 'image', label: 'shot.png', previewUrl: bigPreview, path: '/tmp/shot.png' }
+      ]
+    })
+
+    const raw = window.localStorage.getItem(QUEUE_STORAGE_KEY) ?? ''
+    expect(raw).not.toContain('data:image/png;base64')
+    expect(raw.length).toBeLessThan(bigPreview.length)
+  })
+
+  it('keeps the attachment identity that the drain actually needs', () => {
+    // The preview is presentation-only. Dropping it costs a thumbnail on a
+    // restored entry; dropping id/path/refText would lose the attachment.
+    enqueueQueuedPrompt(SESSION_KEY, {
+      text: 'look at this',
+      attachments: [
+        { id: 'img-1', kind: 'image', label: 'shot.png', previewUrl: 'data:image/png;base64,AAAA', path: '/tmp/shot.png' }
+      ]
+    })
+
+    const persisted = JSON.parse(window.localStorage.getItem(QUEUE_STORAGE_KEY) ?? '{}')
+    const restored = persisted[SESSION_KEY][0].attachments[0]
+
+    expect(restored.id).toBe('img-1')
+    expect(restored.path).toBe('/tmp/shot.png')
+    expect(restored.kind).toBe('image')
+    expect(restored.previewUrl).toBeUndefined()
+  })
+
+  it('keeps the preview in memory for the live composer', () => {
+    // Only the persisted copy is stripped — the in-memory entry still renders
+    // its thumbnail and still carries everything the drain submits.
+    const previewUrl = 'data:image/png;base64,AAAA'
+
+    enqueueQueuedPrompt(SESSION_KEY, {
+      text: 'look at this',
+      attachments: [{ id: 'img-1', kind: 'image', label: 'shot.png', previewUrl }]
+    })
+
+    expect(getQueuedPrompts(SESSION_KEY)[0].attachments[0].previewUrl).toBe(previewUrl)
+  })
+
 })

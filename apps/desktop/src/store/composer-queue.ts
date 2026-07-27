@@ -28,6 +28,30 @@ const load = (): QueueState => {
   }
 }
 
+/**
+ * Strip bytes that must never reach localStorage.
+ *
+ * An image attachment carries `previewUrl` as a base64 data URL — a single
+ * screenshot is >1MB encoded, and the whole queue is serialised as one string
+ * against a ~5MB origin quota. Persisting them made `setItem` throw
+ * QuotaExceededError, and because the write is best-effort the failure was
+ * silent: the in-memory queue looked fine while nothing survived a reload.
+ *
+ * The preview is presentation-only (the composer thumbnail); the attachment is
+ * still identified by id/path/refText, so dropping it costs a thumbnail on a
+ * restored entry rather than the attachment itself.
+ */
+const forStorage = (state: QueueState): QueueState =>
+  Object.fromEntries(
+    Object.entries(state).map(([sid, entries]) => [
+      sid,
+      entries.map(entry => ({
+        ...entry,
+        attachments: entry.attachments.map(({ previewUrl: _previewUrl, ...rest }) => rest)
+      }))
+    ])
+  )
+
 const save = (state: QueueState) => {
   if (typeof window === 'undefined') {
     return
@@ -37,10 +61,14 @@ const save = (state: QueueState) => {
     if (Object.keys(state).length === 0) {
       window.localStorage.removeItem(STORAGE_KEY)
     } else {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(forStorage(state)))
     }
-  } catch {
-    // best-effort: storage may be unavailable, queue still works in-memory
+  } catch (err) {
+    // Storage may genuinely be unavailable (private mode, disabled), which is
+    // survivable — the queue still works in memory. But a quota failure used to
+    // be indistinguishable from that, so a queued image silently stopped
+    // persisting. Say so rather than failing mute.
+    console.warn('[composer-queue] could not persist the queue; it remains in memory only', err)
   }
 }
 

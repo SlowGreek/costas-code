@@ -88,6 +88,27 @@ export type ExecutiveReconcileResult =
   | { readonly accepted: true; readonly batch: AeExecutiveSceneBatch; readonly reason: 'accepted' | 'duplicate' }
   | { readonly accepted: false; readonly batch: AeExecutiveSceneBatch; readonly reason: string }
 
+export interface StudioDesignerContext {
+  readonly revision: number
+  readonly documentHash: string
+}
+
+export function studioDesignerContext(scene: AeExecutiveScene): StudioDesignerContext | null {
+  const editor = scene.receipt?.editor
+
+  if (!editor || typeof editor !== 'object' || Array.isArray(editor)) {return null}
+  const fields = editor as Record<string, unknown>
+  const revision = fields.revision
+  const documentHash = fields.document_hash
+
+  if (
+    !Number.isSafeInteger(revision) || Number(revision) < 0 ||
+    typeof documentHash !== 'string' || !HASH_RE.test(documentHash)
+  ) {return null}
+
+  return { revision: Number(revision), documentHash }
+}
+
 export function loadExecutiveScenes(): Promise<AeExecutiveSceneBatch> {
   return window.hermesDesktop.getAeExecutiveScenes().then(parseExecutiveBatch)
 }

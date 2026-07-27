@@ -173,6 +173,7 @@ import {
   SshConnection
 } from './ssh-connection'
 import { staleBundlePaths } from './stale-bundles'
+import { submitStudioDesignerEvent } from './studio-designer'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
 import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 import { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits } from './update-count'
@@ -8726,6 +8727,14 @@ ipcMain.handle('hermes:ae-executive:scenes', async () => {
   }
 
   return runAeExecutiveProjector(binary, AE_GENERATION.generationId)
+})
+
+ipcMain.handle('hermes:ae-executive:studio-event', async (_event, request) => {
+  if (!request || typeof request !== 'object' || !('event' in request) || !('context' in request)) {
+    throw new Error('studio-ipc-shape')
+  }
+
+  return submitStudioDesignerEvent(request.event, request.context)
 })
 
 ipcMain.handle(LUCID_EXECUTIVE_CHANNEL, async (event, request) => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseExecutiveBatch, reconcileExecutiveBatch, sceneForTab } from './scene'
+import {
+  parseExecutiveBatch,
+  reconcileExecutiveBatch,
+  sceneForTab,
+  studioDesignerContext
+} from './scene'
 
 const artifact = `sha256:${'a'.repeat(64)}`
 const hash = (digit: string) => `sha256:${digit.repeat(64)}`
@@ -166,6 +171,24 @@ describe('generation executive envelope', () => {
     expect(parsed.scenes).toHaveLength(3)
     expect(sceneForTab(parsed, 'home').nodes.some(node => node.on?.tap === 'shell.tab.shell')).toBe(false)
     expect(sceneForTab(parsed, 'shell').id).toBe('run-shell')
+  })
+
+  it('admits only exact Studio editor revision and document hash metadata', () => {
+    const studio = {
+      ...scene('home'),
+      receipt: {
+        editor: {
+          selectable_node_ids: ['home-text'],
+          selected_node_id: 'home-text',
+          revision: 7,
+          document_hash: hash('7')
+        }
+      }
+    }
+
+    expect(studioDesignerContext(studio)).toEqual({ revision: 7, documentHash: hash('7') })
+    expect(studioDesignerContext({ ...studio, receipt: { editor: { revision: -1, document_hash: hash('7') } } }))
+      .toBeNull()
   })
 
   it('isolates one malformed tab instead of rejecting unrelated valid rows', () => {

@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,9 +18,16 @@ export interface UguiSceneEvent {
   scene_id: string
   revision: number
   node_id: string
-  gesture: 'change' | 'key' | 'submit' | 'tap'
+  gesture: 'change' | 'focus' | 'key' | 'submit' | 'tap'
   action: string
   payload: null | { value: string }
+}
+
+interface SelectionRect extends CSSProperties {
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 const TEXT_SIZE: Record<string, string> = { s: 'text-[0.72rem]', m: 'text-sm', l: 'text-lg', xl: 'text-2xl' }
@@ -55,7 +62,72 @@ const layoutData = (node: UgSceneNode) =>
 
 export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps) {
   const [inputs, setInputs] = useState<Record<string, string>>({})
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const rootRef = useRef<HTMLElement | null>(null)
   const nodes = useMemo(() => new Map(scene.nodes.map(node => [node.id, node])), [scene])
+
+  const editor = scene.receipt?.editor && typeof scene.receipt.editor === 'object'
+    ? scene.receipt.editor as Record<string, unknown>
+    : null
+
+  const selectableNodeIds = useMemo(() => new Set(
+    Array.isArray(editor?.selectable_node_ids)
+      ? editor.selectable_node_ids.filter((id): id is string => typeof id === 'string' && nodes.has(id))
+      : []
+  ), [editor, nodes])
+
+  const selectedNodeId = typeof editor?.selected_node_id === 'string' && selectableNodeIds.has(editor.selected_node_id)
+    ? editor.selected_node_id
+    : null
+
+  useEffect(() => {
+    const root = rootRef.current
+
+    if (!root || !selectedNodeId) {
+      setSelectionRect(null)
+
+      return
+    }
+
+    const findSelected = () => [...root.querySelectorAll<HTMLElement>('[data-ugui-node-id]')]
+      .find(element => element.dataset.uguiNodeId === selectedNodeId) ?? null
+
+    const update = () => {
+      const selected = findSelected()
+
+      if (!selected) {
+        setSelectionRect(null)
+
+        return
+      }
+
+      const rootBounds = root.getBoundingClientRect()
+      const selectedBounds = selected.getBoundingClientRect()
+
+      setSelectionRect({
+        left: selectedBounds.left - rootBounds.left + root.scrollLeft,
+        top: selectedBounds.top - rootBounds.top + root.scrollTop,
+        width: selectedBounds.width,
+        height: selectedBounds.height
+      })
+    }
+
+    update()
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+
+    resize?.observe(root)
+    const selected = findSelected()
+
+    if (selected) {resize?.observe(selected)}
+    root.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+
+    return () => {
+      resize?.disconnect()
+      root.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [scene, selectedNodeId])
 
   const emit = (node: UgSceneNode, gesture: UguiSceneEvent['gesture'], action: string, payload: UguiSceneEvent['payload']) => {
     onEvent?.({
@@ -75,6 +147,37 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
 
     if (!node) {return <SceneRefusal code="node-unavailable" detail={id} key={id} />}
 
+    const rendered = paintNode(node)
+
+    if (!selectableNodeIds.has(node.id)) {return rendered}
+
+    return (
+      <div
+        aria-label={`Select ${stringAttr(node, 'name') || stringAttr(node, 'label') || node.p} ${node.id}`}
+        aria-selected={selectedNodeId === node.id}
+        className="relative min-w-0 rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)"
+        data-ugui-node-id={node.id}
+        key={`studio-select-${node.id}`}
+        onClick={event => {
+          event.stopPropagation()
+          emit(node, 'focus', 'studio.element.select', { value: node.id })
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            event.stopPropagation()
+            emit(node, 'focus', 'studio.element.select', { value: node.id })
+          }
+        }}
+        role="option"
+        tabIndex={0}
+      >
+        {rendered}
+      </div>
+    )
+  }
+
+  const paintNode = (node: UgSceneNode): ReactNode => {
     switch (node.p) {
       case 'column':
         return (
@@ -250,8 +353,26 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
   }
 
   return (
-    <section aria-label="UGUI Scene" className="h-full min-h-0 overflow-hidden rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm" data-scene-root={scene.root} data-scene-version={scene.sceneVersion}>
+    <section
+      aria-label="UGUI Scene"
+      className="relative h-full min-h-0 overflow-hidden rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm"
+      data-scene-root={scene.root}
+      data-scene-version={scene.sceneVersion}
+      ref={rootRef}
+    >
       {paint(scene.root)}
+      {selectionRect && selectedNodeId ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute z-50 rounded-[3px] border-2 border-(--theme-primary) shadow-[0_0_0_1px_color-mix(in_srgb,var(--theme-primary)_35%,transparent)]"
+          data-ugui-selection-overlay={selectedNodeId}
+          style={selectionRect}
+        >
+          <span className="absolute -top-5 left-0 rounded-sm bg-(--theme-primary) px-1.5 py-0.5 font-mono text-[0.6rem] leading-none text-white">
+            {selectedNodeId}
+          </span>
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -14,9 +14,10 @@ import {
 import {
   type AeExecutiveSceneBatch,
   loadExecutiveScenes,
-  reconcileExecutiveBatch
+  reconcileExecutiveBatch,
+  studioDesignerContext
 } from './scene'
-import { AeScenePainter } from './scene-painter'
+import { AeScenePainter, type UguiSceneEvent } from './scene-painter'
 import { AeShellViewport } from './shell-viewport'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
@@ -154,6 +155,45 @@ export function AeExecutiveWorkspace() {
     [batch, navigate]
   )
 
+  const onSceneEvent = useCallback(
+    async (event: UguiSceneEvent) => {
+      if (event.action.startsWith('shell.tab.')) {
+        await onAction(event.action)
+
+        return
+      }
+
+      if (tabId !== 'studio' || !scene) {
+        await onAction(event.action)
+
+        return
+      }
+
+      const context = studioDesignerContext(scene)
+
+      if (!context) {
+        setNotice('STUDIO intent refused · exact editor revision/hash unavailable')
+
+        return
+      }
+
+      setNotice(`STUDIO ${event.action} · awaiting resident RUN receipt`)
+
+      try {
+        const receipt = await window.hermesDesktop.submitStudioDesignerEvent({ event, context })
+
+        setNotice(
+          `STUDIO ${receipt.status} · ${receipt.code} · revision ${receipt.revision} · ${receipt.status === 'accepted' ? 'reconciling both shells' : 'not applied'}`
+        )
+      } catch (reason) {
+        const code = reason instanceof Error ? reason.message : 'studio-action-outcome-unknown'
+
+        setNotice(`STUDIO outcome unknown/refused · ${code} · not retried`)
+      }
+    },
+    [onAction, scene, tabId]
+  )
+
   const trust = batch
     ? `Generation ${displayGeneration(batch)} · authority ${batch.authority} · observed ${batch.observed_ms ?? 'unverified'} · freshness ${batch.freshness} · posture ${batch.posture} · artifact ${batch.artifact_generation}`
     : notice
@@ -165,7 +205,7 @@ export function AeExecutiveWorkspace() {
           {shellRequested ? (
             <AeShellViewport />
           ) : scene ? (
-            <AeScenePainter onAction={onAction} scene={scene} />
+            <AeScenePainter onAction={onAction} onEvent={onSceneEvent} scene={scene} />
           ) : error ? (
             <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-5 font-mono text-sm text-destructive">
               UGUI Scene unavailable · {error}

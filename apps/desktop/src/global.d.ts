@@ -4,6 +4,7 @@ import type {
   LucidActionIntent,
   LucidActionResult
 } from './app/ae-executive/lucid-actions'
+import type { UguiSceneEvent } from './app/ae-executive/scene-painter'
 import type {
   HermesClipboardLensSnapshot,
   HermesClipboardLensTextResult
@@ -65,6 +66,19 @@ declare global {
             }>
           }
       >
+      submitStudioDesignerEvent: (request: {
+        event: UguiSceneEvent
+        context: { revision: number; documentHash: string }
+      }) => Promise<{
+        schema: 'ae-studio-designer-action-receipt/1'
+        operation_id: string
+        status: 'accepted' | 'refused'
+        code: string
+        revision: number
+        document_hash: string
+        runtime_hash: string
+        selected_node_id: string | null
+      }>
       executeLucidExecutiveIntent: (request: LucidActionIntent) => Promise<LucidActionResult>
       getUguiSkinCatalog: () => Promise<unknown>
       getUguiSkinSettingsScene: (request: { committed_id: string; preview_id: string }) => Promise<unknown>

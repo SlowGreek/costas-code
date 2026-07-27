@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
   getAeExecutiveScenes: () => ipcRenderer.invoke('hermes:ae-executive:scenes'),
+  submitStudioDesignerEvent: request => ipcRenderer.invoke('hermes:ae-executive:studio-event', request),
   executeLucidExecutiveIntent: request => ipcRenderer.invoke('hermes:ae-executive:lucid', request),
   getUguiSkinCatalog: () => ipcRenderer.invoke('hermes:ugui-skins:catalog'),
   getUguiSkinSettingsScene: request => ipcRenderer.invoke('hermes:ugui-skins:settings-scene', request),

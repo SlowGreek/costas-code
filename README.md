@@ -36,6 +36,11 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ## Quick Install
 
+> **Team members:** read **[SETUP.md](SETUP.md)** instead — it's the exact path
+> we use, including the Copilot device-code login (a `gh` token alone will not
+> work) and fixes for the two errors people actually hit. The rest of this
+> README documents Hermes at large.
+
 Catalyst lives in a **private** repository, so installs need GitHub auth. Do this
 once:
 

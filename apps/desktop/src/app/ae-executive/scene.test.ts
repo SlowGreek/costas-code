@@ -25,6 +25,44 @@ function scene(tab: string, text = tab.toUpperCase()) {
   }
 }
 
+function sceneEnvelope(generation: number, options: { blocker?: boolean } = {}) {
+  const digit = (generation % 10).toString()
+
+  return {
+    schema: 'ae-executive-scene-envelope/1',
+    authority: options.blocker ? 'none' : 'RUN_EXECUTIVE_COMPOSER',
+    executive_generation: generation,
+    document_hash: hash(digit),
+    source_set_hash: hash(((generation + 5) % 10).toString()),
+    observed_ms: 2_000 + generation,
+    freshness: options.blocker ? 'degraded' : 'fresh',
+    artifact_posture: 'observed',
+    admission_code: 'admitted',
+    blocker: options.blocker
+      ? { code: 'AE_EXECUTIVE_STORE_WRITER_UNAVAILABLE', boundary: 'B1-plan-proof', closed: true as const }
+      : null,
+    artifact_generation: artifact,
+    scenes: tabs.map(tab => ({ tab, state: 'fresh', scene: scene(tab) }))
+  }
+}
+
+function unavailableSceneEnvelope() {
+  return {
+    schema: 'ae-executive-scene-envelope/1',
+    authority: 'none',
+    executive_generation: 0,
+    document_hash: null,
+    source_set_hash: null,
+    observed_ms: null,
+    freshness: 'unavailable',
+    artifact_posture: 'unavailable',
+    admission_code: 'executive-episode-missing',
+    blocker: { code: 'AE_EXECUTIVE_STORE_WRITER_UNAVAILABLE', boundary: 'B1-plan-proof', closed: true as const },
+    artifact_generation: artifact,
+    scenes: tabs.map(tab => ({ tab, state: 'unavailable', reason: 'executive-episode-missing' }))
+  }
+}
+
 function envelope(generation: number, textByTab: Readonly<Record<string, string>> = {}) {
   const digit = (generation % 10).toString()
 
@@ -54,6 +92,64 @@ describe('generation executive envelope', () => {
       freshness: 'fresh',
       artifact_generation: artifact,
       posture: 'live'
+    })
+  })
+
+  it('parses the Rust scene envelope and preserves nullable admission provenance', () => {
+    const parsed = parseExecutiveBatch(sceneEnvelope(6, { blocker: true }))
+
+    expect(parsed).toMatchObject({
+      schema: 'ae-executive-scene-envelope/1',
+      generation: 6,
+      document_hash: hash('6'),
+      source_set_hash: hash('1'),
+      observed_ms: 2_006,
+      freshness: 'degraded',
+      artifact_generation: artifact,
+      artifact_posture: 'observed',
+      admission_code: 'admitted',
+      blocker: { code: 'AE_EXECUTIVE_STORE_WRITER_UNAVAILABLE', closed: true },
+      posture: 'degraded'
+    })
+    expect(sceneForTab(parsed, 'home').id).toBe('run-home')
+  })
+
+  it('admits a generation-zero unavailable envelope without requiring scenes and later recovers', () => {
+    const unavailable = parseExecutiveBatch(unavailableSceneEnvelope())
+
+    expect(unavailable).toMatchObject({
+      schema: 'ae-executive-scene-envelope/1',
+      generation: null,
+      document_hash: null,
+      source_set_hash: null,
+      observed_ms: null,
+      posture: 'unavailable',
+      admission_code: 'executive-episode-missing'
+    })
+    expect(unavailable.scenes).toEqual([
+      { tab: 'home', state: 'unavailable', reason: 'executive-episode-missing' },
+      { tab: 'marketplace', state: 'unavailable', reason: 'executive-episode-missing' }
+    ])
+    expect(() => sceneForTab(unavailable, 'home')).toThrow('executive-episode-missing')
+
+    const recovered = reconcileExecutiveBatch(unavailable, parseExecutiveBatch(sceneEnvelope(1)))
+
+    expect(recovered).toMatchObject({ accepted: true, reason: 'accepted' })
+    expect(recovered.batch.generation).toBe(1)
+  })
+
+  it('refuses mixed generation-zero provenance and preserves a live generation over unavailable input', () => {
+    const mixed = { ...unavailableSceneEnvelope(), document_hash: hash('1') }
+
+    expect(() => parseExecutiveBatch(mixed)).toThrow('ae-executive-envelope-unavailable-provenance')
+
+    const current = parseExecutiveBatch(sceneEnvelope(2))
+    const unavailable = parseExecutiveBatch(unavailableSceneEnvelope())
+
+    expect(reconcileExecutiveBatch(current, unavailable)).toMatchObject({
+      accepted: false,
+      reason: 'unavailable-episode-not-live',
+      batch: current
     })
   })
 
@@ -94,6 +190,22 @@ describe('generation executive envelope', () => {
 })
 
 describe('monotonic executive reconciliation', () => {
+  it('accepts an authority upgrade for the same generation and rejects regression', () => {
+    const proven = parseExecutiveBatch(sceneEnvelope(5))
+    const held = parseExecutiveBatch({ ...sceneEnvelope(5), authority: 'none' })
+
+    expect(reconcileExecutiveBatch(held, proven)).toMatchObject({
+      accepted: true,
+      reason: 'accepted',
+      batch: proven
+    })
+    expect(reconcileExecutiveBatch(proven, held)).toMatchObject({
+      accepted: false,
+      reason: 'authority-regression',
+      batch: proven
+    })
+  })
+
   it('accepts a newer generation and treats exact equality as idempotent', () => {
     const first = parseExecutiveBatch(envelope(1))
     const second = parseExecutiveBatch(envelope(2, { home: 'NEW HOME' }))

@@ -155,7 +155,7 @@ export function AeExecutiveWorkspace() {
   )
 
   const trust = batch
-    ? `Generation ${displayGeneration(batch)} · observed ${batch.observed_ms ?? 'unverified'} · freshness ${batch.freshness} · posture ${batch.posture} · artifact ${batch.artifact_generation}`
+    ? `Generation ${displayGeneration(batch)} · authority ${batch.authority} · observed ${batch.observed_ms ?? 'unverified'} · freshness ${batch.freshness} · posture ${batch.posture} · artifact ${batch.artifact_generation}`
     : notice
 
   return (

@@ -45,6 +45,25 @@ declare global {
               reason?: string
             }>
           }
+        | {
+            schema: 'ae-executive-scene-envelope/1'
+            authority: 'none' | 'RUN_EXECUTIVE_COMPOSER'
+            executive_generation: number
+            document_hash: string | null
+            source_set_hash: string | null
+            observed_ms: number | null
+            freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
+            artifact_posture: 'observed' | 'missing' | 'fixture' | 'held' | 'structural' | 'unavailable'
+            admission_code: string
+            blocker: { code: string; boundary: string; closed: true } | null
+            artifact_generation: string
+            scenes: Array<{
+              tab: string
+              state: 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
+              scene?: Record<string, unknown>
+              reason?: string
+            }>
+          }
       >
       executeLucidExecutiveIntent: (request: LucidActionIntent) => Promise<LucidActionResult>
       getUguiSkinCatalog: () => Promise<unknown>

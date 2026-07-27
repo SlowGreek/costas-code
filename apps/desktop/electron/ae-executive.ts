@@ -55,7 +55,7 @@ export interface AeExecutiveSceneBatch {
 
 export interface AeExecutiveSceneEnvelope {
   schema: 'ae-executive-scene-envelope/1'
-  authority: 'none'
+  authority: 'none' | 'RUN_EXECUTIVE_COMPOSER'
   executive_generation: number
   document_hash: string | null
   source_set_hash: string | null
@@ -197,7 +197,9 @@ function validateGenerationBatch(value: unknown): AeExecutiveSceneBatch {
 function validateSceneEnvelope(value: unknown): AeExecutiveSceneEnvelope {
   const envelope = value as Record<string, unknown>
 
-  if (envelope.authority !== 'none') {throw new Error('ae-executive-envelope-authority')}
+  if (!['none', 'RUN_EXECUTIVE_COMPOSER'].includes(String(envelope.authority))) {
+    throw new Error('ae-executive-envelope-authority')
+  }
 
   if (!Number.isSafeInteger(envelope.executive_generation) || Number(envelope.executive_generation) < 0) {
     throw new Error('ae-executive-envelope-generation')
@@ -226,13 +228,21 @@ function validateSceneEnvelope(value: unknown): AeExecutiveSceneEnvelope {
   }
 
   const blocker = admitEnvelopeBlocker(envelope.blocker)
+
+  if (
+    Number(envelope.executive_generation) === 0 && envelope.authority !== 'none' ||
+    envelope.authority === 'RUN_EXECUTIVE_COMPOSER' && blocker !== null
+  ) {
+    throw new Error('ae-executive-envelope-authority')
+  }
+
   const observed = validateBatchHeader('run::executive_composer', envelope.rows)
   const rows = envelope.rows as Array<Record<string, unknown>>
   const scenes = rows.map(row => admitEnvelopeRow(row, observed))
 
   return {
     schema: 'ae-executive-scene-envelope/1',
-    authority: 'none',
+    authority: envelope.authority as AeExecutiveSceneEnvelope['authority'],
     executive_generation: Number(envelope.executive_generation),
     document_hash: envelope.document_hash as string | null,
     source_set_hash: envelope.source_set_hash as string | null,

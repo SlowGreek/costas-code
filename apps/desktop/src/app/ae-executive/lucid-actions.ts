@@ -55,6 +55,13 @@ const exactObject = (value: unknown, keys: readonly string[]): value is Record<s
 export function lucidActionContext(batch: unknown, scene: AeExecutiveScene): LucidActionContext {
   const row = batch && typeof batch === 'object' && !Array.isArray(batch) ? batch as Record<string, unknown> : {}
   const receipt = scene.receipt ?? {}
+  const scenes = Array.isArray(row.scenes) ? row.scenes : []
+
+  const lucidRow = scenes.find(candidate =>
+    Boolean(candidate) && typeof candidate === 'object' &&
+    (candidate as Record<string, unknown>).tab === 'lucid'
+  ) as Record<string, unknown> | undefined
+
   const generation = Number(row.generation ?? receipt.generation ?? receipt.revision)
   const documentHash = String(row.document_hash ?? receipt.document_hash ?? '')
   const postureValue = row.lucid_posture ?? receipt.lucid_posture ?? receipt.posture
@@ -62,8 +69,11 @@ export function lucidActionContext(batch: unknown, scene: AeExecutiveScene): Luc
   const explicitPosture = ['held', 'read', 'ready'].includes(String(postureValue))
     ? postureValue as LucidActionPosture
     : null
-  const admittedRead = Number.isSafeInteger(generation) && generation > 0 && HASH_RE.test(documentHash)
-  const posture = explicitPosture ?? (admittedRead ? 'read' : 'held')
+
+  const admittedRead = Number.isSafeInteger(generation) && generation > 0 && HASH_RE.test(documentHash) &&
+    lucidRow?.state === 'fresh'
+
+  const posture = admittedRead ? explicitPosture ?? 'read' : 'held'
 
   return {
     generation: Number.isSafeInteger(generation) && generation > 0 ? generation : 0,

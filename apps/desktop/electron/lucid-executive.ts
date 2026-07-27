@@ -65,9 +65,11 @@ export function lucidExecutiveStateFromBatch(value: unknown, sessionId: string |
   const explicitPosture = ['held', 'read', 'ready'].includes(String(candidatePosture))
     ? candidatePosture as LucidExecutivePosture
     : null
+
   const admittedRead = Number.isSafeInteger(generation) && generation > 0 && HASH_RE.test(documentHash) &&
-    Boolean(lucidRow?.scene)
-  const posture = explicitPosture ?? (admittedRead ? 'read' : 'held')
+    Boolean(lucidRow?.scene) && lucidRow?.state === 'fresh'
+
+  const posture = admittedRead ? explicitPosture ?? 'read' : 'held'
 
   return {
     generation: Number.isSafeInteger(generation) && generation > 0 ? generation : 0,

@@ -182,6 +182,33 @@ it('admits a fail-closed executive envelope without requiring unavailable scenes
   ])
 })
 
+it('admits proof-backed RUN authority only with a nonzero generation and no blocker', () => {
+  const value = unavailableEnvelope(['home'])
+
+  Object.assign(value, {
+    authority: 'RUN_EXECUTIVE_COMPOSER',
+    executive_generation: 9,
+    document_hash: generationHash('9'),
+    source_set_hash: generationHash('4'),
+    observed_ms: 2_009,
+    freshness: 'stale',
+    artifact_posture: 'observed',
+    admission_code: 'admitted',
+    blocker: null
+  })
+
+  expect(validateAeExecutiveBatch(value)).toMatchObject({
+    authority: 'RUN_EXECUTIVE_COMPOSER',
+    executive_generation: 9,
+    blocker: null
+  })
+
+  expect(() => validateAeExecutiveBatch({
+    ...unavailableEnvelope(['home']),
+    authority: 'RUN_EXECUTIVE_COMPOSER'
+  })).toThrow('ae-executive-envelope-authority')
+})
+
 it.skipIf(process.platform === 'win32')('binds the immutable Electron artifact generation instead of producer input', async () => {
   const file = executable()
   const value = { ...generationBatch(['home', 'marketplace']), artifact_generation: generationHash('f') }

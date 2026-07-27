@@ -289,7 +289,7 @@ describe('AE executive workspace', () => {
     })
 
     expect(screen.getByText('RUN HOME GENERATION 2')).toBeTruthy()
-    expect(screen.getByText(/Generation 2 · observed 1002 · freshness fresh · posture live/)).toBeTruthy()
+    expect(screen.getByText(/Generation 2 · authority none · observed 1002 · freshness fresh · posture live/)).toBeTruthy()
   })
 
   it('recovers after an initial projector failure without remounting', async () => {
@@ -378,7 +378,7 @@ describe('AE executive workspace', () => {
 
     expect(
       await screen.findByText(
-        `Generation 1 · observed 1001 · freshness fresh · posture live · artifact ${ARTIFACT_GENERATION}`
+        `Generation 1 · authority none · observed 1001 · freshness fresh · posture live · artifact ${ARTIFACT_GENERATION}`
       )
     ).toBeTruthy()
     expect(view.container.querySelector('[data-ae-trust-footer]')).toBeTruthy()

@@ -11,6 +11,7 @@ const TAB_ID_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const FRESHNESS = new Set(['fresh', 'degraded', 'stale', 'unavailable'])
 const TAB_STATES = new Set(['fresh', 'stale', 'unavailable', 'fixture', 'structural'])
+const ENVELOPE_POSTURES = new Set(['observed', 'missing', 'fixture', 'held', 'structural', 'unavailable'])
 
 export type UgScenePrimitive =
   | 'button'
@@ -44,6 +45,7 @@ export interface AeExecutiveScene {
   readonly receipt?: Readonly<Record<string, unknown>>
 }
 
+export type AeExecutiveAuthority = 'none' | 'RUN_EXECUTIVE_COMPOSER'
 export type AeExecutiveFreshness = 'fresh' | 'degraded' | 'stale' | 'unavailable' | 'unverified'
 export type AeExecutivePosture = 'live' | 'degraded' | 'stale' | 'unavailable' | 'legacy-unverified'
 export type AeExecutiveTabState = 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
@@ -56,9 +58,18 @@ export interface AeExecutiveSceneRow {
   readonly preserved?: boolean
 }
 
+export interface AeExecutiveBlocker {
+  readonly code: string
+  readonly boundary: string
+  readonly closed: true
+}
+
 export interface AeExecutiveSceneBatch {
-  readonly schema: 'ae-executive-scene-batch/1' | 'ae-executive-scene-batch/2'
-  readonly authority: 'none'
+  readonly schema:
+    | 'ae-executive-scene-batch/1'
+    | 'ae-executive-scene-batch/2'
+    | 'ae-executive-scene-envelope/1'
+  readonly authority: AeExecutiveAuthority
   readonly projector: string
   readonly generation: number | null
   readonly document_hash: string | null
@@ -67,6 +78,9 @@ export interface AeExecutiveSceneBatch {
   readonly freshness: AeExecutiveFreshness
   readonly artifact_generation: string
   readonly posture: AeExecutivePosture
+  readonly artifact_posture?: string
+  readonly admission_code?: string
+  readonly blocker?: AeExecutiveBlocker | null
   readonly scenes: readonly AeExecutiveSceneRow[]
 }
 
@@ -102,6 +116,8 @@ export function parseExecutiveBatch(value: unknown): AeExecutiveSceneBatch {
   if (batch.schema === 'ae-executive-scene-batch/1') {return parseLegacyBatch(batch)}
 
   if (batch.schema === 'ae-executive-scene-batch/2') {return parseGenerationBatch(batch)}
+
+  if (batch.schema === 'ae-executive-scene-envelope/1') {return parseSceneEnvelope(batch)}
   throw new Error('ae-executive-batch-schema')
 }
 
@@ -192,6 +208,117 @@ function parseGenerationBatch(batch: Record<string, unknown>): AeExecutiveSceneB
   }
 }
 
+function parseSceneEnvelope(batch: Record<string, unknown>): AeExecutiveSceneBatch {
+  if (!['none', 'RUN_EXECUTIVE_COMPOSER'].includes(String(batch.authority)) || !Array.isArray(batch.scenes)) {
+    throw new Error('ae-executive-envelope-schema')
+  }
+
+  if (!Number.isSafeInteger(batch.executive_generation) || Number(batch.executive_generation) < 0) {
+    throw new Error('ae-executive-envelope-generation')
+  }
+
+  const generation = Number(batch.executive_generation)
+  const hasLiveGeneration = generation > 0
+  const documentHash = batch.document_hash
+  const sourceSetHash = batch.source_set_hash
+  const observedMs = batch.observed_ms
+
+  if (hasLiveGeneration) {
+    if (typeof documentHash !== 'string' || !HASH_RE.test(documentHash)) {
+      throw new Error('ae-executive-envelope-document-hash')
+    }
+
+    if (typeof sourceSetHash !== 'string' || !HASH_RE.test(sourceSetHash)) {
+      throw new Error('ae-executive-envelope-source-set-hash')
+    }
+
+    if (!Number.isSafeInteger(observedMs) || Number(observedMs) < 0) {
+      throw new Error('ae-executive-envelope-observed')
+    }
+  } else if (documentHash !== null || sourceSetHash !== null || observedMs !== null) {
+    throw new Error('ae-executive-envelope-unavailable-provenance')
+  }
+
+  if (typeof batch.freshness !== 'string' || !FRESHNESS.has(batch.freshness)) {
+    throw new Error('ae-executive-envelope-freshness')
+  }
+
+  if (typeof batch.artifact_posture !== 'string' || !ENVELOPE_POSTURES.has(batch.artifact_posture)) {
+    throw new Error('ae-executive-envelope-artifact-posture')
+  }
+
+  if (!safeEnvelopeText(batch.admission_code)) {
+    throw new Error('ae-executive-envelope-admission-code')
+  }
+
+  const blocker = parseEnvelopeBlocker(batch.blocker)
+
+  if (
+    generation === 0 && batch.authority !== 'none' ||
+    batch.authority === 'RUN_EXECUTIVE_COMPOSER' && blocker !== null
+  ) {
+    throw new Error('ae-executive-envelope-authority')
+  }
+
+  const tabs = validateBatchHeader('run::executive_composer', batch.scenes)
+  const scenes = batch.scenes.map((raw, index) => parseGenerationRow(raw, tabs[index], tabs))
+  const freshness = batch.freshness as Exclude<AeExecutiveFreshness, 'unverified'>
+
+  const posture: AeExecutivePosture = !hasLiveGeneration || freshness === 'unavailable'
+    ? 'unavailable'
+    : blocker || freshness === 'degraded'
+      ? 'degraded'
+      : freshness === 'stale'
+        ? 'stale'
+        : 'live'
+
+  return {
+    schema: 'ae-executive-scene-envelope/1',
+    authority: batch.authority as AeExecutiveAuthority,
+    projector: 'run::executive_composer',
+    generation: hasLiveGeneration ? generation : null,
+    document_hash: hasLiveGeneration ? documentHash as string : null,
+    source_set_hash: hasLiveGeneration ? sourceSetHash as string : null,
+    observed_ms: hasLiveGeneration ? Number(observedMs) : null,
+    freshness,
+    artifact_generation: parseArtifactGeneration(batch.artifact_generation),
+    posture,
+    artifact_posture: batch.artifact_posture,
+    admission_code: batch.admission_code as string,
+    blocker,
+    scenes
+  }
+}
+
+function parseEnvelopeBlocker(value: unknown): AeExecutiveBlocker | null {
+  if (value === null) {return null}
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('ae-executive-envelope-blocker')
+  }
+
+  const blocker = value as Record<string, unknown>
+
+  if (!safeEnvelopeText(blocker.code) || !safeEnvelopeText(blocker.boundary) || blocker.closed !== true) {
+    throw new Error('ae-executive-envelope-blocker')
+  }
+
+  return {
+    code: blocker.code as string,
+    boundary: blocker.boundary as string,
+    closed: true
+  }
+}
+
+function safeEnvelopeText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 &&
+    ![...value].some(character => {
+      const codePoint = character.codePointAt(0) ?? 0
+
+      return codePoint <= 0x1f || codePoint === 0x7f
+    })
+}
+
 function validateBatchHeader(projector: unknown, scenes: unknown[]): string[] {
   if (typeof projector !== 'string' || !projector) {throw new Error('ae-executive-batch-projector')}
 
@@ -267,7 +394,13 @@ export function reconcileExecutiveBatch(
   if (!previous) {return { accepted: true, batch: incoming, reason: 'accepted' }}
 
   if (incoming.generation === null) {
-    return { accepted: false, batch: previous, reason: 'legacy-unverified-not-live' }
+    return {
+      accepted: false,
+      batch: previous,
+      reason: incoming.schema === 'ae-executive-scene-envelope/1'
+        ? 'unavailable-episode-not-live'
+        : 'legacy-unverified-not-live'
+    }
   }
 
   if (previous.generation === null) {
@@ -287,6 +420,10 @@ export function reconcileExecutiveBatch(
   }
 
   if (incoming.generation === previous.generation) {
+    if (previous.authority === 'RUN_EXECUTIVE_COMPOSER' && incoming.authority === 'none') {
+      return { accepted: false, batch: previous, reason: 'authority-regression' }
+    }
+
     if (
       incoming.document_hash !== previous.document_hash ||
       incoming.source_set_hash !== previous.source_set_hash ||
@@ -294,6 +431,10 @@ export function reconcileExecutiveBatch(
       incoming.freshness !== previous.freshness
     ) {
       return { accepted: false, batch: previous, reason: 'same-generation-conflict' }
+    }
+
+    if (previous.authority === 'none' && incoming.authority === 'RUN_EXECUTIVE_COMPOSER') {
+      return { accepted: true, batch: incoming, reason: 'accepted' }
     }
 
     return { accepted: true, batch: previous, reason: 'duplicate' }

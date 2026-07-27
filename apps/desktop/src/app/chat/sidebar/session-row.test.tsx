@@ -195,4 +195,55 @@ describe('SidebarSessionRow', () => {
     expect(avatar).toBeTruthy()
     expect(tipTrigger(avatar as HTMLElement)).toBeTruthy()
   })
+
+  it('gives a branched row room for both the tree stem and the dot', () => {
+    // The lead is a fixed size-3.5 box sized for ONE glyph. A branched row puts
+    // the stem AND the dot inside it, which crushed them together. Reported as
+    // "nested dots are smooshed".
+    const { container } = render(
+      <SidebarSessionRow
+        branchStem="└─ "
+        isPinned={false}
+        isSelected={false}
+        isWorking={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        session={makeSession({ title: 'Branched child session' })}
+      />
+    )
+
+    const stem = [...container.querySelectorAll('span')].find(
+      el => el.textContent === '└─ ' && el.children.length === 0
+    )
+    expect(stem).toBeTruthy()
+
+    // The trailing space in the stem is what separates it from the dot; a
+    // collapsing whitespace rule puts them back on top of each other.
+    expect(stem?.className).toContain('whitespace-pre')
+
+    const lead = stem?.closest('span[class*="size-3.5"]')
+    expect(lead?.className ?? '').toContain('w-auto')
+  })
+
+  it('keeps the fixed lead metric for an unbranched row', () => {
+    // Only branched rows opt out; every other row must stay aligned with the
+    // rest of the sidebar.
+    const { container } = render(
+      <SidebarSessionRow
+        isPinned={false}
+        isSelected={false}
+        isWorking={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        session={makeSession({ title: 'Top level session' })}
+      />
+    )
+
+    expect(container.querySelector('span[class*="w-auto"][class*="size-3.5"]')).toBeNull()
+  })
+
 })

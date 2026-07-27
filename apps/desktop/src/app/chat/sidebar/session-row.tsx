@@ -225,7 +225,11 @@ export function SidebarSessionRow({
               ariaLabel={handleLabel}
               dragging={dragging}
               dragHandleProps={dragHandleProps}
-              leadClassName={needsInput ? 'overflow-visible' : undefined}
+              leadClassName={cn(
+                needsInput && 'overflow-visible',
+                // Same fixed-lead squeeze as the non-reorder branch below.
+                branchStem && 'w-auto justify-start overflow-visible'
+              )}
             >
               <SessionStatusDot
                 branchStem={branchStem}
@@ -235,7 +239,16 @@ export function SidebarSessionRow({
               />
             </SidebarRowGrab>
           ) : (
-            <SidebarRowLead className={needsInput ? 'overflow-visible' : 'overflow-hidden'}>
+            <SidebarRowLead
+              className={cn(
+                needsInput ? 'overflow-visible' : 'overflow-hidden',
+                // A branched row renders the tree stem AND the dot in a lead
+                // sized (size-3.5) for one glyph, so the two get crushed
+                // together. Widen to fit only here; unbranched rows keep the
+                // shared fixed metric so every other row still aligns.
+                branchStem && 'w-auto justify-start overflow-visible'
+              )}
+            >
               <SessionStatusDot branchStem={branchStem} session={session} storedSessionId={session.id} />
             </SidebarRowLead>
           )}

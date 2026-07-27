@@ -143,9 +143,20 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
   const dotState = sessionDotState({ hasBackground, hasError, isStalled, isUnread, isWorking, needsInput })
 
   return (
-    <span className={cn('flex items-center gap-0.5', className)}>
+    <span className={cn('flex items-center', branchStem ? 'gap-1' : 'gap-0.5', className)}>
       {branchStem ? (
-        <span aria-hidden className="shrink-0 font-mono text-[0.625rem] leading-none text-(--ui-text-quaternary)">
+        // `leading-none` on a box-drawing glyph puts its baseline below the
+        // dot's centre, so the two looked mis-stacked rather than aligned.
+        // A fixed line-height matched to the row plus a slight optical lift
+        // sits the elbow on the same visual line as the dot it points at.
+        //
+        // The stem string carries a trailing space (`'└─ '`); `whitespace-pre`
+        // preserves it, which is what keeps the glyph off the dot. Without it
+        // the space collapses and they collide.
+        <span
+          aria-hidden
+          className="shrink-0 -translate-y-px whitespace-pre font-mono text-[0.6875rem] leading-4 text-(--ui-text-quaternary)"
+        >
           {branchStem}
         </span>
       ) : null}

@@ -262,6 +262,24 @@ it('admits a registered host-derived SHELL action without requiring a duplicate 
   expect(validateAeExecutiveBatch(batch).scenes).toHaveLength(10)
 })
 
+it('admits a structural SHELL row when producer Scenes omit the host-derived action', () => {
+  const batch = semanticBatch([...AE_EXECUTIVE_TABS, 'marketplace', 'shell'])
+
+  for (const row of batch.scenes) {
+    const shellIds = new Set(
+      row.scene.nodes
+        .filter(node => (node as { on?: Record<string, string> }).on?.tap === 'shell.tab.shell')
+        .map(node => node.id)
+    )
+
+    row.scene.nodes = row.scene.nodes.filter(node => !shellIds.has(node.id))
+    ;(row.scene.nodes[0] as { kids: string[] }).kids =
+      (row.scene.nodes[0] as { kids: string[] }).kids.filter(id => !shellIds.has(id))
+  }
+
+  expect(validateAeExecutiveBatch(batch).scenes).toHaveLength(batch.scenes.length)
+})
+
 it('admits a nested content-sized Dashboard with no remaining-height node', () => {
   const batch = semanticBatch(AE_EXECUTIVE_TABS)
   const dashboard = batch.scenes.find(row => row.tab === 'dashboard')!.scene

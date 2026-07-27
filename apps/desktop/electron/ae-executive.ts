@@ -427,10 +427,15 @@ function validateExecutiveScene(
   }
 
   const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
-  const allowedWorkspace = [...observed, ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(hostTab => !observed.includes(hostTab))]
+  const semanticTabs = observed.filter(tab => !AE_EXECUTIVE_HOST_DERIVED_TABS.some(hostTab => hostTab === tab))
+
+  const allowedWorkspace = [
+    ...semanticTabs,
+    ...AE_EXECUTIVE_HOST_DERIVED_TABS.filter(hostTab => !semanticTabs.includes(hostTab))
+  ]
 
   if (
-    handlers.length < observed.length ||
+    handlers.length < semanticTabs.length ||
     handlers.length > allowedWorkspace.length ||
     new Set(workspaceTabs).size !== workspaceTabs.length ||
     workspaceTabs.some((workspaceTab, index) => workspaceTab !== allowedWorkspace[index])

@@ -153,6 +153,21 @@ describe('generation executive envelope', () => {
     })
   })
 
+  it('admits a structural Shell row without requiring shell.tab.shell in producer Scenes', () => {
+    const base = sceneEnvelope(7)
+
+    const value = {
+      ...base,
+      scenes: [...base.scenes, { tab: 'shell', state: 'structural', scene: scene('shell') }]
+    }
+
+    const parsed = parseExecutiveBatch(value)
+
+    expect(parsed.scenes).toHaveLength(3)
+    expect(sceneForTab(parsed, 'home').nodes.some(node => node.on?.tap === 'shell.tab.shell')).toBe(false)
+    expect(sceneForTab(parsed, 'shell').id).toBe('run-shell')
+  })
+
   it('isolates one malformed tab instead of rejecting unrelated valid rows', () => {
     const value = envelope(2)
 

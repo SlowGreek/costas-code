@@ -493,13 +493,17 @@ function validateSemanticExecutiveScene(
 
   const workspaceTabs = handlers.map(handler => handler.slice('shell.tab.'.length))
 
+  const semanticTabs = tabs.filter(tab =>
+    !AE_EXECUTIVE_HOST_DERIVED_TAB_IDS.some(hostTab => hostTab === tab)
+  )
+
   const allowedWorkspace = [
-    ...tabs,
-    ...AE_EXECUTIVE_HOST_DERIVED_TAB_IDS.filter(hostTab => !tabs.includes(hostTab))
+    ...semanticTabs,
+    ...AE_EXECUTIVE_HOST_DERIVED_TAB_IDS.filter(hostTab => !semanticTabs.includes(hostTab))
   ]
 
   if (
-    handlers.length < tabs.length ||
+    handlers.length < semanticTabs.length ||
     handlers.length > allowedWorkspace.length ||
     new Set(workspaceTabs).size !== workspaceTabs.length ||
     workspaceTabs.some((workspaceTab, index) => workspaceTab !== allowedWorkspace[index])

@@ -35,6 +35,20 @@ export function smokeAeGeneration(generationOrStoreDir: string) {
 
   const executive = validateAeExecutiveBatch(JSON.parse(executiveBytes))
 
+  const executiveGeneration = 'executive_generation' in executive
+    ? executive.executive_generation
+    : 'generation' in executive
+      ? executive.generation
+      : 0
+
+  const unavailableScenes = executive.scenes.filter(row => !row.scene)
+
+  if (executiveGeneration > 0 && unavailableScenes.length > 0) {
+    throw new Error(
+      `ae-generation-executive-scenes-unavailable:${unavailableScenes.map(row => row.tab).join(',')}`
+    )
+  }
+
   const executiveContract = {
     schema: executive.schema,
     authority: executive.authority,

@@ -96,6 +96,33 @@ function generationBatch(tabs: readonly string[], generation = 1) {
   }
 }
 
+function unavailableEnvelope(tabs: readonly string[]) {
+  return {
+    schema: 'ae-executive-scene-envelope/1',
+    authority: 'none',
+    executive_generation: 0,
+    document_hash: null,
+    source_set_hash: null,
+    observed_ms: null,
+    freshness: 'unavailable',
+    artifact_posture: 'unavailable',
+    admission_code: 'AE_EXECUTIVE_EPISODE_TOO_LARGE',
+    blocker: { code: 'AE_EXECUTIVE_STORE_WRITER_UNAVAILABLE', boundary: 'B1-plan-proof', closed: true },
+    rows: tabs.map(tab => ({
+      schema: 'ae-executive-scene-row/1',
+      tab,
+      source_hash: null,
+      source_generation: 0,
+      observed_ms: null,
+      freshness: 'unavailable',
+      posture: 'unavailable',
+      artifact_posture: 'unavailable',
+      scene: null,
+      code: 'AE_EXECUTIVE_EPISODE_TOO_LARGE'
+    }))
+  }
+}
+
 it('validates the closed ordered nine-scene semantic batch', () => {
   const scenes = AE_EXECUTIVE_TABS.map(tab => ({ tab, scene: semanticScene(tab) }))
 
@@ -137,6 +164,22 @@ it('validates generation provenance while isolating a malformed unrelated tab ro
     state: 'unavailable',
     reason: expect.stringContaining('child-missing')
   })
+})
+
+it('admits a fail-closed executive envelope without requiring unavailable scenes', () => {
+  const batch = validateAeExecutiveBatch(unavailableEnvelope(['home', 'dashboard']))
+
+  expect(batch).toMatchObject({
+    schema: 'ae-executive-scene-envelope/1',
+    executive_generation: 0,
+    document_hash: null,
+    admission_code: 'AE_EXECUTIVE_EPISODE_TOO_LARGE',
+    blocker: { closed: true }
+  })
+  expect(batch.scenes).toEqual([
+    { tab: 'home', state: 'unavailable', reason: 'AE_EXECUTIVE_EPISODE_TOO_LARGE' },
+    { tab: 'dashboard', state: 'unavailable', reason: 'AE_EXECUTIVE_EPISODE_TOO_LARGE' }
+  ])
 })
 
 it.skipIf(process.platform === 'win32')('binds the immutable Electron artifact generation instead of producer input', async () => {

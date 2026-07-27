@@ -38,8 +38,12 @@ export function smokeAeGeneration(generationOrStoreDir: string) {
   const executiveContract = {
     schema: executive.schema,
     authority: executive.authority,
-    projector: executive.projector,
+    ...('projector' in executive ? { projector: executive.projector } : {}),
     scenes: executive.scenes.map(row => {
+      if (!row.scene) {
+        return { tab: row.tab, state: 'state' in row ? row.state : 'unavailable', reason: 'reason' in row ? row.reason : undefined }
+      }
+
       const nodes = row.scene.nodes as Array<Record<string, unknown>>
 
       const tabButtons = nodes.filter(node => {

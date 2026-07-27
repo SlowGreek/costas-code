@@ -20,6 +20,7 @@ const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const ARTIFACT_GENERATION_RE = /^sha256:[0-9a-f]{64}$/
 const FRESHNESS = new Set(['fresh', 'degraded', 'stale', 'unavailable'])
 const TAB_STATES = new Set(['fresh', 'stale', 'unavailable', 'fixture', 'structural'])
+const POSTURES = new Set(['observed', 'missing', 'fixture', 'held', 'structural', 'unavailable'])
 
 export type AeExecutiveFreshness = 'fresh' | 'degraded' | 'stale' | 'unavailable'
 export type AeExecutiveTabState = 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
@@ -52,7 +53,22 @@ export interface AeExecutiveSceneBatch {
   artifact_generation?: string
 }
 
-export type AeExecutiveProjectorBatch = AeExecutiveLegacySceneBatch | AeExecutiveSceneBatch
+export interface AeExecutiveSceneEnvelope {
+  schema: 'ae-executive-scene-envelope/1'
+  authority: 'none'
+  executive_generation: number
+  document_hash: string | null
+  source_set_hash: string | null
+  observed_ms: number | null
+  freshness: AeExecutiveFreshness
+  artifact_posture: string
+  admission_code: string
+  blocker: { code: string; boundary: string; closed: true } | null
+  scenes: AeExecutiveSceneRow[]
+  artifact_generation?: string
+}
+
+export type AeExecutiveProjectorBatch = AeExecutiveLegacySceneBatch | AeExecutiveSceneBatch | AeExecutiveSceneEnvelope
 export type AeExecutiveBoundBatch = AeExecutiveProjectorBatch & { artifact_generation: string }
 
 export function resolveAeExecutiveBinary(options: { generationRoot: string }): string | null {
@@ -76,6 +92,8 @@ export function validateAeExecutiveBatch(value: unknown): AeExecutiveProjectorBa
   if (schema === 'ae-executive-scene-batch/1') {return validateLegacyBatch(value)}
 
   if (schema === 'ae-executive-scene-batch/2') {return validateGenerationBatch(value)}
+
+  if (schema === 'ae-executive-scene-envelope/1') {return validateSceneEnvelope(value)}
   throw new Error('ae-executive-batch-schema')
 }
 
@@ -174,6 +192,127 @@ function validateGenerationBatch(value: unknown): AeExecutiveSceneBatch {
     freshness: batch.freshness as AeExecutiveFreshness,
     scenes
   }
+}
+
+function validateSceneEnvelope(value: unknown): AeExecutiveSceneEnvelope {
+  const envelope = value as Record<string, unknown>
+
+  if (envelope.authority !== 'none') {throw new Error('ae-executive-envelope-authority')}
+
+  if (!Number.isSafeInteger(envelope.executive_generation) || Number(envelope.executive_generation) < 0) {
+    throw new Error('ae-executive-envelope-generation')
+  }
+
+  for (const field of ['document_hash', 'source_set_hash'] as const) {
+    if (envelope[field] !== null && (typeof envelope[field] !== 'string' || !HASH_RE.test(envelope[field]))) {
+      throw new Error(`ae-executive-envelope-${field.replaceAll('_', '-')}`)
+    }
+  }
+
+  if (envelope.observed_ms !== null && (!Number.isSafeInteger(envelope.observed_ms) || Number(envelope.observed_ms) < 0)) {
+    throw new Error('ae-executive-envelope-observed')
+  }
+
+  if (typeof envelope.freshness !== 'string' || !FRESHNESS.has(envelope.freshness)) {
+    throw new Error('ae-executive-envelope-freshness')
+  }
+
+  if (typeof envelope.artifact_posture !== 'string' || !POSTURES.has(envelope.artifact_posture)) {
+    throw new Error('ae-executive-envelope-artifact-posture')
+  }
+
+  if (typeof envelope.admission_code !== 'string' || !envelope.admission_code || envelope.admission_code.length > 256) {
+    throw new Error('ae-executive-envelope-admission-code')
+  }
+
+  const blocker = admitEnvelopeBlocker(envelope.blocker)
+  const observed = validateBatchHeader('run::executive_composer', envelope.rows)
+  const rows = envelope.rows as Array<Record<string, unknown>>
+  const scenes = rows.map(row => admitEnvelopeRow(row, observed))
+
+  return {
+    schema: 'ae-executive-scene-envelope/1',
+    authority: 'none',
+    executive_generation: Number(envelope.executive_generation),
+    document_hash: envelope.document_hash as string | null,
+    source_set_hash: envelope.source_set_hash as string | null,
+    observed_ms: envelope.observed_ms as number | null,
+    freshness: envelope.freshness as AeExecutiveFreshness,
+    artifact_posture: envelope.artifact_posture as string,
+    admission_code: envelope.admission_code,
+    blocker,
+    scenes
+  }
+}
+
+function admitEnvelopeBlocker(value: unknown): AeExecutiveSceneEnvelope['blocker'] {
+  if (value === null) {return null}
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('ae-executive-envelope-blocker')
+  }
+
+  const blocker = value as Record<string, unknown>
+
+  if (
+    typeof blocker.code !== 'string' || !blocker.code || blocker.code.length > 256 ||
+    typeof blocker.boundary !== 'string' || !blocker.boundary || blocker.boundary.length > 256 ||
+    blocker.closed !== true
+  ) {
+    throw new Error('ae-executive-envelope-blocker')
+  }
+
+  return { code: blocker.code, boundary: blocker.boundary, closed: true }
+}
+
+function admitEnvelopeRow(row: Record<string, unknown>, observed: readonly string[]): AeExecutiveSceneRow {
+  const tab = row.tab as string
+
+  if (row.schema !== 'ae-executive-scene-row/1') {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-schema' }
+  }
+
+  if (!Number.isSafeInteger(row.source_generation) || Number(row.source_generation) < 0) {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-generation' }
+  }
+
+  if (row.source_hash !== null && (typeof row.source_hash !== 'string' || !HASH_RE.test(row.source_hash))) {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-source-hash' }
+  }
+
+  if (row.observed_ms !== null && (!Number.isSafeInteger(row.observed_ms) || Number(row.observed_ms) < 0)) {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-observed' }
+  }
+
+  if (
+    typeof row.freshness !== 'string' || !FRESHNESS.has(row.freshness) ||
+    typeof row.posture !== 'string' || !POSTURES.has(row.posture) ||
+    typeof row.artifact_posture !== 'string' || !POSTURES.has(row.artifact_posture)
+  ) {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-posture' }
+  }
+
+  if (row.code !== null && (typeof row.code !== 'string' || row.code.length > 256)) {
+    return { tab, state: 'unavailable', reason: 'ae-executive-row-code' }
+  }
+
+  const state: AeExecutiveTabState =
+    row.scene === null || row.posture === 'unavailable' || row.posture === 'missing' || row.posture === 'held'
+      ? 'unavailable'
+      : row.posture === 'fixture'
+        ? 'fixture'
+        : row.posture === 'structural'
+          ? 'structural'
+          : row.freshness === 'stale'
+            ? 'stale'
+            : 'fresh'
+
+  return admitGenerationRow({
+    tab,
+    state,
+    ...(row.scene !== null ? { scene: row.scene as Record<string, unknown> } : {}),
+    ...(row.code ? { reason: row.code as string } : {})
+  }, observed)
 }
 
 function validateBatchHeader(

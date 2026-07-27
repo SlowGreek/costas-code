@@ -14,6 +14,7 @@ import { triggerHaptic } from '@/lib/haptics'
 import { handoffOriginSource, sessionSourceLabel } from '@/lib/session-source'
 import { coarseElapsed } from '@/lib/time'
 import { cn } from '@/lib/utils'
+import { $erroredSessionIds } from '@/store/session'
 import { $attentionSessionIds, openSessionTile } from '@/store/session-states'
 import { canOpenSessionWindow, openSessionInNewWindow } from '@/store/windows'
 
@@ -87,6 +88,10 @@ export function SidebarSessionRow({
   const handoffLabel = handoffSource ? (sessionSourceLabel(handoffSource) ?? handoffSource) : null
   // True when a clarify prompt in this session is waiting on the user.
   const needsInput = useStore($attentionSessionIds).includes(session.id)
+  // Read straight from the store like the dot does. Threading this as a prop
+  // would give the arc a second source of truth, which is exactly how it and
+  // the dot drift out of agreement.
+  const hasError = useStore($erroredSessionIds).includes(session.id)
 
   return (
     <SessionContextMenu
@@ -163,7 +168,9 @@ export function SidebarSessionRow({
         style={style}
         {...rest}
       >
-        {sessionShowsRunningArc({ isWorking, needsInput }) && <span aria-hidden="true" className="arc-border" />}
+        {sessionShowsRunningArc({ hasError, isWorking, needsInput }) && (
+          <span aria-hidden="true" className="arc-border" />
+        )}
         <SidebarRowBody
           className={cn('z-0 group-hover:pr-12', branchStem && 'pl-3.5')}
           // Middle-click = open in a new tab (browser muscle memory). Swallow

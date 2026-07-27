@@ -49,11 +49,19 @@ export function sessionDotState({
 }
 
 /** A quiet turn is still authoritatively running. Keep the unmistakable row
- * arc until the gateway reports completion; only a blocking prompt suppresses
- * it in favour of the needs-input treatment. */
+ * arc until the gateway reports completion; only a blocking prompt or a failed
+ * turn suppresses it.
+ *
+ * Deliberately mirrors `sessionDotState`: the dot and the arc read the same
+ * signals, so a row can never show a working dot with no arc (or an arc
+ * shimmering under a red error dot). `isStalled` is intentionally NOT consulted
+ * — a stalled turn is still running, and dropping the arc for it is what made
+ * the shimmer look intermittent during long tool calls.
+ */
 export function sessionShowsRunningArc({
+  hasError = false,
   isWorking,
   needsInput
-}: Pick<SessionRowState, 'isWorking' | 'needsInput'>): boolean {
-  return isWorking && !needsInput
+}: Partial<Pick<SessionRowState, 'hasError'>> & Pick<SessionRowState, 'isWorking' | 'needsInput'>): boolean {
+  return isWorking && !needsInput && !hasError
 }

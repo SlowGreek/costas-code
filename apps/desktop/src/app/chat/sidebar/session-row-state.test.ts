@@ -78,3 +78,41 @@ describe('state priority is total', () => {
     expect(seen).toEqual(new Set(['background', 'error', 'idle', 'stalled', 'unread', 'working']))
   })
 })
+
+describe('running arc stays in lockstep with the dot', () => {
+  // The reported symptom: the shimmer "sometimes doesn't show up". A row must
+  // never render a working/stalled dot with no arc — they read the same signals
+  // and are the same claim ("this session is running") in two places.
+  const dotSaysRunning = (s: SessionDotState) => s === 'working' || s === 'stalled'
+
+  it('shows the arc for every state the dot calls running', () => {
+    for (let mask = 0; mask < 8; mask += 1) {
+      const flags = {
+        hasBackground: Boolean(mask & 1),
+        hasError: Boolean(mask & 2),
+        isStalled: Boolean(mask & 4),
+        isUnread: false,
+        isWorking: true,
+        needsInput: false
+      }
+
+      expect(sessionShowsRunningArc(flags)).toBe(dotSaysRunning(sessionDotState(flags)))
+    }
+  })
+
+  it('keeps the arc through a stall', () => {
+    // A quiet turn is still running; dropping the arc during a long tool call
+    // is what made the shimmer look intermittent.
+    expect(sessionShowsRunningArc({ isWorking: true, needsInput: false })).toBe(true)
+    expect(state({ isStalled: true, isWorking: true })).toBe('stalled')
+  })
+
+  it('hides both when a prompt blocks the turn', () => {
+    expect(sessionShowsRunningArc({ isWorking: true, needsInput: true })).toBe(false)
+    expect(state({ isWorking: true, needsInput: true })).toBe('needs-input')
+  })
+
+  it('shows no arc when nothing is running', () => {
+    expect(sessionShowsRunningArc({ isWorking: false, needsInput: false })).toBe(false)
+  })
+})

@@ -15,13 +15,17 @@ name: Build desktop artifacts
 #
 # Runs daily at 06:00 UTC, but only when HEAD differs from the last successful
 # run — an unchanged repo costs one API call instead of two 20-minute runners.
-# Builds on every push to costas-code, so the newest artifact always matches the
-# newest code — chasing "which build has my fix?" cost more than the runner
-# minutes do. The daily schedule stays as a safety net for a day with no pushes.
+# Deliberately NOT per-push. macOS runners bill at a 10x multiplier, so one
+# build (mac + windows) costs ~54 billed minutes. At this repo's real rate —
+# 8 pushes in a day — per-push would be ~13,000 min/month against a 3,000-min
+# allowance. Four times over budget to produce artifacts nobody downloads.
 #
-# `concurrency` below is what makes per-push affordable: a rapid series of
-# pushes cancels its own in-flight builds, so a burst costs one build, not one
-# per commit.
+# Instead:
+#   schedule          once a day, and only when HEAD actually changed
+#   workflow_dispatch when you want an artifact now (this is the common one)
+#   v* tags           a real release
+#
+# `concurrency` still cancels superseded runs so a burst can't stack.
 
 on:
   schedule:
@@ -41,16 +45,8 @@ on:
         type: boolean
         default: false
   push:
-    branches:
-      - costas-code
     tags:
       - 'v*'
-    paths-ignore:
-      # A docs-only push cannot change the artifact, so it should not spend two
-      # 20-minute runners producing a byte-identical one.
-      - '**/*.md'
-      - 'website/**'
-      - '.github/ISSUE_TEMPLATE/**'
 
 permissions:
   contents: write   # needed to create a Release; harmless otherwise
@@ -236,10 +232,9 @@ jobs:
   release:
     name: Attach to release
     needs: build
-    # A TAG push or an explicit request — not an ordinary branch push. Now that
-    # every push builds, `event_name == 'push'` alone would cut a release per
-    # commit; ref_type narrows it back to deliberate releases. Branch-push
-    # artifacts still upload and are downloadable from the run itself.
+    # A TAG push or an explicit request. `ref_type == 'tag'` rather than
+    # `event_name == 'push'`: the latter would also fire on an ordinary branch
+    # push if the trigger is ever widened again, cutting a release per commit.
     #
     # Never when `build` was skipped either: `needs: build` alone is satisfied
     # by a skipped job and would publish an empty release.

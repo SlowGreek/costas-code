@@ -2387,6 +2387,31 @@ class AIAgent:
             "a ghu_ token; `gh auth login` issues gho_ tokens, which GitHub "
             "will not exchange."
         )
+        # An env-var token silently outranks the GitHub CLI, so a user who
+        # "switched accounts" with `gh auth switch` may still be authenticating
+        # as the previous user. Name it here — otherwise the advice above sends
+        # them to re-login on an account that was never in play.
+        try:
+            from hermes_cli.copilot_auth import (
+                COPILOT_ENV_VARS,
+                env_token_shadows_gh_account,
+            )
+            import os as _os
+            for _env_var in COPILOT_ENV_VARS:
+                _val = _os.getenv(_env_var, "").strip()
+                if not _val:
+                    continue
+                _shadowed = env_token_shadows_gh_account(_env_var, _val)
+                if _shadowed:
+                    hint += (
+                        f" Also note: {_env_var} is set and overrides the "
+                        f"GitHub CLI account '{_shadowed}' — `gh auth switch` "
+                        f"does not change which account Copilot uses while it "
+                        f"is set."
+                    )
+                break
+        except Exception:
+            pass
         return f"{detail}{hint}"
 
     @staticmethod

@@ -9934,6 +9934,29 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 except Exception as exc:
                     logging.debug("goal continuation enqueue failed: %s", exc)
 
+    def _auto_unblock_goal_on_user_input(self) -> None:
+        """Resume a ``blocked`` goal because the user just sent a message.
+
+        ``blocked`` means "the agent needs the user before it can proceed", so
+        the user's next message IS that input — requiring a separate
+        ``/goal resume`` is pure ceremony. The turn budget is preserved (this
+        is a continuation, not a restart) and the judge re-decides at the end
+        of the turn; if the reply didn't actually unblock anything it blocks
+        again with a fresher reason. Best-effort — never raises.
+        """
+        try:
+            mgr = self._get_goal_manager()
+            if mgr is None:
+                return
+            state = mgr.unblock_on_user_input()
+        except Exception as exc:
+            logging.debug("goal auto-unblock failed: %s", exc)
+            return
+        if state is not None:
+            _cprint(
+                f"  ⊙ Goal resumed ({state.turns_used}/{state.max_turns}): {state.goal}"
+            )
+
     def _recent_goal_evidence(self, max_items: int = 6, max_chars: int = 1500) -> list:
         """Extract recent tool/command RESULTS from the live transcript.
 
@@ -15650,6 +15673,13 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                         _cprint(f"  {_DIM}📎 {n} image{'s' if n > 1 else ''} attached{_RST}")
 
                     # Regular chat - run agent
+                    # The user speaking IS the input a blocked goal was waiting
+                    # on — resume it before the turn so the end-of-turn judge
+                    # sees an active goal. Safe here: goal continuation and
+                    # parked-wake prompts only enqueue for an ACTIVE goal, so
+                    # anything reaching this point while blocked is a real user
+                    # message.
+                    self._auto_unblock_goal_on_user_input()
                     self._agent_running = True
                     self._pet_turn_error = False
                     self._pet_reasoning = False

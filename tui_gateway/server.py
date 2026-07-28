@@ -10265,6 +10265,40 @@ def _(rid, params: dict) -> dict:
 # ── Methods: prompt ──────────────────────────────────────────────────
 
 
+def _auto_unblock_goal(sid: str, session: dict | None) -> None:
+    """A real user prompt is exactly the input a ``blocked`` goal was waiting on.
+
+    ``blocked`` means "the agent needs the user before it can proceed", so the
+    user's next message auto-resumes the loop instead of stranding it behind a
+    manual ``/goal resume``. The turn budget is preserved (this is a
+    continuation, not a restart) and the judge re-decides at the end of this
+    turn — if the reply didn't actually unblock anything it just blocks again
+    with a fresher reason.
+
+    Fail-soft: any error leaves the goal blocked, which is the honest state.
+    """
+    key = str((session or {}).get("session_key") or "")
+    if not key:
+        return
+    try:
+        from hermes_cli.goals import GoalManager
+
+        state = GoalManager(session_id=key).unblock_on_user_input()
+    except Exception:
+        logger.debug("goal auto-unblock failed", exc_info=True)
+        return
+    if state is None:
+        return
+    _emit(
+        "status.update",
+        sid,
+        {
+            "kind": "goal",
+            "text": f"⊙ Goal resumed ({state.turns_used}/{state.max_turns}): {state.goal}",
+        },
+    )
+
+
 @method("prompt.submit")
 def _(rid, params: dict) -> dict:
     from hermes_cli.input_sanitize import sanitize_user_prompt_text
@@ -10354,6 +10388,10 @@ def _(rid, params: dict) -> dict:
 
     # Persist the DB row lazily, now that the user has actually sent a message.
     _ensure_session_db_row(session)
+    # The user speaking IS the input a blocked goal was waiting on — resume it
+    # before the turn runs so the end-of-turn judge evaluates an active goal
+    # and can chain a continuation instead of leaving it stranded.
+    _auto_unblock_goal(sid, session)
     # A branch becomes real here: copy its parent's transcript into the row so it
     # resumes with full context (the agent won't persist the seed itself).
     _persist_branch_seed(session)

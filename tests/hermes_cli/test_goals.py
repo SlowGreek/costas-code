@@ -262,6 +262,54 @@ class TestGoalManager:
         assert mgr.state.status == "active"
         assert mgr.is_active()
 
+    def test_user_input_auto_unblocks_a_blocked_goal(self, hermes_home):
+        """A blocked goal is waiting on the user — their next message IS it.
+
+        Contract: unblock flips blocked → active WITHOUT resetting the turn
+        budget (a reply continues the goal, it does not restart it), and clears
+        the stale blocked_reason so the UI stops showing a resolved question.
+        """
+        from hermes_cli.goals import GoalManager
+
+        mgr = GoalManager(session_id="unblock-sid")
+        mgr.set("keep looping until it exports")
+        mgr.state.turns_used = 2
+        mgr.mark_blocked("SVG cannot pixel-match a raytraced reference.")
+        assert mgr.state.status == "blocked"
+        assert not mgr.is_active()
+
+        state = mgr.unblock_on_user_input()
+        assert state is not None
+        assert state.status == "active"
+        assert mgr.is_active()
+        assert state.blocked_reason is None
+        # Continuation, not restart: the budget survives.
+        assert state.turns_used == 2
+
+        # Durable — a fresh manager on the same session sees the unblock.
+        assert GoalManager(session_id="unblock-sid").is_active()
+
+    def test_auto_unblock_is_a_noop_for_non_blocked_goals(self, hermes_home):
+        """Only `blocked` auto-resumes. A paused goal stays paused (the user
+        paused it on purpose), a done goal stays done, and no goal is a no-op —
+        otherwise every message would silently resurrect finished work."""
+        from hermes_cli.goals import GoalManager
+
+        empty = GoalManager(session_id="noop-none")
+        assert empty.unblock_on_user_input() is None
+
+        paused = GoalManager(session_id="noop-paused")
+        paused.set("something")
+        paused.pause(reason="user-paused")
+        assert paused.unblock_on_user_input() is None
+        assert paused.state.status == "paused"
+
+        done = GoalManager(session_id="noop-done")
+        done.set("something")
+        done.mark_done("shipped")
+        assert done.unblock_on_user_input() is None
+        assert done.state.status == "done"
+
     def test_clear(self, hermes_home):
         from hermes_cli.goals import GoalManager
 

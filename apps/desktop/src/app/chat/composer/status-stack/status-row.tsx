@@ -156,6 +156,16 @@ export const StatusItemRow = memo(function StatusItemRow({ item, onDismiss, onOp
           </span>
         )}
       </StatusRow>
+      {item.type === 'goal' && item.detailNote && (
+        <p
+          className={cn(
+            'ml-[1.6rem] mr-1.5 -mt-0.5 mb-1 whitespace-pre-wrap break-words text-[0.66rem] leading-[1.15rem]',
+            item.goalStatus === 'blocked' ? 'text-destructive/80' : 'text-amber-500/80'
+          )}
+        >
+          {item.detailNote}
+        </p>
+      )}
     </Fragment>
   )
 })

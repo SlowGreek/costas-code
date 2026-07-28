@@ -34,6 +34,11 @@ export interface ComposerStatusItem {
   currentTool?: string
   /** Goal: compact progress / latest judge reason shown after the title. */
   detail?: string
+  /** Goal: a reason that needs room to be read (blocked / paused). Rendered as
+   *  a wrapped block UNDER the row instead of being truncated into it — a
+   *  blocked goal's reason is the one thing the user must act on, so it must
+   *  never be clipped to "The agent has stopped iterating, stating S…". */
+  detailNote?: string
   /** Goal: native GoalManager lifecycle state driving its glyph/tone. */
   goalStatus?: GoalStatus
   id: string
@@ -161,11 +166,16 @@ const todoToItem = (t: TodoItem): ComposerStatusItem => ({
 })
 
 const goalToItem = (goal: GatewayGoalStatus): ComposerStatusItem => {
-  const reason = goal.waiting_reason || goal.blocked_reason || goal.paused_reason || goal.last_reason
   const progress = `${goal.turns_used}/${goal.max_turns}`
+  // blocked/paused reasons are the user's call to action — they get the full
+  // wrapped block. waiting/last_reason are ambient progress chatter and stay
+  // inline where truncation is harmless.
+  const note = goal.blocked_reason || goal.paused_reason
+  const inline = note ? undefined : goal.waiting_reason || goal.last_reason
 
   return {
-    detail: reason ? `${progress} · ${reason}` : progress,
+    detail: inline ? `${progress} · ${inline}` : progress,
+    detailNote: note || undefined,
     goalStatus: goal.status,
     id: 'goal:standing',
     state: goal.status === 'active' ? 'running' : goal.status === 'blocked' ? 'failed' : 'done',

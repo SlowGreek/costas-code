@@ -582,3 +582,61 @@ def test_tui_result_tool_evidence_reaches_verifier(server, session, hermes_home)
 
     assert "17 passed" in (captured.get("user") or ""), "tool evidence must reach the verifier"
     assert decision["verdict"] == "done"
+
+
+# ── auto-unblock on the next user prompt ──────────────────────────────
+
+
+def test_prompt_submit_auto_unblocks_a_blocked_goal(server, session):
+    """A blocked goal resumes when the user sends their next message.
+
+    `blocked` means the agent needs the user; their prompt IS that input, so
+    the gateway must flip it back to active BEFORE the turn runs — otherwise
+    the end-of-turn judge sees an inactive goal and never chains a
+    continuation, stranding the loop behind a manual /goal resume.
+    """
+    from hermes_cli.goals import GoalManager
+
+    sid, session_key, s = session
+    mgr = GoalManager(session_id=session_key)
+    mgr.set("keep looping until it exports")
+    mgr.state.turns_used = 2
+    mgr.mark_blocked("SVG cannot pixel-match a raytraced reference.")
+
+    emitted = []
+    with patch.object(server, "_emit", lambda kind, _sid, payload=None: emitted.append((kind, payload))):
+        server._auto_unblock_goal(sid, s)
+
+    fresh = GoalManager(session_id=session_key)
+    assert fresh.state.status == "active"
+    assert fresh.is_active()
+    assert fresh.state.blocked_reason is None
+    # Answering a question continues the goal; it does not restart the budget.
+    assert fresh.state.turns_used == 2
+    assert any(p and p.get("kind") == "goal" for _k, p in emitted)
+
+
+def test_auto_unblock_leaves_active_and_paused_goals_alone(server, session):
+    """Only `blocked` auto-resumes: a user-paused goal must stay paused, and
+    an active goal must not be disturbed (nor announce a spurious resume)."""
+    from hermes_cli.goals import GoalManager
+
+    sid, session_key, s = session
+    mgr = GoalManager(session_id=session_key)
+    mgr.set("ship it")
+    mgr.pause(reason="user-paused")
+
+    emitted = []
+    with patch.object(server, "_emit", lambda kind, _sid, payload=None: emitted.append((kind, payload))):
+        server._auto_unblock_goal(sid, s)
+
+    assert GoalManager(session_id=session_key).state.status == "paused"
+    assert emitted == []
+
+
+def test_auto_unblock_is_fail_soft_without_a_session_key(server, session):
+    """No session key (or a goals failure) must never break prompt.submit —
+    the goal simply stays blocked, which is the honest state."""
+    sid, _, _ = session
+    server._auto_unblock_goal(sid, {"session_key": ""})
+    server._auto_unblock_goal(sid, None)

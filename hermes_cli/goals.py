@@ -1746,6 +1746,26 @@ class GoalManager:
         save_goal(self.session_id, self._state)
         return self._state
 
+    def unblock_on_user_input(self) -> Optional[GoalState]:
+        """Auto-resume a ``blocked`` goal because the user just spoke.
+
+        ``blocked`` means one thing: the agent needs the user before it can
+        proceed. A real user prompt IS that input, so requiring a separate
+        ``/goal resume`` is pure ceremony — the user already answered. We flip
+        back to ``active`` and let the judge re-decide at the end of the turn;
+        if the reply didn't actually unblock anything, the judge simply blocks
+        again with a fresh reason. Nothing is lost by trying.
+
+        Deliberately does NOT reset the turn budget (unlike ``resume()``): the
+        user answering a question is a continuation of the same goal, not a
+        restart, so ``2/20`` stays ``2/20``. Returns the updated state, or
+        ``None`` when there was no blocked goal to unblock (so the caller can
+        skip announcing anything).
+        """
+        if self._state is None or self._state.status != "blocked":
+            return None
+        return self.resume(reset_budget=False)
+
     # --- /subgoal user controls ---------------------------------------
 
     def add_subgoal(self, text: str) -> str:

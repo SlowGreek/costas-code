@@ -201,8 +201,12 @@ describe('goal status integration', () => {
       waiting_reason: null
     })
 
+    // The blocked reason is the user's call to action, so it moves OUT of the
+    // truncated inline detail and into the wrapped note block; detail keeps
+    // only the progress counter.
     expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
-      detail: '4/20 · Needs signing credentials',
+      detail: '4/20',
+      detailNote: 'Needs signing credentials',
       goalStatus: 'blocked',
       state: 'failed'
     })
@@ -210,5 +214,45 @@ describe('goal status integration', () => {
     reconcileGoalStatus(SID, null)
     expect($goalStatusBySession.get()).toEqual({})
     expect($statusItemsBySession.get()[SID]).toBeUndefined()
+  })
+
+  it('keeps ambient progress chatter inline and never sets a note for it', () => {
+    // waiting_reason / last_reason are progress noise: truncating them in the
+    // row is harmless, and promoting them to a full block would make every
+    // healthy turn shout.
+    reconcileGoalStatus(SID, {
+      blocked_reason: null,
+      goal: 'Ship Costas Code',
+      last_reason: 'still compiling',
+      max_turns: 20,
+      paused_reason: null,
+      status: 'active',
+      turns_used: 5,
+      waiting_reason: 'waiting on the packaging job'
+    })
+
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      detail: '5/20 · waiting on the packaging job',
+      detailNote: undefined
+    })
+  })
+
+  it('gives a paused Goal its reason as a note too', () => {
+    reconcileGoalStatus(SID, {
+      blocked_reason: null,
+      goal: 'Ship Costas Code',
+      last_reason: 'ignored while paused',
+      max_turns: 20,
+      paused_reason: 'no progress for 4 turns',
+      status: 'paused',
+      turns_used: 9,
+      waiting_reason: null
+    })
+
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      detail: '9/20',
+      detailNote: 'no progress for 4 turns',
+      goalStatus: 'paused'
+    })
   })
 })

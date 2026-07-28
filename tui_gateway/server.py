@@ -2161,6 +2161,54 @@ def _session_db(session: dict):
                 db.close()
 
 
+def _route_penguin_completion(session: dict, sid: str, output: object, status: object) -> None:
+    """Submit an exact role sign-off to Butler without delaying visible completion.
+
+    Missing role/codeword is emitted as a content-free status instead of being
+    forged or silently swallowed. Butler remains the sole EFFIGY/speech owner.
+    """
+
+    from tui_gateway import penguin_completion
+
+    try:
+        with _session_db(session) as db:
+            role = penguin_completion.resolve_role(session, db)
+        params, observation = penguin_completion.prepare_request(
+            role=role,
+            output=output,
+            status=status,
+        )
+    except Exception:
+        logger.warning("PENGUIN completion preparation failed", exc_info=True)
+        _emit(
+            "speech.status",
+            sid,
+            {
+                "schema": "penguin-completion-speech-status/1",
+                "status": "failed",
+                "code": "completion-preparation-failed",
+                "principal": None,
+                "response_id": None,
+                "content_free": True,
+            },
+        )
+        return
+
+    if params is None:
+        _emit("speech.status", sid, observation)
+        return
+
+    def _submit() -> None:
+        result = penguin_completion.submit(params)
+        _emit("speech.status", sid, result)
+
+    threading.Thread(
+        target=_submit,
+        name=f"penguin-completion-{sid[:12]}",
+        daemon=True,
+    ).start()
+
+
 def _persist_session_git_meta(session: dict, cwd: str) -> None:
     """Resolve + persist a session's git branch / repo root WITHOUT blocking.
 
@@ -10952,6 +11000,7 @@ def _run_prompt_submit(
             with session["history_lock"]:
                 _clear_inflight_turn(session)
             _emit("message.complete", sid, payload)
+            _route_penguin_completion(session, sid, raw, status)
 
             # ── /goal continuation (Ralph-style loop) ─────────────────
             # After every TUI turn, if a /goal is active, ask the judge

@@ -958,22 +958,8 @@ class _FakeProc:
         self.killed = True
 
 
-def test_stop_desktop_build_lock_noop_off_windows(tmp_path, monkeypatch):
-    """POSIX can unlink a running binary, so the helper is a no-op there."""
-    desktop_dir = tmp_path / "apps" / "desktop"
-    exe = desktop_dir / "release" / "linux-unpacked" / "hermes"
-    exe.parent.mkdir(parents=True)
-    exe.write_text("", encoding="utf-8")
-    monkeypatch.setattr(cli_main.sys, "platform", "linux")
-
-    proc = _FakeProc(4321, str(exe))
-    with patch("psutil.process_iter", return_value=[proc]) as it:
-        assert cli_main._stop_desktop_processes_locking_build(desktop_dir) == []
-    it.assert_not_called()
-    assert proc.terminated is False
-
-
-def test_stop_desktop_build_lock_terminates_only_release_procs(tmp_path, monkeypatch):
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_stop_desktop_build_lock_terminates_only_release_procs(tmp_path, monkeypatch, platform):
     desktop_dir = tmp_path / "apps" / "desktop"
     release = desktop_dir / "release" / "win-unpacked"
     release.mkdir(parents=True)
@@ -983,7 +969,7 @@ def test_stop_desktop_build_lock_terminates_only_release_procs(tmp_path, monkeyp
     other_exe.parent.mkdir(parents=True)
     other_exe.write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(cli_main.sys, "platform", "win32")
+    monkeypatch.setattr(cli_main.sys, "platform", platform)
     monkeypatch.setattr(cli_main.os, "getpid", lambda: 999)
 
     locker = _FakeProc(101, str(locker_exe))

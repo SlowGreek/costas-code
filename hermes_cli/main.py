@@ -5711,23 +5711,22 @@ def _try_redownload_electron_dist(project_root: Path, env: dict) -> bool:
 
 def _stop_desktop_processes_locking_build(desktop_dir: Path) -> list[int]:
     """Terminate any running desktop app executing from this build's ``release``
-    dir so a rebuild can replace its (otherwise locked) executable.
+    dir so a rebuild replaces one coherent app generation.
 
     On Windows a running ``Hermes.exe`` keeps an exclusive lock on
     ``release/win-unpacked/Hermes.exe``. electron-builder's pack then can't
     delete the stale binary and dies with ``remove …\\Hermes.exe: Access is
     denied`` / ``ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`` (before-pack hits the same
-    EPERM cleaning the dir). The retry path repeats the failure because the lock
-    is still held. POSIX lets you unlink a running binary, so this is a no-op
-    off-Windows.
+    EPERM cleaning the dir). POSIX permits replacing a running bundle, but Electron
+    can then retain the old ``app.asar`` while relative assets resolve from the new
+    unpacked tree, leaving a blank renderer. Stop the release instance first on
+    every platform.
 
     Scope is deliberately narrow: only processes whose executable lives *inside*
     this desktop's ``release`` tree are stopped — a packaged install elsewhere or
     an unrelated "Hermes" process is never touched. Best-effort: never raises.
     Returns the PIDs we asked to stop.
     """
-    if sys.platform != "win32":
-        return []
     try:
         import psutil
     except Exception:
@@ -6114,11 +6113,9 @@ def cmd_gui(args: argparse.Namespace):
                 print("  → No Developer ID configured; ad-hoc signing this local rebuild "
                       "(CSC_IDENTITY_AUTO_DISCOVERY=false)")
             if not source_mode:
-                # A running desktop instance launched from release/win-unpacked
-                # holds Hermes.exe locked on Windows, so the pack can't replace
-                # it ("Access is denied" / ERR_ELECTRON_BUILDER_CANNOT_EXECUTE).
-                # Stop it first so the rebuild — including the installer's
-                # headless --update rebuild — succeeds instead of failing cryptically.
+                # Stop a running release instance before replacing its bundle.
+                # Windows otherwise retains an executable lock; POSIX can mix an
+                # old open ASAR with newly unpacked renderer assets.
                 stopped = _stop_desktop_processes_locking_build(desktop_dir)
                 if stopped:
                     print(f"  ⚠ Stopped running desktop app to free the build output (pid {', '.join(map(str, stopped))})")

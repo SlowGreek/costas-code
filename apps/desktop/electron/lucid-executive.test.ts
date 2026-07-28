@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createLucidExecutiveHandler,
-  parseLucidExecutiveIntent,
-  parseLucidReceipt,
   type LucidExecutiveIntent,
   type LucidExecutiveState,
-  type LucidVerb
+  type LucidVerb,
+  parseLucidExecutiveIntent,
+  parseLucidReceipt
 } from './lucid-executive'
 
 const HASH = `sha256:${'a'.repeat(64)}`
@@ -100,10 +100,12 @@ describe('LUCID executive closed intent ingress', () => {
 
   it('fails closed when identity or authority posture is held', async () => {
     const callBridge = vi.fn()
+
     const noIdentity = createLucidExecutiveHandler({
       currentState: () => ({ ...state(), sessionId: null }),
       callBridge
     })
+
     const held = createLucidExecutiveHandler({ currentState: () => state('held'), callBridge })
 
     expect(await noIdentity(request('get'))).toMatchObject({ code: 'lucid-identity-unavailable' })
@@ -143,6 +145,7 @@ describe('LUCID executive closed intent ingress', () => {
 
   it('refuses generation conflicts before execution', async () => {
     const callBridge = vi.fn()
+
     const handler = createLucidExecutiveHandler({
       currentState: () => ({ ...state(), generation: 8 }),
       callBridge
@@ -154,9 +157,11 @@ describe('LUCID executive closed intent ingress', () => {
 
   it('rejects a completion that became stale while Butler was running', async () => {
     const callBridge = vi.fn().mockResolvedValue(bridgeResult('set'))
+
     const currentState = vi.fn()
       .mockResolvedValueOnce(state())
       .mockResolvedValueOnce({ ...state(), generation: 8, documentHash: `sha256:${'e'.repeat(64)}` })
+
     const handler = createLucidExecutiveHandler({ currentState, callBridge })
 
     expect(await handler(request('set'))).toMatchObject({ code: 'lucid-stale-completion', retryable: false })
@@ -167,6 +172,7 @@ describe('LUCID executive closed intent ingress', () => {
 describe('closed receipt parser', () => {
   it('parses exact receipts and rejects mismatches or open shapes', () => {
     const result = bridgeResult('get').structuredContent.envelope.receipt
+
     const receipt = {
       schema: 'hermes-lucid-receipt/1', id: result.id, timestamp: result.ts,
       verb: 'get', ran: result.ran, trust: result.trust, content_hash: result.content_hash,

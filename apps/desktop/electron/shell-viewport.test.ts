@@ -3,9 +3,10 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { discoverAeRepositoryRoot } from './ae-repository-root'
 import { buildShellViewportModel, composeShellViewportScene } from './shell-viewport'
 
-const aeRoot = path.resolve(import.meta.dirname, '../../../../AgentExperiments')
+const aeRoot = discoverAeRepositoryRoot({ start: import.meta.dirname })
 
 const source = () => ({
   builds: JSON.parse(fs.readFileSync(path.join(aeRoot, 'run/SHELL-BUILDS.json'), 'utf8')),

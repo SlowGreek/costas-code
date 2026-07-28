@@ -1,0 +1,248 @@
+{
+  "schema": "lint/1",
+  "status": "RED",
+  "command": "node scripts/quality/lint.mjs",
+  "checks": [
+    {
+      "id": "typecheck-renderer",
+      "name": "desktop renderer typecheck",
+      "level": "error",
+      "findings": []
+    },
+    {
+      "id": "typecheck-electron",
+      "name": "desktop Electron typecheck",
+      "level": "error",
+      "findings": []
+    },
+    {
+      "id": "typecheck-e2e",
+      "name": "desktop E2E typecheck",
+      "level": "error",
+      "findings": []
+    },
+    {
+      "id": "eslint",
+      "name": "desktop ESLint",
+      "level": "error",
+      "findings": [
+        {
+          "id": "eslint:apps/desktop/src/app/chat/composer/hooks/use-composer-branch.ts:33:5:react-hooks/exhaustive-deps:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/chat/composer/hooks/use-composer-branch.ts",
+          "line": 33,
+          "column": 5,
+          "end_line": 33,
+          "end_column": 27,
+          "rule": "react-hooks/exhaustive-deps",
+          "message": "React Hook useCallback has a missing dependency: 'scope.attachments'. Either include it or remove the dependency array.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/chat/composer/hooks/use-composer-draft.ts:274:6:react-hooks/exhaustive-deps:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/chat/composer/hooks/use-composer-draft.ts",
+          "line": 274,
+          "column": 6,
+          "end_line": 274,
+          "end_column": 37,
+          "rule": "react-hooks/exhaustive-deps",
+          "message": "React Hook useEffect has a missing dependency: 'stashAt'. Either include it or remove the dependency array.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/chat/composer/hooks/use-composer-draft.ts:367:6:react-hooks/exhaustive-deps:1",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/chat/composer/hooks/use-composer-draft.ts",
+          "line": 367,
+          "column": 6,
+          "end_line": 367,
+          "end_column": 27,
+          "rule": "react-hooks/exhaustive-deps",
+          "message": "React Hook useEffect has a missing dependency: 'stashAt'. Either include it or remove the dependency array.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/chat/composer/hooks/use-composer-submit.test.tsx:22:18:no-restricted-globals:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/chat/composer/hooks/use-composer-submit.test.tsx",
+          "line": 22,
+          "column": 18,
+          "end_line": 22,
+          "end_column": 26,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/chat/composer/status-stack/preview-row.test.tsx:22:21:no-restricted-globals:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/chat/composer/status-stack/preview-row.test.tsx",
+          "line": 22,
+          "column": 21,
+          "end_line": 22,
+          "end_column": 29,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/right-sidebar/terminal/rail.test.tsx:28:21:no-restricted-globals:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/right-sidebar/terminal/rail.test.tsx",
+          "line": 28,
+          "column": 21,
+          "end_line": 28,
+          "end_column": 29,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/session/hooks/use-prompt-actions/index.test.tsx:190:6:react-hooks/exhaustive-deps:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/session/hooks/use-prompt-actions/index.test.tsx",
+          "line": 190,
+          "column": 6,
+          "end_line": 198,
+          "end_column": 4,
+          "rule": "react-hooks/exhaustive-deps",
+          "message": "React Hook useEffect has a missing dependency: 'actions'. Either include it or remove the dependency array.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx:101:68:react-hooks/exhaustive-deps:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx",
+          "line": 101,
+          "column": 68,
+          "end_line": 101,
+          "end_column": 93,
+          "rule": "react-hooks/exhaustive-deps",
+          "message": "React Hook useMemo has an unnecessary dependency: 'projectTree'. Either exclude it or remove the dependency array.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:147:12:no-restricted-globals:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 147,
+          "column": 12,
+          "end_line": 147,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:148:12:no-restricted-globals:1",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 148,
+          "column": 12,
+          "end_line": 148,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:186:21:no-restricted-globals:2",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 186,
+          "column": 21,
+          "end_line": 186,
+          "end_column": 29,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:215:12:no-restricted-globals:3",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 215,
+          "column": 12,
+          "end_line": 215,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:229:12:no-restricted-globals:4",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 229,
+          "column": 12,
+          "end_line": 229,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:280:12:no-restricted-globals:5",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 280,
+          "column": 12,
+          "end_line": 280,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:284:12:no-restricted-globals:6",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 284,
+          "column": 12,
+          "end_line": 284,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:307:12:no-restricted-globals:7",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 307,
+          "column": 12,
+          "end_line": 307,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        },
+        {
+          "id": "eslint:apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx:338:12:no-restricted-globals:8",
+          "severity": "warning",
+          "file": "apps/desktop/src/components/assistant-ui/clarify-tool.test.tsx",
+          "line": 338,
+          "column": 12,
+          "end_line": 338,
+          "end_column": 20,
+          "rule": "no-restricted-globals",
+          "message": "Unexpected use of 'document'.",
+          "fixable": false
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "source": {
+      "sha256": "sha256:16cd9af945a1fc1239577249c6c2953beb18e5fc51e2211d76473ec5220d6381",
+      "files": 1183,
+      "bytes": 9530030
+    },
+    "tools": {
+      "eslint": "9.39.4",
+      "node": "26.5.0",
+      "typescript": "6.0.3"
+    }
+  }
+}

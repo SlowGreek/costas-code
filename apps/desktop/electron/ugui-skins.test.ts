@@ -2,9 +2,10 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { discoverAeRepositoryRoot } from './ae-repository-root'
 import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 
-const aeRoot = path.resolve(import.meta.dirname, '../../../../AgentExperiments')
+const aeRoot = discoverAeRepositoryRoot({ start: import.meta.dirname })
 const bindingsDir = path.join(aeRoot, 'ugui', 'skins', 'bindings')
 
 describe('UGUI generated skin catalog admission', () => {

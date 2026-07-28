@@ -2,6 +2,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { discoverAeRepositoryRoot } from './ae-repository-root.mjs'
+
 export function stageAeShellViewport({ aeRoot, destination }) {
   const sources = [
     ['shell-builds.json', path.join(aeRoot, 'run', 'SHELL-BUILDS.json'), 'ae-shell-build-matrix/1'],
@@ -27,9 +29,7 @@ export function stageAeShellViewport({ aeRoot, destination }) {
 const currentFile = fileURLToPath(import.meta.url)
 if (path.resolve(process.argv[1] || '') === currentFile) {
   const appRoot = path.resolve(path.dirname(currentFile), '..')
-  const aeRoot = process.env.AGENT_EXPERIMENTS_ROOT
-    ? path.resolve(process.env.AGENT_EXPERIMENTS_ROOT)
-    : path.resolve(appRoot, '../../..', 'AgentExperiments')
+  const aeRoot = discoverAeRepositoryRoot({ start: appRoot })
   const destination = path.join(appRoot, 'build', 'ae', 'shell-viewport')
   stageAeShellViewport({ aeRoot, destination })
   console.log(`[stage-ae-shell-viewport] staged ${destination}`)

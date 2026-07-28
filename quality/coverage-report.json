@@ -1,0 +1,30 @@
+{
+  "schema": "coverage/1",
+  "command": "node scripts/quality/coverage.mjs",
+  "data": [
+    {
+      "totals": {
+        "branches": {
+          "count": 26256,
+          "covered": 13962
+        },
+        "lines": {
+          "count": 31851,
+          "covered": 18784
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "source": {
+      "sha256": "sha256:16cd9af945a1fc1239577249c6c2953beb18e5fc51e2211d76473ec5220d6381",
+      "files": 1183,
+      "bytes": 9530030
+    },
+    "tools": {
+      "@vitest/coverage-v8": "4.1.9",
+      "node": "26.5.0",
+      "vitest": "4.1.9"
+    }
+  }
+}

@@ -27,12 +27,13 @@ import {
   reconcileAeOrphans,
   validateAeGenerationManifest
 } from './ae-generation.mjs'
+import { discoverAeRepositoryRoot } from './ae-repository-root.mjs'
 import { stageAeShellViewport } from './stage-ae-shell-viewport.mjs'
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const costasRoot = path.resolve(desktopRoot, '..', '..')
 const costasRepositoryRoot = realpathSync(costasRoot)
-const aeRoot = realpathSync(path.resolve(process.env.AGENT_EXPERIMENTS_ROOT || path.join(costasRoot, '..', 'AgentExperiments')))
+const aeRoot = discoverAeRepositoryRoot({ start: costasRepositoryRoot })
 const buildRoot = path.join(desktopRoot, 'build')
 const destinationDir = path.join(buildRoot, 'ae')
 const candidateDir = path.join(buildRoot, `.ae-candidate-${process.pid}-${Date.now()}`)

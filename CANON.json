@@ -1,0 +1,988 @@
+{
+  "$schema": "https://agentexperiments.local/envelope/CANON.schema.json",
+  "schema": "agentexperiments-project-canon/1",
+  "project": {
+    "id": "catalyst",
+    "root": "catalyst/",
+    "registry_ref": "quine/canon/repo_map.json#/19"
+  },
+  "content_address": {
+    "algorithm": "sha256",
+    "canonicalization": "quine-json-c14n-v1",
+    "scope": "entire-document",
+    "emitted_by": "quine-project-canon-receipt"
+  },
+  "truth": {
+    "identity": {
+      "id": "identity.catalyst",
+      "name": "Catalyst",
+      "statement": "Catalyst is the Electron and React desktop product shell that composes, inspects, and authors against one staged AgentExperiments generation.",
+      "evidence_refs": [
+        "evidence.package",
+        "evidence.executive",
+        "evidence.electron-main"
+      ]
+    },
+    "anatomical_role": {
+      "id": "role.desktop-executive-shell",
+      "statement": "Catalyst is a peripheral desktop executive surface: it hosts native lifecycle and renderer interaction while routing canonical runtime and projection semantics to their owners.",
+      "evidence_refs": [
+        "evidence.executive",
+        "evidence.electron-main",
+        "evidence.generation"
+      ]
+    },
+    "purpose": [
+      {
+        "id": "purpose.compose-desktop-experience",
+        "statement": "Compose the canonical executive and UGUI-derived experiences into an operable Electron desktop shell.",
+        "evidence_refs": [
+          "evidence.executive",
+          "evidence.electron-main"
+        ]
+      },
+      {
+        "id": "purpose.publish-verifiable-quality",
+        "statement": "Execute local pinned quality tools and publish deterministic machine reports without converting known failures into green claims.",
+        "evidence_refs": [
+          "evidence.spec",
+          "evidence.quality-common",
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      }
+    ],
+    "boundaries": [
+      {
+        "id": "boundary.host-not-authority",
+        "kind": "ownership",
+        "statement": "Catalyst owns desktop composition, packaging, and interaction, not RUN, Butler, QUINE, Store, Envelope, or UGUI semantic authority.",
+        "rejects": [
+          "desktop copies of canonical runtime semantics",
+          "renderer claims of external effect success",
+          "mutable edits to a staged generation"
+        ],
+        "evidence_refs": [
+          "evidence.executive",
+          "evidence.generation"
+        ]
+      },
+      {
+        "id": "boundary.observed-quality-only",
+        "kind": "trust",
+        "statement": "Quality reports represent executed TypeScript, ESLint, Vitest, and V8 observations and remain red when exact findings exist.",
+        "rejects": [
+          "fabricated green reports",
+          "discarded skipped tests",
+          "coverage percentages without measured totals"
+        ],
+        "evidence_refs": [
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "id": "input.ae-generation",
+        "source": "A parent-pinned AgentExperiments repository generation",
+        "trust": "validated-untrusted",
+        "contract": "A staged immutable generation with repository-root and current-generation selection rules.",
+        "validation": "Resolve the repository root, stage required artifacts, and select only a completely published generation.",
+        "secret_policy": "forbidden",
+        "evidence_refs": [
+          "evidence.generation"
+        ]
+      },
+      {
+        "id": "input.desktop-interaction",
+        "source": "Renderer interaction and Electron host events",
+        "trust": "validated-untrusted",
+        "contract": "Typed desktop intents and bounded host messages admitted by the owning renderer and Electron seams.",
+        "validation": "Validate message shape and route the action to its exact owner before mutating host state.",
+        "secret_policy": "redacted-at-boundary",
+        "evidence_refs": [
+          "evidence.executive",
+          "evidence.electron-main"
+        ]
+      },
+      {
+        "id": "input.quality-source",
+        "source": "Catalyst manifests, quality scripts, Desktop configuration, Electron source, renderer source, scripts, and tests",
+        "trust": "local-observation",
+        "contract": "The deterministic source closure declared by SPEC and collected by scripts/quality/common.mjs.",
+        "validation": "Reject symlinks, special files, oversized files, excessive counts, and bytes beyond the configured closure bound.",
+        "secret_policy": "forbidden",
+        "evidence_refs": [
+          "evidence.spec",
+          "evidence.quality-common"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "id": "output.desktop-shell",
+        "target": "Electron desktop users",
+        "contract": "A React renderer hosted by an Electron main process over one selected AgentExperiments generation.",
+        "freshness": "Current only for the selected fully staged generation and active desktop process.",
+        "bounded": "Catalyst exposes host composition and interaction, not ownership of canonical runtime or persistence semantics.",
+        "evidence_refs": [
+          "evidence.executive",
+          "evidence.electron-main",
+          "evidence.generation"
+        ]
+      },
+      {
+        "id": "output.quality-reports",
+        "target": "quality/lint-report.json, quality/test-report.json, and quality/coverage-report.json",
+        "contract": "Stable JSON preserving exact lint findings, per-suite test truth, and measured line and branch totals.",
+        "freshness": "Default execution atomically replaces reports; --check executes again and accepts only exact stable bytes.",
+        "bounded": "Only the declared Catalyst source closure and locally installed pinned tools are observed.",
+        "evidence_refs": [
+          "evidence.spec",
+          "evidence.quality-common",
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      },
+      {
+        "id": "output.project-canon",
+        "target": "Envelope project-canon discovery and MORPH projection",
+        "contract": "agentexperiments-project-canon/1 for catalyst at registry row 19.",
+        "freshness": "Current only when schema, registry binding, semantic references, evidence, and handoff validate.",
+        "bounded": "Closed structured truth, exactly 17 teaching beats, and explicit residue.",
+        "evidence_refs": [
+          "evidence.spec"
+        ]
+      }
+    ],
+    "invariants": [
+      {
+        "id": "invariant.host-does-not-own-runtime",
+        "statement": "Desktop composition never transfers canonical runtime, projector, evaluator, or persistence ownership into Catalyst.",
+        "evidence_refs": [
+          "evidence.executive",
+          "evidence.generation"
+        ]
+      },
+      {
+        "id": "invariant.report-equals-observation",
+        "statement": "A committed quality report equals the stable shaping of the adapter execution that produced it.",
+        "equation": "committed_report = stable_json(shape(executed_local_tool_output))",
+        "evidence_refs": [
+          "evidence.quality-common",
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      },
+      {
+        "id": "invariant.default-writes-check-compares",
+        "statement": "Default mode writes atomically; check mode performs the same observation, writes nothing, and fails on any byte drift.",
+        "evidence_refs": [
+          "evidence.quality-common"
+        ]
+      }
+    ],
+    "mechanisms": [
+      {
+        "id": "mechanism.desktop-composition",
+        "statement": "Electron and React compose one selected AgentExperiments generation into desktop host and renderer surfaces.",
+        "ordered_steps": [
+          "Resolve and stage the parent-pinned repository generation.",
+          "Atomically select the complete generation.",
+          "Start Electron host lifecycle.",
+          "Render the executive surface and route bounded interactions."
+        ],
+        "consequences": [
+          "Incomplete generations are not selected.",
+          "Canonical owners remain outside Catalyst."
+        ],
+        "evidence_refs": [
+          "evidence.generation",
+          "evidence.electron-main",
+          "evidence.executive"
+        ]
+      },
+      {
+        "id": "mechanism.deterministic-quality",
+        "statement": "Each adapter executes its pinned local tool, shapes bounded stable JSON, then atomically writes or exactly compares its owned report.",
+        "ordered_steps": [
+          "Collect and hash the declared source closure.",
+          "Execute TypeScript and ESLint, Vitest, or Vitest V8 coverage.",
+          "Preserve failures, skips, and measured totals.",
+          "Serialize stable JSON.",
+          "Write by rename or compare exact bytes in check mode."
+        ],
+        "consequences": [
+          "Known lint findings remain visible and red.",
+          "Skipped test truth and coverage denominators survive projection.",
+          "Source or tool-output drift makes check mode fail."
+        ],
+        "evidence_refs": [
+          "evidence.quality-common",
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      }
+    ],
+    "failure_modes": [
+      {
+        "id": "failure.quality-findings-or-drift",
+        "trigger": "Typecheck or ESLint reports a violation, tests fail, coverage execution fails, or regenerated stable JSON differs from committed bytes.",
+        "consequence": "The corresponding adapter exits nonzero and does not claim green.",
+        "detection": "Tool status, exact findings, test failure counts, missing coverage summary, and byte comparison are checked.",
+        "behavior": "reject-and-report",
+        "evidence_refs": [
+          "evidence.quality-common",
+          "evidence.quality-lint",
+          "evidence.quality-test",
+          "evidence.quality-coverage"
+        ]
+      },
+      {
+        "id": "failure.generation-or-host-unavailable",
+        "trigger": "The AgentExperiments repository root, required staged artifact, generation publication, or Electron host prerequisite is unavailable.",
+        "consequence": "The desktop experience cannot safely represent the canonical generation.",
+        "detection": "Repository-root resolution, staging checks, atomic selection, and host startup surface the failure.",
+        "behavior": "fail-closed",
+        "evidence_refs": [
+          "evidence.generation",
+          "evidence.electron-main"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "evidence.package",
+        "path": "package.json",
+        "lines": {
+          "start": 1,
+          "end": 52
+        },
+        "claim": "The root workspace exposes the three Catalyst quality adapters and pins the Node engine."
+      },
+      {
+        "id": "evidence.spec",
+        "path": "SPEC.json",
+        "lines": {
+          "start": 1,
+          "end": 103
+        },
+        "claim": "The area manifest registers lint, test, and coverage report passes, source closures, and quality obligations."
+      },
+      {
+        "id": "evidence.quality-common",
+        "path": "scripts/quality/common.mjs",
+        "lines": {
+          "start": 1,
+          "end": 172
+        },
+        "claim": "Shared quality code bounds source capture, executes local tools, normalizes diagnostics, and atomically writes or exactly checks stable JSON."
+      },
+      {
+        "id": "evidence.quality-lint",
+        "path": "scripts/quality/lint.mjs",
+        "lines": {
+          "start": 1,
+          "end": 119
+        },
+        "claim": "The lint adapter executes three TypeScript projects plus ESLint and preserves every observed violation in checks and findings."
+      },
+      {
+        "id": "evidence.quality-test",
+        "path": "scripts/quality/test.mjs",
+        "lines": {
+          "start": 1,
+          "end": 91
+        },
+        "claim": "The test adapter executes UI and Electron Vitest projects and records per-suite passed, failed, skipped, todo, total, and failures."
+      },
+      {
+        "id": "evidence.quality-coverage",
+        "path": "scripts/quality/coverage.mjs",
+        "lines": {
+          "start": 1,
+          "end": 79
+        },
+        "claim": "The coverage adapter runs V8 coverage and records measured line and branch totals."
+      },
+      {
+        "id": "evidence.vitest-config",
+        "path": "apps/desktop/vitest.config.ts",
+        "lines": {
+          "start": 1,
+          "end": 32
+        },
+        "claim": "Desktop Vitest configuration defines the UI and Electron projects consumed by the quality adapters."
+      },
+      {
+        "id": "evidence.executive",
+        "path": "apps/desktop/src/app/ae-executive/index.tsx",
+        "lines": {
+          "start": 1,
+          "end": 244
+        },
+        "claim": "The renderer composes the AgentExperiments executive experience in the desktop product shell."
+      },
+      {
+        "id": "evidence.electron-main",
+        "path": "apps/desktop/electron/main.ts",
+        "lines": {
+          "start": 1,
+          "end": 300
+        },
+        "claim": "The Electron main process owns native desktop lifecycle and bounded host integration."
+      },
+      {
+        "id": "evidence.generation",
+        "path": "apps/desktop/scripts/ae-generation.mjs",
+        "lines": {
+          "start": 1,
+          "end": 191
+        },
+        "claim": "Generation staging publishes immutable AgentExperiments assets and atomically selects a current generation."
+      }
+    ],
+    "residue": [
+      {
+        "id": "residue.known-lint-red",
+        "statement": "The current Catalyst lint report is RED because exact ESLint violations remain; this contract records rather than conceals them.",
+        "cause": "Existing Desktop source includes lint errors and warnings outside this contract task.",
+        "visibility": "explicit-in-every-projection",
+        "evidence_refs": [
+          "evidence.quality-lint"
+        ]
+      },
+      {
+        "id": "residue.physical-desktop-proof",
+        "statement": "Source tests and machine reports do not prove installation, signing, accessibility, graphics, audio, network, or physical desktop behavior.",
+        "cause": "Those claims require separate packaged-host and physical execution evidence.",
+        "visibility": "explicit-in-every-projection",
+        "evidence_refs": [
+          "evidence.spec",
+          "evidence.electron-main"
+        ]
+      }
+    ],
+    "handoffs": [
+      {
+        "id": "handoff.catalyst-canon-to-envelope",
+        "from_output": "output.project-canon",
+        "to_project": "envelope",
+        "to_canon_ref": "envelope/CANON.json",
+        "to_input": "input.project-canon",
+        "preconditions": [
+          "Catalyst CANON validates against the closed parent schema.",
+          "Evidence paths and line ranges resolve.",
+          "Known lint and physical-proof residue remain explicit."
+        ],
+        "postconditions": [
+          "Envelope may admit Catalyst semantics for MORPH projection.",
+          "Projection may change presentation but not ownership, observations, evidence, residue, or handoff meaning."
+        ],
+        "evidence_refs": [
+          "evidence.spec"
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "term": "generation",
+        "definition": "A completely staged immutable AgentExperiments artifact set selected atomically for the desktop host.",
+        "semantic_refs": [
+          "mechanism.desktop-composition",
+          "output.desktop-shell"
+        ]
+      },
+      {
+        "term": "machine report",
+        "definition": "Stable committed JSON derived from a fresh local quality execution rather than a narrated or fabricated status.",
+        "semantic_refs": [
+          "mechanism.deterministic-quality",
+          "invariant.report-equals-observation"
+        ]
+      }
+    ]
+  },
+  "teaching_graph": {
+    "grammar": "agentexperiments-teaching-17/1",
+    "entry": "scope_title",
+    "exit": "public_record",
+    "order": [
+      "scope_title",
+      "ordinary_operation",
+      "signal",
+      "easy_explanation",
+      "human_consequence",
+      "witness",
+      "invariant",
+      "threshold",
+      "tests_resistance",
+      "ordeal_falsifier",
+      "right_operation",
+      "external_verification",
+      "return",
+      "residue",
+      "handoff",
+      "quiet_after",
+      "public_record"
+    ],
+    "beats": {
+      "scope_title": {
+        "teaching_function": "Name Catalyst as the desktop executive shell without granting it canonical runtime authority.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "ordinary_operation"
+      },
+      "ordinary_operation": {
+        "teaching_function": "Show one staged generation composed through Electron and React.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "signal"
+      },
+      "signal": {
+        "teaching_function": "Expose quality findings, failed execution, or report drift as a visible red signal.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "easy_explanation"
+      },
+      "easy_explanation": {
+        "teaching_function": "Reject the easy explanation that a desktop surface or generated report owns the underlying semantics.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "human_consequence"
+      },
+      "human_consequence": {
+        "teaching_function": "Explain that hidden failures or ownership drift mislead users and downstream automation.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "witness"
+      },
+      "witness": {
+        "teaching_function": "Introduce source paths, exact findings, suite counts, and coverage totals as witnesses.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "invariant"
+      },
+      "invariant": {
+        "teaching_function": "State that reports equal observations and host composition does not transfer authority.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "threshold"
+      },
+      "threshold": {
+        "teaching_function": "Cross into publication only after bounded source collection and successful report shaping.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "tests_resistance"
+      },
+      "tests_resistance": {
+        "teaching_function": "Exercise TypeScript, ESLint, UI and Electron tests, V8 coverage, and check-mode comparison.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "ordeal_falsifier"
+      },
+      "ordeal_falsifier": {
+        "teaching_function": "Try to falsify the contract with known lint, skipped tests, drift, missing summaries, or incomplete generations.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "right_operation"
+      },
+      "right_operation": {
+        "teaching_function": "Execute, preserve truth, atomically publish, and route desktop semantics to their owners.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "external_verification"
+      },
+      "external_verification": {
+        "teaching_function": "Require independent report checks and parent project-canon semantic validation.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "return"
+      },
+      "return": {
+        "teaching_function": "Return to an operable desktop shell with machine-readable evidence.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "residue"
+      },
+      "residue": {
+        "teaching_function": "Keep known lint and missing physical desktop proof visible.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "handoff"
+      },
+      "handoff": {
+        "teaching_function": "Pass structured Catalyst truth to Envelope without transferring desktop ownership.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "quiet_after"
+      },
+      "quiet_after": {
+        "teaching_function": "Leave room to distinguish source evidence from packaged and physical behavior.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": "public_record"
+      },
+      "public_record": {
+        "teaching_function": "Publish identity, boundaries, mechanisms, failures, evidence, residue, and handoff from CANON.",
+        "preserves": {
+          "purpose": [
+            "purpose.publish-verifiable-quality"
+          ],
+          "mechanisms": [
+            "mechanism.deterministic-quality"
+          ],
+          "failure_modes": [
+            "failure.quality-findings-or-drift"
+          ],
+          "consequences": [
+            "failure.quality-findings-or-drift"
+          ],
+          "verification": [
+            "evidence.quality-common",
+            "evidence.quality-lint"
+          ],
+          "residue": [
+            "residue.known-lint-red",
+            "residue.physical-desktop-proof"
+          ],
+          "handoffs": [
+            "handoff.catalyst-canon-to-envelope"
+          ]
+        },
+        "next": null
+      }
+    }
+  },
+  "morph_contract": {
+    "verb": "MORPH",
+    "semantic_authority": "project-local-CANON.json",
+    "profile_contract": "https://agentexperiments.local/envelope/CANON.schema.json#/$defs/morphProfile",
+    "receipt_contract": "https://agentexperiments.local/envelope/CANON.schema.json#/$defs/morphReceipt",
+    "immutable_dimensions": [
+      "invariants",
+      "equations",
+      "mechanisms",
+      "causal-order",
+      "evidence",
+      "residue",
+      "handoffs"
+    ],
+    "style_may_change": [
+      "metaphor-labels",
+      "presentation",
+      "pacing",
+      "channel-affordances"
+    ],
+    "lineage": {
+      "order": [
+        "source",
+        "adaptation",
+        "projection"
+      ],
+      "stages": [
+        {
+          "name": "source",
+          "role": "Catalyst CANON owns desktop-shell semantics and explicit quality residue.",
+          "hash_binding": "canon_sha256 binds current structured Catalyst truth."
+        },
+        {
+          "name": "adaptation",
+          "role": "A teaching adaptation selects semantic identifiers in the fixed 17-beat order.",
+          "hash_binding": "source_sha256 and adaptation_sha256 bind selection and causal order."
+        },
+        {
+          "name": "projection",
+          "role": "A channel projector changes presentation while preserving contract dimensions.",
+          "hash_binding": "profile_sha256, generator_sha256, and projection_sha256 bind emitted bytes."
+        }
+      ],
+      "prior_art": [],
+      "decoupled_dimensions": [
+        "theme",
+        "era",
+        "characters",
+        "art-style",
+        "voice",
+        "medium",
+        "page-count",
+        "geometry"
+      ]
+    }
+  },
+  "migration_dispositions": []
+}

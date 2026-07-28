@@ -1,0 +1,251 @@
+{
+  "$schema": "quine-area/v1",
+  "_doc": "Catalyst-owned Node quality boundary for the Desktop renderer and Electron host. The adapters execute local pinned tools, bound captured output, emit QUINE-compatible summaries, and bind every observation to a deterministic source receipt.",
+  "area": "catalyst",
+  "root": "catalyst",
+  "invoke": "node",
+  "codegen_passes": [
+    {
+      "name": "lint",
+      "command": "scripts/quality/lint.mjs",
+      "check_flag": "--check",
+      "inputs": [
+        "SPEC.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/quality/**/*",
+        "apps/desktop/**/*"
+      ],
+      "outputs": [
+        "quality/lint-report.json"
+      ],
+      "kind": "receipt"
+    },
+    {
+      "name": "test",
+      "command": "scripts/quality/test.mjs",
+      "check_flag": "--check",
+      "inputs": [
+        "SPEC.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/quality/**/*",
+        "apps/desktop/**/*"
+      ],
+      "outputs": [
+        "quality/test-report.json"
+      ],
+      "kind": "receipt"
+    },
+    {
+      "name": "coverage",
+      "command": "scripts/quality/coverage.mjs",
+      "check_flag": "--check",
+      "inputs": [
+        "SPEC.json",
+        "package.json",
+        "package-lock.json",
+        "scripts/quality/**/*",
+        "apps/desktop/**/*"
+      ],
+      "outputs": [
+        "quality/coverage-report.json"
+      ],
+      "kind": "receipt"
+    }
+  ],
+  "quality_obligations": {
+    "dimensions": {
+      "branch_coverage": {
+        "command": "node catalyst/scripts/quality/coverage.mjs --check",
+        "denominator": "instrumented-branches",
+        "investment": {
+          "build_files": [
+            "catalyst/SPEC.json",
+            "catalyst/package.json",
+            "catalyst/package-lock.json",
+            "catalyst/apps/desktop/vitest.config.ts"
+          ],
+          "evidence": [
+            "catalyst/quality/coverage-report.json",
+            "bounded V8 branch totals with deterministic Catalyst source receipt and exact Vitest/provider versions"
+          ],
+          "tests": [
+            "catalyst/apps/desktop/src",
+            "catalyst/apps/desktop/electron"
+          ],
+          "tooling": [
+            "restore the lockfile-matched local Vitest and @vitest/coverage-v8 packages, then rerun this exact adapter"
+          ]
+        },
+        "receipt": "receipts/quality-coverage.json",
+        "receipt_schema": "ae-catalyst-quality-coverage/1",
+        "source_inputs": [
+          "SPEC.json",
+          "package.json",
+          "package-lock.json",
+          "scripts/quality/*.mjs",
+          "apps/desktop/package.json",
+          "apps/desktop/eslint.config.mjs",
+          "apps/desktop/vitest.config.ts",
+          "apps/desktop/tsconfig.json",
+          "apps/desktop/tsconfig.electron.json",
+          "apps/desktop/tsconfig.e2e.json",
+          "apps/desktop/electron/**/*.ts",
+          "apps/desktop/electron/**/*.tsx",
+          "apps/desktop/src/**/*.ts",
+          "apps/desktop/src/**/*.tsx",
+          "apps/desktop/scripts/**/*.ts",
+          "apps/desktop/scripts/**/*.mjs"
+        ],
+        "tool": "node+vitest-v8"
+      },
+      "line_coverage": {
+        "command": "node catalyst/scripts/quality/coverage.mjs --check",
+        "denominator": "executable-lines",
+        "investment": {
+          "build_files": [
+            "catalyst/SPEC.json",
+            "catalyst/package.json",
+            "catalyst/package-lock.json",
+            "catalyst/apps/desktop/vitest.config.ts"
+          ],
+          "evidence": [
+            "catalyst/quality/coverage-report.json",
+            "bounded V8 line totals with deterministic Catalyst source receipt and exact Vitest/provider versions"
+          ],
+          "tests": [
+            "catalyst/apps/desktop/src",
+            "catalyst/apps/desktop/electron"
+          ],
+          "tooling": [
+            "restore the lockfile-matched local Vitest and @vitest/coverage-v8 packages, then rerun this exact adapter"
+          ]
+        },
+        "receipt": "receipts/quality-coverage.json",
+        "receipt_schema": "ae-catalyst-quality-coverage/1",
+        "source_inputs": [
+          "SPEC.json",
+          "package.json",
+          "package-lock.json",
+          "scripts/quality/*.mjs",
+          "apps/desktop/package.json",
+          "apps/desktop/eslint.config.mjs",
+          "apps/desktop/vitest.config.ts",
+          "apps/desktop/tsconfig.json",
+          "apps/desktop/tsconfig.electron.json",
+          "apps/desktop/tsconfig.e2e.json",
+          "apps/desktop/electron/**/*.ts",
+          "apps/desktop/electron/**/*.tsx",
+          "apps/desktop/src/**/*.ts",
+          "apps/desktop/src/**/*.tsx",
+          "apps/desktop/scripts/**/*.ts",
+          "apps/desktop/scripts/**/*.mjs"
+        ],
+        "tool": "node+vitest-v8"
+      },
+      "lint": {
+        "command": "node catalyst/scripts/quality/lint.mjs --check",
+        "denominator": "lint-checks",
+        "investment": {
+          "build_files": [
+            "catalyst/SPEC.json",
+            "catalyst/package.json",
+            "catalyst/package-lock.json",
+            "catalyst/apps/desktop/eslint.config.mjs",
+            "catalyst/apps/desktop/tsconfig.json",
+            "catalyst/apps/desktop/tsconfig.electron.json",
+            "catalyst/apps/desktop/tsconfig.e2e.json"
+          ],
+          "evidence": [
+            "catalyst/quality/lint-report.json",
+            "four bounded Desktop TypeScript and ESLint checks with deterministic Catalyst source receipt"
+          ],
+          "tests": [],
+          "tooling": [
+            "restore the lockfile-pinned local TypeScript and ESLint packages, then rerun this exact adapter"
+          ]
+        },
+        "receipt": "receipts/quality-lint.json",
+        "receipt_schema": "ae-catalyst-quality-lint/1",
+        "source_inputs": [
+          "SPEC.json",
+          "package.json",
+          "package-lock.json",
+          "scripts/quality/*.mjs",
+          "apps/desktop/package.json",
+          "apps/desktop/eslint.config.mjs",
+          "apps/desktop/vitest.config.ts",
+          "apps/desktop/tsconfig.json",
+          "apps/desktop/tsconfig.electron.json",
+          "apps/desktop/tsconfig.e2e.json",
+          "apps/desktop/electron/**/*.ts",
+          "apps/desktop/electron/**/*.tsx",
+          "apps/desktop/src/**/*.ts",
+          "apps/desktop/src/**/*.tsx",
+          "apps/desktop/scripts/**/*.ts",
+          "apps/desktop/scripts/**/*.mjs"
+        ],
+        "tool": "node+typescript+eslint"
+      },
+      "test": {
+        "command": "node catalyst/scripts/quality/test.mjs --check",
+        "denominator": "executed-tests",
+        "investment": {
+          "build_files": [
+            "catalyst/SPEC.json",
+            "catalyst/package.json",
+            "catalyst/package-lock.json",
+            "catalyst/apps/desktop/vitest.config.ts"
+          ],
+          "evidence": [
+            "catalyst/quality/test-report.json",
+            "actual UI and Electron Vitest executed counts with deterministic Catalyst source receipt"
+          ],
+          "tests": [
+            "catalyst/apps/desktop/src",
+            "catalyst/apps/desktop/electron"
+          ],
+          "tooling": [
+            "restore the lockfile-pinned local Vitest package, then rerun this exact adapter"
+          ]
+        },
+        "receipt": "receipts/quality-test.json",
+        "receipt_schema": "ae-catalyst-quality-test/1",
+        "source_inputs": [
+          "SPEC.json",
+          "package.json",
+          "package-lock.json",
+          "scripts/quality/*.mjs",
+          "apps/desktop/package.json",
+          "apps/desktop/eslint.config.mjs",
+          "apps/desktop/vitest.config.ts",
+          "apps/desktop/tsconfig.json",
+          "apps/desktop/tsconfig.electron.json",
+          "apps/desktop/tsconfig.e2e.json",
+          "apps/desktop/electron/**/*.ts",
+          "apps/desktop/electron/**/*.tsx",
+          "apps/desktop/src/**/*.ts",
+          "apps/desktop/src/**/*.tsx",
+          "apps/desktop/scripts/**/*.ts",
+          "apps/desktop/scripts/**/*.mjs"
+        ],
+        "tool": "node+vitest"
+      }
+    },
+    "freshness_seconds": 600,
+    "platform": {
+      "evidence": {
+        "claim": "Catalyst Desktop quality is measured by host-portable local Node, TypeScript, ESLint, Vitest, and V8 coverage adapters without depending on a sibling checkout layout.",
+        "path": "catalyst/SPEC.json"
+      },
+      "identity": "node-desktop-quality-host",
+      "supported_hosts": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
+    "schema": "lattice-quality-obligations/1"
+  }
+}

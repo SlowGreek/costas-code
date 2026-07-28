@@ -4,10 +4,10 @@ import {
   applyLucidActionPosture,
   buildLucidActionIntent,
   createLucidActionCoordinator,
-  lucidActionForHandler,
-  parseLucidActionResult,
   type LucidActionContext,
-  type LucidActionReceipt
+  lucidActionForHandler,
+  type LucidActionReceipt,
+  parseLucidActionResult
 } from './lucid-actions'
 import type { AeExecutiveScene } from './scene'
 
@@ -72,6 +72,7 @@ describe('closed LUCID Scene handler registry', () => {
         { id: 'write', p: 'button', a: { label: 'Write' }, on: { tap: 'lucid.set.view-policy' } }
       ]
     }
+
     const held = applyLucidActionPosture(scene, { ...context, posture: 'held' })
 
     expect(held.nodes[1].on).toBeUndefined()

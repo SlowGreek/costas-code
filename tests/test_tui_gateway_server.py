@@ -1335,10 +1335,16 @@ def test_load_enabled_toolsets_rejects_disabled_mcp_env(monkeypatch, capsys):
         config_mod, "load_config", lambda: {"platform_toolsets": {"cli": ["memory"]}}
     )
 
-    # Sorted: ["kanban", "memory", "project"]. `kanban` is auto-recovered by
-    # _get_platform_tools (a non-configurable platform toolset in hermes-cli's
-    # universe); `project` is GUI-only, folded in by _load_enabled_toolsets.
-    assert server._load_enabled_toolsets() == ["kanban", "memory", "project"]
+    # Contract, not a snapshot: the configured toolset survives, the GUI-only
+    # `project` toolset is folded in by _load_enabled_toolsets, and the result
+    # is sorted + deduped. Asserting the exact list froze whatever
+    # _get_platform_tools auto-recovers (kanban, workflows, ...), so every new
+    # platform toolset broke this test without any behavior regressing.
+    result = server._load_enabled_toolsets()
+    assert result is not None
+    assert "memory" in result, "configured CLI toolset must survive"
+    assert "project" in result, "GUI-only project tools must be folded in"
+    assert result == sorted(set(result))
     err = capsys.readouterr().err
     assert "ignoring disabled MCP servers" in err
     assert "mcp-off" in err
@@ -1359,7 +1365,11 @@ def test_load_enabled_toolsets_falls_back_when_tui_env_invalid(monkeypatch, caps
         config_mod, "load_config", lambda: {"platform_toolsets": {"cli": ["memory"]}}
     )
 
-    assert server._load_enabled_toolsets() == ["kanban", "memory", "project"]
+    result = server._load_enabled_toolsets()
+    assert result is not None
+    assert "memory" in result, "invalid env must fall back to configured CLI toolsets"
+    assert "project" in result, "GUI-only project tools must be folded in"
+    assert result == sorted(set(result))
     assert "using configured CLI toolsets" in capsys.readouterr().err
 
 
@@ -9342,11 +9352,26 @@ def test_session_activate_returns_inflight_stream_before_completion(monkeypatch)
                 ],
             }
 
-    server._sessions["sid-live"] = _session(agent=_Agent())
+    # `agent_ready` pre-set marks the agent as already built. Without it
+    # _start_agent_build runs the REAL builder, which does live network I/O
+    # (provider/model metadata) and hangs in socket.create_connection — the
+    # stub's run_conversation is never reached and `started.wait` times out.
+    ready = threading.Event()
+    ready.set()
+    server._sessions["sid-live"] = _session(agent=_Agent(), agent_ready=ready)
     monkeypatch.setattr(server, "make_stream_renderer", lambda cols: None)
     monkeypatch.setattr(server, "render_message", lambda raw, cols: None)
     monkeypatch.setattr(server, "_get_db", lambda: None)
-    monkeypatch.setattr(server, "_session_info", lambda agent: {"model": agent.model})
+    # The turn thread syncs the agent's model against config before running.
+    # With a stub agent that falls through to a real provider lookup — the
+    # Copilot token exchange dials out and blocks the turn, so the stub's
+    # run_conversation is never reached. The model isn't what this test is
+    # about; only the in-flight stream is.
+    monkeypatch.setattr(server, "_sync_agent_model_with_config", lambda *a, **k: None)
+    # _session_info grew a second `session` parameter; a 1-arg stub made the
+    # turn thread die on TypeError, so `release.wait` timed out and the real
+    # assertion below was never reached. Accept both arities.
+    monkeypatch.setattr(server, "_session_info", lambda agent, *_: {"model": agent.model})
 
     def _emit(event, sid, payload=None):
         if event == "message.complete":

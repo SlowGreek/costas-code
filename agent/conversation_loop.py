@@ -3354,7 +3354,7 @@ def run_conversation(
                     print(f"{agent.log_prefix}     • Verify stored credentials: {_dhh}/auth.json")
                     print(f"{agent.log_prefix}     • Switch providers temporarily: /model <model> --provider openrouter")
                 if (
-                    agent.provider == "copilot"
+                    agent._is_copilot_url()
                     and status_code == 401
                     and not _retry.copilot_auth_retry_attempted
                 ):

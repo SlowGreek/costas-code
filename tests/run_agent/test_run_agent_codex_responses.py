@@ -1463,8 +1463,10 @@ def test_try_refresh_codex_client_credentials_skips_xai_oauth_when_singleton_dif
     assert agent.api_key == pre_refresh_key
 
 
-def test_run_conversation_copilot_refreshes_after_401_and_retries(monkeypatch):
+@pytest.mark.parametrize("provider", ["copilot", "github-copilot"])
+def test_run_conversation_copilot_refreshes_after_401_and_retries(monkeypatch, provider):
     agent = _build_copilot_agent(monkeypatch)
+    setattr(agent, "provider", provider)
     calls = {"api": 0, "refresh": 0}
 
     class _UnauthorizedError(RuntimeError):
@@ -1552,7 +1554,14 @@ def test_try_refresh_copilot_client_credentials_rebuilds_client(monkeypatch):
 
     monkeypatch.setattr(
         "hermes_cli.copilot_auth.resolve_copilot_token",
-        lambda: ("gho_new_token", "GH_TOKEN"),
+        lambda: ("ghu_raw_token", "COPILOT_GITHUB_TOKEN"),
+    )
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.get_copilot_api_token",
+        lambda token: (
+            "tid=enterprise;exp=9999999999;proxy-ep=proxy.enterprise.githubcopilot.com",
+            "https://api.enterprise.githubcopilot.com",
+        ),
     )
     monkeypatch.setattr(run_agent, "OpenAI", _fake_openai)
 
@@ -1561,8 +1570,8 @@ def test_try_refresh_copilot_client_credentials_rebuilds_client(monkeypatch):
 
     assert ok is True
     assert closed["value"] is True
-    assert rebuilt["kwargs"]["api_key"] == "gho_new_token"
-    assert rebuilt["kwargs"]["base_url"] == "https://api.githubcopilot.com"
+    assert rebuilt["kwargs"]["api_key"].startswith("tid=enterprise;")
+    assert rebuilt["kwargs"]["base_url"] == "https://api.enterprise.githubcopilot.com"
     assert rebuilt["kwargs"]["default_headers"]["Copilot-Integration-Id"] == "vscode-chat"
     assert isinstance(agent.client, _RebuiltClient)
 
@@ -1582,11 +1591,40 @@ def test_try_refresh_copilot_client_credentials_rebuilds_even_if_token_unchanged
         "hermes_cli.copilot_auth.resolve_copilot_token",
         lambda: ("gh-token", "gh auth token"),
     )
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.get_copilot_api_token",
+        lambda token: (token, None),
+    )
     monkeypatch.setattr(run_agent, "OpenAI", _fake_openai)
 
     ok = agent._try_refresh_copilot_client_credentials()
 
     assert ok is True
+    assert rebuilt["count"] == 1
+
+
+def test_try_refresh_copilot_client_credentials_accepts_github_copilot_alias(monkeypatch):
+    """Desktop runtime metadata may preserve the github-copilot provider alias."""
+    agent = _build_copilot_agent(monkeypatch)
+    setattr(agent, "provider", "github-copilot")
+    rebuilt = {"count": 0}
+
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.resolve_copilot_token",
+        lambda: ("ghu_raw", "COPILOT_GITHUB_TOKEN"),
+    )
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.get_copilot_api_token",
+        lambda token: ("exchanged", "https://api.enterprise.githubcopilot.com"),
+    )
+
+    def _fake_replace(*, reason):
+        rebuilt["count"] += 1
+        return True
+
+    monkeypatch.setattr(agent, "_replace_primary_openai_client", _fake_replace)
+
+    assert agent._try_refresh_copilot_client_credentials() is True
     assert rebuilt["count"] == 1
 
 

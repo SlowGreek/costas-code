@@ -4900,23 +4900,39 @@ class AIAgent:
         on 401 so retries recover from stale auth/client state without requiring
         a session restart.
         """
-        if self.provider != "copilot":
+        # Desktop/session metadata may preserve a Copilot provider alias such
+        # as ``github-copilot``. The endpoint is the durable capability signal;
+        # an exact provider-name gate silently skipped refresh for those agents.
+        if not self._is_copilot_url():
             return False
 
         try:
-            from hermes_cli.copilot_auth import resolve_copilot_token
+            from hermes_cli.copilot_auth import (
+                get_copilot_api_token,
+                resolve_copilot_token,
+            )
 
-            new_token, token_source = resolve_copilot_token()
+            raw_token, token_source = resolve_copilot_token()
         except Exception as exc:
             logger.debug("Copilot credential refresh failed: %s", exc)
+            return False
+
+        if not isinstance(raw_token, str) or not raw_token.strip():
+            return False
+
+        try:
+            new_token, resolved_base_url = get_copilot_api_token(raw_token.strip())
+        except Exception as exc:
+            logger.debug("Copilot token exchange during refresh failed: %s", exc)
             return False
 
         if not isinstance(new_token, str) or not new_token.strip():
             return False
 
-        new_token = new_token.strip()
-
-        self.api_key = new_token
+        self.api_key = new_token.strip()
+        if resolved_base_url:
+            self.base_url = resolved_base_url.rstrip("/")
+            self._base_url_lower = self.base_url.lower()
         self._client_kwargs["api_key"] = self.api_key
         self._client_kwargs["base_url"] = self.base_url
         self._apply_client_headers_for_base_url(str(self.base_url or ""))

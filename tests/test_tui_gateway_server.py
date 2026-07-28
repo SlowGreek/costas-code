@@ -2173,6 +2173,47 @@ def test_stored_session_runtime_overrides_restores_explicit_normal_tier():
     assert overrides["service_tier_override"] == ""
 
 
+def test_stored_copilot_session_does_not_restore_stale_auth_endpoint():
+    """Copilot's endpoint is account/auth state, not durable session state.
+
+    A resumed chat persisted ``api.githubcopilot.com`` before the user's managed
+    account resolved to ``api.enterprise.githubcopilot.com``. Resume correctly
+    resolved fresh Copilot credentials, then overwrote their endpoint with the
+    stale session value, making only that thread intermittently return the
+    misleading GitHub ToS 403 while new threads worked.
+    """
+    overrides = server._stored_session_runtime_overrides(
+        {
+            "model": "gpt-5.6-sol",
+            "model_config": {
+                "model": "gpt-5.6-sol",
+                "provider": "github-copilot",
+                "base_url": "https://api.githubcopilot.com",
+                "api_mode": "codex_responses",
+            },
+        }
+    )
+
+    assert overrides["model_override"]["base_url"] is None
+    assert overrides["model_override"]["api_mode"] == "codex_responses"
+
+
+def test_runtime_model_config_does_not_persist_copilot_auth_endpoint():
+    agent = types.SimpleNamespace(
+        model="gpt-5.6-sol",
+        provider="copilot",
+        base_url="https://api.enterprise.githubcopilot.com",
+        api_mode="codex_responses",
+        reasoning_config=None,
+        service_tier=None,
+    )
+
+    config = server._runtime_model_config(agent)
+
+    assert config["provider"] == "copilot"
+    assert "base_url" not in config
+
+
 def test_persist_live_session_runtime_preserves_resume_metadata(monkeypatch):
     updates = {}
 

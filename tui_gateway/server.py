@@ -2722,6 +2722,13 @@ def _resolve_startup_runtime() -> tuple[str, str | None]:
 # Bare billing buckets are not routable provider identities (kept in parity with the
 # provider gate in agent_init). Restoring one as a session provider override breaks resume.
 _BARE_BILLING_PROVIDERS = {"auto", "openrouter", "custom"}
+_AUTH_RESOLVED_ENDPOINT_PROVIDERS = {
+    "copilot",
+    "github",
+    "github-copilot",
+    "github-model",
+    "github-models",
+}
 
 
 def _stored_session_runtime_overrides(row: dict | None) -> dict:
@@ -2766,6 +2773,14 @@ def _stored_session_runtime_overrides(row: dict | None) -> dict:
     api_mode = str(model_config.get("api_mode") or "").strip()
     reasoning_config = model_config.get("reasoning_config")
     service_tier = str(model_config.get("service_tier") or "").strip()
+
+    # Copilot's CAPI host belongs to the CURRENT credential/account. Managed
+    # users resolve an enterprise host while individual users resolve the
+    # generic host. Restoring a URL persisted by an older login/session would
+    # overwrite the fresh credential resolution in _make_agent, producing a
+    # thread-local ToS 403 even while newly-created threads work normally.
+    if provider.strip().lower() in _AUTH_RESOLVED_ENDPOINT_PROVIDERS:
+        base_url = ""
 
     # Heal a bare ``"custom"`` provider stored by an older build (or any leak
     # site that bypassed _runtime_model_config's normalization). Bare custom is
@@ -2853,7 +2868,11 @@ def _runtime_model_config(agent, existing: dict | None = None) -> dict:
                     "custom provider identity lookup failed", exc_info=True
                 )
         config["provider"] = provider
-    if base_url:
+    if provider.strip().lower() in _AUTH_RESOLVED_ENDPOINT_PROVIDERS:
+        # The current Copilot login owns this endpoint. Persisting it couples
+        # the chat to whichever account was active at the last metadata write.
+        config.pop("base_url", None)
+    elif base_url:
         config["base_url"] = base_url
     else:
         config.pop("base_url", None)

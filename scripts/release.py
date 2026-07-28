@@ -2350,9 +2350,34 @@ def get_pr_number(subject: str) -> str | None:
     return None
 
 
-def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/NousResearch/hermes-agent",
+def _default_repo_url() -> str:
+    """Resolve the repo the release actually belongs to.
+
+    Hardcoding NousResearch was correct upstream but wrong in a fork: every
+    changelog link pointed at a repo the commits don't exist in (and, in a
+    private fork, at 404s). Ask git for the push remote instead so a fork's
+    release notes link to the fork's own commits. Falls back to upstream when
+    there is no usable remote (a bare export, CI checkout without remotes).
+    """
+    for remote in ("costas", "origin"):
+        result = git_result("remote", "get-url", remote)
+        if result.returncode != 0:
+            continue
+        url = result.stdout.strip()
+        if not url:
+            continue
+        # git@github.com:Owner/repo.git → https://github.com/Owner/repo
+        if url.startswith("git@"):
+            url = url.replace(":", "/", 1).replace("git@", "https://", 1)
+        return url.removesuffix(".git")
+    return "https://github.com/NousResearch/hermes-agent"
+
+
+def generate_changelog(commits, tag_name, semver, repo_url=None,
                        prev_tag=None, first_release=False):
     """Generate markdown changelog from categorized commits."""
+    if repo_url is None:
+        repo_url = _default_repo_url()
     lines = []
 
     # Header
@@ -2563,13 +2588,18 @@ def main():
         print(f"  ✓ Created tag {tag_name}")
 
         # Push
-        push_result = git_result("push", "origin", "HEAD", "--tags")
+        # Push. Resolve the remote rather than hardcoding `origin`: in this
+        # fork `origin` is NousResearch upstream, so a hardcoded push would
+        # send a Catalyst release tag to a repo we don't own (and, with write
+        # access, actually publish it there). Prefer the fork remote.
+        push_remote = "costas" if git_result("remote", "get-url", "costas").returncode == 0 else "origin"
+        push_result = git_result("push", push_remote, "HEAD", "--tags")
         if push_result.returncode == 0:
-            print("  ✓ Pushed to origin")
+            print(f"  ✓ Pushed to {push_remote}")
         else:
-            print(f"  ✗ Failed to push to origin: {push_result.stderr.strip()}")
+            print(f"  ✗ Failed to push to {push_remote}: {push_result.stderr.strip()}")
             print("    Continue manually after fixing access:")
-            print("    git push origin HEAD --tags")
+            print(f"    git push {push_remote} HEAD --tags")
 
         # Create GitHub release
         changelog_file = REPO_ROOT / ".release_notes.md"

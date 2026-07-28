@@ -50,4 +50,39 @@ function resolveClientUpdateBaseline({ checkoutBranch, checkoutSha, installStamp
   }
 }
 
+// The app and the backend it talks to are separate artifacts on separate
+// clocks: the packaged Electron bundle carries a baked-in commit, while the
+// managed checkout at HERMES_HOME advances only when `hermes update` runs.
+//
+// When they diverge the failure is SILENT and confusing rather than loud: the
+// UI ships a feature whose gateway/agent half does not exist yet, so the
+// feature simply misbehaves. A real instance: the desktop began sending images
+// with a mid-turn correction while the backend still had the text-only
+// `redirect(text: str)`, and corrections were rejected with no error anywhere.
+//
+// The update indicator alone cannot catch this — it compares the app against
+// the REMOTE, so both "up to date" and a stale backend can be true at once.
+function resolveBackendDrift({ appCommit, backendCommit }) {
+  const clean = value => (typeof value === 'string' ? value.trim() : '')
+  const app = clean(appCommit)
+  const backend = clean(backendCommit)
+
+  const valid = sha => /^[0-9a-f]{7,64}$/i.test(sha) && !/^0+$/.test(sha)
+
+  // Unknown is not drift. A dev run, a missing stamp, or a backend outside git
+  // must not raise a warning we cannot substantiate.
+  if (!valid(app) || !valid(backend)) {
+    return { drifted: false, reason: 'unknown' }
+  }
+
+  // Compare on the shorter length: the stamp carries a full 40-char sha while
+  // a caller may pass an abbreviated one, and a length mismatch would read as
+  // drift on identical commits.
+  const width = Math.min(app.length, backend.length)
+  const same = app.slice(0, width).toLowerCase() === backend.slice(0, width).toLowerCase()
+
+  return same ? { drifted: false, reason: 'match' } : { drifted: true, reason: 'mismatch' }
+}
+
+export { resolveBackendDrift }
 export { resolveBehindCount, resolveClientUpdateBaseline, shouldCountCommits }

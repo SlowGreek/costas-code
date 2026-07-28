@@ -662,19 +662,6 @@ export function usePromptActions({
       // message after the interrupted checkpoint, matching the durable core
       // transcript rather than a system note that changes role after reload.
       const send = async (id: string): Promise<boolean> => {
-        // Stage images exactly as a normal submit does: syncAttachmentsForSubmit
-        // uploads via image.attach_bytes, appending to the gateway's per-session
-        // queue that session.redirect then drains. Nothing extra crosses the
-        // wire. A staging failure costs only the pixels — never the correction,
-        // which is the part the user cannot afford to lose mid-turn.
-        if (imageAttachments.length) {
-          try {
-            await syncAttachmentsForSubmit(id, imageAttachments)
-          } catch (err) {
-            console.warn('[redirect] image staging failed; sending text only', err)
-          }
-        }
-
         // Redirect aborts the model request, so the completion event can race
         // its RPC response. Insert before the live reply *before* awaiting the
         // gateway; appending after the response leaves the correction below a

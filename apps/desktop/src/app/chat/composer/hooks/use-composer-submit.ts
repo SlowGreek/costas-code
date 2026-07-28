@@ -203,6 +203,10 @@ export function useComposerSubmit({
 
     triggerHaptic('submit')
     clearDraft()
+    // The correction owns these images now. Leaving their chips in the live
+    // composer makes the settled turn look like it still has a payload and the
+    // same screenshot can be submitted again as the next turn.
+    scope.attachments.clear()
 
     void Promise.resolve(onSteer(text, sent)).then(accepted => {
       if (!accepted && activeQueueSessionKey) {

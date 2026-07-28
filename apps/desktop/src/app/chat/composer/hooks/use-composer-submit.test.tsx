@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ComposerAttachment } from '@/store/composer'
+import { $composerAttachments, type ComposerAttachment } from '@/store/composer'
 
 import { useComposerSubmit } from './use-composer-submit'
 
@@ -67,6 +67,7 @@ function renderSubmitHook({
 describe('useComposerSubmit busy-turn routing', () => {
   afterEach(() => {
     cleanup()
+    $composerAttachments.set([])
     vi.restoreAllMocks()
   })
 
@@ -157,6 +158,24 @@ describe('useComposerSubmit busy-turn routing', () => {
 
     await waitFor(() => expect(onSteer).toHaveBeenCalledWith('look at this', [image]))
     expect(queueCurrentDraft).not.toHaveBeenCalled()
+  })
+
+  it('consumes a steered image so it cannot send again after the turn settles', async () => {
+    const image: ComposerAttachment = { id: 'shot', kind: 'image', label: 'screen.png', path: '/tmp/screen.png' }
+    $composerAttachments.set([image])
+
+    const { hook, onSteer } = renderSubmitHook({
+      attachments: [image],
+      busy: true,
+      text: 'look at this'
+    })
+
+    act(() => {
+      hook.result.current.submitDraft()
+    })
+
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('look at this', [image]))
+    expect($composerAttachments.get()).toEqual([])
   })
 
   it('queues a mixed image + file follow-up rather than steering', () => {

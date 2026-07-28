@@ -2336,6 +2336,60 @@ class AIAgent:
         return f"{detail}{hint}"
 
     @staticmethod
+    def _decorate_copilot_forbidden_error(detail: str) -> str:
+        """Explain a Copilot 403 that is really a failed token exchange.
+
+        ``api.githubcopilot.com`` answers an unusable caller with legal
+        boilerplate::
+
+            Access to this endpoint is forbidden. Please review our Terms of
+            Service
+
+        That text is actively misleading.  The common cause is that Hermes is
+        sending a RAW GitHub token because
+        ``/copilot_internal/v2/token`` refused to exchange it — ``gho_``
+        tokens (what ``gh auth token`` returns) cannot be exchanged, only
+        ``ghu_`` tokens from the device-code flow can.
+
+        Individual Copilot plans survive this: the generic host accepts the
+        raw token, so the fallback in ``hermes_cli.copilot_auth`` looks
+        harmless.  Managed / enterprise accounts do not — they are served off
+        an account-specific endpoint that only the exchange reveals, so the
+        raw token hits the wrong host and gets this 403.  That asymmetry is
+        why the failure looks account-specific and unreproducible.
+
+        Only decorates when the exchange fallback is actually active, so a
+        genuine policy/ToS block is not mislabelled as an auth problem.
+        Matched once per detail string — won't double-decorate.
+        """
+        if not detail:
+            return detail
+        lower = detail.lower()
+        if "endpoint is forbidden" not in lower:
+            return detail
+        # Idempotency: substring unique to the hint, absent from GitHub's body.
+        if "could not be exchanged" in lower:
+            return detail
+        try:
+            from hermes_cli.copilot_auth import copilot_raw_token_fallback_active
+            if not copilot_raw_token_fallback_active():
+                return detail
+        except Exception:
+            return detail
+        hint = (
+            " — NOTE: this is very likely NOT a Terms of Service problem. Your "
+            "GitHub token could not be exchanged for a Copilot API token, so "
+            "Hermes fell back to sending the raw token to the generic Copilot "
+            "host. That works on individual Copilot plans but fails on "
+            "managed/enterprise accounts, which need the account-specific "
+            "endpoint the exchange provides. Fix: re-authenticate with the "
+            "device-code flow (`hermes model` → Copilot → device code) to get "
+            "a ghu_ token; `gh auth login` issues gho_ tokens, which GitHub "
+            "will not exchange."
+        )
+        return f"{detail}{hint}"
+
+    @staticmethod
     def _coerce_api_error_detail(value: Any) -> str:
         """Return a display-safe string for structured provider error fields."""
         if isinstance(value, str):
@@ -2404,7 +2458,9 @@ class AIAgent:
                 status_code = getattr(error, "status_code", None)
                 prefix = f"HTTP {status_code}: " if status_code else ""
                 msg = AIAgent._coerce_api_error_detail(msg)
-                return AIAgent._decorate_xai_entitlement_error(f"{prefix}{msg[:300]}")
+                return AIAgent._decorate_copilot_forbidden_error(
+                    AIAgent._decorate_xai_entitlement_error(f"{prefix}{msg[:300]}")
+                )
 
         # SDK may leave body empty while httpx still has the payload (#36109).
         # Redact before returning: the raw provider/proxy error body is
@@ -2427,15 +2483,23 @@ class AIAgent:
                 if isinstance(payload, dict):
                     err = payload.get("error")
                     if isinstance(err, dict) and err.get("message"):
-                        return redact_sensitive_text(f"{prefix}{str(err['message'])[:300]}")
+                        return AIAgent._decorate_copilot_forbidden_error(
+                            redact_sensitive_text(f"{prefix}{str(err['message'])[:300]}")
+                        )
                     if payload.get("message"):
-                        return redact_sensitive_text(f"{prefix}{str(payload['message'])[:300]}")
-                return redact_sensitive_text(f"{prefix}{snippet[:300]}")
+                        return AIAgent._decorate_copilot_forbidden_error(
+                            redact_sensitive_text(f"{prefix}{str(payload['message'])[:300]}")
+                        )
+                return AIAgent._decorate_copilot_forbidden_error(
+                    redact_sensitive_text(f"{prefix}{snippet[:300]}")
+                )
 
         # Fallback: truncate the raw string but give more room than 200 chars
         status_code = getattr(error, "status_code", None)
         prefix = f"HTTP {status_code}: " if status_code else ""
-        return AIAgent._decorate_xai_entitlement_error(f"{prefix}{raw[:500]}")
+        return AIAgent._decorate_copilot_forbidden_error(
+            AIAgent._decorate_xai_entitlement_error(f"{prefix}{raw[:500]}")
+        )
 
     def _mask_api_key_for_logs(self, key: Any) -> Optional[str]:
         # Azure Foundry Entra ID bearer providers are callables — never

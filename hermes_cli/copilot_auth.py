@@ -162,6 +162,101 @@ def _try_gh_cli_token() -> Optional[str]:
 
 # ─── OAuth Device Code Flow ────────────────────────────────────────────────
 
+def copilot_request_device_code(*, host: str = "github.com") -> dict:
+    """Request a device code from GitHub. Headless — no printing, no polling.
+
+    Returns the raw GitHub response dict with at least ``device_code``,
+    ``user_code``, ``verification_uri`` and ``interval``. Raises ValueError
+    when GitHub refuses or returns an unusable payload.
+
+    Split out of :func:`copilot_device_code_login` so non-terminal surfaces
+    (the desktop Accounts tab, the dashboard) can drive the same flow without
+    inheriting the CLI's blocking loop and stdout prompts.
+    """
+    import urllib.request
+    import urllib.parse
+
+    domain = host.rstrip("/")
+    data = urllib.parse.urlencode({
+        "client_id": COPILOT_OAUTH_CLIENT_ID,
+        "scope": "read:user",
+    }).encode()
+    req = urllib.request.Request(
+        f"https://{domain}/login/device/code",
+        data=data,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "HermesAgent/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            device_data = json.loads(resp.read().decode())
+    except Exception as exc:
+        # Never interpolate the exception into user-facing text: GitHub's
+        # error bodies can echo request material.
+        logger.error("Failed to initiate device authorization: %s", exc)
+        raise ValueError("Failed to start device authorization") from exc
+
+    if not device_data.get("device_code") or not device_data.get("user_code"):
+        raise ValueError("GitHub did not return a device code")
+
+    device_data.setdefault("verification_uri", f"https://{domain}/login/device")
+    device_data["interval"] = max(
+        int(device_data.get("interval") or _DEVICE_CODE_POLL_INTERVAL), 1
+    )
+    return device_data
+
+
+def copilot_poll_device_code(
+    device_code: str,
+    *,
+    host: str = "github.com",
+) -> tuple[Optional[str], Optional[str]]:
+    """Poll GitHub once for a device-code authorization result.
+
+    Returns ``(access_token, error)``:
+      * ``(token, None)``  — authorized
+      * ``(None, None)``   — still pending / transient failure; poll again
+      * ``(None, error)``  — terminal error code from GitHub
+
+    ``slow_down`` is returned as an error so the caller can widen its own
+    interval; ``authorization_pending`` is reported as still-pending.
+    """
+    import urllib.request
+    import urllib.parse
+
+    domain = host.rstrip("/")
+    poll_data = urllib.parse.urlencode({
+        "client_id": COPILOT_OAUTH_CLIENT_ID,
+        "device_code": device_code,
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+    }).encode()
+    poll_req = urllib.request.Request(
+        f"https://{domain}/login/oauth/access_token",
+        data=poll_data,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "HermesAgent/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(poll_req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+    except Exception:
+        # Transient — the caller keeps polling until its own deadline.
+        return None, None
+
+    if result.get("access_token"):
+        return result["access_token"], None
+    error = result.get("error", "")
+    if error == "authorization_pending":
+        return None, None
+    return None, (error or None)
+
+
 def copilot_device_code_login(
     *,
     host: str = "github.com",
@@ -172,113 +267,51 @@ def copilot_device_code_login(
     Prints instructions for the user, polls for completion, and returns
     the OAuth access token on success, or None on failure/cancellation.
 
-    This replicates the flow used by opencode and the Copilot CLI.
+    This is the terminal-facing wrapper around
+    :func:`copilot_request_device_code` + :func:`copilot_poll_device_code`;
+    GUI surfaces drive those primitives directly.
     """
-    import urllib.request
-    import urllib.parse
-
-    domain = host.rstrip("/")
-    device_code_url = f"https://{domain}/login/device/code"
-    access_token_url = f"https://{domain}/login/oauth/access_token"
-
-    # Step 1: Request device code
-    data = urllib.parse.urlencode({
-        "client_id": COPILOT_OAUTH_CLIENT_ID,
-        "scope": "read:user",
-    }).encode()
-
-    req = urllib.request.Request(
-        device_code_url,
-        data=data,
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "HermesAgent/1.0",
-        },
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            device_data = json.loads(resp.read().decode())
-    except Exception as exc:
-        logger.error("Failed to initiate device authorization: %s", exc)
-        print(f"  ✗ Failed to start device authorization: {exc}")
+        device_data = copilot_request_device_code(host=host)
+    except ValueError as exc:
+        print(f"  ✗ {exc}")
         return None
 
-    verification_uri = device_data.get("verification_uri", "https://github.com/login/device")
-    user_code = device_data.get("user_code", "")
-    device_code = device_data.get("device_code", "")
-    interval = max(device_data.get("interval", _DEVICE_CODE_POLL_INTERVAL), 1)
+    verification_uri = device_data["verification_uri"]
+    user_code = device_data["user_code"]
+    device_code = device_data["device_code"]
+    interval = device_data["interval"]
 
-    if not device_code or not user_code:
-        print("  ✗ GitHub did not return a device code.")
-        return None
-
-    # Step 2: Show instructions
     print()
     print(f"  Open this URL in your browser: {verification_uri}")
     print(f"  Enter this code: {user_code}")
     print()
     print("  Waiting for authorization...", end="", flush=True)
 
-    # Step 3: Poll for completion
     deadline = time.monotonic() + timeout_seconds
-
     while time.monotonic() < deadline:
         time.sleep(interval + _DEVICE_CODE_POLL_SAFETY_MARGIN)
 
-        poll_data = urllib.parse.urlencode({
-            "client_id": COPILOT_OAUTH_CLIENT_ID,
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        }).encode()
-
-        poll_req = urllib.request.Request(
-            access_token_url,
-            data=poll_data,
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "HermesAgent/1.0",
-            },
-        )
-
-        try:
-            with urllib.request.urlopen(poll_req, timeout=10) as resp:
-                result = json.loads(resp.read().decode())
-        except Exception:
-            print(".", end="", flush=True)
-            continue
-
-        if result.get("access_token"):
+        token, error = copilot_poll_device_code(device_code, host=host)
+        if token:
             print(" ✓")
-            return result["access_token"]
-
-        error = result.get("error", "")
-        if error == "authorization_pending":
+            return token
+        if error is None:
             print(".", end="", flush=True)
             continue
-        elif error == "slow_down":
-            # RFC 8628: add 5 seconds to polling interval
-            server_interval = result.get("interval")
-            if isinstance(server_interval, (int, float)) and server_interval > 0:
-                interval = int(server_interval)
-            else:
-                interval += 5
+        if error == "slow_down":
+            # RFC 8628: back off before the next attempt.
+            interval += 5
             print(".", end="", flush=True)
             continue
-        elif error == "expired_token":
-            print()
+        print()
+        if error == "expired_token":
             print("  ✗ Device code expired. Please try again.")
-            return None
         elif error == "access_denied":
-            print()
             print("  ✗ Authorization was denied.")
-            return None
-        elif error:
-            print()
+        else:
             print(f"  ✗ Authorization failed: {error}")
-            return None
+        return None
 
     print()
     print("  ✗ Timed out waiting for authorization.")
@@ -412,6 +445,28 @@ def _derive_base_url_from_proxy_ep(token: str) -> Optional[str]:
     return f"https://{api_host}"
 
 
+# Fingerprints of raw GitHub tokens whose Copilot exchange failed, so we are
+# sending the RAW token to the generic ``api.githubcopilot.com`` host instead
+# of the account-specific endpoint the exchange would have told us about.
+#
+# This is survivable on individual Copilot plans (the generic host accepts the
+# raw token), which is why the fallback in ``get_copilot_api_token`` exists at
+# all.  On a managed/enterprise account it is fatal: the generic host answers
+# with a Terms-of-Service 403 that says nothing about the real cause.  Record
+# the state here so the error path can explain what actually happened instead
+# of surfacing GitHub's legal boilerplate.
+_exchange_fallback_fingerprints: set[str] = set()
+
+
+def copilot_raw_token_fallback_active() -> bool:
+    """True when at least one Copilot token is in use un-exchanged.
+
+    Set by :func:`get_copilot_api_token` when the exchange fails and we fall
+    back to the raw GitHub token; cleared for that token on a later success.
+    """
+    return bool(_exchange_fallback_fingerprints)
+
+
 def get_copilot_api_token(raw_token: str) -> tuple[str, Optional[str]]:
     """Exchange a raw GitHub token for a Copilot API token, with fallback.
 
@@ -426,11 +481,14 @@ def get_copilot_api_token(raw_token: str) -> tuple[str, Optional[str]]:
     """
     if not raw_token:
         return raw_token, None
+    fp = _token_fingerprint(raw_token)
     try:
         api_token, _, base_url = exchange_copilot_token(raw_token)
+        _exchange_fallback_fingerprints.discard(fp)
         return api_token, base_url
     except Exception as exc:
         logger.debug("Copilot token exchange failed, using raw token: %s", exc)
+        _exchange_fallback_fingerprints.add(fp)
         return raw_token, None
 
 

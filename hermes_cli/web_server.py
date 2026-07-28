@@ -9875,10 +9875,11 @@ _OAUTH_PROVIDER_CATALOG: tuple[Dict[str, Any], ...] = (
     {
         "id": "copilot",
         "name": "GitHub Copilot",
-        "flow": "external",
-        # Device code, NOT `gh auth login`. A gh token is scoped to the GitHub
-        # API and the Copilot endpoint rejects it — the two logins are not
-        # interchangeable, which is the single most common setup failure.
+        # Hermes drives GitHub's device-code flow itself, so this signs in
+        # from the GUI. Deliberately NOT `gh auth login`: a gh token is
+        # gho_/ghp_, scoped to the GitHub API, and GitHub refuses to exchange
+        # it for a Copilot API token — the single most common setup failure.
+        "flow": "device_code",
         "cli_command": "hermes model",
         "docs_url": "https://docs.github.com/en/copilot",
         "status_fn": _copilot_status,
@@ -10692,7 +10693,91 @@ async def _start_device_code_flow(
             "poll_interval": int(device_data["interval"]),
         }
 
+    if provider_id == "copilot":
+        # GitHub's device-code flow, run headlessly so the GUI can render the
+        # code + verification URL itself. Deliberately NOT `gh auth login`:
+        # that yields gho_ tokens, which GitHub refuses to exchange for a
+        # Copilot API token.
+        from hermes_cli.copilot_auth import copilot_request_device_code
+
+        device_data = await asyncio.get_running_loop().run_in_executor(
+            None, copilot_request_device_code
+        )
+        sid, sess = _new_oauth_session("copilot", "device_code", profile=profile)
+        expires_in = int(device_data.get("expires_in") or 900)
+        sess["device_code"] = str(device_data["device_code"])
+        sess["interval"] = int(device_data["interval"])
+        sess["expires_at"] = time.time() + expires_in
+        threading.Thread(
+            target=_copilot_poller, args=(sid,), daemon=True,
+            name=f"oauth-copilot-{sid[:6]}",
+        ).start()
+        return {
+            "session_id": sid,
+            "flow": "device_code",
+            "user_code": str(device_data["user_code"]),
+            "verification_url": str(device_data["verification_uri"]),
+            "expires_in": expires_in,
+            "poll_interval": int(device_data["interval"]),
+        }
+
     raise HTTPException(status_code=400, detail=f"Provider {provider_id} does not support device-code flow")
+
+
+def _copilot_poller(session_id: str) -> None:
+    """Background poller that drives a Copilot device-code flow to completion.
+
+    On success the ``ghu_`` token is saved as ``COPILOT_GITHUB_TOKEN``, which
+    takes priority over ``gh auth token`` in ``resolve_copilot_token()``. That
+    ordering is the point of this flow: a ``gh``-sourced ``gho_`` token cannot
+    be exchanged for a Copilot API token, so it 403s on managed/enterprise
+    accounts.
+    """
+    from hermes_cli.copilot_auth import copilot_poll_device_code
+
+    with _oauth_sessions_lock:
+        sess = _oauth_sessions.get(session_id)
+    if not sess:
+        return
+    device_code = sess["device_code"]
+    interval = sess["interval"]
+    deadline = time.monotonic() + max(60, int(sess["expires_at"] - time.time()))
+
+    try:
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            token, error = copilot_poll_device_code(device_code)
+            if token:
+                from hermes_cli.config import save_env_value
+
+                with _profile_scope(_oauth_session_profile(session_id)):
+                    save_env_value("COPILOT_GITHUB_TOKEN", token)
+                    # Make the new token visible to this running process too,
+                    # so the Accounts status probe stops reporting the stale
+                    # gh-sourced token without requiring a restart.
+                    os.environ["COPILOT_GITHUB_TOKEN"] = token
+                with _oauth_sessions_lock:
+                    sess["status"] = "approved"
+                _log.info("oauth/device: copilot login completed (session=%s)", session_id)
+                return
+            if error is None:
+                continue
+            if error == "slow_down":
+                interval += 5
+                continue
+            with _oauth_sessions_lock:
+                sess["status"] = "denied" if error == "access_denied" else "error"
+                sess["error_message"] = error
+            return
+
+        with _oauth_sessions_lock:
+            sess["status"] = "expired"
+            sess["error_message"] = "Device code expired before approval"
+    except Exception as e:
+        _log.warning("copilot device-code poll failed (session=%s): %s", session_id, e)
+        with _oauth_sessions_lock:
+            sess["status"] = "error"
+            sess["error_message"] = str(e)
 
 
 def _nous_poller(session_id: str) -> None:

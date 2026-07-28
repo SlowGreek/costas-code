@@ -39,8 +39,8 @@ import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { shouldLatchBackendStartFailure } from './backend-start-failure'
 import { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } from './bootstrap-platform'
 import { runBootstrap } from './bootstrap-runner'
-import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
 import { downscaleComposerImage } from './composer-image-downscale'
+import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
 import {
   authModeFromStatus,
   buildGatewayWsUrl,

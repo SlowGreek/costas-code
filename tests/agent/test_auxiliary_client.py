@@ -4233,6 +4233,35 @@ class TestAuxiliaryAuthRefreshRetry:
         assert stale_client.chat.completions.create.call_count == 1
         assert fresh_client.chat.completions.create.call_count == 1
 
+    def test_call_llm_refreshes_copilot_when_auto_routes_to_enterprise_copilot_on_401(self):
+        """Managed-account goal judges must not loop forever on an expired token."""
+        stale_client = MagicMock()
+        stale_client.base_url = "https://api.enterprise.githubcopilot.com"
+        stale_client.chat.completions.create.side_effect = _AuxAuth401(
+            "IDE token expired: unauthorized: token expired"
+        )
+
+        fresh_client = MagicMock()
+        fresh_client.base_url = "https://api.enterprise.githubcopilot.com"
+        fresh_client.chat.completions.create.return_value = _DummyResponse(
+            "fresh-enterprise-copilot"
+        )
+
+        with (
+            patch("agent.auxiliary_client._resolve_task_provider_model", return_value=("auto", None, None, None, None)),
+            patch("agent.auxiliary_client._get_cached_client", side_effect=[(stale_client, "gpt-5.6-sol"), (fresh_client, "gpt-5.6-sol")]),
+            patch("agent.auxiliary_client._refresh_provider_credentials", return_value=True) as mock_refresh,
+            patch("agent.auxiliary_client._evict_cached_clients"),
+        ):
+            resp = call_llm(
+                task="goal_judge",
+                messages=[{"role": "user", "content": "is it done?"}],
+                main_runtime={"provider": "copilot", "model": "gpt-5.6-sol"},
+            )
+
+        assert resp.choices[0].message.content == "fresh-enterprise-copilot"
+        mock_refresh.assert_called_once_with("copilot")
+
     def test_call_llm_refreshes_codex_when_auto_routes_to_codex_on_401(self):
         # Preflight compression's exact failure (#23670): provider auto →
         # Codex OAuth backend 401s → before the fix, no refresh was attempted

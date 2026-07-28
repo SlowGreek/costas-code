@@ -3868,7 +3868,11 @@ def _auth_refresh_provider_for_route(
     normalized = _normalize_aux_provider(resolved_provider)
     if normalized and normalized != "auto":
         return normalized
-    if base_url_host_matches(client_base_url, "api.githubcopilot.com"):
+    # Managed Copilot accounts use tenant-specific hosts such as
+    # ``api.enterprise.githubcopilot.com``. Match the parent domain, not only
+    # the public default host, or auto-routed goal judges skip token refresh and
+    # fail-open into an endless continuation loop after the IDE token expires.
+    if base_url_host_matches(client_base_url, "githubcopilot.com"):
         return "copilot"
     if base_url_host_matches(client_base_url, "chatgpt.com"):
         return "openai-codex"

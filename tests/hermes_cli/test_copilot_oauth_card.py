@@ -73,9 +73,16 @@ class TestCopilotStatus:
 
     def test_a_gh_sourced_token_is_flagged_not_celebrated(self):
         """The failure mode worth preventing: a green 'connected' badge on a
-        token that 403s on the first model call."""
+        token that 403s on the first model call.
+
+        Strengthened after the trash-can bug: a gh token must not merely be
+        *labelled* as doubtful, it must not count as logged_in at all. When it
+        did, disconnecting the real device-code token fell through to the gh
+        token and the sign-in button never came back.
+        """
         status = self._status(("gho_abcd1234efgh", "gh auth token"))
-        assert "may not work" in status["source_label"].lower()
+        assert status["logged_in"] is False
+        assert "gh" in status["source_label"].lower()
 
     def test_the_token_is_never_shown_in_full(self):
         status = self._status(("ghu_abcdefghijklmnop", "COPILOT_GITHUB_TOKEN"))

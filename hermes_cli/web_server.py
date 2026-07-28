@@ -9778,15 +9778,29 @@ def _copilot_status() -> Dict[str, Any]:
             "has_refresh_token": False,
         }
 
-    # A gh-sourced token usually works for the repo but NOT for Copilot; say so
-    # rather than reporting a green "connected" that fails on the first call.
+    # A gh-sourced token is NOT a Copilot login. It resolves (so the repo works)
+    # but cannot be exchanged for a Copilot API token, which is what produces
+    # the "403 Access to this endpoint is forbidden" ToS wall on enterprise
+    # accounts. Reporting it as logged_in strands the user twice over: the card
+    # shows "connected" while every model call fails, AND disconnecting the real
+    # device-code token falls through to this gh token, so the sign-in button
+    # never comes back. Surface it as not-connected-but-detected instead: the
+    # card keeps offering sign-in, and the label explains what was found.
     from_gh = source == "gh auth token"
-    label = "Signed in (device code)" if not from_gh else "Using `gh` token — may not work for Copilot"
+    if from_gh:
+        return {
+            "logged_in": False,
+            "source": source,
+            "source_label": "Using `gh` token — sign in for Copilot",
+            "token_preview": f"{token[:4]}…{token[-4:]}" if len(token) > 8 else None,
+            "expires_at": None,
+            "has_refresh_token": False,
+        }
 
     return {
         "logged_in": True,
         "source": source,
-        "source_label": label,
+        "source_label": "Signed in (device code)",
         "token_preview": f"{token[:4]}…{token[-4:]}" if len(token) > 8 else None,
         "expires_at": None,
         "has_refresh_token": False,
@@ -10172,6 +10186,31 @@ async def disconnect_oauth_provider(
                 status_code=400,
                 detail=f"{provider['name']} cannot be disconnected automatically. {disconnect_hint}",
             )
+
+        # Copilot's device-code token lives in COPILOT_GITHUB_TOKEN (.env), not
+        # the auth store — that's what resolve_copilot_token() reads first and
+        # what the GUI flow writes. clear_provider_auth() alone would report
+        # success while the token kept resolving, leaving a card that says
+        # "connected" with no way to sign in again.
+        if provider_id == "copilot":
+            cleared = False
+            try:
+                from hermes_cli.config import remove_env_value
+
+                cleared = bool(remove_env_value("COPILOT_GITHUB_TOKEN"))
+            except Exception:
+                _log.exception("oauth/disconnect: clearing COPILOT_GITHUB_TOKEN failed")
+            # Drop it from this process too, or the status probe keeps reading
+            # the stale value until the backend restarts.
+            os.environ.pop("COPILOT_GITHUB_TOKEN", None)
+            try:
+                from hermes_cli.auth import clear_provider_auth
+
+                cleared = clear_provider_auth("copilot") or cleared
+            except Exception:
+                pass
+            _log.info("oauth/disconnect: %s", provider_id)
+            return {"ok": cleared, "provider": provider_id}
 
         # Anthropic clears only the Hermes-managed PKCE file and auth-store entry.
         # The separate claude-code catalog row is external/read-only and rejected

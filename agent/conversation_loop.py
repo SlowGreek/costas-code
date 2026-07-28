@@ -1052,6 +1052,33 @@ def run_conversation(
                 agent.session_id or "-",
             )
 
+        # ── Preflight request-payload byte gate ───────────────────────
+        # Every threshold above this point is measured in TOKENS, and
+        # providers bill a flat per-image estimate regardless of an image's
+        # actual size.  A turn carrying several full-resolution pasted
+        # screenshots therefore scores a nearly-empty context meter while
+        # the assembled body is multi-megabyte — and the provider answers
+        # HTTP 413, which no token threshold could have anticipated.  Shed
+        # older user-attached images up front so the oversized request is
+        # never sent.  The newest image-bearing turn (what the user is
+        # actually asking about) is always preserved; the reactive 413
+        # handler sheds that one too only after the provider rejects us.
+        _payload_limit = getattr(agent, "max_request_payload_bytes", 0) or 0
+        if _payload_limit > 0:
+            from agent.context_compressor import estimate_messages_payload_bytes
+
+            _payload_bytes = estimate_messages_payload_bytes(messages)
+            if _payload_bytes > _payload_limit and agent._try_strip_user_image_parts(
+                messages, keep_newest=True
+            ):
+                logger.info(
+                    "preflight payload gate: %s bytes exceeded limit %s — "
+                    "shed older user image payloads (session=%s)",
+                    _payload_bytes,
+                    _payload_limit,
+                    agent.session_id or "-",
+                )
+
         api_messages = []
         for idx, msg in enumerate(messages):
             api_msg = msg.copy()
@@ -4019,6 +4046,32 @@ def run_conversation(
                                 "removed retained vision payloads and retrying..."
                             )
                             continue
+
+                        # User-pasted images are the remaining bulk.  The
+                        # compressor's _strip_historical_media deliberately
+                        # preserves the newest image-bearing user message (it
+                        # is the anchor the user is asking about) and the tool
+                        # stripper above only walks role="tool", so a turn with
+                        # several full-resolution screenshots is otherwise
+                        # structurally incompressible and the thread bricks on
+                        # every subsequent send.  Shed older user images first,
+                        # then the anchor itself, before declaring defeat.
+                        #
+                        # Strip `messages` (the persisted history), not just the
+                        # per-call `api_messages` copy — otherwise the payload
+                        # is rebuilt at full size on the very next turn.
+                        for _keep_newest in (True, False):
+                            if agent._try_strip_user_image_parts(
+                                messages, keep_newest=_keep_newest
+                            ):
+                                agent._buffer_status(
+                                    "📐 Compression could not reduce the request further — "
+                                    "removed attached images and retrying..."
+                                )
+                                _retry.restart_with_compressed_messages = True
+                                break
+                        if _retry.restart_with_compressed_messages:
+                            break
 
                         # Terminal — surface buffered context so the user
                         # sees what compression attempts were made.

@@ -675,6 +675,73 @@ def _content_length_for_budget(raw_content: Any) -> int:
     return total
 
 
+def estimate_content_payload_bytes(raw_content: Any) -> int:
+    """Estimate the serialized wire size, in bytes, of a message's content.
+
+    Distinct from :func:`_content_length_for_budget`, which measures what a
+    provider *bills* (a flat per-image token estimate — a 20 KB thumbnail and
+    a 1.2 MB screenshot cost the same context tokens).  Providers also cap the
+    *byte* size of the request body, and that is the limit a batch of pasted
+    full-resolution screenshots actually trips (``HTTP 413 Request Entity Too
+    Large``).  Because the two ceilings use different currencies, the token
+    meter can honestly read 12% while the wire payload is already oversized.
+
+    Data-URL / base64 image payloads are charged their real length.  Remote
+    ``http(s)://`` images are charged only the length of the reference, since
+    the bytes never ride the wire.
+    """
+    if raw_content is None:
+        return 0
+    if isinstance(raw_content, str):
+        return len(raw_content)
+    if not isinstance(raw_content, list):
+        return len(str(raw_content))
+
+    total = 0
+    for part in raw_content:
+        if isinstance(part, str):
+            total += len(part)
+            continue
+        if not isinstance(part, dict):
+            total += len(str(part))
+            continue
+
+        ptype = part.get("type")
+        if ptype in {"image_url", "input_image"}:
+            url = part.get("image_url")
+            if isinstance(url, dict):
+                url = url.get("url")
+            total += len(url) if isinstance(url, str) else 0
+            continue
+        if ptype == "image":
+            source = part.get("source")
+            if isinstance(source, dict):
+                data = source.get("data")
+                total += len(data) if isinstance(data, str) else 0
+                url = source.get("url")
+                total += len(url) if isinstance(url, str) else 0
+            continue
+
+        text = part.get("text")
+        total += len(text) if isinstance(text, str) else 0
+
+    return total
+
+
+def estimate_messages_payload_bytes(messages: Any) -> int:
+    """Sum :func:`estimate_content_payload_bytes` across a message list."""
+    if not isinstance(messages, list):
+        return 0
+
+    total = 0
+    for msg in messages:
+        if not isinstance(msg, dict):
+            total += len(str(msg))
+            continue
+        total += estimate_content_payload_bytes(msg.get("content"))
+    return total
+
+
 def _serialized_length_for_budget(value: Any) -> int:
     """Return a stable char-length for non-content replay/metadata fields."""
     if value is None or value == "":

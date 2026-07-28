@@ -1849,6 +1849,20 @@ def init_agent(
         except (TypeError, ValueError):
             return default
 
+    # Byte ceiling for an assembled request body.  Distinct currency from
+    # every token threshold: providers bill a flat per-image token estimate
+    # regardless of payload size, so a handful of full-resolution pasted
+    # screenshots reads as a nearly-empty context meter while the wire body
+    # is multi-megabyte and the provider answers HTTP 413.  Negative values
+    # are treated as disabled (0).
+    compression_max_request_payload_bytes = max(
+        0,
+        _parse_prune_int(
+            _compression_cfg.get("max_request_payload_bytes", 8_000_000),
+            8_000_000,
+        ),
+    )
+
     # Opt-in proactive tool-result prune trigger (0 = disabled — the
     # default, so an unset key is behavior-neutral).  Negative values are
     # treated as disabled rather than erroring.
@@ -2353,6 +2367,7 @@ def init_agent(
     agent.compression_in_place = compression_in_place
     agent.codex_app_server_auto_compaction = codex_app_server_auto_compaction
     agent.max_compression_attempts = compression_max_attempts
+    agent.max_request_payload_bytes = compression_max_request_payload_bytes
     agent.compression_idle_compact_after_seconds = (
         compression_idle_compact_after_seconds
     )

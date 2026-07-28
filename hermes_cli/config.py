@@ -1420,6 +1420,15 @@ DEFAULT_CONFIG = {
                                       # (e.g. 6) for tool-schema-heavy sessions where 3
                                       # rounds cannot clear the request estimate.
                                       # Validated >= 1, hard-capped at 10.
+        "max_request_payload_bytes": 8_000_000,  # byte ceiling for an assembled request
+                                      # body. Distinct from every token threshold above:
+                                      # providers bill a flat ~1600 tokens per image
+                                      # regardless of size, so four 1.2MB pasted
+                                      # screenshots read as ~6K tokens (a nearly-empty
+                                      # context meter) while the wire payload is ~6.5MB
+                                      # and the provider answers HTTP 413. When the
+                                      # assembled body exceeds this, older user-attached
+                                      # images are shed proactively. 0 = disable the gate.
         "proactive_prune_tokens": 0,  # opt-in trigger (tokens) for the deterministic,
                                       # no-LLM tool-result prune, run independently of
                                       # `threshold` above. On large-window models

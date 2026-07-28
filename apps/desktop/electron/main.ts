@@ -40,6 +40,7 @@ import { shouldLatchBackendStartFailure } from './backend-start-failure'
 import { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } from './bootstrap-platform'
 import { runBootstrap } from './bootstrap-runner'
 import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
+import { downscaleComposerImage } from './composer-image-downscale'
 import {
   authModeFromStatus,
   buildGatewayWsUrl,
@@ -9606,6 +9607,11 @@ ipcMain.handle('hermes:saveImageBuffer', async (_event, payload) => {
   }
 
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
+  const shrunk = downscaleComposerImage(nativeImage.createFromBuffer(buffer))
+
+  if (shrunk.resized && shrunk.buffer.length) {
+    return writeComposerImage(shrunk.buffer, shrunk.ext)
+  }
 
   return writeComposerImage(buffer, payload?.ext || '.png')
 })
@@ -9614,7 +9620,9 @@ ipcMain.handle('hermes:saveClipboardImage', async () => {
   const image = clipboard.readImage()
 
   if (image && !image.isEmpty()) {
-    return writeComposerImage(image.toPNG(), '.png')
+    const shrunk = downscaleComposerImage(image)
+
+    return writeComposerImage(shrunk.buffer, shrunk.ext)
   }
 
   // WSL2/WSLg doesn't bridge clipboard *images* from the Windows host to the
@@ -9624,7 +9632,11 @@ ipcMain.handle('hermes:saveClipboardImage', async () => {
     const png = readWslWindowsClipboardImage()
 
     if (png) {
-      return writeComposerImage(png, '.png')
+      const shrunk = downscaleComposerImage(nativeImage.createFromBuffer(png))
+
+      return shrunk.buffer.length
+        ? writeComposerImage(shrunk.buffer, shrunk.ext)
+        : writeComposerImage(png, '.png')
     }
   }
 

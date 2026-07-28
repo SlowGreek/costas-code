@@ -6116,6 +6116,76 @@ class AIAgent:
 
         return changed
 
+    def _try_strip_user_image_parts(
+        self,
+        api_messages: list,
+        *,
+        keep_newest: bool = True,
+    ) -> bool:
+        """Replace image parts in ``role: "user"`` messages with placeholders.
+
+        Last-ditch 413 payload recovery.  The compressor's
+        ``_strip_historical_media`` deliberately preserves the newest
+        image-bearing user message (it is the anchor the user is currently
+        talking about), and ``_try_strip_image_parts_from_tool_messages``
+        only walks ``role: "tool"`` messages.  That leaves a turn where the
+        user pasted several full-resolution screenshots structurally
+        incompressible: every retry re-sends the same multi-megabyte body
+        and the turn dies on "Cannot compress further."
+
+        With ``keep_newest=True`` (default) the newest image-bearing user
+        message is preserved and every older one is shed — enough to
+        recover most threads while keeping the image the user just asked
+        about.  ``keep_newest=False`` sheds everything, for the final
+        attempt before surfacing a terminal error.
+
+        Mutates ``api_messages`` in place.  Returns True when at least one
+        image part was replaced, so the caller can decide whether retrying
+        is worthwhile.
+        """
+        if not isinstance(api_messages, list):
+            return False
+
+        image_types = {"image_url", "input_image", "image"}
+
+        def _has_image(msg) -> bool:
+            if not isinstance(msg, dict) or msg.get("role") != "user":
+                return False
+            content = msg.get("content")
+            if not isinstance(content, list):
+                return False
+            return any(
+                isinstance(p, dict) and p.get("type") in image_types
+                for p in content
+            )
+
+        image_indices = [i for i, m in enumerate(api_messages) if _has_image(m)]
+        if not image_indices:
+            return False
+
+        anchor = image_indices[-1] if keep_newest else None
+
+        changed = False
+        for idx in image_indices:
+            if idx == anchor:
+                continue
+            msg = api_messages[idx]
+            new_content = []
+            for part in msg.get("content"):
+                if isinstance(part, dict) and part.get("type") in image_types:
+                    new_content.append({
+                        "type": "text",
+                        "text": "[Attached image — removed to fit the request size limit]",
+                    })
+                    changed = True
+                else:
+                    new_content.append(part)
+            msg["content"] = new_content
+            # Content rewritten → any cached exact-bytes sidecar is stale.
+            msg.pop("api_content", None)
+
+        return changed
+
     def _anthropic_preserve_dots(self) -> bool:
         """True when using an anthropic-compatible endpoint that preserves dots in model names.
         Alibaba/DashScope keeps dots (e.g. qwen3.5-plus).

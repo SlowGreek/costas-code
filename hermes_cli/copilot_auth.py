@@ -21,9 +21,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +47,26 @@ _SUPPORTED_PREFIXES = ("gho_", "github_pat_", "ghu_")
 
 # Env var search order (matches Copilot CLI)
 COPILOT_ENV_VARS = ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+
+# Provider identifiers that all denote the GitHub Copilot provider.
+#
+# Mirrors the ``-> "copilot"`` entries in the provider alias table in
+# ``hermes_cli.auth``. Call sites that key Copilot-specific behaviour off a
+# bare ``provider == "copilot"`` check silently skip every alias; the
+# ``github-copilot`` alias in particular used to miss enterprise endpoint
+# resolution entirely and fall back to the generic host.
+#
+# ``copilot-acp`` is deliberately excluded: it is a separate provider with its
+# own transport, not an alias of this one.
+COPILOT_PROVIDER_ALIASES = frozenset(
+    {"copilot", "github-copilot", "github", "github-models", "github-model"}
+)
+
+
+def is_copilot_provider(provider: object) -> bool:
+    """True when ``provider`` names the GitHub Copilot provider or an alias."""
+    return str(provider or "").strip().lower() in COPILOT_PROVIDER_ALIASES
+
 
 # Polling constants
 _DEVICE_CODE_POLL_INTERVAL = 5  # seconds
@@ -72,6 +94,95 @@ def validate_copilot_token(token: str) -> tuple[bool, str]:
     return True, "OK"
 
 
+def _gh_active_login() -> Optional[str]:
+    """Return the login of the active ``gh`` account, or None.
+
+    Best-effort and cheap: parses ``gh auth status``. Never raises.
+    """
+    _popen_kwargs = {"creationflags": windows_hide_flags()} if IS_WINDOWS else {}
+    clean_env = {
+        k: v for k, v in os.environ.items()
+        if k not in {"GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"}
+    }
+    for gh_path in _gh_cli_candidates():
+        try:
+            result = subprocess.run(
+                [gh_path, "auth", "status"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=clean_env,
+                **_popen_kwargs,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            logger.debug("gh auth status failed (%s): %s", gh_path, exc)
+            continue
+        # `gh auth status` reports every account and marks the active one:
+        #   ✓ Logged in to github.com account NAME (keyring)
+        #   - Active account: true
+        blob = f"{result.stdout}\n{result.stderr}"
+        current: Optional[str] = None
+        for line in blob.splitlines():
+            match = re.search(r"Logged in to \S+ account (\S+)", line)
+            if match:
+                current = match.group(1)
+                continue
+            if current and "Active account: true" in line:
+                return current
+    return None
+
+
+# Emit the env-shadowing warning at most once per process: token resolution runs
+# on a hot path and a repeated warning is exactly the log storm this module
+# already guards against elsewhere.
+_shadow_warning_emitted = False
+
+
+def env_token_shadows_gh_account(env_var: str, token: str) -> Optional[str]:
+    """Return the shadowed ``gh`` login when an env token overrides it.
+
+    Env-var tokens deliberately outrank the GitHub CLI (this matches the
+    official runtime, whose ``AuthMethod`` order puts ``GitHubToken`` above
+    ``GhCli``), and scripted/CI setups depend on that. The hazard is that it
+    is *silent*: with ``COPILOT_GITHUB_TOKEN`` exported, ``gh auth switch``
+    appears to change accounts but changes nothing, so an account switch that
+    looks successful still authenticates as the old user.
+
+    Returns the active ``gh`` login being shadowed, or None when there is no
+    conflict (no gh, not logged in, or gh is serving the same token).
+    """
+    if not token:
+        return None
+    gh_token = _try_gh_cli_token()
+    if not gh_token or gh_token == token:
+        # gh is absent, logged out, or already handing back this same token —
+        # nothing is being overridden.
+        return None
+    return _gh_active_login()
+
+
+def _warn_once_if_env_token_shadows_gh(env_var: str, token: str) -> None:
+    """Log a one-time, actionable warning about a shadowed ``gh`` account."""
+    global _shadow_warning_emitted
+    if _shadow_warning_emitted:
+        return
+    try:
+        shadowed = env_token_shadows_gh_account(env_var, token)
+    except Exception as exc:  # pragma: no cover - diagnostics must never break auth
+        logger.debug("env/gh shadowing check failed: %s", exc)
+        return
+    if not shadowed:
+        return
+    _shadow_warning_emitted = True
+    logger.warning(
+        "Copilot is authenticating with the token in %s, which overrides the "
+        "GitHub CLI account '%s'. `gh auth switch` will NOT change the Copilot "
+        "account while %s is set. To use '%s', unset %s (and GH_TOKEN / "
+        "GITHUB_TOKEN) or re-run the Copilot device-code login to replace it.",
+        env_var, shadowed, env_var, shadowed, env_var,
+    )
+
+
 def resolve_copilot_token() -> tuple[str, str]:
     """Resolve a GitHub token suitable for Copilot API use.
 
@@ -88,6 +199,9 @@ def resolve_copilot_token() -> tuple[str, str]:
                     "Token from %s is not supported: %s", env_var, msg
                 )
                 continue
+            # Precedence is intentional, but must not be silent: warn when this
+            # token is overriding a different signed-in `gh` account.
+            _warn_once_if_env_token_shadows_gh(env_var, val)
             return val, env_var
 
     # 2. Fall back to gh auth token
@@ -327,8 +441,50 @@ _JWT_REFRESH_MARGIN_SECONDS = 120  # refresh 2 min before expiry
 
 # Token exchange endpoint and headers (matching VS Code / Copilot CLI)
 _TOKEN_EXCHANGE_URL = "https://api.github.com/copilot_internal/v2/token"
-_EDITOR_VERSION = "vscode/1.104.1"
-_EXCHANGE_USER_AGENT = "GitHubCopilotChat/0.26.7"
+
+# Client identity sent to the Copilot API.
+#
+# These mirror the official runtime (copilot-agent-runtime
+# ``src/runtime/src/model/capi_client.rs`` + ``src/helpers/packageVersion.ts``),
+# which identifies itself honestly as ``copilot-developer-cli`` and derives
+# ``Editor-Version`` / ``User-Agent`` from its own package name and version.
+#
+# Hermes previously claimed to be ``vscode-chat`` with a fabricated
+# ``Editor-Version: vscode/1.104.1``. Impersonating another integration is the
+# kind of request managed/enterprise accounts reject with a Terms-of-Service
+# 403 — a message that says nothing about the real cause. Identify honestly so
+# a policy rejection is a real policy signal rather than self-inflicted.
+COPILOT_INTEGRATION_ID = "copilot-developer-cli"
+
+# ``X-GitHub-Api-Version`` pin, matching capi_client.rs GITHUB_API_VERSION_VALUE.
+COPILOT_GITHUB_API_VERSION = "2026-07-01"
+
+
+def _client_version() -> str:
+    """Hermes version used in the Editor-Version / User-Agent strings."""
+    try:
+        from hermes_cli import __version__ as _v
+        return str(_v)
+    except Exception:  # pragma: no cover - version import is not critical
+        return "0.0.0"
+
+
+def _editor_version() -> str:
+    """``{product}/{version}``, matching the reference getEditorVersion()."""
+    return f"{COPILOT_INTEGRATION_ID}/{_client_version()}"
+
+
+def _user_agent() -> str:
+    """``{product}/{version} ({platform} {python})``, matching getUserAgent()."""
+    import platform as _platform
+    return (
+        f"{COPILOT_INTEGRATION_ID}/{_client_version()} "
+        f"({_platform.system().lower()} python/{_platform.python_version()})"
+    )
+
+
+_EDITOR_VERSION = _editor_version()
+_EXCHANGE_USER_AGENT = _user_agent()
 
 
 def _token_fingerprint(raw_token: str) -> str:
@@ -501,13 +657,26 @@ def copilot_request_headers(
 ) -> dict[str, str]:
     """Build the standard headers for Copilot API requests.
 
-    Replicates the header set used by opencode and the Copilot CLI.
+    Mirrors the official runtime's static CAPI header set
+    (copilot-agent-runtime ``src/runtime/src/model/capi_client.rs``
+    ``push_static_headers``): honest integration id, pinned GitHub API
+    version, and a per-request interaction id.
+
+    ``X-Initiator`` defaults to ``user`` in the reference client and is
+    overridden per request for agent-initiated calls; ``is_agent_turn``
+    carries that same distinction here. The key is kept lower-case because
+    several call sites merge an ``x-initiator`` override into these headers,
+    and mixing cases would emit the header twice.
     """
     headers: dict[str, str] = {
-        "Editor-Version": "vscode/1.104.1",
-        "User-Agent": "HermesAgent/1.0",
-        "Copilot-Integration-Id": "vscode-chat",
-        "Openai-Intent": "conversation-edits",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Editor-Version": _editor_version(),
+        "User-Agent": _user_agent(),
+        "Copilot-Integration-Id": COPILOT_INTEGRATION_ID,
+        "X-GitHub-Api-Version": COPILOT_GITHUB_API_VERSION,
+        "X-Interaction-Id": str(uuid.uuid4()),
+        "Openai-Intent": "conversation-agent",
         "x-initiator": "agent" if is_agent_turn else "user",
     }
     if is_vision:

@@ -106,6 +106,7 @@ try:  # Version tag for the Codex token-endpoint User-Agent; fall back if unavai
 except Exception:  # pragma: no cover - version import should always succeed
     _HERMES_CLI_VERSION = "unknown"
 CODEX_OAUTH_USER_AGENT = f"hermes-cli/{_HERMES_CLI_VERSION}"
+from hermes_cli.copilot_auth import is_copilot_provider  # noqa: E402
 CODEX_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 XAI_OAUTH_DISCOVERY_URL = f"{XAI_OAUTH_ISSUER}/.well-known/openid-configuration"
@@ -580,7 +581,7 @@ def _resolve_api_key_provider_secret(
     provider_id: str, pconfig: ProviderConfig
 ) -> tuple[str, str]:
     """Resolve an API-key provider's token and indicate where it came from."""
-    if provider_id == "copilot":
+    if is_copilot_provider(provider_id):
         # Use the dedicated copilot auth module for proper token validation
         try:
             from hermes_cli.copilot_auth import resolve_copilot_token, get_copilot_api_token
@@ -6889,7 +6890,7 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
     elif provider_id == "zai":
         base_url = _resolve_zai_base_url(api_key, pconfig.inference_base_url, env_url)
-    elif provider_id == "copilot":
+    elif is_copilot_provider(provider_id):
         # Resolve the Copilot API base URL from the token-exchange response
         # (endpoints.api, with a proxy-ep fallback), which is authoritative
         # for Enterprise / proxied accounts. Falls back to the registry

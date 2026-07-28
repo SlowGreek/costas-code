@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hermes_constants import OPENROUTER_BASE_URL
 from hermes_cli.config import load_env
+from hermes_cli.copilot_auth import is_copilot_provider
 from agent.secret_scope import get_secret as _get_secret
 from agent.credential_persistence import (
     is_borrowed_credential_source,
@@ -116,9 +117,12 @@ SUPPORTED_POOL_STRATEGIES = {
 
 # Cooldown before retrying an exhausted credential.
 # Transient 401 auth failures cool down briefly so single-key setups can recover.
+# 403 (authorization/policy) uses the same short cooldown: it is not a quota
+# signal, so an hour-long lockout of a possibly-healthy credential is wrong.
 # 429 (rate-limited), 402 (billing/quota), and other failures cool down after 1 hour.
 # Provider-supplied reset_at timestamps override these defaults.
 EXHAUSTED_TTL_401_SECONDS = 5 * 60           # 5 minutes
+EXHAUSTED_TTL_403_SECONDS = 5 * 60           # 5 minutes
 EXHAUSTED_TTL_429_SECONDS = 60 * 60          # 1 hour
 EXHAUSTED_TTL_DEFAULT_SECONDS = 60 * 60      # 1 hour
 
@@ -237,6 +241,18 @@ class PooledCredential:
         for k, v in self.extra.items():
             if v is not None:
                 result[k] = v
+        # Never persist the Copilot API endpoint. It is a property of the
+        # authenticated account (individual -> api.githubcopilot.com,
+        # managed/enterprise -> the host advertised by the token exchange),
+        # so it must be re-derived from the live exchange on every load. The
+        # official runtime does the same: it reads
+        # ``copilotUser.endpoints.api`` from the current auth info and stores
+        # no endpoint of its own (copilot-agent-runtime auth/core.rs
+        # ``get_copilot_api_url``). Persisting it meant an endpoint captured
+        # under one account outlived the switch to another and silently
+        # overrode the correct one.
+        if is_copilot_provider(self.provider):
+            result.pop("base_url", None)
         return sanitize_borrowed_credential_payload(result, self.provider)
 
     @property
@@ -290,6 +306,12 @@ def _exhausted_ttl(error_code: Optional[int]) -> int:
     """Return cooldown seconds based on the HTTP status that caused exhaustion."""
     if error_code == 401:
         return EXHAUSTED_TTL_401_SECONDS
+    if error_code == 403:
+        # A 403 is an authorization/policy answer, not a quota or rate signal,
+        # so the hour-long default cooldown is wrong for it: it takes a
+        # credential that may be perfectly usable out of rotation far longer
+        # than any transient policy state lasts. Reuse the short 401 cooldown.
+        return EXHAUSTED_TTL_403_SECONDS
     if error_code == 429:
         return EXHAUSTED_TTL_429_SECONDS
     return EXHAUSTED_TTL_DEFAULT_SECONDS
@@ -1794,6 +1816,44 @@ class CredentialPool:
             if entry is None:
                 return None
             _label = entry.label or entry.id[:8]
+            if status_code == 403 and is_copilot_provider(self.provider):
+                # The official runtime never disables a credential on 403: it
+                # surfaces the error and leaves auth untouched
+                # (copilot-agent-runtime core/helpers/httpApiUtils.ts). A
+                # Copilot 403 is a policy/authorization answer about the
+                # *request*, not evidence the credential is spent, and
+                # Copilot pools are usually single-entry — so exhausting on
+                # 403 locked the account out of every model call for the whole
+                # cooldown, long after the condition cleared, and the state
+                # persisted across restarts. Rotate (so multi-credential
+                # setups still fail over) without marking anything exhausted
+                # and let the 403 propagate to the caller.
+                logger.info(
+                    "credential pool: %s returned 403 for %s; rotating without "
+                    "marking any credential exhausted (403 is not a quota signal)",
+                    self.provider, _label,
+                )
+                self._current_id = None
+                next_entry = self._select_unlocked()
+                # Selection is priority-ordered, so with nothing marked it
+                # hands back the same entry. Prefer a different credential
+                # when one exists so multi-credential setups still fail over,
+                # and fall back to the original when it is the only one —
+                # a 403 is no reason to leave the pool with nothing to return.
+                if next_entry is not None and next_entry.id == entry.id:
+                    alternatives = [
+                        candidate
+                        for candidate in self._available_entries(clear_expired=True)
+                        if candidate.id != entry.id
+                    ]
+                    if alternatives:
+                        next_entry = alternatives[0]
+                        self._current_id = next_entry.id
+                        logger.info(
+                            "credential pool: rotated to %s",
+                            next_entry.label or next_entry.id[:8],
+                        )
+                return next_entry
             self._mark_exhausted(entry, status_code, error_context)
             # A 402/429/401 is an API-key–level failure: the account is out of
             # balance, rate-limited, or its key is rejected.  The same key can
@@ -2230,7 +2290,7 @@ def _seed_from_singletons(provider: str, entries: List[PooledCredential]) -> Tup
                 },
             )
 
-    elif provider == "copilot":
+    elif is_copilot_provider(provider):
         # Copilot tokens are resolved dynamically via `gh auth token` or
         # env vars (COPILOT_GITHUB_TOKEN / GH_TOKEN).  They don't live in
         # the auth store or credential pool, so we resolve them here.

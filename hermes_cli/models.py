@@ -27,7 +27,18 @@ _HERMES_USER_AGENT = f"hermes-cli/{_HERMES_VERSION}"
 
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_MODELS_URL = f"{COPILOT_BASE_URL}/models"
-COPILOT_EDITOR_VERSION = "vscode/1.104.1"
+# Client identity for Copilot API requests. Re-exported from copilot_auth so
+# there is a single source of truth; see the rationale there for why Hermes
+# identifies as copilot-developer-cli rather than impersonating vscode-chat.
+from hermes_cli.copilot_auth import (  # noqa: E402
+    COPILOT_GITHUB_API_VERSION,
+    COPILOT_INTEGRATION_ID,
+    _editor_version as _copilot_editor_version,
+    _user_agent as _copilot_user_agent,
+)
+
+COPILOT_EDITOR_VERSION = _copilot_editor_version()
+COPILOT_USER_AGENT = _copilot_user_agent()
 COPILOT_REASONING_EFFORTS_GPT5 = ["minimal", "low", "medium", "high"]
 COPILOT_REASONING_EFFORTS_O_SERIES = ["low", "medium", "high"]
 
@@ -3097,17 +3108,26 @@ def _payload_items(payload: Any) -> list[dict[str, Any]]:
 def copilot_default_headers(*, is_agent_turn: bool = True) -> dict[str, str]:
     """Standard headers for Copilot API requests.
 
-    Includes Openai-Intent and x-initiator headers that opencode and the
-    Copilot CLI send on every request.
+    Delegates to :func:`hermes_cli.copilot_auth.copilot_request_headers`, which
+    mirrors the official runtime's CAPI header set. The fallback below is only
+    reached if that module cannot be imported and must stay in sync with it —
+    an out-of-date duplicate here would silently reintroduce the impersonated
+    ``vscode-chat`` identity that managed accounts reject with a 403.
     """
     try:
         from hermes_cli.copilot_auth import copilot_request_headers
         return copilot_request_headers(is_agent_turn=is_agent_turn)
     except ImportError:
+        import uuid as _uuid
         return {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
             "Editor-Version": COPILOT_EDITOR_VERSION,
-            "User-Agent": "HermesAgent/1.0",
-            "Openai-Intent": "conversation-edits",
+            "User-Agent": COPILOT_USER_AGENT,
+            "Copilot-Integration-Id": COPILOT_INTEGRATION_ID,
+            "X-GitHub-Api-Version": COPILOT_GITHUB_API_VERSION,
+            "X-Interaction-Id": str(_uuid.uuid4()),
+            "Openai-Intent": "conversation-agent",
             "x-initiator": "agent" if is_agent_turn else "user",
         }
 

@@ -47,7 +47,10 @@ class TestExchangeCopilotToken:
         call_args = mock_urlopen.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") == "token gho_test123"
-        assert "GitHubCopilotChat" in req.get_header("User-agent")
+        # The exchange identifies honestly as the CLI product, matching the
+        # official runtime, rather than impersonating the VS Code chat client.
+        assert "copilot-developer-cli" in req.get_header("User-agent")
+        assert "vscode" not in req.get_header("Editor-version").lower()
 
     @patch("urllib.request.urlopen")
     def test_caches_result(self, mock_urlopen):

@@ -157,3 +157,46 @@ def test_dependency_failure_names_the_interpreter(source):
         "the error should state the supported Python range so the user knows "
         "what to install"
     )
+
+
+def test_supported_python_is_not_blamed_for_an_install_failure(source):
+    """A supported interpreter must NOT be reported as the cause.
+
+    Field report: a Windows install on Python 3.11.9 failed and the error said
+    "The venv is using Python 3.11.9; Hermes requires Python 3.11-3.13." Both
+    halves are true and the conclusion is wrong — 3.11.9 IS in range, so the
+    message sent the user chasing a Python version that was already correct
+    while the real failure went unnamed.
+    """
+    script = source
+
+    # The unconditional blame string must be gone.
+    assert '" The venv is using $venvVer; Hermes requires Python 3.11-3.13."' not in script, (
+        "the interpreter is still blamed unconditionally"
+    )
+
+    # A supported version must produce a message that says so.
+    assert "is supported, so this is NOT a version problem" in script, (
+        "no branch explains a failure on a supported interpreter"
+    )
+
+
+def test_unsupported_python_is_still_named(source):
+    """The original diagnosis must survive — it was right for 3.10."""
+    script = source
+
+    assert "outside the supported range" in script
+    assert "-PythonVersion 3.12" in script, "no actionable remedy for an unsupported interpreter"
+
+
+def test_version_gate_accepts_the_whole_supported_range(source):
+    """The parsed bounds must match pyproject's requires-python.
+
+    A hardcoded gate that drifts from requires-python reintroduces exactly the
+    bug this file exists to prevent, in the opposite direction.
+    """
+    script = source
+
+    assert "$minor -ge 11 -and $minor -le 13" in script, (
+        "the supported-range check does not match requires-python >=3.11,<3.14"
+    )

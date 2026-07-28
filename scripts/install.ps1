@@ -2158,7 +2158,27 @@ except Exception:
                 $venvVer = (& $venvPy --version 2>&1) -join " "
             }
         } catch { }
-        $detail = if ($venvVer) { " The venv is using $venvVer; Hermes requires Python 3.11-3.13." } else { "" }
+        # Only blame the interpreter when it IS the problem. Reporting
+        # "requires 3.11-3.13" on a venv already running 3.11.9 sends the user
+        # chasing a Python version that is fine, while the real failure (a
+        # network block, an index 403, a locked file) goes unnamed. Field
+        # report: Windows install on 3.11.9 that could never succeed by
+        # changing Python.
+        $venvSupported = $false
+        if ($venvVer -match "(\d+)\.(\d+)") {
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            $venvSupported = ($major -eq 3 -and $minor -ge 11 -and $minor -le 13)
+        }
+
+        if ($venvVer -and -not $venvSupported) {
+            $detail = " The venv is using $venvVer, which is outside the supported range (Python 3.11-3.13). Re-run with -PythonVersion 3.12."
+        } elseif ($venvVer) {
+            $detail = " The venv's Python ($venvVer) is supported, so this is NOT a version problem — look for a network/proxy block, a package-index error, or a locked file in the uv output above."
+        } else {
+            $detail = ""
+        }
+
         throw "Failed to install hermes-agent package even with no extras.$detail Inspect the uv pip install output above."
     }
 

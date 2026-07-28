@@ -1494,8 +1494,8 @@ class AIAgent:
     def _is_copilot_url(self) -> bool:
         """Return True when the base URL targets GitHub Copilot or GitHub Models."""
         return (
-            "api.githubcopilot.com" in self._base_url_lower
-            or "models.github.ai" in self._base_url_lower
+            base_url_host_matches(self._base_url_lower, "githubcopilot.com")
+            or base_url_host_matches(self._base_url_lower, "models.github.ai")
         )
 
     def _anthropic_prompt_cache_policy(

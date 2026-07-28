@@ -67,6 +67,12 @@ class TestIsCopilotUrl:
         agent = _make_agent(monkeypatch, "https://api.githubcopilot.com")
         assert agent._is_copilot_url() is True
 
+    def test_enterprise_copilot_url(self, monkeypatch):
+        agent = _make_agent(
+            monkeypatch, "https://api.enterprise.githubcopilot.com"
+        )
+        assert agent._is_copilot_url() is True
+
     def test_copilot_url_with_path(self, monkeypatch):
         agent = _make_agent(monkeypatch, "https://api.githubcopilot.com/v1")
         assert agent._is_copilot_url() is True

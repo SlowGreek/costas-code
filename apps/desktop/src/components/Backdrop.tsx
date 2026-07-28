@@ -72,11 +72,12 @@ export function Backdrop() {
     'Backdrop / Statue',
     {
       enabled: { value: true, label: 'on' },
-      opacity: { value: 0.025, min: 0, max: 1, step: 0.005 },
-      blendMode: { value: 'difference' as BlendMode, options: BLEND_MODES, label: 'blend' },
+      opacity: { value: 0.14, min: 0, max: 1, step: 0.005 },
+      blendMode: { value: 'soft-light' as BlendMode, options: BLEND_MODES, label: 'blend' },
       invert: { value: true, label: 'invert color' },
       saturate: { value: 1, min: 0, max: 3, step: 0.05, label: 'saturate' },
-      brightness: { value: 1, min: 0, max: 2, step: 0.05, label: 'brightness' },
+      brightness: { value: 1.35, min: 0, max: 2, step: 0.05, label: 'brightness' },
+      contrast: { value: 1.4, min: 0.5, max: 3, step: 0.05, label: 'contrast' },
       objectPosition: {
         value: 'top left',
         options: ['top left', 'top right', 'bottom left', 'bottom right', 'center', 'top', 'bottom', 'left', 'right'],
@@ -108,7 +109,7 @@ export function Backdrop() {
             style={{
               height: `${statue.scale}dvh`,
               objectPosition: statue.objectPosition,
-              filter: `invert(calc(${statue.invert ? 1 : 0} * var(--backdrop-invert-mul, 1))) saturate(${statue.saturate}) brightness(${statue.brightness})`
+              filter: `invert(calc(${statue.invert ? 1 : 0} * var(--backdrop-invert-mul, 1))) saturate(${statue.saturate}) brightness(${statue.brightness}) contrast(${statue.contrast})`
             }}
           />
         </div>

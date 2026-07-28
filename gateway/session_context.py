@@ -86,6 +86,10 @@ _SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
 _LUCID_CONVERSATION_ID: ContextVar = ContextVar(
     "HERMES_LUCID_CONVERSATION_ID", default=_UNSET
 )
+# Host-owned role selector for the same durable conversation. It is deliberately
+# separate from _VAR_MAP and never mirrored into os.environ or model arguments.
+_LUCID_ROLE: ContextVar = ContextVar("HERMES_LUCID_ROLE", default=_UNSET)
+_LUCID_ROLES = frozenset({"EM", "SIDEKICK"})
 _LUCID_CONVERSATION_NAMESPACE = UUID("93d653df-6f7b-4a59-9a3b-85ba9ccdddc2")
 _MAX_DURABLE_CONVERSATION_KEY_BYTES = 512
 # In-process UI session/window id for multi-session desktop/TUI hosts. This is
@@ -202,6 +206,31 @@ def get_lucid_conversation_id(default: str = "") -> str:
     return value or default
 
 
+def bind_lucid_role(role: object):
+    """Bind one closed host-selected role; invalid values become explicit denial."""
+
+    admitted = role.strip().upper() if isinstance(role, str) else ""
+    return _LUCID_ROLE.set(admitted if admitted in _LUCID_ROLES else "")
+
+
+def reset_lucid_role(token) -> None:
+    """Restore a previous host role binding without process-global fallback."""
+
+    try:
+        _LUCID_ROLE.reset(token)
+    except Exception:
+        _LUCID_ROLE.set("")
+
+
+def get_lucid_role() -> str | None:
+    """Return the task-local role, ``None`` only when no host bound this context."""
+
+    value = _LUCID_ROLE.get()
+    if value is _UNSET:
+        return None
+    return value if isinstance(value, str) and value in _LUCID_ROLES else ""
+
+
 def set_current_session_id(
     session_id: str, *, conversation_continuity: bool = False
 ) -> None:
@@ -243,6 +272,7 @@ def set_session_vars(
     cwd: str = "",
     async_delivery: bool = True,
     ui_session_id: str = "",
+    lucid_role: str | None = None,
 ) -> list:
     """Set all session context variables and return reset tokens.
 
@@ -276,6 +306,16 @@ def set_session_vars(
         _SESSION_ID.set(session_id),
         _LUCID_CONVERSATION_ID.set(
             stable_lucid_conversation_id(conversation_id or session_id)
+        ),
+        _LUCID_ROLE.set(
+            _UNSET
+            if lucid_role is None
+            else (
+                lucid_role.strip().upper()
+                if isinstance(lucid_role, str)
+                and lucid_role.strip().upper() in _LUCID_ROLES
+                else ""
+            )
         ),
         _SESSION_UI_SESSION_ID.set(ui_session_id),
         _SESSION_MESSAGE_ID.set(message_id),
@@ -313,6 +353,7 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_KEY,
         _SESSION_ID,
         _LUCID_CONVERSATION_ID,
+        _LUCID_ROLE,
         _SESSION_UI_SESSION_ID,
         _SESSION_MESSAGE_ID,
         _SESSION_PROFILE,
@@ -368,6 +409,7 @@ def reset_session_vars() -> None:
     for var in _VAR_MAP.values():
         var.set(_UNSET)
     _LUCID_CONVERSATION_ID.set(_UNSET)
+    _LUCID_ROLE.set(_UNSET)
     # Reset the async-delivery capability to "never bound here" (_UNSET) for the
     # same inheritance-leak reason as the mapped vars above — see clear_session_vars,
     # which resets this var on the handler-exit path for the symmetric concern.

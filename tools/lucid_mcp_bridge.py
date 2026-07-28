@@ -187,7 +187,12 @@ def lucid_signin_request() -> dict[str, str]:
 def lucid_host_role() -> Optional[str]:
     """Return the host-selected AE role; model arguments can never select it."""
 
-    role = os.environ.get("HERMES_LUCID_ROLE", "").strip()
+    from gateway.session_context import get_lucid_role
+
+    bound = get_lucid_role()
+    if bound is not None:
+        return bound if bound in _HOST_ROLES else None
+    role = os.environ.get("HERMES_LUCID_ROLE", "").strip().upper()
     return role if role in _HOST_ROLES else None
 
 

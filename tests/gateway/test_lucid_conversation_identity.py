@@ -6,6 +6,7 @@ from uuid import UUID
 from gateway.session_context import (
     clear_session_vars,
     get_lucid_conversation_id,
+    get_lucid_role,
     reset_session_vars,
     set_current_session_id,
     set_session_vars,
@@ -71,7 +72,40 @@ def test_concurrent_sessions_keep_separate_contextvar_bindings():
 
 
 def test_reset_removes_inherited_host_binding():
-    set_session_vars(session_id="parent-conversation")
+    set_session_vars(session_id="parent-conversation", lucid_role="EM")
     assert get_lucid_conversation_id()
+    assert get_lucid_role() == "EM"
     reset_session_vars()
     assert get_lucid_conversation_id() == ""
+    assert get_lucid_role() is None
+
+
+def test_concurrent_em_and_sidekick_roles_are_request_local():
+    async def observe(session_id: str, role: str) -> tuple[str, str]:
+        tokens = set_session_vars(session_id=session_id, lucid_role=role)
+        try:
+            before = get_lucid_role()
+            await asyncio.sleep(0)
+            return before or "", get_lucid_role() or ""
+        finally:
+            clear_session_vars(tokens)
+
+    async def run() -> list[tuple[str, str]]:
+        return list(
+            await asyncio.gather(
+                observe("em-conversation", "EM"),
+                observe("sidekick-conversation", "SIDEKICK"),
+            )
+        )
+
+    em, sidekick = asyncio.run(run())
+    assert em == ("EM", "EM")
+    assert sidekick == ("SIDEKICK", "SIDEKICK")
+
+
+def test_invalid_explicit_role_is_denied_not_normalized_to_em():
+    tokens = set_session_vars(session_id="engineer", lucid_role="ENGINEER")
+    try:
+        assert get_lucid_role() == ""
+    finally:
+        clear_session_vars(tokens)

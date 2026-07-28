@@ -4703,12 +4703,42 @@ class APIServerAdapter(BasePlatformAdapter):
             )
         return None
 
+    def _lucid_role_for_session(self, session_id: object) -> Optional[str]:
+        """Resolve one durable, observation-only AE role assignment.
+
+        ``None`` means no binding and preserves the enrolled Desktop default.
+        An invalid/foreign binding returns ``""`` so the request fails closed
+        instead of inheriting process-global EM authority.
+        """
+
+        if not isinstance(session_id, str) or not session_id:
+            return ""
+        database = self._ensure_session_db()
+        if database is None:
+            return ""
+        try:
+            binding = database.get_external_role_session_binding(session_id)
+        except (TypeError, ValueError):
+            return ""
+        if binding is None:
+            return None
+        if (
+            binding.get("namespace") != "agent-experiments"
+            or binding.get("authority") != "observe"
+            or binding.get("version") != 1
+        ):
+            return ""
+        return {"em": "EM", "sidekick": "SIDEKICK"}.get(
+            str(binding.get("role") or ""), ""
+        )
+
     @staticmethod
     def _bind_api_server_session(
         *,
         chat_id: str = "",
         session_key: str = "",
         session_id: str = "",
+        lucid_role: Optional[str] = None,
     ) -> list:
         """Bind session contextvars for an API-server agent run.
 
@@ -4732,6 +4762,7 @@ class APIServerAdapter(BasePlatformAdapter):
             chat_id=chat_id,
             session_key=session_key,
             session_id=session_id,
+            lucid_role=lucid_role,
             async_delivery=False,
         )
 
@@ -4778,6 +4809,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     chat_id=session_id or "",
                     session_key=gateway_session_key or session_id or "",
                     session_id=session_id or "",
+                    lucid_role=self._lucid_role_for_session(session_id),
                 )
                 try:
                     agent = self._create_agent(
@@ -5112,6 +5144,7 @@ class APIServerAdapter(BasePlatformAdapter):
                                 chat_id=session_id or "",
                                 session_key=approval_session_key,
                                 session_id=session_id or "",
+                                lucid_role=self._lucid_role_for_session(session_id),
                             )
                             register_gateway_notify(approval_session_key, _approval_notify)
                             r = agent.run_conversation(

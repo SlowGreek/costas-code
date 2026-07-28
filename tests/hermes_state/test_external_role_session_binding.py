@@ -58,13 +58,39 @@ def test_schema_migrates_existing_database_without_touching_session_rows(tmp_pat
         assert table is not None
         assert migrated._conn.execute(
             "SELECT version FROM schema_version"
-        ).fetchone()[0] >= 24
+        ).fetchone()[0] >= 25
         row = migrated.get_session("existing")
         assert row is not None
         assert json.loads(row["model_config"]) == {"provider_setting": "kept"}
         assert migrated.get_external_role_session_binding("existing") is None
     finally:
         migrated.close()
+
+
+def test_sidekick_is_a_closed_content_free_durable_role(db):
+    db.create_session("sidekick", "desktop")
+    expected = {
+        "durable_session_id": "sidekick",
+        "namespace": "agent-experiments",
+        "external_role_session_id": "sidekick-role-session",
+        "external_parent_role_session_id": None,
+        "role": "sidekick",
+        "authority": "observe",
+        "version": 1,
+    }
+    assert _bind(
+        db,
+        "sidekick",
+        external_id="sidekick-role-session",
+        external_parent_id=None,
+        role=ExternalRoleSessionRole.SIDEKICK,
+    ) == expected
+    assert db.get_external_role_session_binding("sidekick") == expected
+    table_sql = db._conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        "AND name='external_role_session_bindings'"
+    ).fetchone()[0]
+    assert "'sidekick'" in table_sql
 
 
 def test_create_get_delete_binding_is_separate_strict_and_content_free(db):

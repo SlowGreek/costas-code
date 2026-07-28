@@ -211,13 +211,14 @@ T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 class ExternalRoleSessionRole(str, enum.Enum):
     """Closed external role labels admitted by the durable binding."""
 
     EM = "em"
+    SIDEKICK = "sidekick"
     ENGINEER = "engineer"
 
 
@@ -1245,7 +1246,7 @@ CREATE TABLE IF NOT EXISTS external_role_session_bindings (
             external_parent_role_session_id IS NULL
             OR LENGTH(external_parent_role_session_id) BETWEEN 1 AND 512
         ),
-    role TEXT NOT NULL CHECK (role IN ('em', 'engineer')),
+    role TEXT NOT NULL CHECK (role IN ('em', 'sidekick', 'engineer')),
     authority TEXT NOT NULL CHECK (authority = 'observe'),
     version INTEGER NOT NULL CHECK (version = 1),
     UNIQUE (namespace, external_role_session_id)
@@ -3296,6 +3297,55 @@ class SessionDB:
             ):
                 self.set_meta(
                     "fts_storage_version", str(FTS_STORAGE_VERSION), cursor=cursor
+                )
+
+            if current_version < 25:
+                # v25: admit the human-partner SIDEKICK role in the content-free
+                # external role-session registry. SQLite cannot ALTER a CHECK
+                # constraint, so rebuild this one bounded table atomically while
+                # preserving every existing EM/engineer binding byte-for-byte.
+                cursor.execute(
+                    "ALTER TABLE external_role_session_bindings "
+                    "RENAME TO external_role_session_bindings_v24"
+                )
+                cursor.execute(
+                    """CREATE TABLE external_role_session_bindings (
+                           durable_session_id TEXT PRIMARY KEY
+                               REFERENCES sessions(id) ON DELETE CASCADE,
+                           namespace TEXT NOT NULL
+                               CHECK (LENGTH(namespace) BETWEEN 1 AND 64),
+                           external_role_session_id TEXT NOT NULL
+                               CHECK (LENGTH(external_role_session_id) BETWEEN 1 AND 512),
+                           external_parent_role_session_id TEXT
+                               CHECK (
+                                   external_parent_role_session_id IS NULL
+                                   OR LENGTH(external_parent_role_session_id) BETWEEN 1 AND 512
+                               ),
+                           role TEXT NOT NULL
+                               CHECK (role IN ('em', 'sidekick', 'engineer')),
+                           authority TEXT NOT NULL CHECK (authority = 'observe'),
+                           version INTEGER NOT NULL CHECK (version = 1),
+                           UNIQUE (namespace, external_role_session_id)
+                       )"""
+                )
+                cursor.execute(
+                    """INSERT INTO external_role_session_bindings (
+                           durable_session_id, namespace,
+                           external_role_session_id,
+                           external_parent_role_session_id,
+                           role, authority, version
+                       )
+                       SELECT durable_session_id, namespace,
+                              external_role_session_id,
+                              external_parent_role_session_id,
+                              role, authority, version
+                       FROM external_role_session_bindings_v24"""
+                )
+                cursor.execute("DROP TABLE external_role_session_bindings_v24")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_external_role_bindings_namespace "
+                    "ON external_role_session_bindings("
+                    "namespace, external_parent_role_session_id)"
                 )
 
             # Advance schema_version to current for ALL non-FTS-layout

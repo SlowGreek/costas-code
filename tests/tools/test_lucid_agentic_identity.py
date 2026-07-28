@@ -9,8 +9,10 @@ import pytest
 
 from gateway.session_context import (
     bind_lucid_conversation_id,
+    bind_lucid_role,
     get_lucid_conversation_id,
     reset_lucid_conversation_id,
+    reset_lucid_role,
 )
 from tools import mcp_tool
 from tools.lucid_mcp_bridge import (
@@ -204,3 +206,27 @@ def test_host_signin_then_ordinary_call_crosses_only_identity_metadata(monkeypat
     crossing = json.dumps([call.kwargs for call in calls]).lower()
     for forbidden in ("localcapability", "token", "signature", "grant", "broker key"):
         assert forbidden not in crossing
+
+
+def test_explicit_sidekick_binding_overrides_process_em_for_bootstrap(monkeypatch):
+    server = _server(_result("set", {"status": "signed-in"}))
+    mcp_tool._servers["lucid-quine"] = server  # type: ignore[assignment]
+    monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", _run_direct)
+    role_token = bind_lucid_role("SIDEKICK")
+    try:
+        result = json.loads(
+            mcp_tool.invoke_lucid_bootstrap_signin(conversation_id=EXPLICIT)
+        )
+    finally:
+        reset_lucid_role(role_token)
+
+    assert result["result"] == {"status": "signed-in"}
+    bootstrap = server.session.call_tool.await_args.kwargs["meta"][
+        HOST_CONTEXT_EXTENSION
+    ]["bootstrap"]
+    assert bootstrap == {
+        "schema": "hermes-lucid-bootstrap-decision/1",
+        "action": "signin",
+        "role": "SIDEKICK",
+        "role_session_id": EXPLICIT,
+    }

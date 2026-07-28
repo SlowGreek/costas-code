@@ -330,7 +330,11 @@ def test_format_message_mentions_pids_and_remediation(tmp_path):
     assert "1234" in msg
     assert "5678" in msg
     assert "hermes.exe" in msg
-    assert "Hermes Desktop" in msg
+    # The remediation must tell the user to close the desktop app. Assert the
+    # instruction, not the product name — this fork ships as "Catalyst", so
+    # matching the upstream brand string turned a rebrand into a test failure
+    # while the message stayed perfectly correct.
+    assert "Close" in msg, f"no close-the-app remediation in: {msg!r}"
     assert "--force" in msg
     # Mentions the file that would have been overwritten
     assert str(tmp_path / "hermes.exe") in msg

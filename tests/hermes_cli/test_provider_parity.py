@@ -37,7 +37,10 @@ _EXEMPT = {"custom"} | _VIRTUAL
 # appear on both desktop tabs (an API-key card AND an account sign-in card).
 # Anthropic supports a direct API key (Keys tab) and a subscription OAuth /
 # Claude Code login (Accounts tab); surfacing both is correct, not a bug.
-_DUAL_TAB = {"anthropic"}
+# Copilot is the same shape: a COPILOT_GITHUB_TOKEN card on the Keys tab and a
+# GitHub device-code sign-in on the Accounts tab (see the `copilot` branch of
+# the OAuth start endpoint in web_server.py).
+_DUAL_TAB = {"anthropic", "copilot"}
 
 
 def _keys_tab_providers() -> set[str]:

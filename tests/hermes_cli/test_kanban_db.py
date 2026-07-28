@@ -3584,6 +3584,7 @@ def test_resolve_hermes_argv_module_actually_runs():
     """
     import subprocess
     import hermes_cli.kanban_db as kb
+    import re
     import shutil
     import unittest.mock as mock
 
@@ -3596,7 +3597,13 @@ def test_resolve_hermes_argv_module_actually_runs():
         f"`{' '.join(argv)} --version` failed (rc={r.returncode}); "
         f"stderr={r.stderr[:200]!r}"
     )
-    assert "Hermes Agent" in r.stdout, f"unexpected output: {r.stdout[:200]!r}"
+    # Assert the CONTRACT — the resolved argv is a runnable Hermes CLI that
+    # reports a version — not the product's brand string. This fork renders
+    # "Catalyst v0.19.0 (2026.7.20)"; upstream renders "Hermes Agent ...".
+    # Matching on the brand made a rebrand look like a broken argv resolver.
+    assert re.search(r"v?\d+\.\d+\.\d+", r.stdout), (
+        f"`--version` produced no version string: {r.stdout[:200]!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

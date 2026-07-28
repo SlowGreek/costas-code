@@ -2174,7 +2174,7 @@ except Exception:
         if ($venvVer -and -not $venvSupported) {
             $detail = " The venv is using $venvVer, which is outside the supported range (Python 3.11-3.13). Re-run with -PythonVersion 3.12."
         } elseif ($venvVer) {
-            $detail = " The venv's Python ($venvVer) is supported, so this is NOT a version problem — look for a network/proxy block, a package-index error, or a locked file in the uv output above."
+            $detail = " The venv's Python ($venvVer) is supported, so this is NOT a version problem -- look for a network/proxy block, a package-index error, or a locked file in the uv output above."
         } else {
             $detail = ""
         }

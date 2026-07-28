@@ -200,3 +200,18 @@ def test_version_gate_accepts_the_whole_supported_range(source):
     assert "$minor -ge 11 -and $minor -le 13" in script, (
         "the supported-range check does not match requires-python >=3.11,<3.14"
     )
+
+
+def test_install_ps1_is_pure_ascii(source):
+    """Windows PowerShell 5.1 parses an extensionless/downloaded script using
+    the system ANSI code page unless it has a BOM. A single non-ASCII glyph can
+    corrupt the rest of a quoted string and cascade into dozens of misleading
+    syntax errors. The installer intentionally stays pure ASCII.
+
+    Field reproduction: an em dash in the supported-Python diagnostic decoded
+    as mojibake, made `look` an unexpected token at line 2177, and prevented the
+    script from parsing before the first installer stage ran.
+    """
+    offenders = [(i + 1, line) for i, line in enumerate(source.splitlines()) if not line.isascii()]
+
+    assert offenders == [], f"install.ps1 must remain pure ASCII; non-ASCII lines: {offenders[:5]}"

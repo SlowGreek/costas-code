@@ -178,6 +178,47 @@ export function chatMessageArraysEquivalent(a: ChatMessage[], b: ChatMessage[]):
   return a.length === b.length && a.every((message, index) => chatMessagesEquivalent(message, b[index]))
 }
 
+const isGeneratedImagePersistenceLine = (line: string): boolean =>
+  line === '[screenshot]' ||
+  ((line.startsWith('[Image attached at: ') || line.startsWith('[Image attached: ')) && line.endsWith(']'))
+
+/**
+ * The optimistic desktop row keeps image previews in `attachmentRefs`, while
+ * the session DB persists the same turn as caption text plus generated image
+ * hints and `[screenshot]` placeholders. Compare those two representations as
+ * one user turn so hydration cannot append the optimistic row a second time.
+ */
+function persistedUserMatchesOptimistic(authoritative: ChatMessage, optimistic: ChatMessage): boolean {
+  const authoritativeText = chatMessageText(authoritative).trim()
+  const optimisticText = chatMessageText(optimistic).trim()
+
+  if (authoritativeText === optimisticText) {
+    return true
+  }
+
+  const hasOptimisticImage = optimistic.attachmentRefs?.some(
+    ref => ref.startsWith('data:image/') || ref.startsWith('@image:')
+  )
+
+  if (!hasOptimisticImage) {
+    return false
+  }
+
+  const caption = optimisticText || 'What do you see in this image?'
+
+  if (!authoritativeText.startsWith(caption)) {
+    return false
+  }
+
+  const suffixLines = authoritativeText
+    .slice(caption.length)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  return suffixLines.length > 0 && suffixLines.every(isGeneratedImagePersistenceLine)
+}
+
 export function reconcileResumeMessages(nextMessages: ChatMessage[], previousMessages: ChatMessage[]): ChatMessage[] {
   if (!previousMessages.length) {
     return nextMessages
@@ -202,6 +243,14 @@ export function reconcileResumeMessages(nextMessages: ChatMessage[], previousMes
 
     if (!previous) {
       return message
+    }
+
+    if (message.role === 'user' && persistedUserMatchesOptimistic(message, previous)) {
+      return {
+        ...message,
+        parts: previous.parts,
+        attachmentRefs: previous.attachmentRefs
+      }
     }
 
     const nextText = chatMessageText(message).trim()
@@ -306,7 +355,7 @@ export function preserveLocalPendingTurnMessages(
     if (
       isOptimisticUser &&
       latestAuthoritativeUser &&
-      chatMessageText(latestAuthoritativeUser).trim() === chatMessageText(message).trim()
+      persistedUserMatchesOptimistic(latestAuthoritativeUser, message)
     ) {
       continue
     }
@@ -318,7 +367,7 @@ export function preserveLocalPendingTurnMessages(
         continue
       }
 
-      if (chatMessageText(authoritative).trim() === chatMessageText(message).trim()) {
+      if (persistedUserMatchesOptimistic(authoritative, message)) {
         continue
       }
     }

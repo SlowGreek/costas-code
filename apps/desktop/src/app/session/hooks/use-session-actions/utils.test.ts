@@ -355,6 +355,33 @@ describe('preserveLocalPendingTurnMessages', () => {
     expect(preserveLocalPendingTurnMessages(next, previous)).toBe(next)
   })
 
+  it('does not replay an optimistic image prompt after its persisted multimodal form arrives', () => {
+    const previous = [
+      msg('user-optimistic', 'user', 'what happened to the goal?', {
+        attachmentRefs: ['data:image/jpeg;base64,preview']
+      })
+    ]
+
+    const next = [
+      msg(
+        'user-stored',
+        'user',
+        'what happened to the goal?\n\n[Image attached at: /session/composer-image.jpg]\n[screenshot]'
+      ),
+      msg('assistant-stored', 'assistant', 'It was blocked.')
+    ]
+
+    const reconciled = reconcileResumeMessages(next, previous)
+    const result = preserveLocalPendingTurnMessages(reconciled, previous)
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toMatchObject({
+      id: 'user-stored',
+      attachmentRefs: ['data:image/jpeg;base64,preview'],
+      parts: [{ type: 'text', text: 'what happened to the goal?' }]
+    })
+  })
+
   it('drops stale optimistic history after compression and keeps only the live tail', () => {
     const compressedAuthority = [
       msg('stored-user', 'user', 'first turn that survived compression'),

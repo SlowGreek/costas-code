@@ -2,7 +2,7 @@
   "name": "hermes",
   "productName": "Catalyst",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.20.0",
   "description": "Native desktop shell for Catalyst, powered by Hermes Agent.",
   "author": "Nous Research",
   "type": "module",

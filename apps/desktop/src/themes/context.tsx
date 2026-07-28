@@ -56,6 +56,8 @@ const normalizeMode = (value: string | null): ThemeMode =>
 // profiles get their own entry and fall back to that global until assigned, so
 // unassigned profiles and pre-per-profile installs stay on the global value.
 const profilePref = <T extends string>(record: string, legacy: string, normalize: (v: string | null) => T) => ({
+  /** The stored value exactly as written, before validation. */
+  raw: (profile: string): string | null => storedStringRecord(record)[profile] ?? storedString(legacy),
   resolve: (profile: string): T => normalize(storedStringRecord(record)[profile] ?? storedString(legacy)),
   assign: (profile: string, value: T): void => {
     if (profile === 'default') {
@@ -335,8 +337,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     [userThemes, backendThemes, registryVersion]
   )
 
+  // The RAW stored skin name, not yet validated. A skin can be unresolvable at
+  // this instant and become resolvable moments later: backend skins
+  // (`$HERMES_HOME/skins/*.yaml`) only land in `$backendThemes` once the gateway
+  // connects, which is well after boot. Normalizing at read time would collapse
+  // the pick to the default and — because `setTheme` persists — write that
+  // default back, silently losing the user's skin on every relaunch. So we hold
+  // the raw name and normalize reactively below, once the registries are known.
   const [themeName, setThemeNameState] = useState(() =>
-    typeof window === 'undefined' ? DEFAULT_SKIN_NAME : skinPref.resolve(readBootProfileKey())
+    typeof window === 'undefined' ? DEFAULT_SKIN_NAME : (skinPref.raw(readBootProfileKey()) ?? DEFAULT_SKIN_NAME)
   )
 
   const [mode, setModeState] = useState<ThemeMode>(() =>
@@ -347,20 +356,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // remember it for the next boot's first paint.
   useEffect(() => {
     rememberActiveProfileKey(profileKey)
-    setThemeNameState(skinPref.resolve(profileKey))
+    setThemeNameState(skinPref.raw(profileKey) ?? DEFAULT_SKIN_NAME)
     setModeState(modePref.resolve(profileKey))
   }, [profileKey])
+
+  // The skin actually painted: the stored pick when it resolves, else the
+  // default. Recomputed as themes arrive, so a late-registering backend skin
+  // takes over from the placeholder default without a reload.
+  const resolvedSkin = useMemo(
+    () => normalizeSkin(themeName),
+    // The theme stores ARE normalizeSkin's reactivity (it calls resolveTheme).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [themeName, userThemes, backendThemes, registryVersion]
+  )
 
   const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
   const resolvedMode = resolveMode(mode, systemDark)
 
   const activeTheme = useMemo(
-    () => deriveTheme(themeName, resolvedMode),
+    () => deriveTheme(resolvedSkin, resolvedMode),
     // deriveTheme resolves its seed through the merged registry, so the theme
     // stores are its reactivity too — an in-place palette edit of the ACTIVE
     // skin (live theme authoring) must repaint, not just a name switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [themeName, resolvedMode, userThemes, backendThemes, registryVersion]
+    [resolvedSkin, resolvedMode, userThemes, backendThemes, registryVersion]
   )
 
   // What actually gets painted (matches the `.dark` class applyTheme toggles).
@@ -403,8 +422,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // (`appearance.toggleMode`) so it shows up in the hotkey map and is rebindable.
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ theme: activeTheme, themeName, mode, resolvedMode, renderedMode, availableThemes, setTheme, setMode }),
-    [activeTheme, themeName, mode, resolvedMode, renderedMode, availableThemes, setTheme, setMode]
+    // `themeName` is the RESOLVED skin so the settings grid / palette highlight
+    // what's actually painted. The raw pick stays in state (and storage) so an
+    // unresolvable-yet backend skin isn't overwritten by the placeholder.
+    () => ({
+      theme: activeTheme,
+      themeName: resolvedSkin,
+      mode,
+      resolvedMode,
+      renderedMode,
+      availableThemes,
+      setTheme,
+      setMode
+    }),
+    [activeTheme, resolvedSkin, mode, resolvedMode, renderedMode, availableThemes, setTheme, setMode]
   )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

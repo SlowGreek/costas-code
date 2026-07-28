@@ -67,4 +67,40 @@ describe('ThemeProvider ← backend skin sync', () => {
     )
     expect(cssVar('--theme-foreground')).toBe('#ff9f0a')
   })
+
+  // Regression: the desktop remembers a backend skin by NAME, but backend skins
+  // only reach `$backendThemes` once the gateway connects — long after boot. The
+  // provider used to validate the stored name at mount, when nothing could
+  // resolve it yet, fall back to the default, and (via setTheme) persist that
+  // default over the user's pick. Net effect: any `$HERMES_HOME/skins/*.yaml`
+  // skin reverted to the default on every quit/relaunch.
+  it('keeps a backend skin selected across a relaunch, painting it once it registers', () => {
+    // Session 1: skin registered and picked, so the name lands in storage.
+    const first = render(
+      <ThemeProvider>
+        <div />
+      </ThemeProvider>
+    )
+
+    act(() => ingestBackendSkin(bloomberg('#ff9f0a'), { apply: true }))
+    expect(cssVar('--theme-foreground')).toBe('#ff9f0a')
+    first.unmount()
+
+    // Session 2: fresh process. localStorage persists; the backend registry
+    // does not, and the gateway has not connected yet.
+    __resetBackendSkinSync()
+
+    render(
+      <ThemeProvider>
+        <div />
+      </ThemeProvider>
+    )
+
+    // gateway.ready seeds the skin without applying. The stored pick must still
+    // be remembered, so this seed alone repaints it.
+    act(() => ingestBackendSkin(bloomberg('#ff9f0a'), { apply: false }))
+
+    expect(cssVar('--theme-foreground')).toBe('#ff9f0a')
+    expect(cssVar('--theme-background-seed')).toBe('#000000')
+  })
 })

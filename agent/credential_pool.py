@@ -33,6 +33,7 @@ from hermes_cli.auth import (
     _load_provider_state,
     _resolve_kimi_base_url,
     _resolve_zai_base_url,
+    _resolve_copilot_base_url,
     _save_auth_store,
     _save_provider_state,
     _store_provider_state,
@@ -2581,6 +2582,17 @@ def _seed_from_env(provider: str, entries: List[PooledCredential]) -> Tuple[bool
             base_url = _resolve_kimi_base_url(token, pconfig.inference_base_url, env_url)
         elif provider == "zai":
             base_url = _resolve_zai_base_url(token, pconfig.inference_base_url, env_url)
+        elif is_copilot_provider(provider):
+            # Copilot's endpoint is account-specific, so the registry default is
+            # only correct for individual seats. This seeder runs AFTER
+            # ``_seed_from_singletons`` and writes the SAME ``env:<VAR>`` source
+            # key, so without this branch it overwrites the exchange-resolved
+            # tenant endpoint with the generic host on every load — and an
+            # enterprise account then talks to the wrong host and gets a
+            # Terms-of-Service 403 that explains nothing.
+            base_url = _resolve_copilot_base_url(
+                token, pconfig.inference_base_url, env_url
+            )
         changed |= _upsert_entry(
             entries,
             provider,

@@ -261,3 +261,116 @@ def test_stale_persisted_copilot_endpoint_is_dropped_on_reload(tmp_path, monkeyp
 
     persisted = json.loads((tmp_path / "hermes" / "auth.json").read_text())
     assert "base_url" not in persisted["credential_pool"]["copilot"][0]
+
+
+# ── the enterprise endpoint survives the whole load ──────────────────────────
+#
+# ``load_pool()`` seeds twice: ``_seed_from_singletons`` resolves the endpoint
+# from the token exchange, then ``_seed_from_env`` runs and writes the SAME
+# ``env:<VAR>`` source key. When the second seeder stamped the registry default
+# it silently clobbered the tenant host on every load. Asserting on the seeders
+# in isolation cannot catch that — these tests assert the FINAL state.
+
+
+@pytest.fixture
+def _enterprise_copilot_env(monkeypatch):
+    """A signed-in Copilot account whose exchange advertises a tenant host."""
+    import hermes_cli.copilot_auth as copilot_auth
+
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "ghu_managed_account")
+    monkeypatch.setattr(
+        copilot_auth, "resolve_copilot_token",
+        lambda *a, **k: ("ghu_managed_account", "COPILOT_GITHUB_TOKEN"),
+    )
+    monkeypatch.setattr(
+        copilot_auth, "get_copilot_api_token",
+        lambda token: (token, "https://api.enterprise.githubcopilot.com"),
+    )
+
+
+@pytest.mark.parametrize("provider", ["copilot", "github-copilot"])
+def test_load_pool_keeps_the_enterprise_endpoint(
+    tmp_path, monkeypatch, _enterprise_copilot_env, provider
+):
+    """The endpoint a managed account is actually served from must survive."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+
+    from agent.credential_pool import load_pool
+
+    entry = load_pool(provider).select()
+
+    assert entry is not None
+    assert entry.base_url == "https://api.enterprise.githubcopilot.com"
+
+
+def test_env_seeder_does_not_overwrite_the_exchange_endpoint(
+    tmp_path, monkeypatch, _enterprise_copilot_env
+):
+    """Pin the ordering bug directly: seed once, then again, endpoint holds."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+
+    import agent.credential_pool as pool_mod
+
+    entries: list = []
+    pool_mod._seed_from_singletons("copilot", entries)
+    assert entries[0].base_url == "https://api.enterprise.githubcopilot.com"
+
+    pool_mod._seed_from_env("copilot", entries)
+    assert entries[0].base_url == "https://api.enterprise.githubcopilot.com", (
+        "_seed_from_env overwrote the exchange-resolved tenant endpoint"
+    )
+
+
+def test_individual_account_still_gets_the_generic_host(tmp_path, monkeypatch):
+    """Individual seats have no tenant host; the registry default applies."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "ghu_individual")
+
+    import hermes_cli.copilot_auth as copilot_auth
+
+    monkeypatch.setattr(
+        copilot_auth, "resolve_copilot_token",
+        lambda *a, **k: ("ghu_individual", "COPILOT_GITHUB_TOKEN"),
+    )
+    # No endpoints.api and no proxy-ep -> exchange resolves no base URL.
+    monkeypatch.setattr(
+        copilot_auth, "get_copilot_api_token", lambda token: (token, None)
+    )
+
+    from agent.credential_pool import load_pool
+
+    entry = load_pool("copilot").select()
+
+    assert entry is not None
+    assert entry.base_url == "https://api.githubcopilot.com"
+
+
+def test_explicit_env_override_beats_the_exchange(tmp_path, monkeypatch):
+    """COPILOT_API_URL is the one thing that outranks the exchange."""
+    from hermes_cli.auth import _resolve_copilot_base_url
+
+    resolved = _resolve_copilot_base_url(
+        "ghu_token",
+        "https://api.githubcopilot.com",
+        "https://copilot.internal.example",
+    )
+
+    assert resolved == "https://copilot.internal.example"
+
+
+def test_endpoint_resolution_failure_falls_back_to_the_default(monkeypatch):
+    """A failed exchange must not take Copilot offline."""
+    import hermes_cli.copilot_auth as copilot_auth
+    from hermes_cli.auth import _resolve_copilot_base_url
+
+    def _boom(token):
+        raise RuntimeError("exchange unreachable")
+
+    monkeypatch.setattr(copilot_auth, "get_copilot_api_token", _boom)
+
+    resolved = _resolve_copilot_base_url(
+        "ghu_token", "https://api.githubcopilot.com", ""
+    )
+
+    assert resolved == "https://api.githubcopilot.com"
+

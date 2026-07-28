@@ -549,6 +549,41 @@ def _resolve_kimi_base_url(api_key: str, default_url: str, env_override: str) ->
 
 
 
+def _resolve_copilot_base_url(api_key: str, default_url: str, env_override: str) -> str:
+    """Return the account-specific Copilot API base URL.
+
+    Copilot's endpoint is a property of the authenticated account, not a static
+    provider default: individual seats use the public host, while managed and
+    enterprise seats are served from a tenant host that only the token exchange
+    advertises (``endpoints.api``, with a ``proxy-ep`` fallback). Sending an
+    enterprise account's traffic to the public host is what makes GitHub answer
+    with a Terms-of-Service 403 that names no real cause.
+
+    The official runtime resolves this the same way — it reads
+    ``copilotUser.endpoints.api`` from the live auth info and keeps no endpoint
+    of its own (copilot-agent-runtime ``runtime/src/auth/core.rs``
+    ``get_copilot_api_url``), with only an explicit ``COPILOT_API_URL``
+    environment value taking precedence.
+
+    Mirrors ``_resolve_kimi_base_url``'s contract: an explicit env override
+    always wins, and any failure falls back to ``default_url`` rather than
+    raising — a resolution failure must not take Copilot offline.
+    """
+    if env_override:
+        return env_override
+    if not api_key:
+        return default_url
+    try:
+        from hermes_cli.copilot_auth import get_copilot_api_token
+
+        _, resolved = get_copilot_api_token(api_key)
+        resolved = (resolved or "").strip().rstrip("/")
+        return resolved or default_url
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Copilot base URL resolution fell back to default: %s", exc)
+        return default_url
+
+
 _PLACEHOLDER_SECRET_VALUES = {
     "*",
     "**",

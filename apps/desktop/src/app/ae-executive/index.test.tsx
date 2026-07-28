@@ -195,14 +195,14 @@ describe('AE executive workspace', () => {
     const view = renderTab(tab.id)
     expect(await screen.findByText(`RUN ${tab.id.toUpperCase()}`)).toBeTruthy()
     expect(view.container.querySelector(`[data-ae-executive-tab="${tab.id}"]`)).toBeTruthy()
-    expect(screen.getByRole('button', { name: tab.label }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('tab', { name: tab.label }).getAttribute('aria-current')).toBe('page')
   })
 
   it('navigates across tabs and redraws from the cached batch', async () => {
     renderTab('home')
     expect(await screen.findByText('RUN HOME')).toBeTruthy()
 
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '[Q]UINE' })))
+    await act(async () => fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' })))
 
     expect(await screen.findByText('RUN QUINE')).toBeTruthy()
     expect(screen.queryByText('RUN HOME')).toBeNull()
@@ -233,7 +233,7 @@ describe('AE executive workspace', () => {
 
     renderTab('home')
     await flushPromises()
-    fireEvent.click(screen.getByRole('button', { name: '[Q]UINE' }))
+    fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' }))
     expect(screen.getByText('RUN QUINE')).toBeTruthy()
 
     await act(async () => {
@@ -348,8 +348,8 @@ describe('AE executive workspace', () => {
     await screen.findByText('RUN HOME')
 
     expect(view.container.querySelector('nav[aria-label="AgentExperiments executive tabs"]')).toBeNull()
-    expect(screen.getAllByRole('button', { name: '[Q]UINE' })).toHaveLength(1)
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '[Q]UINE' })))
+    expect(screen.getAllByRole('tab', { name: '[Q]UINE' })).toHaveLength(1)
+    await act(async () => fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' })))
     expect(await screen.findByText('RUN QUINE')).toBeTruthy()
   })
 
@@ -359,7 +359,7 @@ describe('AE executive workspace', () => {
 
     expect(await screen.findByText('RUN MARKETPLACE')).toBeTruthy()
     expect(view.container.querySelector('[data-ae-executive-tab="marketplace"]')).toBeTruthy()
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'C[A]LCULATOR' })))
+    await act(async () => fireEvent.click(screen.getByRole('tab', { name: 'C[A]LCULATOR' })))
     expect(await screen.findByText('RUN CALC')).toBeTruthy()
     expect(view.container.querySelector('[data-ae-executive-tab="calc"]')).toBeTruthy()
   })

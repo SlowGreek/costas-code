@@ -4629,6 +4629,61 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     "error": f"MCP server '{server_name}' is not connected"
                 }, ensure_ascii=False)
 
+        from tools.lucid_mcp_bridge import (
+            current_lucid_host_context_meta,
+            lucid_bootstrap_decision,
+            lucid_retry_disposition,
+            lucid_unsigned_posture,
+        )
+
+        # ``session_id`` in the generic dispatch kwargs is the current storage
+        # segment, not LUCID's durable conversation UUID. Never confuse the two.
+        # Host adapters may pass an explicit conversation_id; otherwise the
+        # task-local binding established at turn entry is authoritative.
+        explicit_conversation = kwargs.get("conversation_id")
+        if explicit_conversation is None:
+            from gateway.session_context import get_lucid_conversation_id
+
+            explicit_conversation = get_lucid_conversation_id()
+        lifecycle = args.get("value", args) if isinstance(args, dict) else {}
+        lifecycle_action = lifecycle.get("action") if isinstance(lifecycle, dict) else None
+        bootstrap = None
+        if (
+            tool_name == "lucid.set"
+            and isinstance(args, dict)
+            and args.get("path") == "role-session"
+            and lifecycle_action in {"signin", "recover"}
+        ):
+            bootstrap = lucid_bootstrap_decision(
+                explicit_conversation,
+                action="recover" if lifecycle_action == "recover" else "signin",
+            )
+            if bootstrap is None:
+                return json.dumps(
+                    {
+                        "error": "LUCID host role or conversation identity is unavailable",
+                        "code": "lucid-role-unconfigured",
+                        "retryable": False,
+                        "authority": "none",
+                    },
+                    ensure_ascii=False,
+                )
+        host_meta = current_lucid_host_context_meta(
+            server_name,
+            server._config,
+            conversation_id=explicit_conversation,
+            resolved_command=server._resolved_command,
+            bootstrap=bootstrap,
+        )
+        lucid_disposition = lucid_retry_disposition(
+            server_name,
+            server._config,
+            tool_name,
+            resolved_command=server._resolved_command,
+        )
+        if lucid_disposition is not None and host_meta is None:
+            return json.dumps(lucid_unsigned_posture(), ensure_ascii=False)
+
         async def _call():
             _mark_server_call_started(server)
             async with server._rpc_lock:
@@ -4638,14 +4693,6 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 # it and detect the gateway platform / session for routing.
                 server._pending_call_context = contextvars.copy_context()
                 try:
-                    from tools.lucid_mcp_bridge import current_lucid_host_context_meta
-
-                    host_meta = current_lucid_host_context_meta(
-                        server_name,
-                        server._config,
-                        session_id=kwargs.get("session_id"),
-                        resolved_command=server._resolved_command,
-                    )
                     result = await server.session.call_tool(
                         tool_name,
                         arguments=args,
@@ -4895,6 +4942,25 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             }, ensure_ascii=False)
 
     return _handler
+
+
+def invoke_lucid_bootstrap_signin(*, conversation_id: object = None) -> str:
+    """Invoke Butler's host-owned bootstrap/signin path over admitted MCP.
+
+    Hermes sends only the closed lifecycle arguments plus its conversation UUID.
+    Butler owns capability issuance, loading, verification, and retained
+    authorization for later calls; this helper never reads a token/key/path.
+    """
+
+    from tools.lucid_mcp_bridge import LUCID_SERVER_NAME, lucid_signin_request
+
+    server = _get_connected_server_for_call(LUCID_SERVER_NAME)
+    timeout = server.tool_timeout if server is not None else _DEFAULT_TOOL_TIMEOUT
+    handler = _make_tool_handler(LUCID_SERVER_NAME, "lucid.set", timeout)
+    kwargs = {}
+    if conversation_id is not None:
+        kwargs["conversation_id"] = conversation_id
+    return handler(lucid_signin_request(), **kwargs)
 
 
 def _make_list_resources_handler(server_name: str, tool_timeout: float):

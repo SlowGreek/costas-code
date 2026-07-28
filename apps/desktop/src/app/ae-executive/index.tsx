@@ -18,7 +18,6 @@ import {
   studioDesignerContext
 } from './scene'
 import { AeScenePainter, type UguiSceneEvent } from './scene-painter'
-import { AeShellViewport } from './shell-viewport'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
 
@@ -97,11 +96,10 @@ export function AeExecutiveWorkspace() {
   }, [])
 
   const requestedTab = params.tab ?? ''
-  const shellRequested = requestedTab === 'shell'
   const requestedRow = batch?.scenes.find(row => row.tab === requestedTab)
-  const tabId = requestedRow || shellRequested ? requestedTab : aeExecutiveTab(requestedTab).id
+  const tabId = requestedRow ? requestedTab : aeExecutiveTab(requestedTab).id
   const selectedRow = batch?.scenes.find(row => row.tab === tabId)
-  const sourceScene = !shellRequested ? selectedRow?.scene ?? null : null
+  const sourceScene = selectedRow?.scene ?? null
 
   const lucidContext = batch && sourceScene && tabId === 'lucid'
     ? lucidActionContext(batch, sourceScene)
@@ -163,6 +161,14 @@ export function AeExecutiveWorkspace() {
         return
       }
 
+      if (tabId === 'shell' && event.action.startsWith('shell.')) {
+        setNotice(
+          `SHELL intent routed · ${event.action} · revision ${event.revision} · awaiting canonical RUN reduction; host state unchanged`
+        )
+
+        return
+      }
+
       if (tabId !== 'studio' || !scene) {
         await onAction(event.action)
 
@@ -202,10 +208,23 @@ export function AeExecutiveWorkspace() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>
       <main className="min-h-0 flex-1 overflow-hidden p-3">
         <div className="mx-auto h-full min-h-0 w-full max-w-7xl">
-          {shellRequested ? (
-            <AeShellViewport />
-          ) : scene ? (
-            <AeScenePainter onAction={onAction} onEvent={onSceneEvent} scene={scene} />
+          {scene ? (
+            <div className="flex h-full min-h-0 flex-col gap-2">
+              {selectedRow && selectedRow.state !== 'fresh' ? (
+                <div
+                  aria-live="polite"
+                  className="shrink-0 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 font-mono text-xs text-amber-700"
+                  data-ae-scene-posture={selectedRow.state}
+                  role="status"
+                >
+                  UGUI Scene {selectedRow.state} · {selectedRow.reason ?? 'producer posture'}
+                  {selectedRow.preserved ? ' · last valid Scene preserved' : ''}
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1">
+                <AeScenePainter onAction={onAction} onEvent={onSceneEvent} scene={scene} />
+              </div>
+            </div>
           ) : error ? (
             <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-5 font-mono text-sm text-destructive">
               UGUI Scene unavailable · {error}
@@ -225,12 +244,12 @@ export function AeExecutiveWorkspace() {
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-(--ui-stroke-tertiary) px-4 text-[0.65rem] text-(--ui-text-quaternary)">
         <span
           aria-hidden="true"
-          className={cn('size-1.5 rounded-full', scene || shellRequested ? 'bg-sky-500' : 'bg-amber-500')}
+          className={cn('size-1.5 rounded-full', scene ? 'bg-sky-500' : 'bg-amber-500')}
           data-ugui-structural-status
         />
         <span aria-live="polite" data-ae-trust-footer>{trust}</span>
         <span className="truncate" data-ae-reconcile-notice>
-          · {shellRequested ? 'structural shell projection · physical evidence not implied' : notice}
+          · {notice}
         </span>
         {selectedStatus && <span className="truncate">· {selectedStatus}</span>}
         <span className="ml-auto shrink-0">RUN facts · UGUI composition/layout · Desktop paint</span>

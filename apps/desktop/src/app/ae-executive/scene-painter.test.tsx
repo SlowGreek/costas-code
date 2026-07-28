@@ -110,7 +110,7 @@ describe('UGUI typed Scene events', () => {
   it('does not add selection wrappers when the producer declares no editor metadata', () => {
     const view = render(<AeScenePainter scene={scene} />)
 
-    expect(view.container.querySelector('[data-ugui-node-id]')).toBeNull()
+    expect(view.container.querySelector('[role="option"]')).toBeNull()
     expect(view.container.querySelector('[data-ugui-selection-overlay]')).toBeNull()
   })
 

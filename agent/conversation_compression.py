@@ -1889,7 +1889,9 @@ def compress_context(
                     try:
                         from gateway.session_context import set_current_session_id
 
-                        set_current_session_id(agent.session_id)
+                        set_current_session_id(
+                            agent.session_id, conversation_continuity=True
+                        )
                     except Exception:
                         os.environ["HERMES_SESSION_ID"] = agent.session_id
                     # The gateway/tools session context (ContextVar + env) and the
@@ -1934,7 +1936,9 @@ def compress_context(
                         agent.session_id = old_session_id
                         try:
                             from gateway.session_context import set_current_session_id
-                            set_current_session_id(agent.session_id)
+                            set_current_session_id(
+                                agent.session_id, conversation_continuity=True
+                            )
                         except Exception:
                             os.environ["HERMES_SESSION_ID"] = agent.session_id
                         try:

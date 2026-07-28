@@ -158,18 +158,34 @@ describe('generation executive envelope', () => {
     })
   })
 
-  it('admits a structural Shell row without requiring shell.tab.shell in producer Scenes', () => {
+  it('admits the canonical Shell row and its shared shell.tab.shell route from the producer envelope', () => {
     const base = sceneEnvelope(7)
+    const withShellAction = (value: ReturnType<typeof scene>) => {
+      const root = value.nodes[0] as { kids: string[] }
+
+      root.kids.push(`${value.id}-tab-shell`)
+      value.nodes.push({
+        id: `${value.id}-tab-shell`,
+        p: 'button',
+        a: { label: 'SH[E]LL' },
+        on: { tap: 'shell.tab.shell' }
+      })
+
+      return value
+    }
 
     const value = {
       ...base,
-      scenes: [...base.scenes, { tab: 'shell', state: 'structural', scene: scene('shell') }]
+      scenes: [
+        ...base.scenes.map(row => ({ ...row, scene: withShellAction(row.scene) })),
+        { tab: 'shell', state: 'fresh', scene: withShellAction(scene('shell')) }
+      ]
     }
 
     const parsed = parseExecutiveBatch(value)
 
     expect(parsed.scenes).toHaveLength(3)
-    expect(sceneForTab(parsed, 'home').nodes.some(node => node.on?.tap === 'shell.tab.shell')).toBe(false)
+    expect(sceneForTab(parsed, 'home').nodes.some(node => node.on?.tap === 'shell.tab.shell')).toBe(true)
     expect(sceneForTab(parsed, 'shell').id).toBe('run-shell')
   })
 

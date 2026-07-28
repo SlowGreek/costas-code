@@ -54,4 +54,7 @@ if (new URLSearchParams(window.location.search).get('win') === 'overlay') {
       </ErrorBoundary>
     </StrictMode>
   )
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => window.hermesDesktop.signalLifecycleRendererReady())
+  })
 }

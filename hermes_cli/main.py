@@ -5976,7 +5976,7 @@ def cmd_gui(args: argparse.Namespace):
     except Exception:
         pass
 
-    from hermes_constants import with_hermes_node_path
+    from hermes_constants import find_node_executable, with_hermes_node_path
 
     # with_hermes_node_path() copies os.environ when called with no arg.
     env = with_hermes_node_path()
@@ -5998,6 +5998,43 @@ def cmd_gui(args: argparse.Namespace):
     config_electron_flags, config_disable_gpu = _desktop_launch_options()
     if config_disable_gpu != "auto" and "HERMES_DESKTOP_DISABLE_GPU" not in os.environ:
         env["HERMES_DESKTOP_DISABLE_GPU"] = config_disable_gpu
+
+    machine_op = getattr(args, "machine", None)
+    if machine_op:
+        timeout_ms = getattr(args, "readiness_timeout_ms", 30000)
+        if not isinstance(timeout_ms, int) or timeout_ms < 100 or timeout_ms > 120000:
+            print(json.dumps({
+                "schema": "catalyst-desktop-lifecycle-error/1",
+                "op": machine_op,
+                "code": "desktop-lifecycle-timeout",
+            }, separators=(",", ":")))
+            sys.exit(2)
+        node = find_node_executable("node")
+        if not node:
+            print(json.dumps({
+                "schema": "catalyst-desktop-lifecycle-error/1",
+                "op": machine_op,
+                "code": "desktop-lifecycle-node-unavailable",
+            }, separators=(",", ":")))
+            sys.exit(1)
+        env["HERMES_DESKTOP_LIFECYCLE_BUILD_ARGV"] = json.dumps([
+            sys.executable,
+            "-m",
+            "hermes_cli.main",
+            "desktop",
+            "--build-only",
+            "--force-build",
+        ], separators=(",", ":"))
+        env["HERMES_DESKTOP_LIFECYCLE_TIMEOUT_MS"] = str(timeout_ms)
+        env["HERMES_DESKTOP_LIFECYCLE_ELECTRON_FLAGS"] = json.dumps(config_electron_flags)
+        lifecycle_script = desktop_dir / "scripts" / "run-desktop-lifecycle.mjs"
+        result = subprocess.run(
+            [node, str(lifecycle_script), machine_op],
+            cwd=PROJECT_ROOT,
+            env=env,
+            check=False,
+        )
+        sys.exit(result.returncode)
 
     source_mode = getattr(args, "source", False)
     skip_build = getattr(args, "skip_build", False)

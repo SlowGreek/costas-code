@@ -280,6 +280,47 @@ it('admits a structural SHELL row when producer Scenes omit the host-derived act
   expect(validateAeExecutiveBatch(batch).scenes).toHaveLength(batch.scenes.length)
 })
 
+it('admits the canonical recursive SHELL Scene row with independent OS and SURFACE actions', () => {
+  const tabs = [...AE_EXECUTIVE_TABS, 'marketplace', 'shell']
+  const batch = semanticBatch(tabs)
+  const shell = batch.scenes.find(row => row.tab === 'shell')!.scene
+  const nested = semanticScene('nested-shell', tabs)
+
+  ;(shell.nodes as Array<Record<string, unknown>>).push(
+    {
+      id: 'shell-os-macos',
+      p: 'button',
+      a: { label: 'macOS', name: 'OS macOS' },
+      on: { key: 'shell.os.macos', tap: 'shell.os.macos' }
+    },
+    {
+      id: 'shell-surface-desktop',
+      p: 'button',
+      a: { label: 'Desktop', name: 'SURFACE Desktop' },
+      on: { key: 'shell.surface.macos-desktop', tap: 'shell.surface.macos-desktop' }
+    },
+    {
+      id: 'shell-system-within-system',
+      p: 'native',
+      a: {
+        catalog: 'system-shell-scene',
+        name: 'Recursive system shell',
+        spec: { scene: nested }
+      }
+    }
+  )
+  ;(shell.nodes[0] as { kids: string[] }).kids.push(
+    'shell-os-macos',
+    'shell-surface-desktop',
+    'shell-system-within-system'
+  )
+
+  const admitted = validateAeExecutiveBatch(batch)
+
+  expect(admitted.scenes).toHaveLength(tabs.length)
+  expect(admitted.scenes.find(row => row.tab === 'shell')?.scene).toBe(shell)
+})
+
 it('admits a nested content-sized Dashboard with no remaining-height node', () => {
   const batch = semanticBatch(AE_EXECUTIVE_TABS)
   const dashboard = batch.scenes.find(row => row.tab === 'dashboard')!.scene

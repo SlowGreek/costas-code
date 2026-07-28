@@ -14,10 +14,8 @@ export const AE_EXECUTIVE_TAB_IDS = [
 ] as const
 
 export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
-export const AE_EXECUTIVE_HOST_DERIVED_TAB_IDS = ['shell'] as const
-export const AE_EXECUTIVE_BATCH_TAB_IDS = AE_EXECUTIVE_TAB_IDS.filter(
-  (id): id is Exclude<AeExecutiveTabId, 'shell'> => id !== 'shell'
-)
+export const AE_EXECUTIVE_HOST_DERIVED_TAB_IDS = [] as const
+export const AE_EXECUTIVE_BATCH_TAB_IDS = AE_EXECUTIVE_TAB_IDS
 
 export interface AeExecutiveTab {
   readonly id: AeExecutiveTabId
@@ -123,7 +121,7 @@ export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
     mnemonic: 'E',
     route: '/ae/shell',
     icon: 'device-desktop',
-    summary: 'Project one semantic experience through explicit shell, surface, and capability constraints.'
+    summary: 'Enter the canonical recursive UGUI system shell with independent OS and surface projection axes.'
   }
 ] as const
 

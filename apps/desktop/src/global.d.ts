@@ -21,6 +21,7 @@ export {}
 declare global {
   interface Window {
     hermesDesktop: {
+      signalLifecycleRendererReady: () => void
       getAeExecutiveScenes: () => Promise<
         | {
             schema: 'ae-executive-scene-batch/1'

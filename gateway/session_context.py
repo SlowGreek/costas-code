@@ -38,6 +38,7 @@ needs to replace the import + call site:
 
 from contextvars import ContextVar
 from typing import Any
+from uuid import UUID, uuid5
 
 # Sentinel to distinguish "never set in this context" from "explicitly set to empty".
 # When a contextvar holds _UNSET, we fall back to os.environ (CLI/cron compat).
@@ -79,6 +80,14 @@ _SESSION_USER_ID: ContextVar = ContextVar("HERMES_SESSION_USER_ID", default=_UNS
 _SESSION_USER_NAME: ContextVar = ContextVar("HERMES_SESSION_USER_NAME", default=_UNSET)
 _SESSION_KEY: ContextVar = ContextVar("HERMES_SESSION_KEY", default=_UNSET)
 _SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
+# Stable, host-only identity for an entire durable conversation lineage. This
+# is deliberately not part of _VAR_MAP and is never mirrored into os.environ:
+# it is authority-adjacent MCP metadata, not subprocess/model input.
+_LUCID_CONVERSATION_ID: ContextVar = ContextVar(
+    "HERMES_LUCID_CONVERSATION_ID", default=_UNSET
+)
+_LUCID_CONVERSATION_NAMESPACE = UUID("93d653df-6f7b-4a59-9a3b-85ba9ccdddc2")
+_MAX_DURABLE_CONVERSATION_KEY_BYTES = 512
 # In-process UI session/window id for multi-session desktop/TUI hosts. This is
 # intentionally separate from HERMES_SESSION_ID: the latter is the durable
 # conversation/session-db id, while the UI id is the live frontend tab/window
@@ -138,7 +147,64 @@ _VAR_MAP = {
 }
 
 
-def set_current_session_id(session_id: str) -> None:
+def stable_lucid_conversation_id(durable_conversation_id: object) -> str:
+    """Project one durable conversation key to a stable canonical UUID.
+
+    The raw SessionDB key is intentionally never put on the LUCID wire. UUID5
+    gives a deterministic identity across process restarts and compression
+    children while keeping admitted host metadata fixed at 36 ASCII bytes.
+    Empty, non-string, or unreasonably large keys return ``""`` rather than
+    minting an accidental shared identity.
+    """
+
+    if not isinstance(durable_conversation_id, str) or not durable_conversation_id:
+        return ""
+    try:
+        encoded = durable_conversation_id.encode("utf-8")
+    except UnicodeEncodeError:
+        return ""
+    if len(encoded) > _MAX_DURABLE_CONVERSATION_KEY_BYTES:
+        return ""
+    # Preserve an already-canonical UUID so persisted host identities are not
+    # projected through UUID5 a second time.
+    try:
+        parsed = UUID(durable_conversation_id)
+    except (ValueError, AttributeError):
+        parsed = None
+    if parsed is not None and parsed.int != 0:
+        return str(parsed)
+    return str(uuid5(_LUCID_CONVERSATION_NAMESPACE, durable_conversation_id))
+
+
+def bind_lucid_conversation_id(durable_conversation_id: object):
+    """Bind this task to one host-only conversation UUID; return a reset token."""
+
+    return _LUCID_CONVERSATION_ID.set(
+        stable_lucid_conversation_id(durable_conversation_id)
+    )
+
+
+def reset_lucid_conversation_id(token) -> None:
+    """Restore a previous LUCID conversation binding without env fallback."""
+
+    try:
+        _LUCID_CONVERSATION_ID.reset(token)
+    except Exception:
+        _LUCID_CONVERSATION_ID.set("")
+
+
+def get_lucid_conversation_id(default: str = "") -> str:
+    """Return the task-local canonical UUID, never a process-global fallback."""
+
+    value = _LUCID_CONVERSATION_ID.get()
+    if value is _UNSET or not isinstance(value, str):
+        return default
+    return value or default
+
+
+def set_current_session_id(
+    session_id: str, *, conversation_continuity: bool = False
+) -> None:
     """Synchronize ``HERMES_SESSION_ID`` across ContextVar and ``os.environ``.
 
     Long-lived single-process entrypoints like the CLI can rotate sessions via
@@ -146,11 +212,19 @@ def set_current_session_id(session_id: str) -> None:
     reconstructing the entire agent. Tools still consult
     ``get_session_env("HERMES_SESSION_ID")`` with an ``os.environ`` fallback,
     so both storage paths must move together when the active session changes.
+
+    LUCID's host binding is separate. Ordinary switches invalidate/rebind it to
+    the new durable conversation. A committed compression child passes
+    ``conversation_continuity=True`` so the logical conversation UUID survives
+    segment rotation; if no prior binding exists, the child binds itself.
     """
     import os
 
     os.environ["HERMES_SESSION_ID"] = session_id
     _SESSION_ID.set(session_id)
+    current_lucid = _LUCID_CONVERSATION_ID.get()
+    if not conversation_continuity or current_lucid in (_UNSET, ""):
+        _LUCID_CONVERSATION_ID.set(stable_lucid_conversation_id(session_id))
 
 
 def set_session_vars(
@@ -163,6 +237,7 @@ def set_session_vars(
     user_name: str = "",
     session_key: str = "",
     session_id: str = "",
+    conversation_id: str = "",
     message_id: str = "",
     profile: str = "",
     cwd: str = "",
@@ -199,6 +274,9 @@ def set_session_vars(
         _SESSION_USER_NAME.set(user_name),
         _SESSION_KEY.set(session_key),
         _SESSION_ID.set(session_id),
+        _LUCID_CONVERSATION_ID.set(
+            stable_lucid_conversation_id(conversation_id or session_id)
+        ),
         _SESSION_UI_SESSION_ID.set(ui_session_id),
         _SESSION_MESSAGE_ID.set(message_id),
         _SESSION_PROFILE.set(profile),
@@ -234,6 +312,7 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_USER_NAME,
         _SESSION_KEY,
         _SESSION_ID,
+        _LUCID_CONVERSATION_ID,
         _SESSION_UI_SESSION_ID,
         _SESSION_MESSAGE_ID,
         _SESSION_PROFILE,
@@ -288,6 +367,7 @@ def reset_session_vars() -> None:
     """
     for var in _VAR_MAP.values():
         var.set(_UNSET)
+    _LUCID_CONVERSATION_ID.set(_UNSET)
     # Reset the async-delivery capability to "never bound here" (_UNSET) for the
     # same inheritance-leak reason as the mapped vars above — see clear_session_vars,
     # which resets this var on the handler-exit path for the symmetric concern.

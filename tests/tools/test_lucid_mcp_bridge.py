@@ -19,12 +19,15 @@ def test_exact_first_party_lucid_stdio_receives_bounded_host_identity(monkeypatc
     meta = lucid_host_context_meta(
         "lucid-quine",
         {"command": "butler", "args": ["--mcp-stdio"]},
-        session_id="session:desktop-123",
+        session_id="11111111-1111-4111-8111-111111111111",
         resolved_command=butler,
     )
 
     assert meta == {
-        HOST_CONTEXT_EXTENSION: {"session_id": "session:desktop-123"}
+        HOST_CONTEXT_EXTENSION: {
+            "session_id": "11111111-1111-4111-8111-111111111111",
+            "authority": "none",
+        }
     }
     assert args == {"path": "fleet"}, "host enrichment must not mutate model arguments"
 
@@ -40,7 +43,7 @@ def test_non_lucid_or_noncanonical_transports_never_receive_metadata(monkeypatch
     ]
     for name, config in cases:
         assert lucid_host_context_meta(
-            name, config, session_id="session:ok", resolved_command=butler
+            name, config, session_id="33333333-3333-4333-8333-333333333333", resolved_command=butler
         ) is None
 
 
@@ -50,7 +53,7 @@ def test_same_name_path_impersonation_fails_closed(monkeypatch):
     assert lucid_host_context_meta(
         "lucid-quine",
         {"command": "butler", "args": ["--mcp-stdio"]},
-        session_id="session:ok",
+        session_id="33333333-3333-4333-8333-333333333333",
         resolved_command="/tmp/attacker/butler",
     ) is None
 
@@ -228,12 +231,13 @@ def test_exact_confirmation_is_host_bound_and_never_accepts_a_caller_digest(monk
     assert lucid_host_context_meta(
         "lucid-quine",
         {"command": "butler", "args": ["--mcp-stdio"]},
-        session_id="session:desktop",
+        session_id="44444444-4444-4444-8444-444444444444",
         resolved_command=butler,
         exact_confirmation=confirmation,
     ) == {
         HOST_CONTEXT_EXTENSION: {
-            "session_id": "session:desktop",
+            "session_id": "44444444-4444-4444-8444-444444444444",
+            "authority": "none",
             "exact_confirmation": confirmation,
         }
     }

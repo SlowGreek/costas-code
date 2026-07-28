@@ -128,6 +128,7 @@ import {
   resolveTimeoutMs,
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
+import { createLifecycleReadinessReporter, readLifecycleSourceReceipt } from './lifecycle-readiness'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import {
   callInstalledButler,
@@ -415,6 +416,13 @@ const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
 const AE_STORE_ROOT = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
 const AE_GENERATION = resolveAeGenerationRoot(AE_STORE_ROOT)
 const AE_RUNTIME_BIN = AE_GENERATION.root
+const LIFECYCLE_READINESS = createLifecycleReadinessReporter({
+  environment: process.env,
+  execPath: process.execPath,
+  pid: process.pid,
+  source: readLifecycleSourceReceipt(process.resourcesPath),
+  aeGeneration: AE_GENERATION.generationId
+})
 const LUCID_BUTLER_PATH = path.join(AE_RUNTIME_BIN, process.platform === 'win32' ? 'butler.exe' : 'butler')
 const renderProfilePreferences = new RenderProfilePreferenceStore(path.join(RESOLVED_USER_DATA, 'render-profiles.json'))
 
@@ -1009,6 +1017,11 @@ function registerMediaProtocol() {
 }
 
 let mainWindow = null
+ipcMain.on('hermes:lifecycle:renderer-ready', event => {
+  if (LIFECYCLE_READINESS && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
+    LIFECYCLE_READINESS.rendererReady()
+  }
+})
 const backendConnectionState = createBackendConnectionState<ReturnType<typeof spawn>, any>()
 const remoteLiveness = new RemoteLivenessTracker()
 const remoteRevalidation = new RemoteRevalidationCoordinator()
@@ -7723,6 +7736,7 @@ async function spawnPoolBackend(profile, entry) {
         // can still point at the install dir even when spawn cwd is home.
         TERMINAL_CWD: hermesCwd,
         HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
+        HERMES_LUCID_ROLE: 'EM',
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         // Marks this dashboard backend as desktop-spawned so it runs the cron
         // scheduler tick loop (the gateway isn't running under the app).
@@ -7995,6 +8009,7 @@ async function startHermes() {
           ),
           TERMINAL_CWD: hermesCwd,
           HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
+          HERMES_LUCID_ROLE: 'EM',
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron
           // scheduler tick loop (the gateway isn't running under the app).

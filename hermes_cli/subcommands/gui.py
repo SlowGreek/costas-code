@@ -60,4 +60,15 @@ def build_gui_parser(subparsers, *, cmd_gui: Callable) -> None:
         action="store_true",
         help="Force a full rebuild even if the content stamp matches",
     )
+    gui_parser.add_argument(
+        "--machine",
+        choices=("inspect", "build", "launch", "run", "readiness"),
+        help="Emit one bounded JSON lifecycle result for Rust RUN; never stays resident",
+    )
+    gui_parser.add_argument(
+        "--readiness-timeout-ms",
+        type=int,
+        default=30000,
+        help="Bounded renderer readiness wait for --machine launch/run (100..120000 ms)",
+    )
     gui_parser.set_defaults(func=cmd_gui)

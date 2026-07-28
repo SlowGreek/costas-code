@@ -57,24 +57,43 @@ _conversation_id: ContextVar[Optional[str]] = ContextVar(
 
 
 def set_conversation_context(conversation_id: Optional[str]):
-    """Publish the active conversation id for ambient Portal tagging.
+    """Publish the active conversation id for ambient Portal and LUCID use.
 
     Called by the agent loop at turn entry with the conversation's stable
-    id (the session-lineage ROOT id, so the tag survives context-compression
-    session rotation). Pass ``None`` to clear. Returns the ContextVar token
-    so callers can ``reset_conversation_context(token)`` on turn exit.
+    id (the session-lineage ROOT id, so the tag and host UUID survive context-
+    compression session rotation). Pass ``None`` to clear. Returns paired
+    ContextVar tokens so callers can ``reset_conversation_context(token)`` on
+    turn exit.
     """
-    return _conversation_id.set(conversation_id or None)
+    token = _conversation_id.set(conversation_id or None)
+    try:
+        from gateway.session_context import bind_lucid_conversation_id
+
+        lucid_token = bind_lucid_conversation_id(conversation_id)
+    except Exception:
+        lucid_token = None
+    return token, lucid_token
 
 
 def reset_conversation_context(token) -> None:
-    """Restore the previous conversation context (pair with ``set_...``)."""
+    """Restore previous Portal and host conversation bindings."""
+    conversation_token = token
+    lucid_token = None
+    if isinstance(token, tuple) and len(token) == 2:
+        conversation_token, lucid_token = token
     try:
-        _conversation_id.reset(token)
+        _conversation_id.reset(conversation_token)
     except Exception:
         # Token from another Context (e.g. reset on a different thread) —
         # fall back to clearing rather than raising in cleanup paths.
         _conversation_id.set(None)
+    if lucid_token is not None:
+        try:
+            from gateway.session_context import reset_lucid_conversation_id
+
+            reset_lucid_conversation_id(lucid_token)
+        except Exception:
+            pass
 
 
 def get_conversation_context() -> Optional[str]:

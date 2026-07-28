@@ -783,7 +783,7 @@ class TestToolHandler:
                     "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
                 },
             ), self._patch_mcp_loop():
-                result = json.loads(handler(arguments, session_id="session:explicit-456"))
+                result = json.loads(handler(arguments, conversation_id="22222222-2222-4222-8222-222222222222"))
             assert result["result"] == "bounded receipt"
             assert arguments == {"path": "fleet"}
             mock_session.call_tool.assert_called_once_with(
@@ -791,7 +791,8 @@ class TestToolHandler:
                 arguments={"path": "fleet"},
                 meta={
                     "com.nous.lucid/host-context": {
-                        "session_id": "session:explicit-456",
+                        "session_id": "22222222-2222-4222-8222-222222222222",
+                        "authority": "none",
                     }
                 },
             )
@@ -891,7 +892,7 @@ class TestToolHandler:
                     "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
                 },
             ), self._patch_mcp_loop():
-                projected = json.loads(handler({"path": "private/path"}, session_id="session:one"))
+                projected = json.loads(handler({"path": "private/path"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected["error"] == "Butler refused LUCID call (no-capability)"
             assert projected["lucid_receipt"] == {
                 "schema": "hermes-lucid-receipt/1",
@@ -933,7 +934,7 @@ class TestToolHandler:
                     "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
                 },
             ), self._patch_mcp_loop():
-                projected = json.loads(handler({"path": "private"}, session_id="session:one"))
+                projected = json.loads(handler({"path": "private"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "error": "Butler returned an invalid LUCID refusal receipt",
                 "code": "lucid-invalid-receipt",
@@ -984,7 +985,7 @@ class TestToolHandler:
                     "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
                 },
             ), self._patch_mcp_loop():
-                projected = json.loads(handler({"path": "private/path"}, session_id="session:one"))
+                projected = json.loads(handler({"path": "private/path"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "result": intended_result,
                 "lucid_receipt": {
@@ -1029,7 +1030,7 @@ class TestToolHandler:
                     "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
                 },
             ), self._patch_mcp_loop():
-                projected = json.loads(handler({"path": "private"}, session_id="session:one"))
+                projected = json.loads(handler({"path": "private"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "error": "Butler returned an invalid LUCID success receipt",
                 "code": "lucid-invalid-receipt",
@@ -1115,7 +1116,7 @@ class TestToolHandler:
             ) as auth_retry, patch(
                 "tools.mcp_tool._handle_session_expired_and_retry"
             ) as session_retry, self._patch_mcp_loop():
-                projected = json.loads(handler({"task": "engineer"}, session_id="session:one"))
+                projected = json.loads(handler({"task": "engineer"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "error": "LUCID call outcome is unknown; automatic retry is disabled",
                 "code": "lucid-outcome-unknown",
@@ -1150,7 +1151,7 @@ class TestToolHandler:
             ) as auth_retry, patch(
                 "tools.mcp_tool._handle_session_expired_and_retry", return_value=None
             ) as session_retry, self._patch_mcp_loop():
-                projected = json.loads(handler({"path": "fleet"}, session_id="session:one"))
+                projected = json.loads(handler({"path": "fleet"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert "MCP call failed" in projected["error"]
             auth_retry.assert_called_once()
             session_retry.assert_called_once()

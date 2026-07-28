@@ -13,6 +13,7 @@ import json
 import os
 import re
 from typing import Any, Mapping, Optional
+from uuid import UUID
 
 LUCID_SERVER_NAME = "lucid-quine"
 HOST_CONTEXT_EXTENSION = "com.nous.lucid/host-context"
@@ -39,6 +40,8 @@ _NO_AUTOMATIC_RETRY = frozenset(
     {"lucid.show", "lucid.set", "lucid.morph", "lucid.dispatch", "lucid.steer", "lucid.cancel"}
 )
 _EXACT_CONFIRMATION_SCHEMA = "lucid-exact-confirmation/1"
+_BOOTSTRAP_SCHEMA = "hermes-lucid-bootstrap-decision/1"
+_HOST_ROLES = frozenset({"EM", "SIDEKICK"})
 
 
 def _declared_lucid_transport(server_name: str, config: Mapping[str, Any]) -> bool:
@@ -75,7 +78,14 @@ def _bounded_session_id(value: object) -> Optional[str]:
         return None
     if not value or len(value.encode("utf-8")) > _MAX_SESSION_ID_BYTES:
         return None
-    return value if _SESSION_ID_RE.fullmatch(value) else None
+    if _SESSION_ID_RE.fullmatch(value) is None:
+        return None
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        return None
+    canonical = str(parsed)
+    return canonical if parsed.int != 0 and value.lower() == canonical else None
 
 
 def lucid_host_context_meta(
@@ -84,6 +94,7 @@ def lucid_host_context_meta(
     *,
     session_id: object = None,
     resolved_command: object = None,
+    bootstrap: object = None,
     exact_confirmation: object = None,
 ) -> Optional[dict[str, dict[str, Any]]]:
     """Return bounded MCP request metadata for an admitted LUCID call."""
@@ -95,7 +106,20 @@ def lucid_host_context_meta(
     admitted = _bounded_session_id(session_id)
     if admitted is None:
         return None
-    fields: dict[str, Any] = {"session_id": admitted}
+    fields: dict[str, Any] = {"session_id": admitted, "authority": "none"}
+    if bootstrap is not None:
+        decision = _closed_object(
+            bootstrap, {"schema", "action", "role", "role_session_id"}
+        )
+        if (
+            decision is None
+            or decision.get("schema") != _BOOTSTRAP_SCHEMA
+            or decision.get("action") not in {"signin", "recover", "rotate"}
+            or decision.get("role") not in _HOST_ROLES
+            or _bounded_session_id(decision.get("role_session_id")) != admitted
+        ):
+            return None
+        fields["bootstrap"] = dict(decision)
     if exact_confirmation is not None:
         confirmation = _closed_object(
             exact_confirmation, {"schema", "verb", "arguments_hash"}
@@ -116,37 +140,83 @@ def current_lucid_host_context_meta(
     server_name: str,
     config: Mapping[str, Any],
     *,
+    conversation_id: object = None,
     session_id: object = None,
     resolved_command: object = None,
+    bootstrap: object = None,
     exact_confirmation: object = None,
 ) -> Optional[dict[str, dict[str, Any]]]:
     """Resolve host identity without reading model arguments.
 
-    Modern dispatch passes an immutable ``session_id`` handler kwarg. Older
-    entry points fall back to request-scoped ContextVars.
+    Modern host dispatch may pass an immutable ``conversation_id`` handler
+    kwarg. ``session_id`` remains a compatibility alias for host-owned callers.
+    Older entry points fall back to the dedicated request-scoped ContextVar.
+    Invalid explicit identity fails closed instead of borrowing an ambient
+    sibling binding.
     """
 
-    if _bounded_session_id(session_id) is not None:
+    explicit = conversation_id if conversation_id is not None else session_id
+    if explicit is not None:
         return lucid_host_context_meta(
             server_name,
             config,
-            session_id=session_id,
+            session_id=explicit,
             resolved_command=resolved_command,
+            bootstrap=bootstrap,
             exact_confirmation=exact_confirmation,
         )
 
-    from gateway.session_context import get_session_env
+    from gateway.session_context import get_lucid_conversation_id
 
-    fallback = get_session_env("HERMES_SESSION_CHAT_ID", "") or get_session_env(
-        "HERMES_SESSION_ID", ""
-    )
     return lucid_host_context_meta(
         server_name,
         config,
-        session_id=fallback,
+        session_id=get_lucid_conversation_id(),
         resolved_command=resolved_command,
+        bootstrap=bootstrap,
         exact_confirmation=exact_confirmation,
     )
+
+
+def lucid_signin_request() -> dict[str, str]:
+    """Return Butler's closed host lifecycle request with no authority material."""
+
+    return {"action": "signin", "path": "role-session"}
+
+
+def lucid_host_role() -> Optional[str]:
+    """Return the host-selected AE role; model arguments can never select it."""
+
+    role = os.environ.get("HERMES_LUCID_ROLE", "").strip()
+    return role if role in _HOST_ROLES else None
+
+
+def lucid_bootstrap_decision(
+    conversation_id: object, *, action: str = "signin"
+) -> Optional[dict[str, str]]:
+    """Create the closed host decision for one exact role lifecycle call."""
+
+    session_id = _bounded_session_id(conversation_id)
+    role = lucid_host_role()
+    if session_id is None or role is None or action not in {"signin", "recover", "rotate"}:
+        return None
+    return {
+        "schema": _BOOTSTRAP_SCHEMA,
+        "action": action,
+        "role": role,
+        "role_session_id": session_id,
+    }
+
+
+def lucid_unsigned_posture() -> dict[str, object]:
+    """Typed fail-closed result for an admitted call lacking host identity."""
+
+    return {
+        "error": "LUCID conversation identity is unavailable",
+        "code": "lucid-unsigned",
+        "retryable": False,
+        "authority": "none",
+    }
 
 
 def lucid_exact_confirmation(

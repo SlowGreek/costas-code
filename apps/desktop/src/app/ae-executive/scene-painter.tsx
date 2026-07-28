@@ -1,16 +1,26 @@
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type HTMLAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
-import type { AeExecutiveScene, UgSceneNode } from './scene'
+import { type AeExecutiveScene, type UgSceneNode, validateExecutiveScene } from './scene'
 
 interface AeScenePainterProps {
   scene: AeExecutiveScene
   onAction?: (action: string) => void
   onEvent?: (event: UguiSceneEvent) => void
+  depth?: number
 }
 
 export interface UguiSceneEvent {
@@ -18,7 +28,7 @@ export interface UguiSceneEvent {
   scene_id: string
   revision: number
   node_id: string
-  gesture: 'change' | 'focus' | 'key' | 'submit' | 'tap'
+  gesture: 'change' | 'drag' | 'focus' | 'key' | 'longpress' | 'submit' | 'tap'
   action: string
   payload: null | { value: string }
 }
@@ -31,6 +41,8 @@ interface SelectionRect extends CSSProperties {
 }
 
 const TEXT_SIZE: Record<string, string> = { s: 'text-[0.72rem]', m: 'text-sm', l: 'text-lg', xl: 'text-2xl' }
+const MAX_NESTED_SCENE_DEPTH = 2
+const NESTED_SCENE_CATALOGS = new Set(['scene', 'system-shell', 'system-shell-scene', 'ugui-scene'])
 
 const TOKEN_COLOR: Record<string, string> = {
   surface: 'var(--ui-chat-surface-background)',
@@ -60,7 +72,9 @@ const layoutClass = (node: UgSceneNode) =>
 const layoutData = (node: UgSceneNode) =>
   ({ 'data-ugui-height': layoutHeight(node) === undefined ? undefined : String(layoutHeight(node)) }) as const
 
-export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps) {
+const nodeData = (node: UgSceneNode) => ({ 'data-ugui-node-id': node.id }) as const
+
+export function AeScenePainter({ depth = 0, scene, onAction, onEvent }: AeScenePainterProps) {
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
   const rootRef = useRef<HTMLElement | null>(null)
@@ -130,16 +144,50 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
   }, [scene, selectedNodeId])
 
   const emit = (node: UgSceneNode, gesture: UguiSceneEvent['gesture'], action: string, payload: UguiSceneEvent['payload']) => {
-    onEvent?.({
-      schema: 'ugui-scene-event/1',
-      scene_id: scene.id ?? scene.root,
-      revision: typeof scene.receipt?.revision === 'number' ? scene.receipt.revision : 0,
-      node_id: node.id,
-      gesture,
-      action,
-      payload
-    })
-    onAction?.(action)
+    if (onEvent) {
+      onEvent({
+        schema: 'ugui-scene-event/1',
+        scene_id: scene.id ?? scene.root,
+        revision: typeof scene.receipt?.revision === 'number' ? scene.receipt.revision : 0,
+        node_id: node.id,
+        gesture,
+        action,
+        payload
+      })
+    } else {
+      onAction?.(action)
+    }
+  }
+
+  const interactionProps = (node: UgSceneNode): HTMLAttributes<HTMLElement> => {
+    const handlers = node.on ?? {}
+    const keyboardAction = handlers.key || handlers.tap
+    const name = stringAttr(node, 'name') || stringAttr(node, 'label') || node.id
+
+    if (!Object.keys(handlers).length) {return {}}
+
+    return {
+      'aria-label': name,
+      draggable: Boolean(handlers.drag),
+      onClick: handlers.tap ? () => emit(node, 'tap', handlers.tap!, null) : undefined,
+      onContextMenu: handlers.longpress
+        ? event => {
+            event.preventDefault()
+            emit(node, 'longpress', handlers.longpress!, null)
+          }
+        : undefined,
+      onDragEnd: handlers.drag ? () => emit(node, 'drag', handlers.drag!, null) : undefined,
+      onFocus: handlers.focus ? () => emit(node, 'focus', handlers.focus!, null) : undefined,
+      onKeyDown: keyboardAction
+        ? (event: KeyboardEvent<HTMLElement>) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {return}
+            event.preventDefault()
+            emit(node, handlers.key ? 'key' : 'tap', keyboardAction, null)
+          }
+        : undefined,
+      role: stringAttr(node, 'role') || 'button',
+      tabIndex: 0
+    }
   }
 
   const paint = (id: string): ReactNode => {
@@ -183,6 +231,8 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <div
             {...layoutData(node)}
+            {...nodeData(node)}
+            {...interactionProps(node)}
             className={cn('flex min-w-0 flex-col', node.id === scene.root && 'h-full min-h-0', layoutClass(node))}
             key={node.id}
             style={{ gap: numberAttr(node, 'gap', 8) }}
@@ -195,6 +245,8 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <div
             {...layoutData(node)}
+            {...nodeData(node)}
+            {...interactionProps(node)}
             className={cn('flex min-w-0 flex-wrap items-center', layoutClass(node))}
             key={node.id}
             style={{ gap: numberAttr(node, 'gap', 8) }}
@@ -207,6 +259,8 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <div
             {...layoutData(node)}
+            {...nodeData(node)}
+            {...interactionProps(node)}
             className={cn('grid min-w-0 [&>*]:col-start-1 [&>*]:row-start-1', layoutClass(node))}
             key={node.id}
           >
@@ -218,6 +272,8 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <p
             {...layoutData(node)}
+            {...nodeData(node)}
+            aria-live={stringAttr(node, 'role') === 'status' ? 'polite' : undefined}
             className={cn(
               'min-w-0 whitespace-pre-wrap font-mono leading-relaxed',
               TEXT_SIZE[stringAttr(node, 'size')] ?? TEXT_SIZE.m,
@@ -225,6 +281,7 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
               layoutClass(node)
             )}
             key={node.id}
+            role={stringAttr(node, 'role') || undefined}
             style={{ color: resolveColor(stringAttr(node, 'color')) }}
           >
             {stringAttr(node, 'text')}
@@ -236,11 +293,20 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <Button
             {...layoutData(node)}
+            {...nodeData(node)}
             aria-current={stringAttr(node, 'role') === 'tab' && attr(node, 'primary') === true ? 'page' : undefined}
+            aria-label={stringAttr(node, 'name') || stringAttr(node, 'label') || node.id}
             className={cn('w-fit justify-start font-mono', layoutClass(node))}
             disabled={!action || attr(node, 'disabled') === true}
             key={node.id}
             onClick={() => action && emit(node, 'tap', action, null)}
+            onFocus={() => node.on?.focus && emit(node, 'focus', node.on.focus, null)}
+            onKeyDown={event => {
+              if (!node.on?.key || (event.key !== 'Enter' && event.key !== ' ')) {return}
+              event.preventDefault()
+              emit(node, 'key', node.on.key, null)
+            }}
+            role={stringAttr(node, 'role') === 'tab' ? 'tab' : undefined}
             size="sm"
             variant={attr(node, 'primary') === true ? 'default' : 'outline'}
           >
@@ -255,6 +321,7 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <Input
             {...layoutData(node)}
+            {...nodeData(node)}
             aria-label={stringAttr(node, 'name') || stringAttr(node, 'placeholder') || node.id}
             className={layoutClass(node)}
             key={node.id}
@@ -275,6 +342,7 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <select
             {...layoutData(node)}
+            {...nodeData(node)}
             aria-label={stringAttr(node, 'name') || node.id}
             className={cn(
               'h-8 rounded border border-(--ui-stroke-secondary) bg-background px-2 font-mono text-xs',
@@ -304,21 +372,22 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <Progress
             aria-label={stringAttr(node, 'name') || node.id}
+            {...nodeData(node)}
             key={node.id}
             value={Math.min(1, Math.max(0, numberAttr(node, 'value')))}
           />
         )
 
       case 'divider':
-        return <div {...layoutData(node)} className={cn('h-px', layoutClass(node))} key={node.id} role="separator" style={{ background: resolveColor(stringAttr(node, 'color')) }} />
+        return <div {...layoutData(node)} {...nodeData(node)} className={cn('h-px', layoutClass(node))} key={node.id} role="separator" style={{ background: resolveColor(stringAttr(node, 'color')) }} />
 
       case 'spacer':
-        return <div {...layoutData(node)} aria-hidden="true" className={layoutClass(node)} key={node.id} style={{ height: numberAttr(node, 'size', 8) }} />
+        return <div {...layoutData(node)} {...nodeData(node)} aria-hidden="true" className={layoutClass(node)} key={node.id} style={{ height: numberAttr(node, 'size', 8) }} />
 
       case 'image':
         if (stringAttr(node, 'src').startsWith('asset://')) {
           return (
-            <div {...layoutData(node)} className={layoutClass(node)} key={node.id}>
+            <div {...layoutData(node)} {...nodeData(node)} className={layoutClass(node)} key={node.id}>
               <SceneRefusal
                 code="asset-catalog-unavailable"
                 detail={stringAttr(node, 'alt') || stringAttr(node, 'src')}
@@ -330,6 +399,7 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return (
           <img
             {...layoutData(node)}
+            {...nodeData(node)}
             alt={stringAttr(node, 'alt') || stringAttr(node, 'text-alt')}
             className={cn('max-h-full max-w-full rounded object-contain', layoutClass(node))}
             key={node.id}
@@ -341,11 +411,26 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
         return <UguiCanvas key={node.id} node={node} />
 
       case 'native':
-        if (stringAttr(node, 'catalog') === 'shell-structural-viewport') {
-          return <ShellViewportFrame key={node.id} model={attr(node, 'model')} />
+        if (NESTED_SCENE_CATALOGS.has(stringAttr(node, 'catalog'))) {
+          return (
+            <NestedScene
+              depth={depth}
+              key={node.id}
+              node={node}
+              onAction={onAction}
+              onEvent={onEvent}
+            />
+          )
         }
 
-        return <SceneRefusal code="native-realization-unavailable" detail={stringAttr(node, 'catalog') || node.id} key={node.id} />
+        return (
+          <div {...nodeData(node)} key={node.id}>
+            <SceneRefusal
+              code="native-realization-unavailable"
+              detail={stringAttr(node, 'placeholder') || stringAttr(node, 'catalog') || node.id}
+            />
+          </div>
+        )
 
       default:
         return <SceneRefusal code="primitive-unavailable" detail={`${node.p}:${node.id}`} key={node.id} />
@@ -355,11 +440,13 @@ export function AeScenePainter({ scene, onAction, onEvent }: AeScenePainterProps
   return (
     <section
       aria-label="UGUI Scene"
-      className="relative h-full min-h-0 overflow-hidden rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm"
+      className="relative h-full min-h-0 overflow-hidden rounded-xl border border-(--ui-stroke-tertiary) bg-[color-mix(in_srgb,var(--ui-chat-surface-background)_86%,transparent)] p-5 shadow-sm motion-reduce:scroll-auto motion-reduce:transition-none"
+      data-scene-depth={depth}
       data-scene-root={scene.root}
       data-scene-version={scene.sceneVersion}
       ref={rootRef}
     >
+      <VisualLossReceipt receipt={scene.receipt} />
       {paint(scene.root)}
       {selectionRect && selectedNodeId ? (
         <div
@@ -384,7 +471,7 @@ function UguiCanvas({ node }: { node: UgSceneNode }) {
   const alt = stringAttr(node, 'text-alt')
 
   return (
-    <figure className="grid gap-1.5 overflow-x-auto">
+    <figure className="grid gap-1.5 overflow-x-auto" {...nodeData(node)}>
       <svg aria-label={alt || undefined} className="max-w-full" role={alt ? 'img' : undefined} viewBox={`0 0 ${width} ${height}`}>
         {operations.map((operation, index) => {
           const fill = resolveColor(String(operation.fill ?? 'text'))
@@ -413,49 +500,91 @@ function resolveColor(value: string): string | undefined {
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : undefined
 }
 
-function ShellViewportFrame({ model }: { model: unknown }) {
-  if (!model || typeof model !== 'object' || Array.isArray(model)) {
-    return <SceneRefusal code="shell-viewport-model" detail="invalid" />
+function NestedScene({
+  depth,
+  node,
+  onAction,
+  onEvent
+}: {
+  depth: number
+  node: UgSceneNode
+  onAction?: (action: string) => void
+  onEvent?: (event: UguiSceneEvent) => void
+}) {
+  if (depth >= MAX_NESTED_SCENE_DEPTH) {
+    return <SceneRefusal code="scene-recursion-refused" detail={`depth-${depth + 1}`} />
   }
 
-  const row = model as Record<string, unknown>
-  const geometry = row.geometry && typeof row.geometry === 'object' ? (row.geometry as Record<string, unknown>) : {}
-  const viewport = geometry.viewport && typeof geometry.viewport === 'object' ? (geometry.viewport as Record<string, unknown>) : {}
-  const width = typeof viewport.width === 'number' && viewport.width > 0 ? viewport.width : 1280
-  const height = typeof viewport.height === 'number' && viewport.height > 0 ? viewport.height : 720
-  const ratio = Math.max(0.2, Math.min(5, width / height))
-  const formFactor = typeof row.form_factor === 'string' ? row.form_factor : 'desktop'
-  const shell = typeof row.shell_id === 'string' ? row.shell_id : 'unknown-shell'
-  const warning = typeof row.warning === 'string' ? row.warning : 'STRUCTURAL PROJECTION'
-  const chrome = Array.isArray(row.chrome) ? row.chrome.filter((item): item is string => typeof item === 'string') : []
+  const spec = objectAttr(node, 'spec')
+  const candidate = spec?.scene ?? spec?.sceneJson
+  let nested: unknown = candidate
+
+  if (typeof candidate === 'string') {
+    if (candidate.length > 512 * 1024) {
+      return <SceneRefusal code="nested-scene-bound" detail={node.id} />
+    }
+
+    try {
+      nested = JSON.parse(candidate)
+    } catch {
+      return <SceneRefusal code="nested-scene-json" detail={node.id} />
+    }
+  }
+
+  try {
+    validateExecutiveScene(nested as AeExecutiveScene)
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : 'invalid'
+
+    return <SceneRefusal code="nested-scene-invalid" detail={detail} />
+  }
 
   return (
-    <div className="grid min-h-72 place-items-center overflow-auto rounded-(--morph-radius-md) border border-(--morph-border-color) bg-(--morph-desktop) p-(--morph-spacing)" data-shell-form-factor={formFactor} data-shell-target={shell}>
-      <div
-        className="relative grid max-h-[34rem] min-h-52 w-full max-w-4xl overflow-hidden border-[length:var(--morph-stroke-width)] border-(--morph-border-color) bg-(--morph-surface) text-(--morph-on-surface) shadow-[var(--morph-shadow)]"
-        style={{
-          aspectRatio: String(ratio),
-          borderRadius: formFactor === 'handset' ? 'min(12%, var(--morph-radius-lg))' : 'var(--morph-radius-md)'
-        }}
-      >
-        {chrome.includes('status-bar') || chrome.includes('title-bar') ? (
-          <div className="flex h-7 items-center justify-between bg-(--morph-titlebar) px-3 text-[0.65rem] font-semibold">
-            <span>{shell}</span>
-            <span>{Math.round(width)}×{Math.round(height)}</span>
-          </div>
-        ) : null}
-        <div className="grid min-h-0 place-items-center p-4">
-          <div className="grid max-w-sm gap-3 rounded-(--morph-radius-md) border border-(--morph-border-color) bg-(--morph-surface) p-4 shadow-[var(--morph-shadow)]">
-            <div className="text-sm font-semibold">Same semantic GenUI experience</div>
-            <div className="text-xs opacity-75">One identity and action set. Shell constraints alter projection, not meaning.</div>
-            <Button size="sm">Inspect evidence</Button>
-          </div>
-        </div>
-        <div className="border-t border-(--morph-border-color) px-2 py-1 text-center font-mono text-[0.6rem] uppercase tracking-wide">
-          STRUCTURE ONLY · AUTHORITY NONE · NOT RUN · {warning}
-        </div>
-      </div>
+    <div
+      {...nodeData(node)}
+      aria-label={stringAttr(node, 'name') || `Nested UGUI Scene ${node.id}`}
+      className="h-full min-h-0 overflow-hidden rounded-lg border border-(--ui-stroke-secondary) p-2 motion-reduce:transition-none"
+      data-ugui-recursion-depth={depth + 1}
+      role="group"
+    >
+      <AeScenePainter
+        depth={depth + 1}
+        onAction={onAction}
+        onEvent={onEvent}
+        scene={nested as AeExecutiveScene}
+      />
     </div>
+  )
+}
+
+function objectAttr(node: UgSceneNode, key: string): Record<string, unknown> | null {
+  const value = attr(node, key)
+
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function VisualLossReceipt({ receipt }: { receipt: AeExecutiveScene['receipt'] }) {
+  if (!receipt) {return null}
+  const render = receipt.render && typeof receipt.render === 'object' && !Array.isArray(receipt.render)
+    ? receipt.render as Record<string, unknown>
+    : null
+  const raw = receipt.namedLosses ?? receipt.named_losses ?? render?.namedLosses ?? render?.named_losses
+  const losses = Array.isArray(raw)
+    ? [...new Set(raw.filter((loss): loss is string => typeof loss === 'string' && loss.length > 0 && loss.length <= 256))]
+      .slice(0, 32)
+    : []
+
+  if (!losses.length) {return null}
+
+  return (
+    <aside
+      aria-label="Visual loss receipt"
+      className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 font-mono text-[0.68rem] text-amber-700"
+      data-ugui-visual-loss-count={losses.length}
+      role="status"
+    >
+      Visual loss receipt · {losses.join(' · ')}
+    </aside>
   )
 }
 

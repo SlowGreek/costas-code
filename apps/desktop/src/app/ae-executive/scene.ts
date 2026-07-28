@@ -6,6 +6,7 @@ const SCENE_PRIMITIVES = new Set<UgScenePrimitive>([
 ])
 
 const CONTAINER_PRIMITIVES = new Set<UgScenePrimitive>(['column', 'row', 'stack'])
+const SCENE_GESTURES = new Set(['change', 'drag', 'focus', 'key', 'longpress', 'submit', 'tap'])
 const SCENE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const TAB_ID_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
@@ -594,6 +595,19 @@ export function validateExecutiveScene(scene: AeExecutiveScene): readonly string
       } else if (!CONTAINER_PRIMITIVES.has(node.p) && node.kids.length > 0) {
         errors.push(`leaf-children:${node.id}`)
       }
+    }
+
+    if (node.on !== undefined) {
+      if (
+        !node.on || typeof node.on !== 'object' || Array.isArray(node.on) ||
+        Object.entries(node.on).some(([gesture, handler]) =>
+          !SCENE_GESTURES.has(gesture) ||
+          typeof handler !== 'string' ||
+          handler.length < 1 ||
+          handler.length > 256 ||
+          !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(handler)
+        )
+      ) {errors.push(`handlers:${node.id}`)}
     }
 
     byId.set(node.id, node)

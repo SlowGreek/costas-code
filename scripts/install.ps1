@@ -2010,6 +2010,17 @@ function Install-Venv {
 
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
+
+    # Windows installers should trust the Windows certificate store by default.
+    # uv otherwise uses bundled Mozilla roots, which reject a corporate MITM /
+    # mandatory-proxy certificate even when Windows itself trusts it. That makes
+    # EVERY tier fail identically -- lock sync, all extras, and bare core -- on a
+    # managed enterprise machine. Respect an explicit user override, but make
+    # the zero-config path work behind normal corporate TLS inspection.
+    if (-not $env:UV_SYSTEM_CERTS) {
+        $env:UV_SYSTEM_CERTS = "true"
+        Write-Info "Using the Windows certificate store for uv downloads."
+    }
     
     Push-Location $InstallDir
     

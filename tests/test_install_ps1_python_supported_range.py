@@ -215,3 +215,29 @@ def test_install_ps1_is_pure_ascii(source):
     offenders = [(i + 1, line) for i, line in enumerate(source.splitlines()) if not line.isascii()]
 
     assert offenders == [], f"install.ps1 must remain pure ASCII; non-ASCII lines: {offenders[:5]}"
+
+
+def test_dependency_stage_uses_windows_certificate_store_by_default(source):
+    """uv defaults to bundled Mozilla roots, which fail behind enterprise TLS
+    inspection even when Windows trusts the corporate root. The installer is a
+    Windows-only script, so its zero-config default should use the native store.
+    """
+    assert '$env:UV_SYSTEM_CERTS = "true"' in source
+    assert "Windows certificate store for uv downloads" in source
+
+
+def test_dependency_stage_respects_explicit_certificate_override(source):
+    """A user who explicitly set UV_SYSTEM_CERTS=false must retain control."""
+    guard = 'if (-not $env:UV_SYSTEM_CERTS) {'
+    assignment = '$env:UV_SYSTEM_CERTS = "true"'
+    assert guard in source
+    assert source.index(guard) < source.index(assignment)
+
+
+def test_system_certs_is_set_before_any_dependency_uv_command(source):
+    """Setting the env var after uv sync would leave the hash-verified first
+    attempt broken and needlessly fall into the unpinned fallback cascade."""
+    assignment = source.index('$env:UV_SYSTEM_CERTS = "true"')
+    sync = source.index('& $UvCmd sync --extra all --locked')
+    pip = source.index('& $UvCmd pip install -e $tier.Spec')
+    assert assignment < sync < pip

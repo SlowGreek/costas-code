@@ -1,0 +1,70 @@
+name: Windows installer smoke
+
+# Exact reproduction of the desktop bootstrap's Python path on Windows.
+# Manual only: this is a debugging/verification harness, not another recurring
+# consumer of private-repo Actions minutes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: PowerShell 5.1 installer stages
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f54457d0c9ce  # v4
+        with:
+          ref: costas-code
+
+      - name: Show native environment
+        shell: powershell
+        run: |
+          $PSVersionTable | Format-List
+          Write-Host "workspace=$env:GITHUB_WORKSPACE"
+          Write-Host "temp=$env:RUNNER_TEMP"
+          python --version
+
+      - name: Install uv through the real installer stage
+        shell: powershell
+        run: |
+          & .\scripts\install.ps1 `
+            -Stage uv `
+            -NonInteractive `
+            -HermesHome "$env:RUNNER_TEMP\hermes" `
+            -InstallDir "$env:GITHUB_WORKSPACE"
+
+      - name: Resolve Python through the real installer stage
+        shell: powershell
+        run: |
+          & .\scripts\install.ps1 `
+            -Stage python `
+            -NonInteractive `
+            -HermesHome "$env:RUNNER_TEMP\hermes" `
+            -InstallDir "$env:GITHUB_WORKSPACE"
+
+      - name: Create venv through the real installer stage
+        shell: powershell
+        run: |
+          & .\scripts\install.ps1 `
+            -Stage venv `
+            -NonInteractive `
+            -HermesHome "$env:RUNNER_TEMP\hermes" `
+            -InstallDir "$env:GITHUB_WORKSPACE"
+          & "$env:GITHUB_WORKSPACE\venv\Scripts\python.exe" --version
+
+      - name: Install dependencies through the real failing stage
+        shell: powershell
+        run: |
+          & .\scripts\install.ps1 `
+            -Stage dependencies `
+            -NonInteractive `
+            -HermesHome "$env:RUNNER_TEMP\hermes" `
+            -InstallDir "$env:GITHUB_WORKSPACE"
+
+      - name: Prove the installed backend imports
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\venv\Scripts\python.exe" -c "import dotenv, openai, rich, prompt_toolkit, run_agent; print('backend imports OK')"

@@ -17,7 +17,12 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # costas-code is this fork's default branch and where all work lands;
+    # main only mirrors upstream. Gating CI on main alone meant every push
+    # to the real development branch ran zero checks.
+    branches: [costas-code, main]
+  # Lets a release be gated on a green run without inventing a throwaway PR.
+  workflow_dispatch:
 
 permissions:
   contents: read

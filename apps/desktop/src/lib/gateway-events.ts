@@ -21,6 +21,10 @@ const UNSCOPED_STREAM_EVENT_TYPES = new Set([
   'approval.request',
   'browser.progress',
   'clarify.request',
+  // Pairs with clarify.request: the expiry must reach the same pinned session
+  // even after the user switches chats mid-turn, or a background chat's dead
+  // card never settles.
+  'clarify.expire',
   'error',
   'message.complete',
   'message.delta',

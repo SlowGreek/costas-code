@@ -2,6 +2,7 @@ import { atom } from 'nanostores'
 
 import { resetSidebarBatchCapability } from '@/hermes'
 import { invalidateProfileScopedQueries } from '@/lib/query-client'
+import { clearClarifyRequest } from '@/store/clarify'
 import { resetSessionsLimit } from '@/store/layout'
 import {
   $unreadFinishedSessionIds,
@@ -52,6 +53,10 @@ export function wipeSessionListsForGatewaySwitch(): void {
   // $attentionSessionIds (computed) and $stalledSessionIds (owned beside it).
   // $unreadFinishedSessionIds is separate, so wipe it explicitly.
   clearAllSessionStates()
+  // Blocking prompts are keyed by runtime session id, which the next backend
+  // mints fresh — a leftover entry would be unanswerable and, since the card no
+  // longer self-limits on the running flag, could surface on an unrelated row.
+  clearClarifyRequest()
   $unreadFinishedSessionIds.set([])
   setSessionsLoading(true)
   resetSessionsLimit()

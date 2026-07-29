@@ -65,7 +65,13 @@ export function setClarifyRequest(request: ClarifyRequest): void {
   $clarifyRequests.set({ ...$clarifyRequests.get(), [keyFor(request.sessionId)]: request })
 }
 
-export function clearClarifyRequest(requestId?: string, sessionId?: string | null): void {
+/**
+ * Drop a parked clarify. Returns whether anything was actually removed, so a
+ * caller can avoid acting on a no-op — a stale `clarify.expire` for a request
+ * that has already been superseded must not clear the sidebar's "needs input"
+ * flag on a session that is still blocked.
+ */
+export function clearClarifyRequest(requestId?: string, sessionId?: string | null): boolean {
   const requests = $clarifyRequests.get()
 
   // Targeted clear when the caller knows the session (the common path from the
@@ -75,14 +81,14 @@ export function clearClarifyRequest(requestId?: string, sessionId?: string | nul
     const current = requests[key]
 
     if (!current || (requestId && current.requestId !== requestId)) {
-      return
+      return false
     }
 
     const next = { ...requests }
     delete next[key]
     $clarifyRequests.set(next)
 
-    return
+    return true
   }
 
   // Fallback with no session hint: drop every entry matching the request id
@@ -100,5 +106,65 @@ export function clearClarifyRequest(requestId?: string, sessionId?: string | nul
 
   if (changed) {
     $clarifyRequests.set(next)
+  }
+
+  return changed
+}
+
+/**
+ * Re-arm the blocking prompts a resumed/activated session is still waiting on.
+ *
+ * `clarify.request` is emitted exactly once, when the tool blocks. A window
+ * that opens afterwards — a reopened chat, an app restart, a reconnect that
+ * dropped the frame — never saw it, so there is no entry here and the inline
+ * card can never become answerable: it renders the persisted question from the
+ * tool-call args and then has nothing to respond WITH. The agent stays blocked
+ * until `agent.clarify_timeout` elapses.
+ *
+ * `session.resume` / `session.activate` carry `pending_prompts`, so the
+ * renderer restores the same state the live event would have produced.
+ *
+ * Only `clarify.request` is restored: it is the one blocking prompt whose UI is
+ * an inline transcript row keyed off a store entry. Approvals, sudo and secret
+ * prompts render as overlays owned by `store/prompts.ts` and are left alone
+ * rather than speculatively wired. Lives here, beside the store it writes, so
+ * the resume path doesn't import through a second module into this one.
+ */
+export function rearmPendingPrompts(
+  sessionId: null | string,
+  prompts: { event: string; payload: Record<string, unknown> }[] | undefined
+): void {
+  if (!prompts?.length) {
+    return
+  }
+
+  for (const prompt of prompts) {
+    if (prompt?.event !== 'clarify.request') {
+      continue
+    }
+
+    const payload = prompt.payload ?? {}
+    const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
+    const question = typeof payload.question === 'string' ? payload.question : ''
+
+    // A card with no request id could not be answered, and one with no question
+    // could not be read — an unanswerable card is worse than none.
+    if (!requestId || !question) {
+      continue
+    }
+
+    const rawChoices = payload.choices
+    const choices = normalizeChoices(rawChoices)
+
+    if (rawChoices != null && choices.length === 0) {
+      warnDroppedChoices('gateway', question, rawChoices)
+    }
+
+    setClarifyRequest({
+      choices: choices.length > 0 ? choices : null,
+      question,
+      requestId,
+      sessionId
+    })
   }
 }

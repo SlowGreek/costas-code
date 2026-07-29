@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ClientSessionState } from '@/app/types'
 import { createClientSessionState } from '@/lib/chat-runtime'
-import { clearClarifyRequest } from '@/store/clarify'
+import { $clarifyRequests, clearClarifyRequest } from '@/store/clarify'
 import type { RpcEvent } from '@/types/hermes'
 
 import { useMessageStream } from './index'
@@ -57,6 +57,9 @@ async function mountStream() {
 const clarifyRequest = (payload: Record<string, unknown>) =>
   act(() => handleEvent!({ payload, session_id: SID, type: 'clarify.request' }))
 
+const clarifyExpire = (payload: Record<string, unknown>) =>
+  act(() => handleEvent!({ payload, session_id: SID, type: 'clarify.expire' }))
+
 const toolStart = (payload: Record<string, unknown>) =>
   act(() => handleEvent!({ payload, session_id: SID, type: 'tool.start' }))
 
@@ -103,6 +106,34 @@ describe('clarify.request stream hydration', () => {
     clarifyRequest({ choices: ['a'], question: 'Pick', request_id: 'req-2' })
 
     expect(clarifyParts()).toHaveLength(1)
+  })
+
+  it('drops the live request and the needs-input flag when the clarify expires', async () => {
+    await mountStream()
+
+    clarifyRequest({ choices: ['a'], question: 'Pick', request_id: 'req-exp' })
+
+    expect($clarifyRequests.get()[SID]).toBeTruthy()
+    expect(stateRef?.current.get(SID)?.needsInput).toBe(true)
+
+    // The server-side wait elapsed: the request is gone from the gateway's
+    // `_pending`, so the card must stop pretending to be answerable.
+    clarifyExpire({ request_id: 'req-exp' })
+
+    expect($clarifyRequests.get()[SID]).toBeUndefined()
+    expect(stateRef?.current.get(SID)?.needsInput).toBe(false)
+  })
+
+  it('leaves a newer clarify alone when a stale expire arrives', async () => {
+    await mountStream()
+
+    clarifyRequest({ choices: ['a'], question: 'Pick', request_id: 'req-new' })
+    clarifyExpire({ request_id: 'req-old' })
+
+    expect($clarifyRequests.get()[SID]?.requestId).toBe('req-new')
+    // The session is still blocked on the newer question, so the sidebar's
+    // attention indicator must survive a no-op expire.
+    expect(stateRef?.current.get(SID)?.needsInput).toBe(true)
   })
 
   it('does not duplicate when clarify.request arrives before the tool.start row', async () => {

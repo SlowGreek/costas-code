@@ -575,6 +575,12 @@ reinforced after the Mini Shai-Hulud worm campaign (May 2026).
 3. Never commit a bare `>=X.Y.Z` without a ceiling — CI and reviewers will reject it.
 4. Run `uv lock` to regenerate `uv.lock` with hashes.
 
+**Any** edit to `pyproject.toml` needs `uv lock` — not just dependency
+changes. `uv.lock` also pins the project's own `version`, so a release
+bump that skips re-locking breaks `uv sync --locked` for every consumer.
+See "A version bump is not done until `uv.lock` is re-locked" under Known
+Pitfalls.
+
 Reference: #2810 (bounds pass), #9801 (SHA pinning + audit CI).
 
 ---
@@ -1233,6 +1239,49 @@ Leaks as literal `?[K` text under `prompt_toolkit`'s `patch_stdout`. Use space-p
 
 ### `_last_resolved_tool_names` is a process-global in `model_tools.py`
 `_run_single_child()` in `delegate_tool.py` saves and restores this global around subagent execution. If you add new code that reads this global, be aware it may be temporarily stale during child agent runs.
+
+### A version bump is not done until `uv.lock` is re-locked
+`uv.lock` pins the project's **own** version, so bumping `pyproject.toml`
+without running `uv lock` leaves the two disagreeing. CI installs with
+`uv sync --locked`, which refuses a stale lockfile — dependency install
+then fails on **every** test slice before a single test runs, and
+`docker.yml` (which also uses `--locked`) can't build the image at all.
+
+The tell is distinctive: many slices red, but **zero `FAILED` lines** in
+any of them. No test failed because none executed. If you see broad
+failures with no named test, check the install step before hunting for a
+code regression.
+
+`scripts/release.py::update_version_files` now runs `uv lock` itself and
+the bump commit stages `uv.lock` + `apps/desktop/package.json`, and
+`tests/scripts/test_version_consistency.py` asserts all four version
+sources agree (pyproject, `hermes_cli.__version__`, desktop
+`package.json`, `uv.lock`). If you ever bump a version by hand, run
+`uv lock --check` before pushing.
+
+General rule this is an instance of: **`pyproject.toml` is not a leaf
+node.** Before hand-editing a file that other artifacts derive from, ask
+what else embeds it.
+
+### Tag the release only after CI is green ON THE BUMP COMMIT
+A green run on the commit *before* the version bump proves nothing about
+the bump itself — the bump is exactly the commit that can break the
+lockfile, the desktop version, or the changelog. Push the bump, wait for
+CI on that SHA, then tag.
+
+Recovering from a bad tag is cheap in this fork (`git tag -f` + `git push
+--force` the single tag) and does NOT disturb an already-published
+GitHub Release or its uploaded artifacts — the release keeps its assets
+and stays published. That force-push is a deliberate exception to "never
+rewrite published history," which governs *branches*; collaborators need
+`git fetch --tags --force` afterwards.
+
+### `scripts/release.py --publish` pushes to `origin`
+In a fork, `origin` is upstream (`NousResearch/hermes-agent`), so a naive
+`--publish` sends your release tag to a repo you don't own. The script
+now resolves both the push remote and the changelog `repo_url` from git
+remotes (preferring the fork), but verify `git remote -v` before running
+any release automation in a new checkout.
 
 ### DO NOT hardcode cross-tool references in schema descriptions
 Tool schema descriptions must not mention tools from other toolsets by name (e.g., `browser_navigate` saying "prefer web_search"). Those tools may be unavailable (missing API keys, disabled toolset), causing the model to hallucinate calls to non-existent tools. If a cross-reference is needed, add it dynamically in `get_tool_definitions()` in `model_tools.py` — see the `browser_navigate` / `execute_code` post-processing blocks for the pattern.

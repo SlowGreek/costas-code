@@ -485,13 +485,21 @@ function validateExecutiveSceneGraph(scene: Record<string, unknown>, tab: string
 
       const layout = node.layout as Record<string, unknown>
 
-      if (Object.keys(layout).some(key => key !== 'height')) {throw new Error(`ae-executive-layout:${tab}`)}
+      if (Object.keys(layout).some(key => key !== 'height' && key !== 'width')) {
+        throw new Error(`ae-executive-layout:${tab}`)
+      }
 
       if (
         layout.height !== undefined &&
         layout.height !== '*' &&
         (!Number.isSafeInteger(layout.height) || Number(layout.height) < 1 || Number(layout.height) > 4096)
       ) {throw new Error(`ae-executive-layout-height:${tab}`)}
+
+      if (
+        layout.width !== undefined &&
+        layout.width !== '*' &&
+        (!Number.isSafeInteger(layout.width) || Number(layout.width) < 1 || Number(layout.width) > 4096)
+      ) {throw new Error(`ae-executive-layout-width:${tab}`)}
     }
 
     if (node.kids !== undefined) {

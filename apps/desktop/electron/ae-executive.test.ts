@@ -401,6 +401,9 @@ describe('fail-closed batch validation', () => {
     expect(mutate(scene => {scene.nodes[1].p = 'iframe'})).toThrow('ae-executive-primitive')
     expect(mutate(scene => {scene.nodes[2].kids = [scene.nodes[0].id]})).toThrow('ae-executive-leaf-children')
     expect(mutate(scene => {scene.nodes[1].layout = { height: 0 }})).toThrow('ae-executive-layout-height')
+    expect(mutate(scene => {scene.nodes[1].layout = { width: 0 }})).toThrow('ae-executive-layout-width')
+    expect(mutate(scene => {scene.nodes[1].layout = { height: '*', width: '*' }})).not.toThrow()
+    expect(mutate(scene => {scene.nodes[1].layout = { height: '*', gap: 1 }})).toThrow('ae-executive-layout')
     expect(
       mutate(scene => {
         scene.nodes[1].kids = [scene.nodes[0].id]

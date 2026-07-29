@@ -70,7 +70,7 @@ function batch(
             id: `${tab}-elastic`,
             p: 'image' as const,
             a: { src: `asset://run/home/${tab}.svg`, alt: `${tab} semantic image` },
-            layout: { height: '*' as const }
+            layout: { height: '*' as const, width: '*' as const }
           },
           {
             id: `${tab}-fixed`,
@@ -369,6 +369,7 @@ describe('AE executive workspace', () => {
     await screen.findByText('RUN HOME')
 
     expect(view.container.querySelector('[data-ugui-height="*"]')?.className).toContain('flex-1')
+    expect(view.container.querySelector('[data-ugui-width="*"]')?.className).toContain('flex-1')
     expect(view.container.querySelector('[data-ugui-height="1"]')?.className).toContain('shrink-0')
     expect(screen.getByText('UGUI refusal · asset-catalog-unavailable · home semantic image')).toBeTruthy()
   })

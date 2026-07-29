@@ -65,12 +65,19 @@ const numberAttr = (node: UgSceneNode, key: string, fallback = 0) =>
   typeof attr(node, key) === 'number' ? Number(attr(node, key)) : fallback
 
 const layoutHeight = (node: UgSceneNode) => node.layout?.height
+const layoutWidth = (node: UgSceneNode) => node.layout?.width
 
 const layoutClass = (node: UgSceneNode) =>
-  layoutHeight(node) === '*' ? 'min-h-0 flex-1 overflow-auto' : layoutHeight(node) ? 'shrink-0' : undefined
+  cn(
+    layoutHeight(node) === '*' ? 'min-h-0 flex-1 overflow-auto' : layoutHeight(node) ? 'shrink-0' : undefined,
+    layoutWidth(node) === '*' ? 'min-w-0 flex-1 overflow-auto' : layoutWidth(node) ? 'shrink-0' : undefined
+  )
 
 const layoutData = (node: UgSceneNode) =>
-  ({ 'data-ugui-height': layoutHeight(node) === undefined ? undefined : String(layoutHeight(node)) }) as const
+  ({
+    'data-ugui-height': layoutHeight(node) === undefined ? undefined : String(layoutHeight(node)),
+    'data-ugui-width': layoutWidth(node) === undefined ? undefined : String(layoutWidth(node))
+  }) as const
 
 const nodeData = (node: UgSceneNode) => ({ 'data-ugui-node-id': node.id }) as const
 

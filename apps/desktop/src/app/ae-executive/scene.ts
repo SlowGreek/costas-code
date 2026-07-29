@@ -34,7 +34,7 @@ export interface UgSceneNode {
   readonly p: UgScenePrimitive
   readonly a?: Readonly<Record<string, unknown>>
   readonly kids?: readonly string[]
-  readonly layout?: Readonly<{ height?: '*' | number }>
+  readonly layout?: Readonly<{ height?: '*' | number; width?: '*' | number }>
   readonly on?: Readonly<Record<string, string>>
 }
 
@@ -579,14 +579,23 @@ export function validateExecutiveScene(scene: AeExecutiveScene): readonly string
     if (!SCENE_PRIMITIVES.has(node.p)) {errors.push(`primitive:${node.id}`)}
 
     if (node.layout !== undefined) {
-      if (Object.keys(node.layout).some(key => key !== 'height')) {errors.push(`layout:${node.id}`)}
+      if (Object.keys(node.layout).some(key => key !== 'height' && key !== 'width')) {
+        errors.push(`layout:${node.id}`)
+      }
       const height = node.layout.height
+      const width = node.layout.width
 
       if (
         height !== undefined &&
         height !== '*' &&
         (!Number.isSafeInteger(height) || Number(height) < 1 || Number(height) > 4096)
       ) {errors.push(`layout-height:${node.id}`)}
+
+      if (
+        width !== undefined &&
+        width !== '*' &&
+        (!Number.isSafeInteger(width) || Number(width) < 1 || Number(width) > 4096)
+      ) {errors.push(`layout-width:${node.id}`)}
     }
 
     if (node.kids !== undefined) {

@@ -6307,6 +6307,33 @@ def run_conversation(
                     final_response = None
                     continue
 
+                # ── Pending-input follow-up ───────────────────────────────
+                # A /steer that arrived while the model was composing this
+                # tool-free answer has no tool result to ride on. Rather than
+                # deferring it to some later turn, commit the answer and
+                # reopen the turn with the correction as a real user message
+                # (the kanban stop-nudge above uses the same shape). The next
+                # request is a pure append, so prompt caching still holds.
+                from agent.agent_runtime_helpers import (
+                    apply_steer_followup,
+                    take_steer_followup,
+                )
+
+                _steer_followup = take_steer_followup(agent)
+                if _steer_followup:
+                    apply_steer_followup(messages, final_msg, _steer_followup)
+                    agent._session_messages = messages
+                    logger.info(
+                        "Steer pending at turn end — reopening turn (%d chars)",
+                        len(_steer_followup),
+                    )
+                    _pending_verification_response = final_response
+                    _pending_verification_response_previewed = (
+                        agent._interim_content_was_streamed(final_response or "")
+                    )
+                    final_response = None
+                    continue
+
                 messages.append(final_msg)
                 
                 _turn_exit_reason = f"text_response(finish_reason={finish_reason})"

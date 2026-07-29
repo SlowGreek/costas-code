@@ -20,7 +20,7 @@ import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { billingCtaLabel, clearBillingBlock, runBillingRecovery, setBillingBlock } from '@/store/billing-block'
 import { clearClarifyRequest, normalizeChoices, setClarifyRequest, warnDroppedChoices } from '@/store/clarify'
 import { setSessionCompacting } from '@/store/compaction'
-import { refreshBackgroundProcesses, refreshGoalStatus } from '@/store/composer-status'
+import { refreshBackgroundProcesses, refreshGoalStatus, setGoalJudging } from '@/store/composer-status'
 import { $gateway } from '@/store/gateway'
 import { dispatchNativeNotification } from '@/store/native-notifications'
 import { notify } from '@/store/notifications'
@@ -885,6 +885,12 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           // structured record into the composer status card whenever the judge
           // advances, pauses, blocks, or completes the standing goal.
           void refreshGoalStatus(sessionId)
+        } else if (sessionId && payload?.kind === 'goal_judging') {
+          // The turn is done painting but the goal is still deciding: the
+          // judge (and, on DONE, the verifier) each cost an auxiliary LLM
+          // round-trip. Mark the goal row as judging so the app doesn't look
+          // idle through that gap — the verdict clears it moments later.
+          setGoalJudging(sessionId, true)
         }
       } else if (event.type === 'review.summary') {
         // Self-improvement background review saved something to memory/skills

@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   $backgroundStatusBySession,
+  $goalJudgingBySession,
   $goalStatusBySession,
   $statusItemsBySession,
   dismissBackgroundProcess,
   groupStatusItems,
   reconcileBackgroundProcesses,
-  reconcileGoalStatus
+  reconcileGoalStatus,
+  setGoalJudging
 } from './composer-status'
 
 const SID = 'sess-1'
@@ -254,5 +256,66 @@ describe('goal status integration', () => {
       detailNote: 'no progress for 4 turns',
       goalStatus: 'paused'
     })
+  })
+})
+
+describe('goal judging indicator', () => {
+  beforeEach(() => {
+    $goalStatusBySession.set({})
+    $goalJudgingBySession.set({})
+  })
+
+  const activeGoal = {
+    blocked_reason: null,
+    goal: 'Ship Costas Code',
+    last_reason: 'wired the gateway',
+    max_turns: 20,
+    paused_reason: null,
+    status: 'active' as const,
+    turns_used: 3,
+    waiting_reason: null
+  }
+
+  it('shows judging while the verdict is still pending', () => {
+    // The gateway emits message.complete BEFORE the judge runs, so without
+    // this the app looks idle through one or two auxiliary LLM round-trips.
+    reconcileGoalStatus(SID, activeGoal)
+    setGoalJudging(SID, true)
+
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      detail: '3/20 · judging…',
+      state: 'running'
+    })
+  })
+
+  it('spins even when the persisted status is not active', () => {
+    // A blocked goal whose reply just ran is judging again: the row must not
+    // sit on the old red "failed" glyph while the judge re-decides.
+    reconcileGoalStatus(SID, { ...activeGoal, blocked_reason: 'needs a decision', status: 'blocked' })
+    setGoalJudging(SID, true)
+
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      state: 'running',
+      detailNote: undefined
+    })
+  })
+
+  it('clears judging when the authoritative verdict lands', () => {
+    reconcileGoalStatus(SID, activeGoal)
+    setGoalJudging(SID, true)
+    reconcileGoalStatus(SID, { ...activeGoal, last_reason: 'still going', turns_used: 4 })
+
+    expect($goalJudgingBySession.get()).toEqual({})
+    expect($statusItemsBySession.get()[SID]?.[0]).toMatchObject({
+      detail: '4/20 · still going'
+    })
+  })
+
+  it('preserves reference identity on a no-op toggle', () => {
+    setGoalJudging(SID, true)
+    const first = $goalJudgingBySession.get()
+    setGoalJudging(SID, true)
+
+    expect($goalJudgingBySession.get()).toBe(first)
   })
 })

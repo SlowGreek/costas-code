@@ -750,6 +750,114 @@ def run_conversation(
     persist_user_timestamp: Optional[float] = None,
     moa_config: Optional[dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """Run a turn, guaranteeing a steer follow-up can never lose an answer.
+
+    ``_run_conversation_inner`` has ~25 early ``return`` sites for hard
+    failures (context overflow, 413, billing walls, retry exhaustion) that
+    bypass ``finalize_turn`` entirely. When a pending steer reopens a turn
+    it withholds the answer the model already produced, so ANY of those
+    exits could replace a real answer with an error string and swallow the
+    steer. Rather than patching each site, this wrapper restores the
+    withheld answer and re-queues the steer at the one place every exit
+    must pass through.
+    """
+    agent._steer_followup_withheld = None
+    agent._steer_followup_text = None
+    try:
+        result = _run_conversation_inner(
+            agent,
+            user_message,
+            system_message=system_message,
+            conversation_history=conversation_history,
+            task_id=task_id,
+            stream_callback=stream_callback,
+            persist_user_message=persist_user_message,
+            persist_user_timestamp=persist_user_timestamp,
+            moa_config=moa_config,
+        )
+    finally:
+        _withheld = getattr(agent, "_steer_followup_withheld", None)
+        _steer_text = getattr(agent, "_steer_followup_text", None)
+        agent._steer_followup_withheld = None
+        agent._steer_followup_text = None
+
+    if not _withheld or not isinstance(result, dict):
+        return result
+
+    return _apply_steer_followup_rescue(result, _withheld, _steer_text)
+
+
+def _apply_steer_followup_rescue(
+    result: Dict[str, Any], withheld: str, steer_text: Optional[str]
+) -> Dict[str, Any]:
+    """Reinstate a withheld answer when the steer follow-up did not deliver one."""
+    # The follow-up produced its own answer — nothing was lost. Gate on the
+    # turn's own status flags rather than a truthy ``error``: some non-failed
+    # exits (e.g. the compression-defer notice) set ``error`` while still
+    # carrying a legitimate response we must not clobber.
+    if result.get("final_response") and not result.get("failed"):
+        return result
+
+    # A hard interrupt supersedes a pending steer (see clear_interrupt in
+    # run_agent.py). Restoring the answer is still right — the user should
+    # see what the model produced — but re-queueing the correction they
+    # just cancelled with /stop is not.
+    if result.get("interrupted"):
+        logger.info("Steer follow-up interrupted — restoring the answer, dropping the steer")
+        _restore_withheld_answer(result, withheld)
+        return result
+
+    logger.info("Steer follow-up did not complete — restoring the withheld answer")
+    _restore_withheld_answer(result, withheld)
+
+    # The correction is already in `messages` as a real user item, so a turn
+    # that got far enough to send it must NOT also hand it back as next-turn
+    # input — the model would see the same instruction twice.
+    if steer_text and not result.get("pending_steer") and not _steer_in_messages(result, steer_text):
+        result["pending_steer"] = steer_text
+    return result
+
+
+def _restore_withheld_answer(result: Dict[str, Any], withheld: str) -> None:
+    """Reinstate the withheld answer, flagging that the user already saw it.
+
+    The answer was emitted as an interim message before the turn reopened
+    (so a dying follow-up could never swallow it). Surfaces suppress a
+    duplicate send via ``response_previewed``, but the gateway only checks
+    that on non-failed turns — and a restored answer is by definition on a
+    failed one. Marking it here keeps the user from receiving the same text
+    twice.
+    """
+    result["final_response"] = withheld
+    result["response_previewed"] = True
+
+
+def _steer_in_messages(result: Dict[str, Any], steer_text: str) -> bool:
+    """Whether the correction already reached the model as a user message."""
+    for msg in reversed(result.get("messages") or []):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and steer_text in content:
+            return True
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and steer_text in str(part.get("text", "")):
+                    return True
+    return False
+
+
+def _run_conversation_inner(
+    agent,
+    user_message: Any,
+    system_message: str = None,
+    conversation_history: List[Dict[str, Any]] = None,
+    task_id: str = None,
+    stream_callback: Optional[callable] = None,
+    persist_user_message: Optional[Any] = None,
+    persist_user_timestamp: Optional[float] = None,
+    moa_config: Optional[dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Run a complete conversation with tool calling until completion.
 
@@ -6300,6 +6408,47 @@ def run_conversation(
                     # final_response while continuing so a later budget
                     # exhaustion path does not treat the narrated stop as
                     # a completed answer.
+                    _pending_verification_response = final_response
+                    _pending_verification_response_previewed = (
+                        agent._interim_content_was_streamed(final_response or "")
+                    )
+                    final_response = None
+                    continue
+
+                # ── Pending-input follow-up ───────────────────────────────
+                # A /steer that arrived while the model was composing this
+                # tool-free answer has no tool result to ride on. Rather than
+                # deferring it to some later turn, commit the answer and
+                # reopen the turn with the correction as a real user message
+                # (the kanban stop-nudge above uses the same shape). The next
+                # request is a pure append, so prompt caching still holds.
+                from agent.agent_runtime_helpers import (
+                    apply_steer_followup,
+                    take_steer_followup,
+                )
+
+                _steer_followup = take_steer_followup(agent)
+                if _steer_followup:
+                    # The answer is real content the user asked for. Emit and
+                    # persist it BEFORE reopening the turn (same contract as
+                    # the verify-on-stop gate above) so a failing follow-up
+                    # request can never destroy an answer we already had.
+                    agent._emit_interim_assistant_message(final_msg)
+                    apply_steer_followup(messages, final_msg, _steer_followup)
+                    try:
+                        agent._flush_messages_to_session_db(messages, conversation_history)
+                    except Exception:
+                        logger.debug("steer follow-up interim flush failed", exc_info=True)
+                    agent._session_messages = messages
+                    logger.info(
+                        "Steer pending at turn end — reopening turn (%d chars)",
+                        len(_steer_followup),
+                    )
+                    # If the follow-up request fails or is interrupted, the
+                    # run_conversation wrapper restores this answer and
+                    # re-queues the steer, so no exit path can lose either.
+                    agent._steer_followup_withheld = final_response
+                    agent._steer_followup_text = _steer_followup
                     _pending_verification_response = final_response
                     _pending_verification_response_previewed = (
                         agent._interim_content_was_streamed(final_response or "")

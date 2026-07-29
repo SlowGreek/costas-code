@@ -67,7 +67,7 @@ def test_run_conversation_dict_returns_include_final_response():
     from agent import conversation_loop
 
     try:
-        source = inspect.getsource(conversation_loop.run_conversation)
+        source = inspect.getsource(conversation_loop._run_conversation_inner)
     except OSError as exc:
         pytest.skip(f"run_conversation source is unavailable: {exc}")
     tree = ast.parse(source)
@@ -8551,7 +8551,7 @@ class TestDeadRetryCode:
 
     def test_no_unreachable_max_retries_after_backoff(self):
         import inspect
-        from agent.conversation_loop import run_conversation as _rc
+        from agent.conversation_loop import _run_conversation_inner as _rc
         source = inspect.getsource(_rc)
         occurrences = source.count("if retry_count >= max_retries:")
         assert occurrences == 2, (
@@ -8590,7 +8590,7 @@ class TestMemoryContextSanitization:
         a literal <memory-context> tag we don't silently delete their text.
         The streaming scrubber + plugin-side scrub cover real leak paths."""
         import inspect
-        from agent.conversation_loop import run_conversation as _rc
+        from agent.conversation_loop import _run_conversation_inner as _rc
         src = inspect.getsource(_rc)
         assert "sanitize_context(user_message)" not in src
         assert "sanitize_context(persist_user_message)" not in src

@@ -110,7 +110,12 @@ dependencies = [
   # without an explicit dependency here (and in the `web` extra below).
   "python-multipart>=0.0.9,<1",
   "ptyprocess>=0.7.0,<1; sys_platform != 'win32'",
-  "pywinpty>=2.0.0,<3; sys_platform == 'win32'",
+  # pywinpty 3.0.3+ is the first line with win_arm64 wheels. Keeping the
+  # ceiling at <4 (rather than <3) lets Windows-on-ARM resolve a prebuilt
+  # wheel instead of falling back to a maturin/Rust source build. We only use
+  # the stable PtyProcess surface (spawn/read/write/setwinsize), which is
+  # unchanged across the 2.x -> 3.x major.
+  "pywinpty>=2.0.0,<4; sys_platform == 'win32'",
   # Desktop SSH's Windows remote runtime (hermes_cli/windows_ssh_runtime.py)
   # imports win32security/win32file/etc. directly — declare pywin32 rather than
   # relying on the concurrent-log-handler → portalocker transitive chain.

@@ -470,12 +470,23 @@ export interface SessionResumeResponse {
   info?: SessionRuntimeInfo
   message_count: number
   messages: SessionMessage[]
+  /** Blocking prompts (clarify/sudo/secret/terminal.read) still waiting on this
+   *  session. The announcing event is one-shot, so a client that attaches after
+   *  the tool blocked re-arms from here. Absent when nothing is pending. */
+  pending_prompts?: SessionPendingPrompt[]
   resumed: string
   running?: boolean
   session_id: string
   session_key?: string
   started_at?: number
   status?: string
+}
+
+/** One entry of `SessionResumeResponse.pending_prompts` — the original event
+ *  name plus the verbatim payload that was emitted (it carries `request_id`). */
+export interface SessionPendingPrompt {
+  event: string
+  payload: Record<string, unknown>
 }
 
 export interface SessionRuntimeInfo {

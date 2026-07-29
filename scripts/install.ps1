@@ -2093,8 +2093,56 @@ function Install-Venv {
     Write-Success "Virtual environment ready (Python $PythonVersion)"
 }
 
+function Assert-Arm64WheelSupport {
+    <#
+    .SYNOPSIS
+        Fail fast on Windows ARM64 instead of cascading through four tiers.
+
+    .DESCRIPTION
+        Two core dependencies publish no win_arm64 wheel:
+
+          * cryptography  -- 46.0.3 was the last release with an ARM64 wheel,
+                             and it sits BELOW our CVE floor (46.0.7 pins
+                             CVE-2026-39892 / CVE-2026-34073). Downgrading to
+                             regain the wheel would reintroduce both CVEs, so
+                             we don't.
+          * pywinpty      -- ARM64 wheels start at 3.0.3.
+
+        Without a wheel, uv falls back to a source build: maturin pulls a Rust
+        toolchain, then openssl-sys demands a full OpenSSL dev environment that
+        no ordinary Windows user has. The observed failure was a four-tier
+        cascade ending in "even with no extras", which reads like a Hermes bug
+        rather than an unsupported CPU architecture.
+
+        Reuse Get-WindowsArch: it already resolves the case where an ARM64
+        machine reports X64 from an emulated x64 PowerShell host.
+    #>
+    if ((Get-WindowsArch) -ne 'arm64') { return }
+
+    throw @"
+Windows on ARM is not supported yet.
+
+This machine reports an ARM64 processor. Two of Hermes's Python dependencies
+(cryptography and pywinpty) publish no prebuilt ARM64 wheel, so installing
+them would require compiling from source with a Rust toolchain and a full
+OpenSSL development environment.
+
+Workaround -- install the x64 build of Python 3.11 and re-run this installer.
+Windows on ARM runs x64 programs under emulation, so every existing amd64
+wheel applies:
+
+  https://www.python.org/downloads/windows/  (choose "Windows installer (64-bit)")
+
+Native ARM64 support is tracked as a known gap.
+"@
+}
+
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
+
+    # Preflight: bail out on Windows ARM64 before the four-tier cascade below
+    # can bury the real cause under "even with no extras".
+    Assert-Arm64WheelSupport
 
     # UV_SYSTEM_CERTS is set once at script scope (see the top of this file) so
     # it covers every uv download, including `uv python install`, not just the

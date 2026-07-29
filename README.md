@@ -1,344 +1,111 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Catalyst" width="100%">
-</p>
-
+<!-- GENERATED/DO-NOT-EDIT: rust-quine-project-readmes/v1 -->
 # Catalyst
-<p align="center">
-  <a href="https://github.com/SlowGreek/costas-code">Catalyst</a> · Powered by <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
-</p>
-<p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/SlowGreek/costas-code/blob/costas-code/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/SlowGreek/costas-code"><img src="https://img.shields.io/badge/Distribution-Catalyst-5B6CFF?style=for-the-badge" alt="Catalyst"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
-  <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
-  <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
-</p>
 
-**Catalyst is a collaborative agent workbench built on [Hermes Agent](https://github.com/NousResearch/hermes-agent).** It keeps Hermes protocol, configuration, session, skill, and plugin compatibility while shipping a team-facing Catalyst experience, steering-first interaction, a native standing-goal surface, and the Costas Agent Plugin. Existing Hermes data in `~/.hermes` is reused automatically; source and updates remain in the Costas Code distribution repository.
+Catalyst is the Electron and React desktop product shell that composes, inspects, and authors against one staged AgentExperiments generation.
 
-Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
+**Role:** Catalyst is a peripheral desktop executive surface: it hosts native lifecycle and renderer interaction while routing canonical runtime and projection semantics to their owners.
 
-<table>
-<tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
-<tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
-<tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
-<tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Dynamic workflows</b></td><td>Ask for a workflow and Catalyst writes a script that orchestrates dozens of subagents — the <i>script</i> holds the loop, the branching, and the intermediate results, so only the final answer reaches the conversation. Agents return schema-validated JSON, so the script can filter and re-feed results; runs are backgrounded and resumable. Built for fan-out-and-verify, tournaments, and audits where one agent should adversarially check another's findings rather than grade its own.</td></tr>
-<tr><td><b>Per-task model selection</b></td><td>Opt in with <code>delegation.allowed_models</code> and each subagent can run on a different model — a Claude parent can dispatch a review to Gemini or GPT. Cross-model critique catches what a model misses about its own work. Off by default, and the field never enters the tool schema unless you set an allowlist.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six terminal backends — local, Docker, SSH, Singularity, Modal, and Daytona. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
-<tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
-</table>
+## Purpose
+- Compose the canonical executive and UGUI-derived experiences into an operable Electron desktop shell. Evidence: `evidence.executive`, `evidence.electron-main`.
+- Execute local pinned quality tools and publish deterministic machine reports without converting known failures into green claims. Evidence: `evidence.spec`, `evidence.quality-common`, `evidence.quality-lint`, `evidence.quality-test`, `evidence.quality-coverage`.
 
----
+## Invariants and boundaries
 
-## Quick Install
+### Invariants
+- **invariant.host-does-not-own-runtime.** Desktop composition never transfers canonical runtime, projector, evaluator, or persistence ownership into Catalyst. Evidence: `evidence.executive`, `evidence.generation`.
+- **invariant.report-equals-observation.** A committed quality report equals the stable shaping of the adapter execution that produced it. Equation: `committed_report = stable_json(shape(executed_local_tool_output))` Evidence: `evidence.quality-common`, `evidence.quality-lint`, `evidence.quality-test`, `evidence.quality-coverage`.
+- **invariant.default-writes-check-compares.** Default mode writes atomically; check mode performs the same observation, writes nothing, and fails on any byte drift. Evidence: `evidence.quality-common`.
 
-Catalyst lives in a **private** repository, so installs need GitHub auth. Do this
-once:
+### Boundaries
+- **boundary.host-not-authority.** Catalyst owns desktop composition, packaging, and interaction, not RUN, Butler, QUINE, Store, Envelope, or UGUI semantic authority. Evidence: `evidence.executive`, `evidence.generation`.
+  - Rejects: desktop copies of canonical runtime semantics; renderer claims of external effect success; mutable edits to a staged generation
+- **boundary.observed-quality-only.** Quality reports represent executed TypeScript, ESLint, Vitest, and V8 observations and remain red when exact findings exist. Evidence: `evidence.quality-lint`, `evidence.quality-test`, `evidence.quality-coverage`.
+  - Rejects: fabricated green reports; discarded skipped tests; coverage percentages without measured totals
 
-```bash
-gh auth login          # https://cli.github.com if you don't have gh
-```
+## Mechanisms and flow
 
-### Linux, macOS, WSL2, Termux
+### Mechanisms
+- **mechanism.desktop-composition.** Electron and React compose one selected AgentExperiments generation into desktop host and renderer surfaces. Evidence: `evidence.generation`, `evidence.electron-main`, `evidence.executive`.
+  - Steps: Resolve and stage the parent-pinned repository generation.; Atomically select the complete generation.; Start Electron host lifecycle.; Render the executive surface and route bounded interactions.
+  - Consequences: Incomplete generations are not selected.; Canonical owners remain outside Catalyst.
+- **mechanism.deterministic-quality.** Each adapter executes its pinned local tool, shapes bounded stable JSON, then atomically writes or exactly compares its owned report. Evidence: `evidence.quality-common`, `evidence.quality-lint`, `evidence.quality-test`, `evidence.quality-coverage`.
+  - Steps: Collect and hash the declared source closure.; Execute TypeScript and ESLint, Vitest, or Vitest V8 coverage.; Preserve failures, skips, and measured totals.; Serialize stable JSON.; Write by rename or compare exact bytes in check mode.
+  - Consequences: Known lint findings remain visible and red.; Skipped test truth and coverage denominators survive projection.; Source or tool-output drift makes check mode fail.
 
-```bash
-gh api repos/SlowGreek/costas-code/contents/scripts/install.sh --jq .content | base64 -d | bash
-```
+### Inputs
+| Contract | Source | Meaning |
+| --- | --- | --- |
+| input.ae-generation | A parent-pinned AgentExperiments repository generation | A staged immutable generation with repository-root and current-generation selection rules. |
+| input.desktop-interaction | Renderer interaction and Electron host events | Typed desktop intents and bounded host messages admitted by the owning renderer and Electron seams. |
+| input.quality-source | Catalyst manifests, quality scripts, Desktop configuration, Electron source, renderer source, scripts, and tests | The deterministic source closure declared by SPEC and collected by scripts/quality/common.mjs. |
 
-### Windows (native, PowerShell)
+### Outputs
+| Contract | Target | Meaning |
+| --- | --- | --- |
+| output.desktop-shell | Electron desktop users | A React renderer hosted by an Electron main process over one selected AgentExperiments generation. |
+| output.quality-reports | quality/lint-report.json, quality/test-report.json, and quality/coverage-report.json | Stable JSON preserving exact lint findings, per-suite test truth, and measured line and branch totals. |
+| output.project-canon | Envelope project-canon discovery and MORPH projection | agentexperiments-project-canon/1 for catalyst at registry row 19. |
 
-> **Heads up:** Native Windows runs Catalyst without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file an issue](https://github.com/SlowGreek/costas-code/issues).
+### Handoffs
+- **handoff.catalyst-canon-to-envelope.** output.project-canon Evidence: `evidence.spec`.
+  - Preconditions: Catalyst CANON validates against the closed parent schema.; Evidence paths and line ranges resolve.; Known lint and physical-proof residue remain explicit.
+  - Postconditions: Envelope may admit Catalyst semantics for MORPH projection.; Projection may change presentation but not ownership, observations, evidence, residue, or handoff meaning.
+  - From: output.project-canon
+  - To project: envelope
+  - To input: input.project-canon
 
-```powershell
-$b64 = (gh api repos/SlowGreek/costas-code/contents/scripts/install.ps1 --jq .content) -replace '\s',''
-[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | iex
-```
+## Evidence and current truth
+
+| Evidence | Location | Establishes |
+| --- | --- | --- |
+| evidence.package | `package.json` | The root workspace exposes the three Catalyst quality adapters and pins the Node engine. |
+| evidence.spec | `SPEC.json` | The area manifest registers lint, test, and coverage report passes, source closures, and quality obligations. |
+| evidence.quality-common | `scripts/quality/common.mjs` | Shared quality code bounds source capture, executes local tools, normalizes diagnostics, and atomically writes or exactly checks stable JSON. |
+| evidence.quality-lint | `scripts/quality/lint.mjs` | The lint adapter executes three TypeScript projects plus ESLint and preserves every observed violation in checks and findings. |
+| evidence.quality-test | `scripts/quality/test.mjs` | The test adapter executes UI and Electron Vitest projects and records per-suite passed, failed, skipped, todo, total, and failures. |
+| evidence.quality-coverage | `scripts/quality/coverage.mjs` | The coverage adapter runs V8 coverage and records measured line and branch totals. |
+| evidence.vitest-config | `apps/desktop/vitest.config.ts` | Desktop Vitest configuration defines the UI and Electron projects consumed by the quality adapters. |
+| evidence.executive | `apps/desktop/src/app/ae-executive/index.tsx` | The renderer composes the AgentExperiments executive experience in the desktop product shell. |
+| evidence.electron-main | `apps/desktop/electron/main.ts` | The Electron main process owns native desktop lifecycle and bounded host integration. |
+| evidence.generation | `apps/desktop/scripts/ae-generation.mjs` | Generation staging publishes immutable AgentExperiments assets and atomically selects a current generation. |
+
+## Limitations and residuals
+
+### Residuals
+- **residue.known-lint-red.** The current Catalyst lint report is RED because exact ESLint violations remain; this contract records rather than conceals them. Evidence: `evidence.quality-lint`.
+  - Cause: Existing Desktop source includes lint errors and warnings outside this contract task.
+  - Visibility: explicit-in-every-projection
+- **residue.physical-desktop-proof.** Source tests and machine reports do not prove installation, signing, accessibility, graphics, audio, network, or physical desktop behavior. Evidence: `evidence.spec`, `evidence.electron-main`.
+  - Cause: Those claims require separate packaged-host and physical execution evidence.
+  - Visibility: explicit-in-every-projection
+
+### Failure modes
+- **failure.quality-findings-or-drift.** Typecheck or ESLint reports a violation, tests fail, coverage execution fails, or regenerated stable JSON differs from committed bytes. Evidence: `evidence.quality-common`, `evidence.quality-lint`, `evidence.quality-test`, `evidence.quality-coverage`.
+  - Consequence: The corresponding adapter exits nonzero and does not claim green.
+  - Detection: Tool status, exact findings, test failure counts, missing coverage summary, and byte comparison are checked.
+  - Behavior: reject-and-report
+- **failure.generation-or-host-unavailable.** The AgentExperiments repository root, required staged artifact, generation publication, or Electron host prerequisite is unavailable. Evidence: `evidence.generation`, `evidence.electron-main`.
+  - Consequence: The desktop experience cannot safely represent the canonical generation.
+  - Detection: Repository-root resolution, staging checks, atomic selection, and host startup surface the failure.
+  - Behavior: fail-closed
+
+## Glossary
+
+| Term | Definition |
+| --- | --- |
+| generation | A completely staged immutable AgentExperiments artifact set selected atomically for the desktop host. |
+| machine report | Stable committed JSON derived from a fresh local quality execution rather than a narrated or fabricated status. |
 
 <details>
-<summary>Pointing an AI agent at this repo</summary>
+<summary>Generation details</summary>
 
-Give your agent the one-liner above verbatim — `gh` supplies credentials, so
-there is no token to paste or leak. If the agent already has a checkout, it can
-install from source with `bash scripts/install.sh --dir "$PWD" --skip-setup`.
-
-Plain `curl https://raw.githubusercontent.com/...` will **404** on this repo.
-That is a private-visibility response, not a wrong URL — anonymous reads are
-refused. Use `gh api` (above) or pass a token:
-
-```bash
-curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
-  https://raw.githubusercontent.com/SlowGreek/costas-code/costas-code/scripts/install.sh | bash
-```
+| Fact | Value |
+| --- | --- |
+| Source | `catalyst/CANON.json` |
+| Source SHA-256 | `sha256:5dd9028e7d4410d28cd45470986447f8a0450af0bf444bc8496c5847ddc50d4d` |
+| Generator | `quine/src/project_readmes.rs` |
+| Registry | `quine/canon/repo_map.json#/19` |
+| Projection schema | `rust-quine-project-readmes/v1` |
+| Tool version | `0.1.0` |
 
 </details>
-
-The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** on Windows. Internal command names and state paths remain `hermes` / `~/.hermes` for upstream compatibility.
-
-If you already have Git installed, the installer detects it and uses that instead. Otherwise a ~45MB MinGit download is all you need — it won't touch or interfere with any system Git.
-
-> **Android / Termux:** The tested manual path is documented in the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux). On Termux, Hermes installs a curated `.[termux]` extra because the full `.[all]` extra currently pulls Android-incompatible voice dependencies.
->
-> **Windows:** Native Windows is fully supported — the PowerShell one-liner above installs everything. If you'd rather use WSL2, the Linux command works there too. Native Windows install lives under `%LOCALAPPDATA%\hermes`; WSL2 installs under `~/.hermes` as on Linux.
-
-After installation:
-
-```bash
-source ~/.bashrc    # reload shell (or: source ~/.zshrc)
-hermes              # start chatting!
-```
-
-### Install the desktop app from a release
-
-Download the artifact for your platform from [GitHub Releases](https://github.com/SlowGreek/costas-code/releases):
-
-- macOS: open `Catalyst-<version>-mac-<arch>.dmg`, then drag **Catalyst.app** to Applications.
-- Windows: run the generated NSIS or MSI installer.
-- Linux: install the `.deb`/`.rpm`, or run the AppImage.
-
-Local development builds are not Apple-notarized. On macOS, Control-click the app and choose **Open**, or approve it under **System Settings → Privacy & Security**.
-
-## Build from source
-
-Prerequisites: Git, Python 3.11–3.13, and Node.js 20.19+ (Node 22.12+ recommended).
-
-While the repository is private, clone over authenticated HTTPS (`gh auth login`
-first) or SSH:
-
-```bash
-# HTTPS (GitHub CLI supplies credentials)
-git clone --branch costas-code --single-branch https://github.com/SlowGreek/costas-code.git
-
-# or SSH
-git clone --branch costas-code --single-branch git@github.com:SlowGreek/costas-code.git
-
-cd costas-code
-
-# Install the Python runtime and JavaScript workspace dependencies.
-bash scripts/install.sh --dir "$PWD" --skip-setup
-npm install
-
-# Run the desktop app in development mode.
-npm run dev --workspace apps/desktop
-```
-
-Build distributable desktop artifacts:
-
-```bash
-# macOS DMG
-npm run dist:mac:dmg --workspace apps/desktop
-
-# Windows NSIS installer (run on Windows)
-npm run dist:win:nsis --workspace apps/desktop
-
-# Linux AppImage, deb, and rpm
-npm run dist:linux --workspace apps/desktop
-```
-
-Artifacts are written to `apps/desktop/release/`. Before publishing, run:
-
-```bash
-NODE_OPTIONS=--no-experimental-webstorage npm run check -w apps/desktop
-scripts/run_tests.sh
-```
-
-### Troubleshooting
-
-#### Windows Defender or antivirus flags `uv.exe` as malware
-
-If your antivirus (Bitdefender, Windows Defender, etc.) quarantines `uv.exe` from the Hermes `bin` folder (`%LOCALAPPDATA%\hermes\bin\uv.exe`), this is a **false positive**. The file is Astral's `uv` — the Rust Python package manager Hermes bundles to manage its Python environment. ML-based antivirus engines commonly flag unsigned Rust binaries that download and install packages.
-
-**To verify your copy is authentic:**
-
-```powershell
-# Install GitHub CLI if needed
-winget install --id GitHub.cli
-
-# Login to GitHub
-gh auth login
-
-# Run verification
-$uv = "$env:LOCALAPPDATA\hermes\bin\uv.exe"
-$ver = (& $uv --version).Split(' ')[1]
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$zip = "$env:TEMP\uv.zip"
-Invoke-WebRequest "https://github.com/astral-sh/uv/releases/download/$ver/uv-x86_64-pc-windows-msvc.zip" -OutFile $zip -UseBasicParsing
-gh attestation verify $zip --repo astral-sh/uv
-Expand-Archive $zip "$env:TEMP\uv_x" -Force
-(Get-FileHash "$env:TEMP\uv_x\uv.exe").Hash -eq (Get-FileHash $uv).Hash
-```
-
-If attestation says "Verification succeeded" and the last line prints `True`, you're good.
-
-**To whitelist Hermes:**
-- **Windows Defender:** Run PowerShell as Admin → `Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\hermes\bin"`
-- **Bitdefender:** Add an exception in the Bitdefender console (Protection > Antivirus > Settings > Manage Exceptions)
-- Whitelist the **folder**, not the file hash — Hermes updates `uv` and the hash changes every version
-
-For more context, see the upstream Astral reports: [astral-sh/uv#13553](https://github.com/astral-sh/uv/issues/13553), [astral-sh/uv#15011](https://github.com/astral-sh/uv/issues/15011), [astral-sh/uv#10079](https://github.com/astral-sh/uv/issues/10079).
-
----
-
-## Getting Started
-
-```bash
-hermes              # Interactive CLI — start a conversation
-hermes model        # Choose your LLM provider and model
-hermes tools        # Configure which tools are enabled
-hermes config set   # Set individual config values
-hermes config get   # Print individual config values
-hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-hermes setup        # Run the full setup wizard (configures everything at once)
-hermes claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
-hermes update       # Update to the latest version
-hermes doctor       # Diagnose any issues
-```
-
-📖 **[Full documentation →](https://hermes-agent.nousresearch.com/docs/)**
-
----
-
-## Skip the API-key collection — Nous Portal
-
-Hermes works with whatever provider you want — that's not changing. But if you'd rather not collect five separate API keys for the model, web search, image generation, TTS, and a cloud browser, **[Nous Portal](https://portal.nousresearch.com)** covers all of them under one subscription:
-
-- **300+ models** — pick any of them with `/model <name>`
-- **Tool Gateway** — web search (Firecrawl), image generation (FAL), text-to-speech (OpenAI), cloud browser (Browser Use), all routed through your sub. No extra accounts.
-
-One command from a fresh install:
-
-```bash
-hermes setup --portal
-```
-
-That logs you in via OAuth, sets Nous as your provider, and turns on the Tool Gateway. Check what's wired up any time with `hermes portal info`. Full details on the [Tool Gateway docs page](https://hermes-agent.nousresearch.com/docs/user-guide/features/tool-gateway).
-
-You can still bring your own keys per-tool whenever you want — the gateway is per-backend, not all-or-nothing.
-
----
-
-## CLI vs Messaging Quick Reference
-
-Hermes has two entry points: start the terminal UI with `hermes`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email. Once you're in a conversation, many slash commands are shared across both interfaces.
-
-| Action                         | CLI                                           | Messaging platforms                                                              |
-| ------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| Start chatting                 | `hermes`                                      | Run `hermes gateway setup` + `hermes gateway start`, then send the bot a message |
-| Start fresh conversation       | `/new` or `/reset`                            | `/new` or `/reset`                                                               |
-| Change model                   | `/model [provider:model]`                     | `/model [provider:model]`                                                        |
-| Set a personality              | `/personality [name]`                         | `/personality [name]`                                                            |
-| Retry or undo the last turn    | `/retry`, `/undo`                             | `/retry`, `/undo`                                                                |
-| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]`                                        |
-| Browse skills                  | `/skills` or `/<skill-name>`                  | `/<skill-name>`                                                                  |
-| Interrupt current work         | `Ctrl+C` or send a new message                | `/stop` or send a new message                                                    |
-| Platform-specific status       | `/platforms`                                  | `/status`, `/sethome`                                                            |
-
-For the full command lists, see the [CLI guide](https://hermes-agent.nousresearch.com/docs/user-guide/cli) and the [Messaging Gateway guide](https://hermes-agent.nousresearch.com/docs/user-guide/messaging).
-
----
-
-## Documentation
-
-All documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**:
-
-| Section                                                                                             | What's Covered                                             |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart)                 | Install → setup → first conversation in 2 minutes          |
-| [CLI Usage](https://hermes-agent.nousresearch.com/docs/user-guide/cli)                              | Commands, keybindings, personalities, sessions             |
-| [Configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration)                | Config file, providers, models, all options                |
-| [Messaging Gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging)                | Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant |
-| [Security](https://hermes-agent.nousresearch.com/docs/user-guide/security)                          | Command approval, DM pairing, container isolation          |
-| [Tools & Toolsets](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools)            | 40+ tools, toolset system, terminal backends               |
-| [Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)              | Procedural memory, Skills Hub, creating skills             |
-| [Memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory)                     | Persistent memory, user profiles, best practices           |
-| [MCP Integration](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)               | Connect any MCP server for extended capabilities           |
-| [Cron Scheduling](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron)              | Scheduled tasks with platform delivery                     |
-| [Context Files](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files)       | Project context that shapes every conversation             |
-| [Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture)             | Project structure, agent loop, key classes                 |
-| [Contributing](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing)             | Development setup, PR process, code style                  |
-| [CLI Reference](https://hermes-agent.nousresearch.com/docs/reference/cli-commands)                  | All commands and flags                                     |
-| [Environment Variables](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) | Complete env var reference                                 |
-
----
-
-## Migrating from OpenClaw
-
-If you're coming from OpenClaw, Hermes can automatically import your settings, memories, skills, and API keys.
-
-**During first-time setup:** The setup wizard (`hermes setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
-
-**Anytime after install:**
-
-```bash
-hermes claw migrate              # Interactive migration (full preset)
-hermes claw migrate --dry-run    # Preview what would be migrated
-hermes claw migrate --preset user-data   # Migrate without secrets
-hermes claw migrate --overwrite  # Overwrite existing conflicts
-```
-
-What gets imported:
-
-- **SOUL.md** — persona file
-- **Memories** — MEMORY.md and USER.md entries
-- **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
-- **Command allowlist** — approval patterns
-- **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
-- **TTS assets** — workspace audio files
-- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
-
-See `hermes claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
-
----
-
-## Contributing
-
-We welcome contributions! See the [Contributing Guide](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) for development setup, code style, and PR process.
-
-Quick start for contributors — use the standard installer, then work from the
-full git checkout it creates at `$HERMES_HOME/hermes-agent` (usually
-`~/.hermes/hermes-agent`). This matches the layout used by `hermes update`, the
-managed venv, lazy dependencies, gateway, and docs tooling.
-
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-cd "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
-uv pip install -e ".[all,dev]"
-scripts/run_tests.sh
-```
-
-Manual clone fallback (for throwaway clones/CI where you intentionally do not
-want the managed install layout):
-
-Create the venv outside the cloned source tree — a venv inside the directory
-the agent operates from can be wiped by a relative-path command the agent runs
-against its own checkout, destroying the running runtime mid-session.
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv ~/.hermes/venvs/hermes-dev --python 3.11
-source ~/.hermes/venvs/hermes-dev/bin/activate
-uv pip install -e ".[all,dev]"
-scripts/run_tests.sh
-```
-
----
-
-## Community
-
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📚 [Skills Hub](https://agentskills.io)
-- 🐛 [Issues](https://github.com/NousResearch/hermes-agent/issues)
-- 🔌 [computer-use-linux](https://github.com/avifenesh/computer-use-linux) — Linux desktop-control MCP server for Hermes and other MCP hosts, with AT-SPI accessibility trees, Wayland/X11 input, screenshots, and compositor window targeting.
-- 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — Community WeChat bridge: Run Hermes Agent and OpenClaw on the same WeChat account.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-Built by [Nous Research](https://nousresearch.com).

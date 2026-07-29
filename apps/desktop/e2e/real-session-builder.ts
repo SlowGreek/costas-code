@@ -49,6 +49,14 @@ export interface RealSession {
  * This intentionally uses the shipped stdio JSON-RPC transport instead of
  * importing SessionDB or launching Electron. The desktop's WebSocket backend
  * dispatches the same `tui_gateway.server` methods.
+ *
+ * REQUIRES a busy-input mode that runs each submitted prompt as its OWN turn
+ * (`interrupt` or `queue`). Turns are submitted back-to-back with no
+ * think-time and each one waits for its own `message.complete`. Under the
+ * product default `steer`, a prompt arriving mid-turn is folded into the live
+ * turn and emits no second completion, so the wait below never resolves and
+ * the spec dies on the 60s timeout. `writeMockProviderConfig()` pins the mode
+ * for exactly this reason — don't drop that pin.
  */
 export class RealSessionBuilder {
   private readonly child: ChildProcessWithoutNullStreams

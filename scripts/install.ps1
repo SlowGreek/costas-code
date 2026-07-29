@@ -246,6 +246,40 @@ function Get-WindowsArch {
     }
 }
 
+# Translate a bare Python minor version ("3.11") into the interpreter request
+# string we hand to uv (`python find`, `python install`, `venv --python`).
+#
+# On Windows on ARM this pins the request to the x64 CPython build.  An arm64
+# interpreter looks like the natural choice and is what uv picks by default
+# when one is already installed, but it is a trap: PyPI publishes no
+# win_arm64 wheels for several of our exact-pinned dependencies (cryptography,
+# pywinpty).  uv then falls back to the sdist, whose build backend is maturin,
+# which needs a full Rust toolchain for aarch64-pc-windows-msvc and tries to
+# bootstrap rustup into a temp dir mid-install.  Every dependency tier fails:
+#
+#   Python reports platform: win-arm64
+#   Computed rustc target triple: aarch64-pc-windows-msvc
+#   x Failed to build `cryptography==46.0.7`
+#   `-> Call to `maturin.build_wheel` failed (exit code: 1)
+#
+# The x64 build runs fine under Prism emulation and resolves prebuilt
+# win_amd64 wheels for the whole tree, so no compiler is needed at all.  We
+# use uv's full request syntax rather than a bare version so uv skips an
+# already-installed arm64 interpreter instead of matching it, and downloads an
+# x64 build when none is present.
+#
+# $Arch is injectable so the behavior is testable off-Windows; it defaults to
+# the real (emulation-invariant) OS arch.
+function Get-UvPythonRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [string]$Arch
+    )
+    if (-not $Arch) { $Arch = Get-WindowsArch }
+    if ($Arch -eq "arm64") { return "cpython-$Version-windows-x86_64" }
+    return $Version
+}
+
 # ============================================================================
 
 function Write-Banner {
@@ -631,7 +665,7 @@ function Resolve-AvailablePythonVersion {
         if (-not $ver -or $seen.ContainsKey($ver)) { continue }
         $seen[$ver] = $true
         try {
-            $found = & $UvCmd python find $ver 2>$null
+            $found = & $UvCmd python find (Get-UvPythonRequest $ver) 2>$null
             if ($found) { return $ver }
         } catch { }
     }
@@ -643,7 +677,7 @@ function Test-Python {
     
     # Let uv find or install Python
     try {
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        $pythonPath = & $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null
         if ($pythonPath) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python found: $ver"
@@ -668,13 +702,13 @@ function Test-Python {
         # semantics or stderr noise.  This fix was previously landed as
         # commit ec1714e71 and then lost in a release squash; reapplied here.
         $ErrorActionPreference = "Continue"
-        $uvOutput = & $UvCmd python install $PythonVersion 2>&1
+        $uvOutput = & $UvCmd python install (Get-UvPythonRequest $PythonVersion) 2>&1
         $uvExitCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
 
         # Check if Python is now available (more reliable than exit code
         # since uv may return non-zero due to "already installed" etc.)
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        $pythonPath = & $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null
         if ($pythonPath) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python installed: $ver"
@@ -696,7 +730,7 @@ function Test-Python {
     Write-Info "Trying to find any existing Python 3.10+..."
     foreach ($fallbackVer in $PythonFallbackVersions) {
         try {
-            $pythonPath = & $UvCmd python find $fallbackVer 2>$null
+            $pythonPath = & $UvCmd python find (Get-UvPythonRequest $fallbackVer) 2>$null
             if ($pythonPath) {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Found fallback: $ver"
@@ -2052,7 +2086,7 @@ function Install-Venv {
     # normal progress such as "Using CPython ..." on stderr; under Windows
     # PowerShell 5.1 with EAP=Stop that stderr is a NativeCommandError unless
     # we temporarily relax EAP and trust $LASTEXITCODE for real failures.
-    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python $PythonVersion }
+    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python (Get-UvPythonRequest $PythonVersion) }
     # Relaxing EAP above means a *genuine* uv-venv failure (exit != 0) no longer
     # aborts on its own. Capture $LASTEXITCODE immediately and fail fast, so the
     # `venv` stage can't falsely report success (and Invoke-Stage can't emit
@@ -2236,7 +2270,7 @@ function Install-Dependencies {
 
     # Parse [project.optional-dependencies].all from pyproject.toml.
     # tomllib is stdlib on Python 3.11+ which the bootstrap guarantees.
-    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find (Get-UvPythonRequest $PythonVersion)) }
     $allExtras = @()
     if (Test-Path $pythonExeForParse) {
         $parsed = & $pythonExeForParse -c @"
@@ -2332,7 +2366,7 @@ except Exception:
     if (-not $NoVenv) {
         $venvPython = "$InstallDir\venv\Scripts\python.exe"
         if (-not (Test-Path $venvPython)) {
-            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, manually: cd '$InstallDir'; Remove-Item -Recurse -Force venv,.venv; uv venv venv --python $PythonVersion; `$env:UV_PROJECT_ENVIRONMENT='$InstallDir\venv'; uv sync --extra all --locked"
+            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, manually: cd '$InstallDir'; Remove-Item -Recurse -Force venv,.venv; uv venv venv --python $(Get-UvPythonRequest $PythonVersion); `$env:UV_PROJECT_ENVIRONMENT='$InstallDir\venv'; uv sync --extra all --locked"
         }
         # Relax EAP=Stop while running the import probe.  Python writes
         # deprecation warnings and import-system info to stderr; under
@@ -2403,7 +2437,7 @@ print(','.join(scripts))
     # users hit and lazy-import errors from `hermes dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find (Get-UvPythonRequest $PythonVersion)) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         $webServerSyntaxOk = $false

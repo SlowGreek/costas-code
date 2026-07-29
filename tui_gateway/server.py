@@ -6055,6 +6055,29 @@ def _handle_busy_submit(
             # The turn ended between prompt.submit's first busy check and this
             # helper. Let the caller retry and claim the now-idle session.
             return None
+        # A turn the GOAL LOOP started on its own must never absorb the user's
+        # message. steer() stashes text onto the next TOOL RESULT and redirect()
+        # rewrites the in-flight request — both are right for a turn the USER
+        # started (they're refining work they asked for), and both are wrong
+        # here: the user is answering the agent's question or redirecting the
+        # loop, so their words must become a real turn.
+        #
+        # Without this, a reply to "should I commit?" is stashed for a tool
+        # result that may never come — it renders attached to earlier content
+        # ("above" the agent's message), the goal keeps looping, and the only
+        # escape is pressing stop. Queue + interrupt instead: the continuation
+        # stops, the user's message runs as the next turn, and the judge
+        # re-evaluates against it.
+        goal_continuation = bool(session.get("_goal_continuation"))
+    if goal_continuation:
+        transport_for_queue = transport
+        with session["history_lock"]:
+            if not session.get("running"):
+                return None
+            _enqueue_prompt(session, text, transport_for_queue)
+            session["last_active"] = time.time()
+        _interrupt_busy_session(sid, session, agent)
+        return _ok(rid, {"status": "queued"})
     text_only = _is_text_only_busy_payload(text)
     plain_text = _coerce_message_text(text).strip() if text_only else ""
     if mode == "steer" and text_only and plain_text and agent is not None and hasattr(agent, "steer"):
@@ -10265,6 +10288,19 @@ def _(rid, params: dict) -> dict:
 # ── Methods: prompt ──────────────────────────────────────────────────
 
 
+def _clear_goal_continuation(session: dict | None) -> None:
+    """Drop the goal-continuation marker once that turn is over.
+
+    Per-turn state, never sticky: if it survived, every later user turn would
+    refuse to steer and silently disable the user's configured
+    ``display.busy_input_mode``.
+    """
+    if not isinstance(session, dict):
+        return
+    if session.get("_goal_continuation"):
+        session["_goal_continuation"] = False
+
+
 def _auto_unblock_goal(sid: str, session: dict | None) -> None:
     """A real user prompt is exactly the input a ``blocked`` goal was waiting on.
 
@@ -11508,6 +11544,9 @@ def _run_prompt_submit(
                 session["running"] = False
                 session["last_active"] = time.time()
                 _clear_inflight_turn(session)
+            # The goal-initiated turn is over: a user message from here on is
+            # steerable again per the user's configured busy_input_mode.
+            _clear_goal_continuation(session)
             _emit("session.info", sid, _session_info(agent, session))
 
         # A user prompt that arrived mid-turn (interrupt + queue) wins over
@@ -11543,6 +11582,10 @@ def _run_prompt_submit(
                     # the judge will re-run on the next turn anyway.
                     return
                 session["running"] = True
+                # Mark this turn as goal-initiated so a user message arriving
+                # mid-flight PREEMPTS it instead of being steered/redirected
+                # into a turn the user never asked for (#goal-steer-swallow).
+                session["_goal_continuation"] = True
             try:
                 _emit("message.start", sid)
                 _run_prompt_submit(rid, sid, session, goal_followup)

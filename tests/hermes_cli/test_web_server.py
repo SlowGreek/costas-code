@@ -274,9 +274,16 @@ class TestWebServerEndpoints:
 
         # Satisfy the fresh-install guard: read_only opens require the DB
         # file to already exist.
+        #
+        # Patch `default_db_path` (the function), not the `DEFAULT_DB_PATH`
+        # constant. 1d986efcb moved resolution to per-call so the path follows
+        # the active profile; patching the import-time constant no longer
+        # affects the guard, which then sees the real (absent) DB and returns 0
+        # before the fake is ever consulted.
         fake_db_path = tmp_path / "state.db"
         fake_db_path.touch()
         monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", fake_db_path)
+        monkeypatch.setattr(hermes_state, "default_db_path", lambda: fake_db_path)
 
         captured = {}
 

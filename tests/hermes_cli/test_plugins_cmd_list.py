@@ -2,6 +2,8 @@ import argparse
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from hermes_cli import plugins_cmd
 
 
@@ -89,6 +91,7 @@ def test_cmd_list_json_output(monkeypatch, capsys):
     ]
 
 
+@pytest.mark.real_entry_points
 def test_discover_all_plugins_includes_entrypoint_plugins(monkeypatch, tmp_path):
     bundled_dir = tmp_path / "bundled"
     user_dir = tmp_path / "user"

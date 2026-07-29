@@ -127,6 +127,10 @@ class TestSupportsSystemdServicesWSL:
         monkeypatch.setattr(gateway, "is_linux", lambda: True)
         monkeypatch.setattr(gateway, "is_termux", lambda: False)
         monkeypatch.setattr(gateway, "is_wsl", lambda: True)
+        # supports_systemd_services() also probes for the systemctl BINARY,
+        # which does not exist on a macOS dev box. Stub it so this stays a
+        # test of the WSL branch logic rather than of the host's PATH.
+        monkeypatch.setattr(gateway.shutil, "which", lambda name: "/usr/bin/systemctl")
         monkeypatch.setattr(gateway, "_wsl_systemd_operational", lambda: True)
         assert gateway.supports_systemd_services() is True
 
@@ -143,6 +147,10 @@ class TestSupportsSystemdServicesWSL:
         monkeypatch.setattr(gateway, "is_linux", lambda: True)
         monkeypatch.setattr(gateway, "is_termux", lambda: False)
         monkeypatch.setattr(gateway, "is_wsl", lambda: False)
+        monkeypatch.setattr(gateway, "is_container", lambda: False)
+        # See test_wsl_with_systemd: the systemctl binary probe is a host
+        # fact, not part of the branch under test.
+        monkeypatch.setattr(gateway.shutil, "which", lambda name: "/usr/bin/systemctl")
         assert gateway.supports_systemd_services() is True
 
     def test_termux_still_excluded(self, monkeypatch):

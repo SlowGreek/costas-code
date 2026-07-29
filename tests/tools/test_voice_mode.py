@@ -73,6 +73,25 @@ def mock_sd(monkeypatch):
 # ============================================================================
 
 class TestPulseSocketReachable:
+    @pytest.fixture
+    def short_tmp(self, monkeypatch):
+        """A short-path tmpdir suitable for binding AF_UNIX sockets.
+
+        AF_UNIX addresses are capped near 104 bytes. pytest's ``tmp_path`` on
+        macOS lives under /private/var/folders/<hash>/T/pytest-of-<user>/
+        pytest-N/<test_name>0, which exceeds that on its own — before the
+        ``pulse/native`` suffix these tests append — so ``bind()`` raises
+        "OSError: AF_UNIX path too long" and the test fails for a reason that
+        has nothing to do with PulseAudio detection.
+        """
+        import shutil as _shutil
+        import tempfile as _tempfile
+        from pathlib import Path as _Path
+
+        d = _tempfile.mkdtemp(prefix="hpulse")
+        yield _Path(d)
+        _shutil.rmtree(d, ignore_errors=True)
+
     def test_no_env_no_socket(self, monkeypatch):
         monkeypatch.delenv("PULSE_SERVER", raising=False)
         monkeypatch.delenv("PULSE_RUNTIME_PATH", raising=False)
@@ -80,10 +99,10 @@ class TestPulseSocketReachable:
         from tools.voice_mode import _pulse_socket_reachable
         assert _pulse_socket_reachable() is False
 
-    def test_stale_socket_file_not_reachable(self, monkeypatch, tmp_path):
+    def test_stale_socket_file_not_reachable(self, monkeypatch, short_tmp):
         """A socket file with no listener should not count as reachable."""
         import socket as _socket
-        sock_path = tmp_path / "pulse" / "native"
+        sock_path = short_tmp / "pulse" / "native"
         sock_path.parent.mkdir(parents=True)
         # Create + bind, then close so the path is a stale socket file.
         s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
@@ -91,14 +110,14 @@ class TestPulseSocketReachable:
         s.close()
         monkeypatch.delenv("PULSE_SERVER", raising=False)
         monkeypatch.delenv("PULSE_RUNTIME_PATH", raising=False)
-        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(short_tmp))
         from tools.voice_mode import _pulse_socket_reachable
         assert _pulse_socket_reachable() is False
 
-    def test_listening_socket_reachable_via_xdg_runtime(self, monkeypatch, tmp_path):
+    def test_listening_socket_reachable_via_xdg_runtime(self, monkeypatch, short_tmp):
         """A live PulseAudio-style socket under XDG_RUNTIME_DIR is reachable (#35622)."""
         import socket as _socket
-        sock_path = tmp_path / "pulse" / "native"
+        sock_path = short_tmp / "pulse" / "native"
         sock_path.parent.mkdir(parents=True)
         server = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
         server.bind(str(sock_path))
@@ -106,15 +125,15 @@ class TestPulseSocketReachable:
         try:
             monkeypatch.delenv("PULSE_SERVER", raising=False)
             monkeypatch.delenv("PULSE_RUNTIME_PATH", raising=False)
-            monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+            monkeypatch.setenv("XDG_RUNTIME_DIR", str(short_tmp))
             from tools.voice_mode import _pulse_socket_reachable
             assert _pulse_socket_reachable() is True
         finally:
             server.close()
 
-    def test_listening_socket_reachable_via_pulse_server_env(self, monkeypatch, tmp_path):
+    def test_listening_socket_reachable_via_pulse_server_env(self, monkeypatch, short_tmp):
         import socket as _socket
-        sock_path = tmp_path / "native"
+        sock_path = short_tmp / "native"
         server = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
         server.bind(str(sock_path))
         server.listen(1)

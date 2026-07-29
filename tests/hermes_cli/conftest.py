@@ -54,3 +54,51 @@ def _suppress_concurrent_hermes_gate(request, monkeypatch):
         lambda *_a, **_k: [],
         raising=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin_entry_points(request, monkeypatch):
+    """Hide pip-installed Hermes plugins from plugin-discovery tests.
+
+    ``PluginManager`` discovers plugins from three sources: ``HERMES_HOME``,
+    the project directory, and ``importlib.metadata`` entry points in the
+    ``hermes_agent.plugins`` group. The hermetic-environment fixture redirects
+    the first two to a tempdir, but entry points come from the *interpreter's
+    own site-packages* and no amount of ``HERMES_HOME`` juggling hides them.
+
+    So any developer with a real Hermes plugin pip-installed into their venv
+    (e.g. ``hermes-ultracode``) sees it counted alongside the fixture plugins,
+    and every count assertion in the discovery tests fails with an off-by-N
+    (``assert 2 == 1``). CI never caught this because CI installs no plugins.
+
+    Tests that specifically exercise entry-point discovery opt out with
+    ``@pytest.mark.real_entry_points`` and patch the scan themselves.
+    """
+    if request.node.get_closest_marker("real_entry_points"):
+        return
+    try:
+        from hermes_cli import plugins as _plugins
+    except Exception:
+        return
+    # raising=False for the same partially-initialized-module race documented
+    # on the concurrent-gate fixture above.
+    monkeypatch.setattr(
+        _plugins.PluginManager,
+        "_scan_entry_points",
+        lambda self: [],
+        raising=False,
+    )
+
+    # `hermes plugins list` walks its own entry-point scanner rather than
+    # PluginManager's, so stubbing only the method above still leaked
+    # site-packages plugins into the CLI-listing tests.
+    try:
+        from hermes_cli import plugins_cmd as _plugins_cmd
+    except Exception:
+        return
+    monkeypatch.setattr(
+        _plugins_cmd,
+        "_discover_entrypoint_plugins",
+        lambda: [],
+        raising=False,
+    )

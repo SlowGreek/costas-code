@@ -390,8 +390,14 @@ class TestPluginDiscovery:
         assert mgr._discovered is False, "failed sweep was cached as discovered"
 
         # A later call (with discovery healthy again) must do the real scan.
+        # ``undo()`` reverts EVERY active patch, including the autouse
+        # entry-point isolation in conftest — so re-apply it here, or a
+        # developer with a pip-installed Hermes plugin sees it counted below.
         monkeypatch.undo()
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
+        monkeypatch.setattr(
+            PluginManager, "_scan_entry_points", lambda self: [], raising=False
+        )
         mgr.discover_and_load()
         assert mgr._discovered is True
         non_bundled = {
@@ -416,6 +422,7 @@ class TestPluginDiscovery:
         }
         assert len(non_bundled) == 0
 
+    @pytest.mark.real_entry_points
     def test_entry_points_scanned(self, tmp_path, monkeypatch):
         """Entry-point based plugins are discovered (mocked)."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))

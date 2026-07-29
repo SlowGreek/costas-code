@@ -148,14 +148,25 @@ def test_completed_answer_survives_a_failed_followup(failing_followup_env):
 
 
 def test_steer_survives_a_failed_followup(failing_followup_env):
-    """The drained steer must be recoverable so it is not silently swallowed."""
+    """The correction must not be silently swallowed by a failed follow-up.
+
+    "Survives" means the model acts on it exactly once — either it already
+    reached the model in this turn's history, or it comes back as
+    next-turn input. Requiring both would deliver it twice.
+    """
     agent, handler = failing_followup_env
 
     result = agent.run_conversation("do the thing", conversation_history=[], task_id="t")
 
-    assert result.get("pending_steer") == handler.steer_text, (
-        "a failed follow-up dropped the user's steer entirely"
+    in_messages = any(
+        m.get("role") == "user" and handler.steer_text in str(m.get("content", ""))
+        for m in (result.get("messages") or [])
+        if isinstance(m, dict)
     )
+    requeued = result.get("pending_steer") == handler.steer_text
+
+    assert in_messages or requeued, "a failed follow-up dropped the user's steer entirely"
+    assert not (in_messages and requeued), "the steer would be acted on twice"
 
 
 class _ContextOverflowHandler(_FailingFollowupHandler):
@@ -165,6 +176,15 @@ class _ContextOverflowHandler(_FailingFollowupHandler):
     retry-exhaustion path — one of ~25 that bypass ``finalize_turn``. The
     protection must be structural, not per-call-site.
     """
+
+    failure_status: int = 400
+    failure_body: dict = {
+        "error": {
+            "message": "This model's maximum context length is 8192 tokens.",
+            "type": "invalid_request_error",
+            "code": "context_length_exceeded",
+        }
+    }
 
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
@@ -181,21 +201,16 @@ class _ContextOverflowHandler(_FailingFollowupHandler):
             _AGENT[0].steer(type(self).steer_text)
             self._answer(req, "ANSWER ONE")
         else:
-            self._json(400, {"error": {
-                "message": "This model's maximum context length is 8192 tokens.",
-                "type": "invalid_request_error",
-                "code": "context_length_exceeded",
-            }})
+            self._json(type(self).failure_status, type(self).failure_body)
 
 
-@pytest.fixture()
-def overflow_followup_env():
-    _ContextOverflowHandler.completion_requests = 0
-    srv = HTTPServer(("127.0.0.1", 0), _ContextOverflowHandler)
+def _make_env(handler_cls, prefix: str):
+    handler_cls.completion_requests = 0
+    srv = HTTPServer(("127.0.0.1", 0), handler_cls)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-    test_home = tempfile.mkdtemp(prefix="hermes_steer_overflow_")
+    test_home = tempfile.mkdtemp(prefix=prefix)
     os.makedirs(os.path.join(test_home, ".hermes"))
     prev_home = os.environ.get("HERMES_HOME")
     os.environ["HERMES_HOME"] = os.path.join(test_home, ".hermes")
@@ -212,16 +227,33 @@ def overflow_followup_env():
         skip_memory=True, save_trajectories=False, platform="cli",
     )
     _AGENT[0] = agent
+    return agent, srv, test_home, prev_home
 
+
+def _teardown(srv, test_home, prev_home):
+    srv.shutdown()
+    shutil.rmtree(test_home, ignore_errors=True)
+    if prev_home is None:
+        os.environ.pop("HERMES_HOME", None)
+    else:
+        os.environ["HERMES_HOME"] = prev_home
+
+
+@pytest.fixture()
+def overflow_followup_env():
+    _ContextOverflowHandler.failure_status = 400
+    _ContextOverflowHandler.failure_body = {
+        "error": {
+            "message": "This model's maximum context length is 8192 tokens.",
+            "type": "invalid_request_error",
+            "code": "context_length_exceeded",
+        }
+    }
+    agent, srv, home, prev = _make_env(_ContextOverflowHandler, "hermes_steer_overflow_")
     try:
         yield agent, _ContextOverflowHandler
     finally:
-        srv.shutdown()
-        shutil.rmtree(test_home, ignore_errors=True)
-        if prev_home is None:
-            os.environ.pop("HERMES_HOME", None)
-        else:
-            os.environ["HERMES_HOME"] = prev_home
+        _teardown(srv, home, prev)
 
 
 def test_answer_survives_a_followup_that_exits_on_a_different_path(overflow_followup_env):
@@ -233,4 +265,99 @@ def test_answer_survives_a_followup_that_exits_on_a_different_path(overflow_foll
     assert handler.completion_requests >= 2, "the steer never reopened the turn"
     assert "ANSWER ONE" in (result.get("final_response") or ""), (
         "a context-overflow exit destroyed the model's completed answer"
+    )
+
+
+# Each shape leaves the loop through a different early return. A guard bolted
+# onto one call site passes the first and fails the rest.
+_FAILURE_SHAPES = {
+    "billing_402": (402, {"error": {
+        "message": "Your credit balance is too low to access the API.",
+        "type": "insufficient_quota", "code": "insufficient_quota"}}),
+    "bad_request_400": (400, {"error": {
+        "message": "Invalid request payload.",
+        "type": "invalid_request_error", "code": "invalid_request"}}),
+    "server_500": (500, {"error": {"message": "internal error"}}),
+    "context_overflow": (400, {"error": {
+        "message": "This model's maximum context length is 8192 tokens.",
+        "type": "invalid_request_error", "code": "context_length_exceeded"}}),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_FAILURE_SHAPES))
+def test_answer_survives_every_followup_failure_shape(shape):
+    """The whole bug class, not just the shape the first fix happened to cover."""
+    status, body = _FAILURE_SHAPES[shape]
+    _ContextOverflowHandler.failure_status = status
+    _ContextOverflowHandler.failure_body = body
+    agent, srv, home, prev = _make_env(_ContextOverflowHandler, f"hermes_steer_{shape}_")
+    try:
+        result = agent.run_conversation("do the thing", conversation_history=[], task_id="t")
+
+        assert _ContextOverflowHandler.completion_requests >= 2, (
+            f"[{shape}] the steer never reopened the turn"
+        )
+        assert "ANSWER ONE" in (result.get("final_response") or ""), (
+            f"[{shape}] the model's completed answer was destroyed"
+        )
+    finally:
+        _teardown(srv, home, prev)
+
+
+class _InterruptedFollowupHandler(_FailingFollowupHandler):
+    """Answers, accepts a steer, then the user hits /stop mid-follow-up."""
+
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length", 0))
+        req = json.loads(self.rfile.read(length).decode())
+
+        if "messages" not in req:
+            self._json(200, {"id": "m", "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}]})
+            return
+
+        type(self).completion_requests += 1
+
+        if type(self).completion_requests == 1:
+            _AGENT[0].steer(type(self).steer_text)
+            self._answer(req, "ANSWER ONE")
+        else:
+            _AGENT[0].interrupt()
+            self._answer(req, "should not matter")
+
+
+@pytest.fixture()
+def interrupted_followup_env():
+    agent, srv, home, prev = _make_env(_InterruptedFollowupHandler, "hermes_steer_interrupt_")
+    try:
+        yield agent, _InterruptedFollowupHandler
+    finally:
+        _teardown(srv, home, prev)
+
+
+def test_stop_during_a_followup_does_not_resurrect_the_steer(interrupted_followup_env):
+    """/stop kills a pending steer — the safety net must not undo that."""
+    agent, handler = interrupted_followup_env
+
+    result = agent.run_conversation("do the thing", conversation_history=[], task_id="t")
+
+    assert result.get("pending_steer") is None, (
+        "a steer cancelled by /stop was resurrected for the next turn"
+    )
+
+
+def test_steer_is_not_delivered_twice(failing_followup_env):
+    """Already in `messages` AND handed back as pending_steer = seen twice."""
+    agent, handler = failing_followup_env
+
+    result = agent.run_conversation("do the thing", conversation_history=[], task_id="t")
+
+    in_messages = any(
+        m.get("role") == "user" and handler.steer_text in str(m.get("content", ""))
+        for m in (result.get("messages") or [])
+        if isinstance(m, dict)
+    )
+    assert not (in_messages and result.get("pending_steer")), (
+        "the correction is in history AND queued as next-turn input — "
+        "the model would act on it twice"
     )

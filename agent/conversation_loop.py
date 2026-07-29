@@ -788,11 +788,39 @@ def run_conversation(
     if result.get("final_response") and not (result.get("failed") or result.get("error")):
         return result
 
+    # A hard interrupt supersedes a pending steer (see clear_interrupt in
+    # run_agent.py). Restoring the answer is still right — the user should
+    # see what the model produced — but re-queueing the correction they
+    # just cancelled with /stop is not.
+    if result.get("interrupted"):
+        logger.info("Steer follow-up interrupted — restoring the answer, dropping the steer")
+        result["final_response"] = _withheld
+        return result
+
     logger.info("Steer follow-up did not complete — restoring the withheld answer")
     result["final_response"] = _withheld
-    if _steer_text and not result.get("pending_steer"):
+
+    # The correction is already in `messages` as a real user item, so a turn
+    # that got far enough to send it must NOT also hand it back as next-turn
+    # input — the model would see the same instruction twice.
+    if _steer_text and not result.get("pending_steer") and not _steer_in_messages(result, _steer_text):
         result["pending_steer"] = _steer_text
     return result
+
+
+def _steer_in_messages(result: Dict[str, Any], steer_text: str) -> bool:
+    """Whether the correction already reached the model as a user message."""
+    for msg in reversed(result.get("messages") or []):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and steer_text in content:
+            return True
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and steer_text in str(part.get("text", "")):
+                    return True
+    return False
 
 
 def _run_conversation_inner(

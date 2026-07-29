@@ -2858,8 +2858,10 @@ def _profile_platform_ports(profile_home: Path, runtime: Optional[dict]) -> Dict
 
     blocks: Dict[str, dict] = {}
     try:
-        with open(profile_home / "config.yaml", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
+        # Multi-profile probe: load_config() targets the ACTIVE profile's
+        # home, so read the probed profile's file via the raw primitive.
+        from hermes_cli.config import read_user_config_raw
+        cfg = read_user_config_raw(profile_home / "config.yaml")
         gateway_cfg = cfg.get("gateway") if isinstance(cfg.get("gateway"), dict) else {}
         # gateway.platforms first, top-level platforms second — later wins,
         # matching the precedence in gateway.config.load_gateway_config().
@@ -4493,7 +4495,13 @@ async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
 
 
 def _split_text_for_speak_stream(text: str, cap: int) -> list:
-    """Split *text* into provider-cap-sized pieces on sentence boundaries."""
+    """Split *text* into provider-cap-sized pieces on sentence boundaries.
+
+    Deliberately NOT unified with gateway.platforms.helpers'
+    split_text_fence_aware: this splitter reflows whitespace (sentences are
+    re-joined with single spaces) and has no fence/markdown semantics, so
+    expressing it as knobs on the fence-aware core would change behavior.
+    """
     from tools.tts_streaming import SENTENCE_BOUNDARY_RE as _SENTENCE_BOUNDARY_RE
 
     cap = cap if cap and cap > 0 else 4000
@@ -4795,6 +4803,7 @@ def get_sessions(
                 # rows, skip the system_prompt blob inside SQLite too (pairs
                 # with the API-level _strip_session_list_rows below).
                 compact_rows=not full,
+                include_pinned=True,
             )
             total = db.session_count(
                 source=source or None,
@@ -4807,16 +4816,20 @@ def get_sessions(
                 exclude_children=True,
             )
             now = time.time()
+            # Same ownership contract as get_session_detail: rows are stamped
+            # with the serving profile even when the request wasn't explicitly
+            # scoped, so default-profile rows never circulate unowned.
+            row_profile = profile_name or _cron_default_profile()
             for s in sessions:
                 s["is_active"] = (
                     s.get("ended_at") is None
                     and (now - s.get("last_active", s.get("started_at", 0))) < 300
                 )
-                if profile_name:
-                    s["profile"] = profile_name
-                    s["is_default_profile"] = profile_name == "default"
+                s["profile"] = row_profile
+                s["is_default_profile"] = row_profile == "default"
                 # SQLite stores the flag as 0/1; expose a real JSON boolean.
                 s["archived"] = bool(s.get("archived"))
+                s["pinned"] = bool(s.get("pinned"))
             if not full:
                 _strip_session_list_rows(sessions)
             return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
@@ -4919,6 +4932,7 @@ def get_profiles_sessions(
                 order_by_last_active=order == "recent",
                 # Same SQL-level blob skip as /api/sessions (see above).
                 compact_rows=not full,
+                include_pinned=True,
             )
             profile_total = db.session_count(
                 source=source_filter,
@@ -4939,6 +4953,7 @@ def get_profiles_sessions(
                     and (now - s.get("last_active", s.get("started_at", 0))) < 300
                 )
                 s["archived"] = bool(s.get("archived"))
+                s["pinned"] = bool(s.get("pinned"))
                 merged.append(s)
         except Exception as exc:
             errors.append({"profile": name, "error": str(exc)})
@@ -4947,7 +4962,12 @@ def get_profiles_sessions(
 
     sort_key = "last_active" if order == "recent" else "started_at"
     merged.sort(key=lambda s: s.get(sort_key) or s.get("started_at") or 0, reverse=True)
+    # Pinned rows are back-filled past each profile's LIMIT on purpose; keep
+    # them in the merged window instead of re-dropping them on recency.
     window = merged[offset:offset + limit]
+    if len(merged) > offset + limit:
+        seen = {id(s) for s in window}
+        window.extend(s for s in merged[offset + limit:] if s.get("pinned") and id(s) not in seen)
     if not full:
         _strip_session_list_rows(window)
     return {
@@ -5024,6 +5044,9 @@ def get_profiles_sessions_sidebar(
                 and (now - s.get("last_active", s.get("started_at", 0))) < 300
             )
             s["archived"] = bool(s.get("archived"))
+            # SQLite stores the pin as 0/1; the sidebar needs a real boolean to
+            # render the Pinned section from server state.
+            s["pinned"] = bool(s.get("pinned"))
         return rows
 
     def _slice(db, *, source=None, exclude=None, cap):
@@ -5037,6 +5060,9 @@ def get_profiles_sessions_sidebar(
             archived_only=False,
             order_by_last_active=True,
             compact_rows=True,
+            # A pinned conversation must reach the sidebar even when it has
+            # aged past the window — otherwise its Pinned row renders empty.
+            include_pinned=True,
         )
 
     for name, home in targets:
@@ -5054,8 +5080,10 @@ def get_profiles_sessions_sidebar(
                 # A full window means more rows remain on disk. That is all the
                 # sidebar's "load more" needs, and unlike an exact COUNT(*) per
                 # profile per refresh it costs nothing beyond the rows already
-                # read.
-                recents_truncated[name] = len(profile_rows) >= recents_cap
+                # read. Discount pinned back-fills — they arrive past the LIMIT
+                # and would otherwise fake a full page on a short list.
+                unpinned_count = sum(1 for s in profile_rows if not s.get("pinned"))
+                recents_truncated[name] = unpinned_count >= recents_cap
                 recents_rows.extend(_tag(profile_rows, name))
             cron_rows.extend(_tag(_slice(db, source="cron", cap=cron_cap), name))
             messaging_rows.extend(
@@ -5068,7 +5096,13 @@ def get_profiles_sessions_sidebar(
 
     def _window(rows: List[Dict[str, Any]], cap: int) -> List[Dict[str, Any]]:
         rows.sort(key=lambda s: s.get("last_active") or s.get("started_at") or 0, reverse=True)
+        # Pinned rows survive the cap. The per-profile queries deliberately
+        # back-fill them past the LIMIT, so truncating the merged window on
+        # recency alone would throw away exactly what the back-fill fetched.
         win = rows[:cap]
+        if len(rows) > cap:
+            seen = {id(s) for s in win}
+            win.extend(s for s in rows[cap:] if s.get("pinned") and id(s) not in seen)
         _strip_session_list_rows(win)
         return win
 
@@ -11420,7 +11454,6 @@ def _codex_full_login_worker(session_id: str) -> None:
         from hermes_cli.auth import (
             CODEX_OAUTH_CLIENT_ID,
             CODEX_OAUTH_TOKEN_URL,
-            DEFAULT_CODEX_BASE_URL,
         )
         issuer = "https://auth.openai.com"
 
@@ -11982,8 +12015,16 @@ async def get_session_detail(session_id: str, profile: Optional[str] = None):
         session = db.get_session(sid) if sid else None
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        if profile:
-            session["profile"] = _cron_profile_home(profile)[0]
+        # Always stamp the owning profile — the serving profile is known even
+        # when the request carries no ``?profile=`` (it's this process's own
+        # profile). Stamping only on explicit ``?profile=`` left rows for the
+        # default/primary profile systematically unowned, so multi-profile
+        # clients resolved them to whichever gateway happened to be active
+        # (cross-profile open asymmetry, #67603 family).
+        session["profile"] = (
+            _cron_profile_home(profile)[0] if profile else _cron_default_profile()
+        )
+        session["is_default_profile"] = session["profile"] == "default"
         return session
     finally:
         db.close()
@@ -13560,7 +13601,7 @@ async def install_mcp_catalog_entry(body: MCPCatalogInstall, profile: Optional[s
         # the first clone is still running.
         action = _mcp_install_action_name(name)
         try:
-            proc = _spawn_hermes_action(
+            _spawn_hermes_action(
                 _profile_cli_args(effective_profile) + ["mcp", "install", name],
                 action,
             )

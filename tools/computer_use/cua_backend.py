@@ -48,8 +48,10 @@ import subprocess
 import sys
 import threading
 import uuid
+from pathlib import PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
+from hermes_cli._subprocess_compat import windows_hide_flags
 from tools.computer_use.backend import (
     ActionResult,
     CaptureResult,
@@ -350,6 +352,30 @@ def _select_capture_target(
     return windows[0]
 
 
+def _wsl_windows_path_to_posix(path: str) -> str:
+    """Translate a Windows absolute manifest command when Hermes runs in WSL.
+
+    Windows cua-driver manifests can report ``C:\\Users\\...\\cua-driver.exe``
+    even though the Hermes process uses POSIX subprocess spawning inside WSL.
+    The same file is reachable through DrvFS as ``/mnt/c/Users/...``.
+    Non-Windows paths and non-WSL hosts are returned unchanged.
+    """
+    if not re.match(r"^[A-Za-z]:[\\/]", path):
+        return path
+    try:
+        from hermes_constants import is_wsl
+
+        if not is_wsl():
+            return path
+    except Exception:
+        return path
+    win = PureWindowsPath(path)
+    drive = (win.drive or "").rstrip(":").lower()
+    if not drive:
+        return path
+    return os.path.join("/mnt", drive, *(str(part) for part in win.parts[1:]))
+
+
 def _resolve_mcp_invocation(
     driver_cmd: str,
     *,
@@ -381,6 +407,7 @@ def _resolve_mcp_invocation(
             [driver_cmd, "manifest"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             stdin=subprocess.DEVNULL,
+            creationflags=windows_hide_flags(),
             # cua-driver is a third-party binary — never hand it provider
             # API keys via inherited env (same policy as the MCP and CLI
             # fallback spawns below; #53503/#55709/#58889 lineage).
@@ -408,6 +435,11 @@ def _resolve_mcp_invocation(
         # The driver knows the subcommand but didn't surface its own path.
         # Keep our resolved driver_cmd; the args are still authoritative.
         return driver_cmd, _mcp_args_with_overlay_flag(args, driver_cmd=driver_cmd)
+    # A Windows-installed cua-driver can hand a WSL-hosted Hermes an absolute
+    # ``C:\...`` command; translate it to its DrvFS ``/mnt/<drive>/...`` form
+    # BEFORE the path-separator check (backslash is not a separator on POSIX,
+    # so the raw Windows string would otherwise be discarded here).
+    command = _wsl_windows_path_to_posix(command)
     if not _has_path_separator(command):
         # A manifest may legitimately retain the generic ``cua-driver`` name.
         # Under a GUI's thin PATH that would lose the resolved user-local path
@@ -447,6 +479,7 @@ def _cua_driver_supports_no_overlay(driver_cmd: str) -> bool:
             [driver_cmd, "--help"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3.0,
             stdin=subprocess.DEVNULL,
+            creationflags=windows_hide_flags(),
             env=_sanitize_subprocess_env(cua_driver_child_env()),
         )
         help_text = (proc.stdout or "") + (proc.stderr or "")
@@ -589,6 +622,7 @@ def cua_driver_update_check(*, timeout: Optional[float] = None) -> Optional[Dict
             # stdin-reading mode rather than erroring — DEVNULL gives them EOF
             # so they exit fast instead of blocking until the timeout.
             stdin=subprocess.DEVNULL,
+            creationflags=windows_hide_flags(),
             # Sanitized like every other cua-driver spawn: third-party
             # binary, no inherited provider keys (#53503/#55709/#58889).
             env=_sanitize_subprocess_env(cua_driver_child_env()),
@@ -1330,6 +1364,7 @@ class _CuaDriverSession:
                 try:
                     proc = _subprocess.run(
                         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=max(15.0, timeout),
+                        creationflags=windows_hide_flags(),
                         env=_sanitize_subprocess_env(cua_driver_child_env()),
                     )
                 except Exception as e:  # pragma: no cover - subprocess spawn failure
@@ -1590,23 +1625,70 @@ def _ingest_windows(raw_windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     windows: List[Dict[str, Any]] = []
     for w in raw_windows:
+        # Compatibility envelopes are untrusted input: skip non-dict members
+        # instead of raising AttributeError on one malformed record.
+        if not isinstance(w, dict):
+            continue
         pid_int = _positive_int(w.get("pid"))
         window_id_int = _positive_int(w.get("window_id"))
         if pid_int is None or window_id_int is None:
             continue
         z_raw = w.get("z_index")
         z_index = z_raw if isinstance(z_raw, (int, float)) and not isinstance(z_raw, bool) else 0
+        app_name = w.get("app_name", "")
+        title = w.get("title", "")
         windows.append({
-            "app_name": w.get("app_name", ""),
+            "app_name": app_name if isinstance(app_name, str) else "",
             "pid": pid_int,
             "window_id": window_id_int,
             # cua-driver 0.6.x on Linux may return JSON null here.
             # Only explicit False means off-screen; null means unknown.
             "off_screen": w.get("is_on_screen") is False,
-            "title": w.get("title", ""),
+            "title": title if isinstance(title, str) else "",
             "z_index": z_index,
         })
     return windows
+
+
+def _windows_from_tool_result(out: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return list_windows payloads across cua-driver result shapes."""
+    structured = out.get("structuredContent")
+    if isinstance(structured, dict):
+        windows = structured.get("windows")
+        if isinstance(windows, list) and windows:
+            return windows
+
+    data = out.get("data")
+    if isinstance(data, dict):
+        windows = data.get("windows")
+        if isinstance(windows, list) and windows:
+            return windows
+        legacy_windows = data.get("_legacy_windows")
+        if isinstance(legacy_windows, list) and legacy_windows:
+            return legacy_windows
+
+    windows = out.get("windows")
+    if isinstance(windows, list) and windows:
+        return windows
+    legacy_windows = out.get("_legacy_windows")
+    if isinstance(legacy_windows, list) and legacy_windows:
+        return legacy_windows
+    return []
+
+
+def _apps_from_windows(windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    apps: List[Dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for summary in _ingest_windows(windows):
+        name = summary["app_name"]
+        if not name:
+            continue
+        key = (name, summary["pid"])
+        if key in seen:
+            continue
+        seen.add(key)
+        apps.append({"name": name, "pid": summary["pid"]})
+    return apps
 
 
 # ---------------------------------------------------------------------------
@@ -1784,8 +1866,7 @@ class CuaDriverBackend(ComputerUseBackend):
             "list_windows",
             {"on_screen_only": True, "session": self._session_id},
         )
-        raw_windows = (out.get("structuredContent") or {}).get("windows") or []
-        windows = _ingest_windows(raw_windows)
+        windows = _ingest_windows(_windows_from_tool_result(out))
         windows.sort(key=lambda w: w["z_index"], reverse=True)
         if windows:
             return windows
@@ -1807,8 +1888,7 @@ class CuaDriverBackend(ComputerUseBackend):
             logger.error("cua-driver CLI re-fetch for list_windows returned an error")
             self._clear_active_target()
             return []
-        raw_windows = (cli_out.get("structuredContent") or {}).get("windows") or []
-        windows = _ingest_windows(raw_windows)
+        windows = _ingest_windows(_windows_from_tool_result(cli_out))
         windows.sort(key=lambda w: w["z_index"], reverse=True)
         return windows
 
@@ -2171,9 +2251,6 @@ class CuaDriverBackend(ComputerUseBackend):
             text = gws_out["data"] if isinstance(gws_out["data"], str) else ""
             summary, tree = _split_tree_text(text)
 
-            # Parse element count from summary e.g. "✅ AppName — 42 elements, turn 3..."
-            m = re.search(r'(\d+)\s+elements?', summary)
-
             # Surface 2 of NousResearch/hermes-agent#47072: prefer the
             # canonical structuredContent.elements array (trycua/cua#1961).
             # Falls back to markdown regex parsing for cua-driver builds
@@ -2478,23 +2555,37 @@ class CuaDriverBackend(ComputerUseBackend):
     def list_apps(self) -> List[Dict[str, Any]]:
         out = self._session.call_tool("list_apps", {"session": self._session_id})
         structured = out.get("structuredContent")
-        if isinstance(structured, dict) and isinstance(structured.get("apps"), list):
-            return structured["apps"]
-
-        # Older drivers and direct CLI fallbacks may put apps in data instead.
         data = out.get("data")
-        if isinstance(data, list):
+
+        # structuredContent is the canonical MCP payload. Empty lists fall
+        # through so a populated compatibility envelope can still recover.
+        if isinstance(structured, dict):
+            apps = structured.get("apps")
+            if isinstance(apps, list) and apps:
+                return apps
+        # Older drivers and direct CLI fallbacks may put apps in data instead.
+        if isinstance(data, list) and data:
             return data
-        if isinstance(data, dict) and isinstance(data.get("apps"), list):
-            return data["apps"]
+        if isinstance(data, dict):
+            apps = data.get("apps")
+            if isinstance(apps, list) and apps:
+                return apps
+        apps = out.get("apps")
+        if isinstance(apps, list) and apps:
+            return apps
+
+        derived = _apps_from_windows(_windows_from_tool_result(out))
+        if derived:
+            return derived
+
         # Old text-only drivers retain a small, name/PID-only fallback.
         if isinstance(data, str):
-            apps = []
+            parsed_apps = []
             for line in data.splitlines():
                 m = re.search(r'(.+?)\s+\(pid\s+(\d+)\)', line)
                 if m:
-                    apps.append({"name": m.group(1).strip(), "pid": int(m.group(2))})
-            return apps
+                    parsed_apps.append({"name": m.group(1).strip(), "pid": int(m.group(2))})
+            return parsed_apps
         return []
 
     def list_windows(self) -> List[Dict[str, Any]]:

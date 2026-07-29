@@ -784,8 +784,18 @@ def run_conversation(
     if not _withheld or not isinstance(result, dict):
         return result
 
-    # The follow-up produced its own answer — nothing was lost.
-    if result.get("final_response") and not (result.get("failed") or result.get("error")):
+    return _apply_steer_followup_rescue(result, _withheld, _steer_text)
+
+
+def _apply_steer_followup_rescue(
+    result: Dict[str, Any], withheld: str, steer_text: Optional[str]
+) -> Dict[str, Any]:
+    """Reinstate a withheld answer when the steer follow-up did not deliver one."""
+    # The follow-up produced its own answer — nothing was lost. Gate on the
+    # turn's own status flags rather than a truthy ``error``: some non-failed
+    # exits (e.g. the compression-defer notice) set ``error`` while still
+    # carrying a legitimate response we must not clobber.
+    if result.get("final_response") and not result.get("failed"):
         return result
 
     # A hard interrupt supersedes a pending steer (see clear_interrupt in
@@ -794,18 +804,32 @@ def run_conversation(
     # just cancelled with /stop is not.
     if result.get("interrupted"):
         logger.info("Steer follow-up interrupted — restoring the answer, dropping the steer")
-        result["final_response"] = _withheld
+        _restore_withheld_answer(result, withheld)
         return result
 
     logger.info("Steer follow-up did not complete — restoring the withheld answer")
-    result["final_response"] = _withheld
+    _restore_withheld_answer(result, withheld)
 
     # The correction is already in `messages` as a real user item, so a turn
     # that got far enough to send it must NOT also hand it back as next-turn
     # input — the model would see the same instruction twice.
-    if _steer_text and not result.get("pending_steer") and not _steer_in_messages(result, _steer_text):
-        result["pending_steer"] = _steer_text
+    if steer_text and not result.get("pending_steer") and not _steer_in_messages(result, steer_text):
+        result["pending_steer"] = steer_text
     return result
+
+
+def _restore_withheld_answer(result: Dict[str, Any], withheld: str) -> None:
+    """Reinstate the withheld answer, flagging that the user already saw it.
+
+    The answer was emitted as an interim message before the turn reopened
+    (so a dying follow-up could never swallow it). Surfaces suppress a
+    duplicate send via ``response_previewed``, but the gateway only checks
+    that on non-failed turns — and a restored answer is by definition on a
+    failed one. Marking it here keeps the user from receiving the same text
+    twice.
+    """
+    result["final_response"] = withheld
+    result["response_previewed"] = True
 
 
 def _steer_in_messages(result: Dict[str, Any], steer_text: str) -> bool:

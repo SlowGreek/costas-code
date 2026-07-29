@@ -361,3 +361,61 @@ def test_steer_is_not_delivered_twice(failing_followup_env):
         "the correction is in history AND queued as next-turn input — "
         "the model would act on it twice"
     )
+
+
+class TestRestoreGate:
+    """The wrapper must only rescue turns that actually lost their answer."""
+
+    def test_does_not_clobber_a_successful_turn_that_reports_an_error(self):
+        """Some non-failed exits set `error` alongside a legitimate response.
+
+        The compression-defer return (agent/conversation_loop.py) is
+        `failed: False` + `error` + a real `final_response`. Treating a
+        truthy `error` as failure would replace that live response with a
+        stale withheld answer.
+        """
+        from agent.conversation_loop import _apply_steer_followup_rescue
+
+        result = {
+            "final_response": "the follow-up's own answer",
+            "failed": False,
+            "error": "compression deferred",
+            "partial": True,
+        }
+        rescued = _apply_steer_followup_rescue(result, "STALE withheld answer", "steer text")
+
+        assert rescued["final_response"] == "the follow-up's own answer"
+        assert "pending_steer" not in rescued
+
+    def test_rescues_a_genuinely_failed_turn(self):
+        from agent.conversation_loop import _apply_steer_followup_rescue
+
+        result = {
+            "final_response": "API call failed after 3 retries",
+            "failed": True,
+            "error": "HTTP 500",
+            "messages": [],
+        }
+        rescued = _apply_steer_followup_rescue(result, "the real answer", "steer text")
+
+        assert rescued["final_response"] == "the real answer"
+        assert rescued["response_previewed"] is True
+        assert rescued["pending_steer"] == "steer text"
+
+
+def test_restored_answer_is_marked_as_already_shown(failing_followup_env):
+    """The answer was emitted as interim before the turn reopened.
+
+    Surfaces suppress a duplicate send via ``response_previewed``, but the
+    gateway only consults it on non-failed turns (gateway/run.py) — and a
+    restored answer always rides a failed one. Without the flag the user
+    reads the same answer twice.
+    """
+    agent, _ = failing_followup_env
+
+    result = agent.run_conversation("do the thing", conversation_history=[], task_id="t")
+
+    assert "ANSWER ONE" in (result.get("final_response") or "")
+    assert result.get("response_previewed") is True, (
+        "a restored answer was not flagged as already delivered — it will be sent twice"
+    )

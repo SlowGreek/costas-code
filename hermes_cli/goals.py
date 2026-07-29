@@ -35,7 +35,7 @@ import re
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,15 @@ DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES = 3
 # A broken/invalid API key returns 401 every call — the loop must not
 # run until the turn budget, wasting every turn on an unreachable judge.
 DEFAULT_MAX_CONSECUTIVE_TRANSPORT_FAILURES = 5
+
+# How many times a DONE verdict may be downgraded by the second-stage
+# verifier before the loop stops and surfaces the disagreement. Failing
+# closed is correct — an uncorroborated claim is not proof — but an
+# unbounded veto is indistinguishable from a hang: the judge keeps saying
+# done, the verifier keeps refusing, and the goal silently burns its whole
+# budget. After this many rounds we pause and tell the user what the
+# verifier wants instead.
+MAX_VERIFY_DOWNGRADES = 3
 # Hard ceiling on how long ANY wait barrier parks the loop before it is
 # force-released, regardless of barrier kind (pid / session / time). Without
 # a ceiling a bare-pid wait on a process that never exits, or a session wait
@@ -112,8 +121,13 @@ CONTINUATION_PROMPT_TEMPLATE = (
     "[Continuing toward your standing goal]\n"
     "Goal: {goal}\n\n"
     "Continue working toward this goal. Take the next concrete step. "
+    "The goal is a standing mandate: decide and proceed on reversible, "
+    "in-scope work rather than pausing to ask. Do not stop to seek "
+    "permission for a step the goal already authorises. "
     "If you believe the goal is complete, state so explicitly and stop. "
-    "If you are blocked and need input from the user, say so clearly and stop."
+    "Stop only when the work is genuinely irreversible or out of scope, or "
+    "you lack something you cannot obtain (a credential, a decision only the "
+    "user can make) — then say exactly what you need and stop."
 )
 
 # Used when the goal carries a structured completion contract. The contract
@@ -127,10 +141,13 @@ CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE = (
     "{contract_block}\n\n"
     "Continue working toward the outcome above. Take the next concrete step. "
     "Stay within the stated boundaries and do not violate the constraints. "
+    "Within those boundaries the contract is a standing mandate: decide and "
+    "proceed rather than pausing to ask permission. "
     "Before claiming the goal is done, satisfy the Verification criterion and "
     "show the concrete evidence (command output, file contents, test result). "
-    "If you hit the stated stop condition or are otherwise blocked and need "
-    "user input, say so clearly and stop."
+    "Stop when you hit the contract's stop condition, or when the work is "
+    "genuinely irreversible or you lack something only the user can supply — "
+    "then say exactly what you need and stop."
 )
 
 # Used when the user has added one or more /subgoal criteria. Surfaced
@@ -142,10 +159,13 @@ CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE = (
     "Additional criteria the user added mid-loop:\n"
     "{subgoals_block}\n\n"
     "Continue working toward the goal AND all additional criteria. Take "
-    "the next concrete step. If you believe the goal and every "
+    "the next concrete step. The goal is a standing mandate: decide and "
+    "proceed on reversible, in-scope work rather than pausing to ask. "
+    "If you believe the goal and every "
     "additional criterion are complete, state so explicitly and stop. "
-    "If you are blocked and need input from the user, say so clearly "
-    "and stop."
+    "Stop only when the work is genuinely irreversible or out of scope, or "
+    "you lack something only the user can supply — then say exactly what you "
+    "need and stop."
 )
 
 
@@ -173,6 +193,14 @@ JUDGE_SYSTEM_PROMPT = (
     "honestly instead of being shown a false 'achieved'. Choose BLOCKED over "
     "CONTINUE only when re-poking the agent cannot help because the blocker is "
     "external to it.\n\n"
+    "Being unable to proceed is NOT the same as choosing to ask. An agent "
+    "that merely requests permission for reversible, in-scope work the "
+    "standing goal already authorises (for example 'shall I commit and "
+    "push?', 'do you want me to merge?', 'should I continue?') is NOT "
+    "blocked — return CONTINUE so it proceeds. Reserve BLOCKED for a real "
+    "external dependency: a missing credential, an irreversible or "
+    "out-of-scope action, a genuine ambiguity in the goal, or a decision "
+    "whose answer the agent cannot derive.\n\n"
     "WAIT — the goal is NOT done, but the next step is to wait for async "
     "work to finish rather than act again. Choose this ONLY when the agent's "
     "progress is genuinely gated on something running on its own:\n"
@@ -542,6 +570,10 @@ class GoalState:
     prior_gap: Optional[str] = None
     continue_fingerprint: Optional[str] = None
     no_progress_streak: int = 0
+    # Consecutive DONE verdicts vetoed by the second-stage verifier. Bounded
+    # by MAX_VERIFY_DOWNGRADES so a judge/verifier standoff surfaces instead
+    # of silently consuming the whole turn budget.
+    verify_downgrades: int = 0
     # User-added criteria appended mid-loop via the /subgoal command.
     # When non-empty the judge prompt and continuation prompt both
     # include them so the agent works toward them and the judge factors
@@ -605,6 +637,7 @@ class GoalState:
             prior_gap=data.get("prior_gap"),
             continue_fingerprint=data.get("continue_fingerprint"),
             no_progress_streak=int(data.get("no_progress_streak", 0) or 0),
+            verify_downgrades=int(data.get("verify_downgrades", 0) or 0),
             subgoals=subgoals,
             waiting_on_pid=(int(data["waiting_on_pid"]) if data.get("waiting_on_pid") else None),
             waiting_on_session=(str(data["waiting_on_session"]) if data.get("waiting_on_session") else None),
@@ -1703,6 +1736,7 @@ class GoalManager:
         self._state.waiting_reason = None
         self._state.waiting_since = 0.0
         self._state.no_progress_streak = 0
+        self._state.verify_downgrades = 0
         self._state.continue_fingerprint = None
         if reset_budget:
             self._state.turns_used = 0
@@ -1998,6 +2032,7 @@ class GoalManager:
         user_initiated: bool = True,
         background_processes: Optional[List[Dict[str, Any]]] = None,
         recent_evidence: Optional[List[str]] = None,
+        status_callback: Optional[Callable[..., Any]] = None,
     ) -> Dict[str, Any]:
         """Run the judge and update state. Return a decision dict.
 
@@ -2058,6 +2093,26 @@ class GoalManager:
         state.turns_used += 1
         state.last_turn_at = time.time()
 
+        # The driver has already told the UI this turn is complete, but the
+        # judge (and, on DONE, the verifier) are still to run — each an
+        # auxiliary LLM round-trip. Announce it so the app doesn't look idle
+        # while the goal is still deciding. Best-effort: a broken callback
+        # must never take down the loop.
+        def _status(kind: str, text: Optional[str] = None) -> None:
+            if status_callback is None:
+                return
+            try:
+                status_callback(kind, text)
+            except TypeError:
+                try:
+                    status_callback(kind)
+                except Exception:
+                    logger.debug("goal status_callback failed", exc_info=True)
+            except Exception:
+                logger.debug("goal status_callback failed", exc_info=True)
+
+        _status("judging", "assessing goal progress")
+
         verdict, reason, parse_failed, wait_directive, transport_failed = judge_goal(
             state.goal,
             last_response,
@@ -2068,6 +2123,7 @@ class GoalManager:
         )
         state.last_verdict = verdict
         state.last_reason = reason
+        _status("judged", verdict)
 
         # Track consecutive judge parse failures. Reset on any usable reply,
         # including API / transport errors (parse_failed=False) so a flaky
@@ -2169,6 +2225,7 @@ class GoalManager:
                 state.no_progress_streak = 0
                 state.continue_fingerprint = None
                 state.prior_gap = None
+                state.verify_downgrades = 0
                 save_goal(self.session_id, state)
                 # Keep the judge's rationale in the user-facing line; the
                 # "(verified)" suffix signals the second-stage corroboration.
@@ -2183,6 +2240,33 @@ class GoalManager:
                 }
             # Not corroborated → treat as continue and fall through so the
             # no-progress / budget backstops apply.
+            state.verify_downgrades += 1
+            # Bounded standoff: the judge keeps saying DONE and the verifier
+            # keeps refusing. Continuing silently burns the whole budget and
+            # looks like a hang, so surface the disagreement and let the user
+            # decide (resume to try again, or adjust the goal).
+            if state.verify_downgrades >= MAX_VERIFY_DOWNGRADES:
+                state.status = "paused"
+                state.paused_reason = (
+                    f"completion claimed {state.verify_downgrades}x but never "
+                    f"corroborated — last gap: {verify_reason}"
+                )
+                state.last_verdict = "continue"
+                state.last_reason = verify_reason
+                save_goal(self.session_id, state)
+                return {
+                    "status": "paused",
+                    "should_continue": False,
+                    "continuation_prompt": None,
+                    "verdict": "continue",
+                    "reason": verify_reason,
+                    "message": (
+                        f"⏸ Goal paused — the agent claimed completion "
+                        f"{state.verify_downgrades} times without corroborating "
+                        f"evidence: {verify_reason}. Supply the missing proof or "
+                        f"adjust the goal, then /goal resume."
+                    ),
+                }
             verdict = "continue"
             reason = f"completion claimed but not verified: {verify_reason}"
             state.last_verdict = "continue"

@@ -163,7 +163,15 @@ class TestDetectDangerousRm:
                     None,
                 )
 
-    def test_symlinked_temp_dir_only_exempts_canonical_target(self, tmp_path):
+    def test_symlinked_temp_dir_exempts_either_spelling_of_the_same_file(self, tmp_path):
+        """Both spellings of the temp dir are exempt; escapes are not.
+
+        macOS reports ``gettempdir()`` as ``/var/folders/...`` whose realpath
+        is ``/private/var/folders/...``, so the two spellings name the SAME
+        file. Rejecting the reported spelling made the exemption dead code on
+        every Mac. The property that actually matters is that the operand
+        RESOLVES inside the temp directory — covered by the escape test below.
+        """
         real_temp = tmp_path / "real-temp"
         real_temp.mkdir()
         linked_temp = tmp_path / "linked-temp"
@@ -171,12 +179,54 @@ class TestDetectDangerousRm:
         basename = "hermes-verify-example.py"
 
         with mock_patch("tempfile.gettempdir", return_value=str(linked_temp)):
-            assert detect_dangerous_command(f"rm -f {linked_temp / basename}")[0] is True
+            assert detect_dangerous_command(f"rm -f {linked_temp / basename}") == (
+                False,
+                None,
+                None,
+            )
             assert detect_dangerous_command(f"rm -f {real_temp / basename}") == (
                 False,
                 None,
                 None,
             )
+
+    def test_reported_tempdir_spelling_is_exempt_on_macos_style_paths(self):
+        """The exemption must fire on the path ``tempfile`` actually hands out.
+
+        Regression: macOS ``gettempdir()`` returns ``/var/folders/...`` while
+        its realpath is ``/private/var/folders/...``. The guard compared the
+        operand only against the realpath form, so the agent's own cleanup of
+        a script it had just created via ``tempfile`` was flagged dangerous on
+        every Mac — the exemption was unreachable in production.
+        """
+        reported = "/var/folders/ab/xyz/T"
+        canonical = "/private/var/folders/ab/xyz/T"
+
+        def fake_realpath(path):
+            if path == reported:
+                return canonical
+            if path.startswith(reported + "/"):
+                return canonical + path[len(reported):]
+            return path
+
+        with mock_patch("tempfile.gettempdir", return_value=reported), mock_patch(
+            "os.path.realpath", side_effect=fake_realpath
+        ):
+            assert detect_dangerous_command(
+                f"rm -f {reported}/hermes-verify-example.py"
+            ) == (False, None, None)
+
+    def test_symlink_escaping_temp_dir_is_still_dangerous(self, tmp_path):
+        """A symlink planted in temp pointing outside it must NOT be exempt."""
+        real_temp = tmp_path / "real-temp"
+        real_temp.mkdir()
+        outside = tmp_path / "outside.conf"
+        outside.write_text("sensitive")
+        planted = real_temp / "hermes-verify-evil.py"
+        planted.symlink_to(outside)
+
+        with mock_patch("tempfile.gettempdir", return_value=str(real_temp)):
+            assert detect_dangerous_command(f"rm -f {planted}")[0] is True
 
     def test_verification_cleanup_exemption_rejects_broader_deletions(self):
         commands = (

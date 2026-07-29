@@ -10415,6 +10415,14 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             user_initiated=True,
             background_processes=_bg_procs,
             recent_evidence=_recent_evidence,
+            # The turn already printed its response; the judge (and, on DONE,
+            # the verifier) are still to run. Show a line so the CLI doesn't
+            # sit silent through an auxiliary round-trip.
+            status_callback=lambda kind, text=None: (
+                _cprint(f"  {_DIM}⋯ {text or 'judging goal'}{_RST}")
+                if kind == "judging"
+                else None
+            ),
         )
         msg = decision.get("message") or ""
         if msg:

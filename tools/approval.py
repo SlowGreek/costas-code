@@ -2024,11 +2024,26 @@ def _is_verification_artifact_cleanup(command: str) -> bool:
         return False
 
     operand = argv[2]
-    temp_dir = os.path.realpath(tempfile.gettempdir())
+    reported_temp_dir = tempfile.gettempdir()
+    temp_dir = os.path.realpath(reported_temp_dir)
     basename = os.path.basename(operand)
-    if operand != os.path.join(temp_dir, basename):
+
+    # The operand must be spelled as a direct child of the temp directory,
+    # with no traversal, globbing, or nesting. Accept BOTH the canonical
+    # (realpath) spelling and the spelling tempfile actually reports: on
+    # macOS `gettempdir()` returns `/var/folders/...` while its realpath is
+    # `/private/var/folders/...`, so comparing only against the canonical
+    # form rejected every path the agent is handed and the exemption never
+    # fired on macOS at all.
+    allowed_parents = {temp_dir}
+    if os.path.isabs(reported_temp_dir):
+        allowed_parents.add(os.path.normpath(reported_temp_dir))
+    if operand not in {os.path.join(parent, basename) for parent in allowed_parents}:
         return False
 
+    # Resolve the operand and require it to still land directly inside the
+    # canonical temp directory. This is the escape check: a symlink planted
+    # in temp that points at /etc/passwd resolves outside and is rejected.
     target = os.path.realpath(operand)
     if os.path.dirname(target) != temp_dir:
         return False

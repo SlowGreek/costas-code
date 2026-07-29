@@ -246,6 +246,40 @@ function Get-WindowsArch {
     }
 }
 
+# Translate a bare Python minor version ("3.11") into the interpreter request
+# string we hand to uv (`python find`, `python install`, `venv --python`).
+#
+# On Windows on ARM this pins the request to the x64 CPython build.  An arm64
+# interpreter looks like the natural choice and is what uv picks by default
+# when one is already installed, but it is a trap: PyPI publishes no
+# win_arm64 wheels for several of our exact-pinned dependencies (cryptography,
+# pywinpty).  uv then falls back to the sdist, whose build backend is maturin,
+# which needs a full Rust toolchain for aarch64-pc-windows-msvc and tries to
+# bootstrap rustup into a temp dir mid-install.  Every dependency tier fails:
+#
+#   Python reports platform: win-arm64
+#   Computed rustc target triple: aarch64-pc-windows-msvc
+#   x Failed to build `cryptography==46.0.7`
+#   `-> Call to `maturin.build_wheel` failed (exit code: 1)
+#
+# The x64 build runs fine under Prism emulation and resolves prebuilt
+# win_amd64 wheels for the whole tree, so no compiler is needed at all.  We
+# use uv's full request syntax rather than a bare version so uv skips an
+# already-installed arm64 interpreter instead of matching it, and downloads an
+# x64 build when none is present.
+#
+# $Arch is injectable so the behavior is testable off-Windows; it defaults to
+# the real (emulation-invariant) OS arch.
+function Get-UvPythonRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [string]$Arch
+    )
+    if (-not $Arch) { $Arch = Get-WindowsArch }
+    if ($Arch -eq "arm64") { return "cpython-$Version-windows-x86_64" }
+    return $Version
+}
+
 # ============================================================================
 
 function Write-Banner {
@@ -631,7 +665,7 @@ function Resolve-AvailablePythonVersion {
         if (-not $ver -or $seen.ContainsKey($ver)) { continue }
         $seen[$ver] = $true
         try {
-            $found = & $UvCmd python find $ver 2>$null
+            $found = & $UvCmd python find (Get-UvPythonRequest $ver) 2>$null
             if ($found) { return $ver }
         } catch { }
     }
@@ -643,7 +677,7 @@ function Test-Python {
     
     # Let uv find or install Python
     try {
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        $pythonPath = & $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null
         if ($pythonPath) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python found: $ver"
@@ -668,13 +702,13 @@ function Test-Python {
         # semantics or stderr noise.  This fix was previously landed as
         # commit ec1714e71 and then lost in a release squash; reapplied here.
         $ErrorActionPreference = "Continue"
-        $uvOutput = & $UvCmd python install $PythonVersion 2>&1
+        $uvOutput = & $UvCmd python install (Get-UvPythonRequest $PythonVersion) 2>&1
         $uvExitCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
 
         # Check if Python is now available (more reliable than exit code
         # since uv may return non-zero due to "already installed" etc.)
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        $pythonPath = & $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null
         if ($pythonPath) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python installed: $ver"
@@ -696,7 +730,7 @@ function Test-Python {
     Write-Info "Trying to find any existing Python 3.10+..."
     foreach ($fallbackVer in $PythonFallbackVersions) {
         try {
-            $pythonPath = & $UvCmd python find $fallbackVer 2>$null
+            $pythonPath = & $UvCmd python find (Get-UvPythonRequest $fallbackVer) 2>$null
             if ($pythonPath) {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Found fallback: $ver"
@@ -2052,7 +2086,7 @@ function Install-Venv {
     # normal progress such as "Using CPython ..." on stderr; under Windows
     # PowerShell 5.1 with EAP=Stop that stderr is a NativeCommandError unless
     # we temporarily relax EAP and trust $LASTEXITCODE for real failures.
-    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python $PythonVersion }
+    Invoke-NativeWithRelaxedErrorAction { & $UvCmd venv venv --python (Get-UvPythonRequest $PythonVersion) }
     # Relaxing EAP above means a *genuine* uv-venv failure (exit != 0) no longer
     # aborts on its own. Capture $LASTEXITCODE immediately and fail fast, so the
     # `venv` stage can't falsely report success (and Invoke-Stage can't emit
@@ -2093,10 +2127,40 @@ function Install-Venv {
     Write-Success "Virtual environment ready (Python $PythonVersion)"
 }
 
+function Get-PythonPlatformTag {
+    <#
+    .SYNOPSIS
+        Return an interpreter's wheel platform tag ("win-amd64", "win-arm64").
+
+    .DESCRIPTION
+        This is the tag pip/uv match wheels against, so it -- not the CPU --
+        decides whether a prebuilt wheel applies.  An x64 CPython on an ARM64
+        machine reports win-amd64 and resolves amd64 wheels under emulation.
+        Returns $null when the interpreter is missing or can't be probed.
+    #>
+    param([string]$PythonExe)
+
+    if (-not $PythonExe -or -not (Test-Path $PythonExe)) { return $null }
+    $prevEAP = $ErrorActionPreference
+    try {
+        # Python writes assorted noise to stderr; EAP=Stop would turn that into
+        # a terminating NativeCommandError even on a successful probe.
+        $ErrorActionPreference = "Continue"
+        $tag = & $PythonExe -c "import sysconfig; print(sysconfig.get_platform())" 2>$null
+        $exit = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($exit -eq 0 -and $tag) { return ([string]$tag).Trim() }
+    } catch {
+        $ErrorActionPreference = $prevEAP
+    }
+    return $null
+}
+
 function Assert-Arm64WheelSupport {
     <#
     .SYNOPSIS
-        Fail fast on Windows ARM64 instead of cascading through four tiers.
+        Fail fast on a win-arm64 interpreter instead of cascading through four
+        tiers.
 
     .DESCRIPTION
         Two core dependencies publish no win_arm64 wheel:
@@ -2114,24 +2178,45 @@ function Assert-Arm64WheelSupport {
         cascade ending in "even with no extras", which reads like a Hermes bug
         rather than an unsupported CPU architecture.
 
-        Reuse Get-WindowsArch: it already resolves the case where an ARM64
-        machine reports X64 from an emulated x64 PowerShell host.
+        What actually decides this is the INTERPRETER's platform tag, not the
+        CPU: Windows on ARM runs x64 under emulation, and an x64 CPython
+        reports win-amd64 and resolves every existing amd64 wheel.  That is why
+        Get-UvPythonRequest pins an x64 build on arm64 -- so this guard is now
+        the backstop for the case where an arm64 interpreter is used anyway
+        (an inherited $env:UV_PYTHON, a hand-made venv, -NoVenv against a
+        pre-existing arm64 Python), rather than the common path.
+
+        Gating on the CPU alone would reject the very workaround this message
+        recommends: on an ARM64 machine an x64 Python installs fine, so
+        Get-WindowsArch is only the cheap pre-filter. Get-WindowsArch is still
+        what resolves the emulation edge case where an ARM64 machine reports
+        X64 from an emulated x64 PowerShell host.
     #>
+    param([string]$PythonExe)
+
     if ((Get-WindowsArch) -ne 'arm64') { return }
 
+    # An x64 interpreter under emulation gets amd64 wheels -- nothing to block.
+    # A failed probe ($null) stays conservative and throws.
+    $tag = Get-PythonPlatformTag $PythonExe
+    if ($tag -and $tag -ne 'win-arm64') { return }
+
     throw @"
-Windows on ARM is not supported yet.
+Windows on ARM needs an x64 Python, and this install has an ARM64 one.
 
-This machine reports an ARM64 processor. Two of Hermes's Python dependencies
-(cryptography and pywinpty) publish no prebuilt ARM64 wheel, so installing
-them would require compiling from source with a Rust toolchain and a full
-OpenSSL development environment.
+Two of Hermes's Python dependencies (cryptography and pywinpty) publish no
+prebuilt ARM64 wheel, so installing them would require compiling from source
+with a Rust toolchain and a full OpenSSL development environment.
 
-Workaround -- install the x64 build of Python 3.11 and re-run this installer.
-Windows on ARM runs x64 programs under emulation, so every existing amd64
-wheel applies:
+Windows on ARM runs x64 programs under emulation, so an x64 (amd64) Python
+makes every existing wheel apply. The installer normally provisions one for
+you; something pinned an ARM64 interpreter instead -- most often an inherited
+UV_PYTHON, a hand-made venv, or -NoVenv against a pre-existing ARM64 Python.
 
-  https://www.python.org/downloads/windows/  (choose "Windows installer (64-bit)")
+Fix -- clear UV_PYTHON, delete the venv, and re-run this installer:
+
+  Remove-Item Env:\UV_PYTHON -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force "$InstallDir\venv"
 
 Native ARM64 support is tracked as a known gap.
 "@
@@ -2140,9 +2225,16 @@ Native ARM64 support is tracked as a known gap.
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
 
-    # Preflight: bail out on Windows ARM64 before the four-tier cascade below
-    # can bury the real cause under "even with no extras".
-    Assert-Arm64WheelSupport
+    # Preflight: bail out on a win-arm64 interpreter before the four-tier
+    # cascade below can bury the real cause under "even with no extras".
+    # Probe the interpreter the tiers will actually install into: the venv's,
+    # or uv's resolved one under -NoVenv.
+    $preflightPython = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        (& $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null)
+    }
+    Assert-Arm64WheelSupport $preflightPython
 
     # UV_SYSTEM_CERTS is set once at script scope (see the top of this file) so
     # it covers every uv download, including `uv python install`, not just the
@@ -2236,7 +2328,7 @@ function Install-Dependencies {
 
     # Parse [project.optional-dependencies].all from pyproject.toml.
     # tomllib is stdlib on Python 3.11+ which the bootstrap guarantees.
-    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find (Get-UvPythonRequest $PythonVersion)) }
     $allExtras = @()
     if (Test-Path $pythonExeForParse) {
         $parsed = & $pythonExeForParse -c @"
@@ -2332,7 +2424,7 @@ except Exception:
     if (-not $NoVenv) {
         $venvPython = "$InstallDir\venv\Scripts\python.exe"
         if (-not (Test-Path $venvPython)) {
-            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, manually: cd '$InstallDir'; Remove-Item -Recurse -Force venv,.venv; uv venv venv --python $PythonVersion; `$env:UV_PROJECT_ENVIRONMENT='$InstallDir\venv'; uv sync --extra all --locked"
+            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, manually: cd '$InstallDir'; Remove-Item -Recurse -Force venv,.venv; uv venv venv --python $(Get-UvPythonRequest $PythonVersion); `$env:UV_PROJECT_ENVIRONMENT='$InstallDir\venv'; uv sync --extra all --locked"
         }
         # Relax EAP=Stop while running the import probe.  Python writes
         # deprecation warnings and import-system info to stderr; under
@@ -2403,7 +2495,7 @@ print(','.join(scripts))
     # users hit and lazy-import errors from `hermes dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find (Get-UvPythonRequest $PythonVersion)) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         $webServerSyntaxOk = $false

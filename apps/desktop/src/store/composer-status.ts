@@ -169,20 +169,28 @@ const todoToItem = (t: TodoItem): ComposerStatusItem => ({
   type: 'todo'
 })
 
-const goalToItem = (goal: GatewayGoalStatus): ComposerStatusItem => {
+// Sessions whose goal judge (and, on DONE, verifier) is mid-flight. The
+// gateway emits message.complete BEFORE running them, so without this the app
+// looks idle through one or two auxiliary LLM round-trips. Cleared as soon as
+// the verdict lands and refreshes the authoritative goal row.
+export const $goalJudgingBySession = atom<Record<string, boolean>>({})
+
+const goalToItem = (goal: GatewayGoalStatus, judging = false): ComposerStatusItem => {
   const progress = `${goal.turns_used}/${goal.max_turns}`
   // blocked/paused reasons are the user's call to action — they get the full
   // wrapped block. waiting/last_reason are ambient progress chatter and stay
   // inline where truncation is harmless.
   const note = goal.blocked_reason || goal.paused_reason
-  const inline = note ? undefined : goal.waiting_reason || goal.last_reason
+  const inline = judging ? 'judging…' : note ? undefined : goal.waiting_reason || goal.last_reason
 
   return {
     detail: inline ? `${progress} · ${inline}` : progress,
-    detailNote: note || undefined,
+    detailNote: judging ? undefined : note || undefined,
     goalStatus: goal.status,
     id: 'goal:standing',
-    state: goal.status === 'active' ? 'running' : goal.status === 'blocked' ? 'failed' : 'done',
+    // While judging, the row spins regardless of the last persisted status:
+    // the turn is done but the goal has not decided yet.
+    state: judging || goal.status === 'active' ? 'running' : goal.status === 'blocked' ? 'failed' : 'done',
     title: goal.goal,
     type: 'goal'
   }
@@ -241,9 +249,10 @@ export const $statusItemsBySession = computed(
     $goalsBySession,
     $subagentsBySession,
     $backgroundStatusBySession,
-    $todosBySession
+    $todosBySession,
+    $goalJudgingBySession
   ],
-  (goals, sessionGoals, subs, background, todos) => {
+  (goals, sessionGoals, subs, background, todos, judging) => {
     const out: Record<string, ComposerStatusItem[]> = {}
 
     const push = (sid: string, items: ComposerStatusItem[]) => {
@@ -257,7 +266,7 @@ export const $statusItemsBySession = computed(
     }
 
     for (const [sid, goal] of Object.entries(goals)) {
-      push(sid, [goalToItem(goal)])
+      push(sid, [goalToItem(goal, Boolean(judging[sid]))])
     }
 
     // Only where the richer record hasn't landed — never two goal rows.
@@ -429,6 +438,33 @@ export function reconcileBackgroundProcesses(sid: string, procs: GatewayProcessE
   writeBackground(sid, next)
 }
 
+// Sessions whose goal judge (and, on DONE, verifier) is mid-flight. The
+// gateway emits message.complete BEFORE running them, so without this the app
+// looks idle through one or two auxiliary LLM round-trips. Cleared as soon as
+// the verdict lands and refreshes the authoritative goal row.
+// (The atom itself is declared above goalToItem, which reads it.)
+export function setGoalJudging(sid: string, judging: boolean) {
+  if (!sid) {
+    return
+  }
+
+  const current = $goalJudgingBySession.get()
+
+  if (Boolean(current[sid]) === judging) {
+    return // preserve reference identity on a no-op
+  }
+
+  const next = { ...current }
+
+  if (judging) {
+    next[sid] = true
+  } else {
+    delete next[sid]
+  }
+
+  $goalJudgingBySession.set(next)
+}
+
 export function reconcileGoalStatus(sid: string, goal: GatewayGoalStatus | null) {
   if (!sid) {
     return
@@ -436,6 +472,9 @@ export function reconcileGoalStatus(sid: string, goal: GatewayGoalStatus | null)
 
   const current = $goalStatusBySession.get()
   const next = { ...current }
+
+  // The verdict has landed: whatever the outcome, judging is over.
+  setGoalJudging(sid, false)
 
   if (goal && goal.status !== 'cleared' && goal.status !== 'done') {
     next[sid] = goal

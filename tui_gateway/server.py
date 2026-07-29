@@ -12985,6 +12985,17 @@ def _run_prompt_submit(
                                 user_initiated=True,
                                 background_processes=_bg_procs,
                                 recent_evidence=_goal_evidence,
+                                # message.complete has already painted this
+                                # turn as finished, but the judge (and, on
+                                # DONE, the verifier) are still to run — each
+                                # an auxiliary LLM round-trip. Surface them so
+                                # the app doesn't look idle while the goal is
+                                # still deciding.
+                                status_callback=lambda kind, text=None: _status_update(
+                                    sid,
+                                    "goal_judging" if kind == "judging" else "goal",
+                                    text,
+                                ),
                             )
                             verdict_msg = decision.get("message") or ""
                             if verdict_msg:

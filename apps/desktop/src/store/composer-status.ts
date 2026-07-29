@@ -5,6 +5,7 @@ import { stableArray } from '@/lib/stable-array'
 import type { TodoItem, TodoStatus } from '@/lib/todos'
 
 import { $gateway } from './gateway'
+import { $goalsBySession, type SessionGoal, type GoalStatus as SessionGoalStatus } from './goals'
 import { dispatchNativeNotification } from './native-notifications'
 import { notifyError } from './notifications'
 import { $sessionStates } from './session-states'
@@ -14,7 +15,9 @@ import { $todosBySession } from './todos'
 /** Composer status stack feed — merged todos, subagents, background per session. */
 export type StatusItemState = 'done' | 'failed' | 'running'
 export type StatusItemType = 'background' | 'goal' | 'subagent' | 'todo'
-export type GoalStatus = 'active' | 'blocked' | 'cleared' | 'done' | 'paused'
+// The union the status row renders from: GoalManager's authoritative lifecycle
+// states plus the 'waiting' state the text-derived store can report.
+export type GoalStatus = SessionGoalStatus | 'blocked' | 'cleared'
 
 export interface GatewayGoalStatus {
   blocked_reason?: null | string
@@ -39,7 +42,8 @@ export interface ComposerStatusItem {
    *  blocked goal's reason is the one thing the user must act on, so it must
    *  never be clipped to "The agent has stopped iterating, stating S…". */
   detailNote?: string
-  /** Goal: native GoalManager lifecycle state driving its glyph/tone. */
+  /** Goal: lifecycle state driving its glyph/tone —
+   *  active | blocked | cleared | done | paused | waiting. */
   goalStatus?: GoalStatus
   id: string
   /** background process: captured stdout/stderr tail for the inline viewer. */
@@ -184,10 +188,62 @@ const goalToItem = (goal: GatewayGoalStatus): ComposerStatusItem => {
   }
 }
 
+// Fallback for sessions the authoritative `goal.status` RPC hasn't answered for
+// yet: the text-derived store parsed off the gateway's status line.
+const sessionGoalToItem = (goal: SessionGoal): ComposerStatusItem => ({
+  detail: goal.detail,
+  goalStatus: goal.status,
+  id: 'goal:standing',
+  state: goal.status === 'active' || goal.status === 'waiting' ? 'running' : 'done',
+  title: goal.title,
+  type: 'goal'
+})
+
 // The single thing the stack reads: a typed, merged item list per session.
+//
+// Identity contract: this computed's inputs churn constantly during a turn (a
+// subagent tick, a 5s background poll, a todo update — in ANY session), but
+// the merged output for most sessions is unchanged. Rebuilding fresh arrays
+// and item objects every time handed every mounted composer stack a new
+// reference per recompute — cross-session churn × open tiles. Stabilize both
+// levels: an unchanged session keeps its previous array (and item objects),
+// and a fully-unchanged map keeps its previous reference so `computed` skips
+// the notify entirely ("preserve reference identity on no-ops").
+const sameStatusItem = (a: ComposerStatusItem, b: ComposerStatusItem) =>
+  a.id === b.id &&
+  a.type === b.type &&
+  a.state === b.state &&
+  a.title === b.title &&
+  a.output === b.output &&
+  a.exitCode === b.exitCode &&
+  a.currentTool === b.currentTool &&
+  a.detail === b.detail &&
+  a.detailNote === b.detailNote &&
+  a.goalStatus === b.goalStatus &&
+  a.todoStatus === b.todoStatus &&
+  a.sessionId === b.sessionId
+
+const stabilizeItems = (prev: ComposerStatusItem[] | undefined, next: ComposerStatusItem[]): ComposerStatusItem[] => {
+  if (!prev) {
+    return next
+  }
+
+  const merged = next.map((item, i) => (prev[i] && sameStatusItem(prev[i], item) ? prev[i] : item))
+
+  return merged.length === prev.length && merged.every((item, i) => item === prev[i]) ? prev : merged
+}
+
+let prevStatusItems: Record<string, ComposerStatusItem[]> = {}
+
 export const $statusItemsBySession = computed(
-  [$goalStatusBySession, $subagentsBySession, $backgroundStatusBySession, $todosBySession],
-  (goals, subs, background, todos) => {
+  [
+    $goalStatusBySession,
+    $goalsBySession,
+    $subagentsBySession,
+    $backgroundStatusBySession,
+    $todosBySession
+  ],
+  (goals, sessionGoals, subs, background, todos) => {
     const out: Record<string, ComposerStatusItem[]> = {}
 
     const push = (sid: string, items: ComposerStatusItem[]) => {
@@ -204,6 +260,13 @@ export const $statusItemsBySession = computed(
       push(sid, [goalToItem(goal)])
     }
 
+    // Only where the richer record hasn't landed — never two goal rows.
+    for (const [sid, goal] of Object.entries(sessionGoals)) {
+      if (!goals[sid]) {
+        push(sid, [sessionGoalToItem(goal)])
+      }
+    }
+
     for (const [sid, list] of Object.entries(subs)) {
       push(sid, list.filter(s => s.status === 'running' || s.status === 'queued').map(subToItem))
     }
@@ -212,7 +275,14 @@ export const $statusItemsBySession = computed(
       push(sid, list)
     }
 
-    return out
+    let unchanged = Object.keys(prevStatusItems).length === Object.keys(out).length
+
+    for (const sid of Object.keys(out)) {
+      out[sid] = stabilizeItems(prevStatusItems[sid], out[sid]!)
+      unchanged &&= out[sid] === prevStatusItems[sid]
+    }
+
+    return (prevStatusItems = unchanged ? prevStatusItems : out)
   }
 )
 

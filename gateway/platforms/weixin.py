@@ -124,6 +124,12 @@ def _make_ssl_connector() -> Optional["aiohttp.TCPConnector"]:
     When ``certifi`` is installed, use its Mozilla CA bundle to guarantee
     verification. Otherwise fall back to aiohttp's default (which honors
     ``SSL_CERT_FILE`` env var via ``trust_env=True``).
+
+    Uses a tight ``keepalive_timeout=2`` (default aiohttp: 30s) so idle
+    connections drain promptly behind proxies like Cloudflare Warp that
+    leave peer-initiated FIN in ``CLOSE_WAIT`` (same class as #18451).
+    ``enable_cleanup_closed=True`` helps the connector clean up sockets
+    that the remote side has already closed.
     """
     try:
         import ssl
@@ -133,7 +139,12 @@ def _make_ssl_connector() -> Optional["aiohttp.TCPConnector"]:
     if not AIOHTTP_AVAILABLE:
         return None
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    return aiohttp.TCPConnector(ssl=ssl_ctx)
+    return aiohttp.TCPConnector(
+        ssl=ssl_ctx,
+        # Tighter keepalive so idle CLOSE_WAIT drains promptly (#18451, #69089).
+        keepalive_timeout=2,
+        enable_cleanup_closed=True,
+    )
 
 ITEM_TEXT = 1
 ITEM_IMAGE = 2
@@ -962,9 +973,25 @@ def _extract_text(item_list: List[Dict[str, Any]]) -> str:
             return text
     for item in item_list:
         if item.get("type") == ITEM_VOICE:
-            voice_text = str((item.get("voice_item") or {}).get("text") or "")
-            if voice_text:
-                return voice_text
+            # #27300: Tencent Cloud's `voice_item.text` is their STT output,
+            # which is wrong for any non-Chinese audio (the original report
+            # was a Russian voice message that came back as English
+            # gibberish). Return empty so the central STT pipeline in
+            # ``gateway/run.py`` produces the body from the downloaded
+            # audio instead.
+            voice_item = item.get("voice_item") or {}
+            if not (voice_item.get("media") or {}):
+                # No raw audio to download — Weixin supplied only its own
+                # speech-to-text result. Use it, but preserve the voice
+                # origin so the agent can distinguish this from text the
+                # user typed (#65022).
+                voice_text = str(voice_item.get("text") or "")
+                if voice_text:
+                    return (
+                        "[Voice transcription provided by Weixin]\n"
+                        f"{voice_text}"
+                    )
+            continue
     return ""
 
 
@@ -1648,8 +1675,13 @@ class WeixinAdapter(BasePlatformAdapter):
     async def _download_voice(self, item: Dict[str, Any]) -> Optional[str]:
         voice_item = item.get("voice_item") or {}
         media = voice_item.get("media") or {}
-        if voice_item.get("text"):
-            return None
+        # #27300: previously short-circuited when ``voice_item.text`` was set
+        # on the assumption that Tencent Cloud's STT was good enough.
+        # For non-Chinese audio that text is garbage (e.g. a Russian
+        # message comes back as English phonemes) — we must always
+        # download the raw audio so ``gateway/run.py``'s central STT
+        # pipeline can re-transcribe with the user's configured
+        # mlx-whisper / whisper.cpp / faster-whisper backend.
         try:
             data = await _download_and_decrypt_media(
                 self._poll_session,

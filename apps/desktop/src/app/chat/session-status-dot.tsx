@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 
 import { type Translations, useI18n } from '@/i18n'
+import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { $backgroundRunningSessionIds } from '@/store/composer-status'
 import { $erroredSessionIds, $unreadFinishedSessionIds } from '@/store/session'
@@ -147,13 +148,17 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
   useStore($sessionColorById)
   const color = sessionColorFor(session) ?? null
 
-  const needsInput = useStore($attentionSessionIds).includes(storedSessionId)
-  const isWorking = useStore($workingSessionIds).includes(storedSessionId)
-  const isStalled = useStore($stalledSessionIds).includes(storedSessionId)
-  const isUnread = useStore($unreadFinishedSessionIds).includes(storedSessionId)
-  const hasBackground = useStore($backgroundRunningSessionIds).includes(storedSessionId)
-  const hasError = useStore($erroredSessionIds).includes(storedSessionId)
-  const hasSubagents = useStore($subagentWaitingSessionIds).includes(storedSessionId)
+  // Per-session membership as booleans via useStoreSelector: these arrays tick
+  // on every stream delta (any session working/stalled/etc changes the array
+  // reference), but a given dot only repaints when ITS OWN membership flips.
+  // A plain useStore(array).includes(id) re-rendered every dot on every tick.
+  const needsInput = useStoreSelector($attentionSessionIds, ids => ids.includes(storedSessionId))
+  const isWorking = useStoreSelector($workingSessionIds, ids => ids.includes(storedSessionId))
+  const isStalled = useStoreSelector($stalledSessionIds, ids => ids.includes(storedSessionId))
+  const isUnread = useStoreSelector($unreadFinishedSessionIds, ids => ids.includes(storedSessionId))
+  const hasBackground = useStoreSelector($backgroundRunningSessionIds, ids => ids.includes(storedSessionId))
+  const hasError = useStoreSelector($erroredSessionIds, ids => ids.includes(storedSessionId))
+  const hasSubagents = useStoreSelector($subagentWaitingSessionIds, ids => ids.includes(storedSessionId))
 
   const dotState = sessionDotState({ hasBackground, hasError, hasSubagents, isStalled, isUnread, isWorking, needsInput })
 

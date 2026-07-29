@@ -25,6 +25,7 @@ import { clearAllPrompts } from '@/store/prompts'
 import {
   $busy,
   $connection,
+  $currentCwd,
   $messages,
   setAwaitingResponse,
   setBusy,
@@ -33,6 +34,7 @@ import {
 } from '@/store/session'
 import { clearSessionSubagents } from '@/store/subagents'
 import { clearSessionTodos } from '@/store/todos'
+import { setSessionDraftingTool } from '@/store/tool-drafting'
 
 import type {
   ClientSessionState,
@@ -53,7 +55,8 @@ import {
   planEdit,
   planReload,
   planRestore,
-  runRewindSubmit
+  runRewindSubmit,
+  truncateSubmitParams
 } from './rewind'
 import { useSlashCommand } from './slash'
 import { useSubmitPrompt } from './submit'
@@ -74,26 +77,38 @@ interface HandoffResult {
   error?: string
 }
 
+const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/
+const POSIX_ABSOLUTE_PATH_RE = /^\/(?!\/)/
+
+// `mode: local` means the gateway was launched locally, not necessarily that
+// Electron and the gateway share a filesystem. Windows Desktop can front a
+// WSL/Docker backend whose cwd is POSIX, so a Windows host path must cross the
+// boundary as bytes just like a remote attachment.
+function attachmentPathNeedsUpload(path: string, backendCwd?: null | string): boolean {
+  return WINDOWS_ABSOLUTE_PATH_RE.test(path.trim()) && POSIX_ABSOLUTE_PATH_RE.test(backendCwd?.trim() || '')
+}
+
 /**
  * Stage one file/image attachment into the session workspace and return the
- * attachment rewritten with the gateway-side ref. Images upload their bytes in
- * remote mode (so vision works) and pass the path locally; non-image files
- * upload bytes remotely and pass the path locally. Throws on failure so callers
- * can surface an error. Shared by submit-time sync, the eager drop-time upload,
- * and the message-edit composer drop — keep them in lockstep.
+ * attachment rewritten with the gateway-side ref. Attachments upload their
+ * bytes for remote gateways and local cross-filesystem backends; otherwise the
+ * gateway receives the shared local path. Throws on failure so callers can
+ * surface an error. Shared by submit-time sync, the eager drop-time upload, and
+ * the message-edit composer drop — keep them in lockstep.
  */
 export async function uploadComposerAttachment(
   attachment: ComposerAttachment,
-  opts: { remote: boolean; requestGateway: GatewayRequest; sessionId: string }
+  opts: { backendCwd?: null | string; remote: boolean; requestGateway: GatewayRequest; sessionId: string }
 ): Promise<ComposerAttachment> {
-  const { remote, requestGateway, sessionId } = opts
+  const { backendCwd, remote, requestGateway, sessionId } = opts
   const path = attachment.path ?? ''
   const label = attachment.label || pathLabel(path)
+  const uploadBytes = remote || attachmentPathNeedsUpload(path, backendCwd)
 
   if (attachment.kind === 'image') {
     let result: ImageAttachResponse
 
-    if (remote) {
+    if (uploadBytes) {
       let payload: Awaited<ReturnType<typeof readImageForRemoteAttach>>
 
       try {
@@ -136,7 +151,7 @@ export async function uploadComposerAttachment(
   // Non-image file.
   let dataUrl: string | null = null
 
-  if (remote) {
+  if (uploadBytes) {
     try {
       dataUrl = await readFileDataUrlForAttach(path)
     } catch (err) {
@@ -323,7 +338,12 @@ export function usePromptActions({
         }
 
         if (attachment.kind === 'image' || attachment.kind === 'file') {
-          const nextAttachment = await uploadComposerAttachment(attachment, { remote, requestGateway, sessionId })
+          const nextAttachment = await uploadComposerAttachment(attachment, {
+            backendCwd: $currentCwd.get(),
+            remote,
+            requestGateway,
+            sessionId
+          })
 
           // Update-only: never resurrect a chip the user removed mid-upload.
           if (updateComposerAttachments) {
@@ -362,7 +382,14 @@ export function usePromptActions({
       try {
         // Update-only: if the user removed the chip while this was uploading,
         // don't resurrect it — just drop the staged result on the floor.
-        updateComposerAttachment(await uploadComposerAttachment(attachment, { remote, requestGateway, sessionId }))
+        updateComposerAttachment(
+          await uploadComposerAttachment(attachment, {
+            backendCwd: $currentCwd.get(),
+            remote,
+            requestGateway,
+            sessionId
+          })
+        )
       } catch (err) {
         // Leave the chip in place so submit-time sync can retry (or the user can
         // remove it) and flag the card; also toast so a hard failure (unreadable
@@ -506,6 +533,8 @@ export function usePromptActions({
     busyRef,
     copy,
     createBackendSessionForSend,
+    getRoutedStoredSessionId,
+    getRuntimeIdForStoredSession,
     handleSkinCommand,
     handoffSession,
     openMemoryGraph,
@@ -525,7 +554,9 @@ export function usePromptActions({
 
       if (!attachments.length && SLASH_COMMAND_RE.test(visibleText)) {
         triggerHaptic('selection')
-        await executeSlashCommand(visibleText)
+        // Forward the explicit target (background queue drain, tile) — dropping
+        // it ran the command against whatever chat happened to be in front.
+        await executeSlashCommand(visibleText, options?.sessionId ? { sessionId: options.sessionId } : undefined)
 
         return true
       }
@@ -596,6 +627,7 @@ export function usePromptActions({
     clearSessionTodos(sessionId)
     clearSessionSubagents(sessionId)
     resetSessionBackground(sessionId)
+    setSessionDraftingTool(sessionId, '')
     // Stop ends the turn, so the gateway is no longer blocked on any prompt it
     // raised. Drop this session's pending clarify / approval / sudo / secret so
     // a dead panel (and the sidebar "needs input" dot) can't linger and accept
@@ -645,7 +677,10 @@ export function usePromptActions({
   const redirectPrompt = useCallback(
     async (rawText: string, attachments?: ComposerAttachment[]): Promise<boolean> => {
       const text = sanitizeComposerInput(rawText).trim()
-      const sessionId = activeSessionId || activeSessionIdRef.current
+      // Ref, not the closure-captured prop — see cancelRun above. A redirect
+      // reaches the live model mid-turn, so a stale target delivers the user's
+      // correction into a conversation they are no longer looking at.
+      const sessionId = activeSessionIdRef.current
 
       // Only images ride a correction. A @file/@folder/terminal ref is resolved
       // by the turn-setup path a redirect bypasses, so the composer keeps those
@@ -767,7 +802,6 @@ export function usePromptActions({
       return false
     },
     [
-      activeSessionId,
       activeSessionIdRef,
       appendSessionTextMessage,
       requestGateway,
@@ -779,7 +813,11 @@ export function usePromptActions({
 
   const reloadFromMessage = useCallback(
     async (parentId: string | null) => {
-      if (!activeSessionId || $busy.get()) {
+      // Ref, not the closure-captured prop — a truncating resubmit aimed at a
+      // stale session deletes the wrong transcript.
+      const sessionId = activeSessionIdRef.current
+
+      if (!sessionId || $busy.get()) {
         return
       }
 
@@ -790,16 +828,20 @@ export function usePromptActions({
       }
 
       clearNotifications()
-      updateSessionState(activeSessionId, state => applyReloadOptimistic(state, plan))
+      updateSessionState(sessionId, state => applyReloadOptimistic(state, plan))
 
       try {
         await requestGateway(
           'prompt.submit',
-          { session_id: activeSessionId, text: plan.text, truncate_before_user_ordinal: plan.truncateOrdinal },
+          {
+            session_id: sessionId,
+            text: plan.text,
+            ...truncateSubmitParams(plan.truncateOrdinal)
+          },
           PROMPT_SUBMIT_REQUEST_TIMEOUT_MS
         )
       } catch (err) {
-        updateSessionState(activeSessionId, state => ({
+        updateSessionState(sessionId, state => ({
           ...state,
           busy: false,
           awaitingResponse: false
@@ -807,7 +849,7 @@ export function usePromptActions({
         notifyError(err, copy.regenerateFailed)
       }
     },
-    [activeSessionId, copy.regenerateFailed, requestGateway, updateSessionState]
+    [activeSessionIdRef, copy.regenerateFailed, requestGateway, updateSessionState]
   )
 
   // Cursor-style "restore checkpoint": rewind the conversation to a past user
@@ -827,7 +869,9 @@ export function usePromptActions({
 
   const restoreToMessage = useCallback(
     async (messageId: string, target?: RestoreMessageTarget) => {
-      const sessionId = activeSessionId || activeSessionIdRef.current
+      // Ref, not the closure-captured prop — a rewind is destructive, so a
+      // stale target truncates a conversation the user did not ask to rewind.
+      const sessionId = activeSessionIdRef.current
 
       if (!sessionId) {
         throw new Error('No active session to restore.')
@@ -868,12 +912,14 @@ export function usePromptActions({
         throw err
       }
     },
-    [activeSessionId, activeSessionIdRef, busyRef, submitRewindPrompt, updateSessionState]
+    [activeSessionIdRef, busyRef, submitRewindPrompt, updateSessionState]
   )
 
   const editMessage = useCallback(
     async (edited: AppendMessage) => {
-      const sessionId = activeSessionId || activeSessionIdRef.current
+      // Ref, not the closure-captured prop — an edit rewinds and resubmits, so
+      // a stale target rewrites the wrong session's history.
+      const sessionId = activeSessionIdRef.current
       const messages = $messages.get()
       const plan = sessionId ? planEdit(messages, edited) : null
 
@@ -924,7 +970,7 @@ export function usePromptActions({
         notifyError(surfaced, copy.editFailed)
       }
     },
-    [activeSessionId, activeSessionIdRef, busyRef, copy.editFailed, submitRewindPrompt, updateSessionState]
+    [activeSessionIdRef, busyRef, copy.editFailed, submitRewindPrompt, updateSessionState]
   )
 
   const handleThreadMessagesChange = useCallback(

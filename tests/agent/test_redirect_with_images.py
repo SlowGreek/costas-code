@@ -113,15 +113,25 @@ class TestApplyActiveTurnRedirect:
     def test_checkpoint_prefix_becomes_a_text_part(self):
         """When an assistant item is already committed the checkpoint folds
         into the correction. As a string that would stringify the parts list;
-        as a part it preserves the images."""
+        as a part it preserves the images.
+
+        The scaffolding is provider-replay text, so it rides the ``api_content``
+        sidecar (the exact bytes replayed to the model) while ``content`` keeps
+        the user's own words for the transcript.
+        """
         messages = [{"role": "assistant", "content": "already committed"}]
         _apply_active_turn_redirect(_FakeAgent(), messages, [TEXT_PART, IMAGE_PART])
 
-        content = messages[-1]["content"]
-        assert isinstance(content, list)
-        assert content[0]["type"] == "text"
-        assert "interrupted assistant response" in content[0]["text"]
-        assert IMAGE_PART in content
+        # Transcript side: the user's own parts, unscaffolded.
+        assert messages[-1]["content"] == [TEXT_PART, IMAGE_PART]
+
+        # Provider side: the checkpoint prefix is its own text part, and the
+        # image survives (a string format would have stringified the list).
+        api_content = messages[-1]["api_content"]
+        assert isinstance(api_content, list)
+        assert api_content[0]["type"] == "text"
+        assert "interrupted assistant response" in api_content[0]["text"]
+        assert IMAGE_PART in api_content
 
     def test_role_alternation_is_preserved(self):
         # An assistant checkpoint after an assistant item would be invalid.

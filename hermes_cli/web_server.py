@@ -27,6 +27,7 @@ import inspect
 import importlib.util
 import json
 import logging
+import math
 import mimetypes
 import os
 import queue
@@ -47,7 +48,7 @@ import zipfile
 from hermes_cli._subprocess_compat import windows_detach_flags, windows_hide_flags
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import yaml
 
@@ -71,6 +72,7 @@ from hermes_cli.config import (
     save_config,
     save_env_value,
     remove_env_value,
+    custom_endpoint_key_env,
     check_config_version,
     detect_install_method,
     format_docker_update_message,
@@ -94,6 +96,7 @@ from gateway.status import (
     normalize_updated_at,
     parse_active_agents,
     read_runtime_status,
+    resolve_gateway_liveness,
 )
 from utils import env_var_enabled
 
@@ -105,7 +108,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
-    from pydantic import BaseModel, SecretStr
+    from pydantic import BaseModel, SecretStr, field_validator
     from starlette.concurrency import run_in_threadpool
 except ImportError:
     # First try lazy-installing the dashboard extras. Only the user actually
@@ -121,7 +124,7 @@ except ImportError:
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
         from fastapi.staticfiles import StaticFiles
-        from pydantic import BaseModel, SecretStr
+        from pydantic import BaseModel, SecretStr, field_validator
         from starlette.concurrency import run_in_threadpool
     except Exception:
         raise SystemExit(
@@ -192,13 +195,13 @@ async def _lifespan(app: "FastAPI"):
     # event loop during lifespan startup — see _get_event_state's docstring.
     app.state.chat_argv_lock = asyncio.Lock()
 
-    # Fire hermes_cli.gateway import into a background thread so the event
-    # loop is not blocked and HERMES_DASHBOARD_READY fires without delay.
-    # On a cold Windows install the module chain triggers .pyc compilation
-    # and Defender real-time scans that can stall the event loop for 15-30s.
-    # Running in an executor means the cost is paid in a worker thread while
-    # the server socket is already open and accepting probes.
-    asyncio.get_event_loop().run_in_executor(None, _warm_gateway_module)
+    # Import hermes_cli.gateway eagerly *before* the lifespan yield so the
+    # GIL-heavy .pyc compilation and Defender scan cost is absorbed during
+    # backend initialisation — before the server socket accepts probes.
+    # On Windows + Python 3.11 the import does not release the GIL, so
+    # run_in_executor still froze the event loop for 15-22 s, causing the
+    # Desktop's 10-second WebSocket ready-probe to time out (GH-73083).
+    _warm_gateway_module()
 
     # Desktop-spawned backends (HERMES_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `hermes
@@ -222,11 +225,16 @@ async def _lifespan(app: "FastAPI"):
     # /api/status).  The loop exits immediately when httpx is unavailable.
     selftest_task = asyncio.create_task(_dashboard_selftest_loop())
 
+    # Live auto-archive timer — keeps a backend that stays up for days
+    # sweeping stale sessions on schedule, independent of list requests.
+    auto_archive_task = asyncio.create_task(_auto_archive_ticker_loop())
+
     try:
         yield
     finally:
         pty_reaper_task.cancel()
         selftest_task.cancel()
+        auto_archive_task.cancel()
         await PTY_REGISTRY.close_all()
         if cron_stop is not None:
             cron_stop.set()
@@ -309,6 +317,13 @@ def _apply_ssh_owner_nonce(nonce: Optional[str]) -> None:
 # than inlining ``True`` at every gate) so the WS endpoints and the SPA token
 # injection share a single, testable seam.
 _DASHBOARD_EMBEDDED_CHAT_ENABLED = True
+
+# Desktop's file.attach compatibility transport sends a complete base64 data
+# URL in one JSON-RPC frame. Uvicorn defaults to 16 MiB, which rejects files at
+# the preview ceiling before the dispatcher sees them. Keep the gateway
+# finite while allowing the 256 MiB raw Desktop attach cap plus base64/JSON
+# overhead.
+_DESKTOP_ATTACHMENT_WS_MAX_BYTES = 384 * 1024 * 1024
 
 # Simple rate limiter for the reveal endpoint
 _reveal_timestamps: List[float] = []
@@ -791,7 +806,23 @@ def _memory_provider_options() -> List[str]:
     return list(dict.fromkeys(options))
 
 
+def _timezone_options() -> List[str]:
+    """Return sorted IANA timezone identifiers, cached at import time."""
+    try:
+        import zoneinfo
+        return sorted(zoneinfo.available_timezones()) or ["UTC"]
+    except Exception:  # pragma: no cover
+        return ["UTC"]
+
+
 _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "timezone": {
+        "type": "select",
+        "description": "IANA timezone (e.g. America/New_York). Blank uses the system timezone.",
+        "options": _timezone_options(),
+        "searchable": True,
+        "clearable": True,
+    },
     "memory.provider": {
         "type": "select",
         "description": "Memory provider plugin",
@@ -817,6 +848,25 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "description": "Modal sandbox mode",
         "options": ["sandbox", "function"],
     },
+    "proxy.enabled": {
+        "type": "boolean",
+        "description": (
+            "Docker-only egress credential firewall. Requires `hermes egress setup` "
+            "and `hermes egress start`; Modal/SSH/Daytona are not wired yet."
+        ),
+        "category": "security",
+    },
+    "proxy.credential_source": {
+        "type": "select",
+        "description": "Where iron-proxy loads real upstream secrets at start time",
+        "options": ["env", "bitwarden"],
+        "category": "security",
+    },
+    "proxy.enforce_on_docker": {
+        "type": "boolean",
+        "description": "Refuse Docker sandboxes when egress is enabled but not configured/running",
+        "category": "security",
+    },
     "tts.provider": {
         "type": "select",
         "description": "Text-to-speech provider",
@@ -828,6 +878,21 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         # "mistral" temporarily removed — mistralai PyPI package quarantined
         # (malicious 2.4.6 release on 2026-05-12). Restore once available.
         "options": ["local", "groq", "openai", "xai", "elevenlabs"],
+    },
+    "stt.local.model": {
+        "type": "select",
+        "description": "Local faster-whisper model size",
+        "options": ["tiny", "base", "small", "medium", "large-v3"],
+    },
+    "stt.groq.model": {
+        "type": "select",
+        "description": "Groq Whisper model",
+        "options": ["whisper-large-v3-turbo", "whisper-large-v3", "distil-whisper-large-v3-en"],
+    },
+    "stt.openai.model": {
+        "type": "select",
+        "description": "OpenAI transcription model",
+        "options": ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "gpt-transcribe"],
     },
     "stt.elevenlabs.model_id": {
         "type": "select",
@@ -895,7 +960,7 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "options": ["stash", "discard"],
     },
     "updates.refresh_cua_driver": {
-        "type": "bool",
+        "type": "boolean",
         "description": (
             "Refresh an already-installed cua-driver during hermes update. "
             "Disable this on non-admin macOS accounts where /Applications is "
@@ -940,6 +1005,9 @@ _CATEGORY_MERGE: Dict[str, str] = {
     # field — fold it into the agent tab rather than spawning a one-field
     # orphan category.
     "computer_use": "agent",
+    # `telemetry.shared_metrics.enabled` is the only schema-surfaced telemetry
+    # field — fold it into security alongside the other privacy-posture toggles.
+    "telemetry": "security",
 }
 
 # Display order for tabs — unlisted categories sort alphabetically after these.
@@ -1202,105 +1270,90 @@ def _schema_with_dynamic_provider_options() -> Dict[str, Dict[str, Any]]:
     return {**CONFIG_SCHEMA, **overlay}
 
 
-class ConfigUpdate(BaseModel):
-    config: dict
-    profile: Optional[str] = None
-
-
-class EnvVarUpdate(BaseModel):
-    key: str
-    value: str
-    profile: Optional[str] = None
-    # Optional bearer key for the connectivity probe of a custom/local endpoint
-    # (``key == "OPENAI_BASE_URL"``). Self-hosted endpoints that gate
-    # ``/v1/models`` behind auth otherwise look "reachable but empty"; sending
-    # the key lets the probe enumerate the served models. Ignored for the
-    # regular PUT /api/env path (which only reads key/value).
-    api_key: str = ""
-
-
-class EnvVarDelete(BaseModel):
-    key: str
-    profile: Optional[str] = None
-
-
-class EnvVarReveal(BaseModel):
-    key: str
-    profile: Optional[str] = None
-
-
-class MemoryProviderConfigUpdate(BaseModel):
-    values: Dict[str, Any] = {}
-
-
-class MemoryProviderSetupRequest(BaseModel):
-    values: Dict[str, Any] = {}
-
-
-class CustomEndpointUpdate(BaseModel):
-    id: str = ""
-    name: str
-    base_url: str
-    model: str
-    api_key: Optional[str] = None
-    context_length: Optional[int] = None
-    discover_models: bool = True
-    make_default: bool = False
-
-
-class MessagingPlatformUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    env: Dict[str, str] = {}
-    clear_env: List[str] = []
-    # Explicit body profile beats the query param injected by the global
-    # dashboard profile switcher (same precedence as other scoped writes).
-    profile: Optional[str] = None
-
-
-class TelegramOnboardingStart(BaseModel):
-    bot_name: Optional[str] = None
-
-
-class TelegramOnboardingApply(BaseModel):
-    allowed_user_ids: List[str]
-    profile: Optional[str] = None
-
-
-class WhatsAppOnboardingStart(BaseModel):
-    mode: Optional[str] = "bot"
-    allowed_users: Optional[str] = ""
-    profile: Optional[str] = None
-
-
-class WhatsAppOnboardingApply(BaseModel):
-    mode: Optional[str] = None
-    allowed_users: Optional[str] = None
-    profile: Optional[str] = None
-
-
-class AudioTranscriptionRequest(BaseModel):
-    data_url: str
-    mime_type: Optional[str] = None
-
-
-class ManagedFileUpload(BaseModel):
-    path: str
-    data_url: str
-    overwrite: bool = True
-
-
-class ChatImageUpload(BaseModel):
-    data_url: str
-    filename: Optional[str] = None
-
-
-class ManagedDirectoryCreate(BaseModel):
-    path: str
-
-
-class ManagedFileDelete(BaseModel):
-    path: str
-    recursive: bool = False
+from hermes_cli.web_models import (  # noqa: F401
+    ConfigUpdate,
+    EnvVarUpdate,
+    EnvVarDelete,
+    EnvVarReveal,
+    MemoryProviderConfigUpdate,
+    MemoryProviderSetupRequest,
+    CustomEndpointUpdate,
+    MessagingPlatformUpdate,
+    TelegramOnboardingStart,
+    TelegramOnboardingApply,
+    WhatsAppOnboardingStart,
+    WhatsAppOnboardingApply,
+    AudioTranscriptionRequest,
+    ManagedFileUpload,
+    ChatImageUpload,
+    ManagedDirectoryCreate,
+    ManagedFileDelete,
+    ModelAssignment,
+    MoaModelSlot,
+    _MoaReferenceControls,
+    MoaPresetPayload,
+    MoaConfigPayload,
+    FsWriteText,
+    GitPathBody,
+    GitFileBody,
+    GitCommitBody,
+    GitWorktreeAddBody,
+    GitWorktreeRemoveBody,
+    GitBranchSwitchBody,
+    CuratorPause,
+    LearningNodeRef,
+    LearningNodeEdit,
+    DebugShareRequest,
+    TTSSpeakRequest,
+    OAuthSubmitBody,
+    BulkDeleteSessions,
+    SessionImport,
+    SessionRename,
+    SessionPrune,
+    CronJobCreate,
+    CronJobUpdate,
+    AutomationBlueprintInstantiate,
+    MCPServerCreate,
+    MCPServersReplace,
+    MCPEnabledToggle,
+    MCPCatalogInstall,
+    PairingApprove,
+    PairingRevoke,
+    WebhookCreate,
+    WebhookEnabledToggle,
+    CredentialPoolAdd,
+    MemoryProviderSelect,
+    MemoryReset,
+    BackupRequest,
+    ImportRequest,
+    HookCreate,
+    HookDelete,
+    SkillInstallRequest,
+    SkillUninstallRequest,
+    SkillsUpdateRequest,
+    ProfileCreate,
+    ProfileRename,
+    ProfileSoulUpdate,
+    ProfileActiveUpdate,
+    ProfileDescriptionUpdate,
+    ProfileModelUpdate,
+    ProfileDescribeAuto,
+    SkillToggle,
+    SkillCreate,
+    SkillContentUpdate,
+    ToolsetToggle,
+    ToolsetProviderSelect,
+    ToolsetModelSelect,
+    ToolsetEnvUpdate,
+    ToolsetPostSetup,
+    TerminalBackendSelect,
+    RawConfigUpdate,
+    ThemeSetBody,
+    FontSetBody,
+    _AgentPluginInstallBody,
+    _PluginProvidersPutBody,
+    _PluginVisibilityBody,
+)
 
 
 _AUDIO_MIME_EXTENSIONS: Dict[str, str] = {
@@ -1326,75 +1379,6 @@ def _audio_extension_for_mime(mime_type: str) -> str:
     return _AUDIO_MIME_EXTENSIONS.get(normalized, ".webm")
 
 
-class ModelAssignment(BaseModel):
-    """Payload for POST /api/model/set — assign a provider/model to a slot.
-
-    scope="main"        → writes model.provider + model.default
-    scope="auxiliary"   → writes auxiliary.<task>.provider + auxiliary.<task>.model
-    scope="auxiliary" with task=""  → applied to every auxiliary.* slot
-    scope="auxiliary" with task="__reset__"  → resets every slot to provider="auto"
-    """
-    scope: str
-    provider: str
-    model: str
-    task: str = ""
-    # Optional OpenAI-compatible endpoint URL. Only honored for custom/local
-    # providers on the main slot — lets the GUI configure a self-hosted endpoint
-    # (vLLM, llama.cpp, Ollama, …) that needs no API key. The runtime resolver
-    # reads model.base_url from config (it ignores OPENAI_BASE_URL), so this is
-    # the path that actually wires a local endpoint into resolution.
-    base_url: str = ""
-    # Optional API key for a custom/local endpoint. Persisted to
-    # ``model.api_key`` (where the runtime resolver reads it) so a self-hosted
-    # endpoint that requires auth works from the GUI — mirrors the key the
-    # ``hermes model`` custom flow collects. Honored only on the main slot for
-    # custom/local providers.
-    api_key: str = ""
-    confirm_expensive_model: bool = False
-    profile: Optional[str] = None
-
-
-class MoaModelSlot(BaseModel):
-    provider: str = ""
-    model: str = ""
-    # Optional per-slot reasoning effort. Declared so a client round-tripping
-    # the GET payload doesn't have it stripped at parse time and wiped on save.
-    reasoning_effort: Optional[str] = None
-
-
-class MoaPresetPayload(BaseModel):
-    reference_models: list[MoaModelSlot] = []
-    aggregator: MoaModelSlot = MoaModelSlot()
-    # None = temperature omitted from API calls (provider default), matching
-    # single-model agent behavior.
-    reference_temperature: Optional[float] = None
-    aggregator_temperature: Optional[float] = None
-    max_tokens: int = 4096
-    # Newer per-preset knobs (see moa_config._normalize_preset). Optional so
-    # older clients that never send them keep working; declared so clients
-    # that round-trip the GET payload don't silently erase hand-set values.
-    reference_max_tokens: Optional[int] = None
-    fanout: Optional[str] = None
-    enabled: bool = True
-
-
-class MoaConfigPayload(BaseModel):
-    default_preset: str = "default"
-    active_preset: str = ""
-    presets: dict[str, MoaPresetPayload] = {}
-    # Backward-compatible flat payload fields used by older dashboard/desktop
-    # clients during this PR's transition window.
-    reference_models: list[MoaModelSlot] = []
-    aggregator: MoaModelSlot = MoaModelSlot()
-    reference_temperature: Optional[float] = None
-    aggregator_temperature: Optional[float] = None
-    max_tokens: int = 4096
-    reference_max_tokens: Optional[int] = None
-    fanout: Optional[str] = None
-    enabled: bool = True
-    profile: Optional[str] = None
-
-
 def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, str]:
     """Normalize a main-slot (provider, model) pair before persisting.
 
@@ -1418,6 +1402,14 @@ def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, st
        known but ``poolside`` isn't) but the model is a vendor-prefixed
        aggregator slug, keep the user's CURRENT aggregator if they're on
        one, else fall back to openrouter.
+
+       Named custom providers (``custom:litellm``, etc.) are excluded from
+       this fallback: ``_KNOWN_PROVIDER_NAMES`` only lists the bare
+       ``"custom"`` bucket, never a specific ``custom:<name>`` slug, so
+       without this exclusion every named custom provider paired with a
+       slash-bearing model (e.g. ``ollama/glm-5.2`` behind a LiteLLM proxy)
+       looked exactly like the stray-vendor-prefix case above and got
+       silently reassigned to ``openrouter``.
     2. Model-format normalization for the resolved provider via
        ``normalize_model_for_provider`` (e.g. ``anthropic/claude-opus-4.6``
        on native anthropic → ``claude-opus-4-6``).
@@ -1452,7 +1444,21 @@ def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, st
     if custom_provider is not None:
         return custom_provider.id, model_in
 
-    if canonical not in _KNOWN_PROVIDER_NAMES and "/" in model_in:
+    # A named custom provider that didn't resolve above (typo, config
+    # mismatch, entry missing from custom_providers/providers) must still
+    # not be treated as a stray vendor prefix -- it isn't a known Hermes
+    # provider/alias, but it also isn't the analytics-vendor case this
+    # fallback exists for. Match only the durable named-custom syntax
+    # (bare "custom" bucket, or "custom:<name>" per
+    # ``providers.custom_provider_slug``) -- a bare ``startswith("custom")``
+    # would also swallow unrelated unconfigured vendor names that merely
+    # happen to start with "custom" (e.g. "customproxy").
+    is_custom_provider_slug = canonical == "custom" or canonical.startswith("custom:")
+    if (
+        canonical not in _KNOWN_PROVIDER_NAMES
+        and not is_custom_provider_slug
+        and "/" in model_in
+    ):
         # Vendor prefix posing as a provider (analytics fallback). Resolve
         # against the user's current provider when it's an aggregator that
         # serves vendor-prefixed slugs; otherwise default to openrouter.
@@ -2597,11 +2603,6 @@ async def fs_read_text(path: str):
     }
 
 
-class FsWriteText(BaseModel):
-    path: str
-    content: str
-
-
 @app.post("/api/fs/write-text")
 async def fs_write_text(payload: FsWriteText):
     """Overwrite (or create) a UTF-8 text file for the in-app spot editor.
@@ -2703,39 +2704,6 @@ async def _git_op(fn, *args):
 
 def _git_path(path: str) -> str:
     return str(_fs_path(path))
-
-
-class GitPathBody(BaseModel):
-    path: str
-
-class GitFileBody(BaseModel):
-    path: str
-    file: Optional[str] = None
-
-
-class GitCommitBody(BaseModel):
-    path: str
-    message: str
-    push: bool = False
-
-
-class GitWorktreeAddBody(BaseModel):
-    path: str
-    name: Optional[str] = None
-    branch: Optional[str] = None
-    base: Optional[str] = None
-    existingBranch: Optional[str] = None
-
-
-class GitWorktreeRemoveBody(BaseModel):
-    path: str
-    worktreePath: str
-    force: bool = False
-
-
-class GitBranchSwitchBody(BaseModel):
-    path: str
-    branch: str
 
 
 @app.get("/api/git/status")
@@ -2985,6 +2953,16 @@ async def get_ssh_ownership(request: Request):
     return {"ok": True, "sshOwnerNonce": _SSH_OWNER_NONCE, "protocolVersion": 1}
 
 
+@app.get("/api/health")
+async def get_health():
+    """Lightweight process liveness for desktop/backend readiness probes."""
+    return {
+        "ok": True,
+        "version": __version__,
+        "auth_required": bool(getattr(app.state, "auth_required", False)),
+    }
+
+
 @app.get("/api/status")
 async def get_status(profile: Optional[str] = None):
     status_scope = None
@@ -2998,38 +2976,69 @@ async def get_status(profile: Optional[str] = None):
     # skills-module attributes that a concurrent request would cross-restore
     # across that await. Status only resolves get_hermes_home() at call time
     # (config/env/gateway state), which the task-local contextvar covers.
+    profile_dir: Optional[Path] = None
     if requested_profile and requested_profile.lower() != "current":
+        profile_dir = _resolve_profile_dir(requested_profile)
         status_scope = _config_profile_scope(requested_profile)
         status_scope.__enter__()
 
     try:
         current_ver, latest_ver = check_config_version()
         # --- Gateway liveness detection ---
-        # Try local PID check first (same-host).  If that fails and a remote
-        # GATEWAY_HEALTH_URL is configured, probe the gateway over HTTP so the
-        # dashboard works when the gateway runs in a separate container.
-        gateway_pid = get_running_pid_cached()
-        gateway_running = gateway_pid is not None
-        remote_health_body: dict | None = None
+        # Delegated to the single shared ladder in gateway.status so this
+        # endpoint and /api/messaging/platforms can never disagree about
+        # whether the gateway is up (they used to: sidebar "running" while
+        # the Channels page rendered "The gateway is not running").
+        #
+        # When ?profile=<name> was given, scope PID and state reads to that
+        # profile's directory — gateway identity files (PID, lock, runtime
+        # status) are written to the per-profile home, not the process-level
+        # HERMES_HOME (see issue #69143). Plain /api/status keeps the exact
+        # zero-arg call so its behavior (and cache signature) is unchanged.
+        #
+        # The module-level probe references are handed to the resolver so the
+        # long-standing `monkeypatch.setattr(web_server, "get_running_pid_cached", ...)`
+        # seam used across the test-suite still intercepts them.
+        def _bounded_health_probe():
+            """Health probe with the route's blocking-call budget preserved.
 
-        if not gateway_running and _GATEWAY_HEALTH_URL:
-            loop = asyncio.get_running_loop()
-            try:
-                alive, remote_health_body = await asyncio.wait_for(
-                    loop.run_in_executor(None, _probe_gateway_health),
-                    timeout=_GATEWAY_HEALTH_ROUTE_TIMEOUT,
-                )
-            except TimeoutError:
-                _log.warning(
-                    "/api/status gateway health probe exceeded %.2fs; using local status",
-                    _GATEWAY_HEALTH_ROUTE_TIMEOUT,
-                )
-                alive, remote_health_body = False, None
-            if alive:
-                gateway_running = True
-                # PID from the remote container (display only — not locally valid)
-                if remote_health_body:
-                    gateway_pid = remote_health_body.get("pid")
+            The resolver only reaches this rung when the local PID probe came
+            up empty, so the timeout is paid at most once per request and only
+            in the cross-container case that needs it.
+            """
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_probe_gateway_health)
+                try:
+                    return future.result(timeout=_GATEWAY_HEALTH_ROUTE_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    _log.warning(
+                        "/api/status gateway health probe exceeded %.2fs; "
+                        "using local status",
+                        _GATEWAY_HEALTH_ROUTE_TIMEOUT,
+                    )
+                    return False, None
+                except Exception:
+                    return False, None
+
+        local_runtime = (
+            read_runtime_status(path=profile_dir / "gateway_state.json")
+            if profile_dir
+            else read_runtime_status()
+        )
+
+        liveness = await run_in_threadpool(
+            lambda: resolve_gateway_liveness(
+                profile_dir=profile_dir,
+                runtime=local_runtime,
+                health_probe=_bounded_health_probe if _GATEWAY_HEALTH_URL else None,
+                pid_probe=get_running_pid_cached,
+                runtime_reader=read_runtime_status,
+                runtime_pid_probe=get_runtime_status_running_pid,
+            )
+        )
+        gateway_running = liveness.running
+        gateway_pid = liveness.pid
+        remote_health_body: dict | None = liveness.health_body
 
         gateway_state = None
         gateway_platforms: dict = {}
@@ -3048,20 +3057,9 @@ async def get_status(profile: Optional[str] = None):
 
         # Prefer the detailed health endpoint response (has full state) when the
         # local runtime status file is absent or stale (cross-container).
-        local_runtime = read_runtime_status()
         runtime = local_runtime
         if runtime is None and remote_health_body and remote_health_body.get("gateway_state"):
             runtime = remote_health_body
-        # The runtime-status PID fallback validates liveness with a local
-        # os.kill() probe, so it must only run against the LOCAL status file —
-        # never the remote health body, whose PID belongs to another host and
-        # is display-only. (Running os.kill on a remote PID is both wrong and
-        # trips the test live-system guard.)
-        if not gateway_running and local_runtime is not None:
-            runtime_pid = get_runtime_status_running_pid(local_runtime)
-            if runtime_pid is not None:
-                gateway_running = True
-                gateway_pid = runtime_pid
 
         if runtime:
             gateway_state = runtime.get("gateway_state")
@@ -3459,10 +3457,6 @@ async def get_curator_status():
     }
 
 
-class CuratorPause(BaseModel):
-    paused: bool
-
-
 @app.put("/api/curator/paused")
 async def set_curator_paused(body: CuratorPause):
     from agent import curator
@@ -3496,17 +3490,6 @@ async def get_learning_graph(profile: Optional[str] = None):
     except Exception:
         _log.exception("GET /api/learning/graph failed")
         raise HTTPException(status_code=500, detail="Failed to build learning graph")
-
-
-class LearningNodeRef(BaseModel):
-    id: str
-    profile: Optional[str] = None
-
-
-class LearningNodeEdit(BaseModel):
-    id: str
-    content: str
-    profile: Optional[str] = None
 
 
 @app.get("/api/learning/node")
@@ -3563,9 +3546,11 @@ async def get_portal_status():
     cfg = load_config() or {}
     auth: Dict[str, Any] = {}
     try:
-        from hermes_cli.auth import get_nous_auth_status
+        from hermes_cli.auth import get_nous_auth_status_local
 
-        auth = get_nous_auth_status() or {}
+        # Read-only dashboard endpoint: refresh-free snapshot so polling
+        # never performs an OAuth refresh or burns a refresh token.
+        auth = get_nous_auth_status_local() or {}
     except Exception:
         auth = {}
 
@@ -3631,15 +3616,6 @@ async def run_config_migrate():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed: {exc}")
     return {"ok": True, "pid": proc.pid, "name": "config-migrate"}
-
-
-class DebugShareRequest(BaseModel):
-    # Redaction is ON by default — force-mode scrubs credential-shaped tokens
-    # out of log content before it leaves the machine. The toggle exists so an
-    # operator who knows the logs are clean can opt out for fuller fidelity.
-    redact: bool = True
-    # Recent log lines included in the summary tail (full logs are separate).
-    lines: int = 200
 
 
 @app.post("/api/ops/debug-share")
@@ -4125,6 +4101,12 @@ def _recent_upstream_commits(n: int = 20) -> List[Dict[str, Any]]:
             ],
             capture_output=True,
             text=True,
+            # git log emits UTF-8 (commit subjects can carry emoji/CJK). On
+            # Windows text=True defaults to the ANSI code page — a byte like
+            # 0x90 (3rd byte of 🐛) is undefined in cp1252 and crashed the
+            # stdlib _readerthread, killing the desktop backend (#52649).
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         if out.returncode != 0:
@@ -4239,7 +4221,9 @@ async def check_hermes_update(force: bool = False):
 
 
 @app.post("/api/audio/transcribe")
-async def transcribe_audio_upload(payload: AudioTranscriptionRequest):
+async def transcribe_audio_upload(
+    payload: AudioTranscriptionRequest, profile: Optional[str] = None
+):
     data_url = (payload.data_url or "").strip()
     if not data_url.startswith("data:") or "," not in data_url:
         raise HTTPException(status_code=400, detail="Invalid audio payload")
@@ -4289,8 +4273,17 @@ async def transcribe_audio_upload(payload: AudioTranscriptionRequest):
         # and re-listens instead of surfacing a 400 on every quiet turn.
         from tools.voice_mode import transcribe_recording
 
+        def _transcribe_scoped():
+            # Home-only scope (contextvar), NOT _profile_scope: transcription
+            # blocks for the provider round-trip and _profile_scope holds a
+            # process-global skills lock for its entire body (see the MCP
+            # probe above). STT only needs config/.env resolution, which the
+            # contextvar override provides inside this worker thread.
+            with _config_profile_scope(profile):
+                return transcribe_recording(temp_path)
+
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, transcribe_recording, temp_path)
+        result = await loop.run_in_executor(None, _transcribe_scoped)
     except HTTPException:
         raise
     except Exception as exc:
@@ -4304,20 +4297,21 @@ async def transcribe_audio_upload(payload: AudioTranscriptionRequest):
                 pass
 
     if not result.get("success"):
-        raise HTTPException(
-            status_code=400,
-            detail=result.get("error") or "Transcription failed",
-        )
+        err = result.get("error") or "Transcription failed"
+        # An empty transcript means no speech was detected — a normal outcome
+        # for VAD/continuous voice loops (e.g. a wake-word conversation
+        # re-listening on silence), not an error. Return an empty transcript so
+        # the client quietly re-listens instead of surfacing a "transcription
+        # failed" toast on every silent gap.
+        if "empty transcript" in err.lower():
+            return {"ok": True, "transcript": "", "provider": result.get("provider")}
+        raise HTTPException(status_code=400, detail=err)
 
     return {
         "ok": True,
         "transcript": str(result.get("transcript") or "").strip(),
         "provider": result.get("provider"),
     }
-
-
-class TTSSpeakRequest(BaseModel):
-    text: str
 
 
 def _elevenlabs_voice_label(voice: Dict[str, Any]) -> str:
@@ -4350,13 +4344,16 @@ def _voice_list_error_logged_once(signature: Optional[str]) -> bool:
 
 
 @app.get("/api/audio/elevenlabs/voices")
-async def get_elevenlabs_voices():
+async def get_elevenlabs_voices(profile: Optional[str] = None):
     """Return ElevenLabs voices when an API key is configured.
 
     The desktop UI uses this for the ``tts.elevenlabs.voice_id`` dropdown.
     Only non-secret voice metadata is returned; the API key stays server-side.
     """
-    api_key = (load_env().get("ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    # Config-only scope (await-safe): the key lookup reads the requested
+    # profile's .env, matching the profile the settings UI writes to.
+    with _config_profile_scope(profile):
+        api_key = (load_env().get("ELEVENLABS_API_KEY") or os.environ.get("ELEVENLABS_API_KEY") or "").strip()
     if not api_key:
         return {"available": False, "voices": []}
 
@@ -4418,7 +4415,7 @@ async def get_elevenlabs_voices():
 
 
 @app.post("/api/audio/speak")
-async def speak_text(payload: TTSSpeakRequest):
+async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
     """Synthesize speech and return audio as base64 data URL.
 
     Used by the desktop voice-conversation mode to play back assistant
@@ -4432,8 +4429,21 @@ async def speak_text(payload: TTSSpeakRequest):
 
     try:
         from tools.tts_tool import text_to_speech_tool
+
+        def _speak_scoped():
+            # Home-only scope (contextvar), NOT _profile_scope: synthesis
+            # blocks for the provider round-trip and only needs config/.env
+            # resolution, so the task-local override inside this worker
+            # thread is sufficient (same reasoning as the MCP probe scope).
+            with _config_profile_scope(profile):
+                return text_to_speech_tool(text)
+
         loop = asyncio.get_running_loop()
-        result_json = await loop.run_in_executor(None, text_to_speech_tool, text)
+        result_json = await loop.run_in_executor(None, _speak_scoped)
+    except HTTPException:
+        # _config_profile_scope raises 400/404 for a bad profile — pass it
+        # through instead of masking it as a 500 synthesis failure.
+        raise
     except Exception as exc:
         _log.exception("Desktop voice TTS failed")
         raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {exc}")
@@ -4530,15 +4540,22 @@ async def speak_stream_ws(ws: "WebSocket") -> None:
         return
     await ws.accept()
 
+    # Profile via query param, like /api/pty and /api/console: the provider
+    # chain + API keys must resolve from the requesting profile's config, not
+    # the dashboard's own. The streamer captures its config at resolve time,
+    # so scoping resolution scopes the whole session.
+    profile = (ws.query_params.get("profile") or "").strip() or None
+
     loop = asyncio.get_running_loop()
 
     def _resolve():
         from tools.tts_streaming import resolve_streaming_provider
         from tools.tts_tool import _get_provider, _load_tts_config, _resolve_max_text_length
 
-        cfg = _load_tts_config()
-        streamer = resolve_streaming_provider(cfg)
-        cap = _resolve_max_text_length(_get_provider(cfg), cfg) if streamer else 0
+        with _config_profile_scope(profile):
+            cfg = _load_tts_config()
+            streamer = resolve_streaming_provider(cfg)
+            cap = _resolve_max_text_length(_get_provider(cfg), cfg) if streamer else 0
         return streamer, cap
 
     try:
@@ -4712,6 +4729,7 @@ def get_sessions(
     archived: str = "exclude",
     order: str = "created",
     source: str = None,
+    sources: str = None,
     exclude_sources: str = None,
     cwd_prefix: str = None,
     full: bool = False,
@@ -4748,16 +4766,23 @@ def get_sessions(
     try:
         db = _open_session_db_for_profile(profile)
         try:
+            # Opportunistic, config-gated, double-throttled stale-session
+            # sweep — the only auto_archive hook that fires for Desktop's
+            # `hermes serve` backend. No-op when disabled or run recently.
+            _maybe_auto_archive_for_profile(db, profile)
             min_message_count = max(0, min_messages)
             archived_only = archived == "only"
             include_archived = archived == "include"
             # Optional source scoping: ``source`` includes a single class,
+            # ``sources`` includes any of several comma-separated classes, and
             # ``exclude_sources`` (comma-separated) drops classes. The desktop
             # uses these to split recents (exclude=cron) from the cron-jobs
             # section (source=cron) into two independent lists.
-            exclude_list = [s for s in (exclude_sources or "").split(",") if s.strip()]
+            source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
+            exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
             sessions = db.list_sessions_rich(
                 source=source or None,
+                sources=source_list or None,
                 exclude_sources=exclude_list or None,
                 cwd_prefix=(cwd_prefix or None),
                 limit=limit,
@@ -4773,6 +4798,7 @@ def get_sessions(
             )
             total = db.session_count(
                 source=source or None,
+                sources=source_list or None,
                 cwd_prefix=(cwd_prefix or None),
                 exclude_sources=exclude_list or None,
                 min_message_count=min_message_count,
@@ -4812,6 +4838,7 @@ def get_profiles_sessions(
     order: str = "recent",
     profile: str = "all",
     source: str = None,
+    sources: str = None,
     exclude_sources: str = None,
     full: bool = False,
 ):
@@ -4856,7 +4883,8 @@ def get_profiles_sessions(
     # the cron-jobs section passes source=cron — two independent lists so
     # newest cron sessions can't starve the recents page.
     source_filter = source or None
-    exclude_list = [s for s in (exclude_sources or "").split(",") if s.strip()]
+    source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
+    exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
     # Over-fetch per profile so the merged+sorted window is correct for the
     # requested page. Capped so a huge profile can't blow up the response.
     per_profile = min(max(limit + offset, limit), 500)
@@ -4881,6 +4909,7 @@ def get_profiles_sessions(
         try:
             rows = db.list_sessions_rich(
                 source=source_filter,
+                sources=source_list or None,
                 exclude_sources=exclude_list or None,
                 limit=per_profile,
                 offset=0,
@@ -4893,6 +4922,7 @@ def get_profiles_sessions(
             )
             profile_total = db.session_count(
                 source=source_filter,
+                sources=source_list or None,
                 exclude_sources=exclude_list or None,
                 min_message_count=min_message_count,
                 include_archived=include_archived,
@@ -4981,8 +5011,7 @@ def get_profiles_sessions_sidebar(
     recents_rows: List[Dict[str, Any]] = []
     cron_rows: List[Dict[str, Any]] = []
     messaging_rows: List[Dict[str, Any]] = []
-    recents_total = 0
-    recents_profile_totals: Dict[str, int] = {}
+    recents_truncated: Dict[str, bool] = {}
     errors: List[Dict[str, str]] = []
     now = time.time()
 
@@ -5021,18 +5050,13 @@ def get_profiles_sessions_sidebar(
             continue
         try:
             if recents_scope == "all" or name == recents_scope:
-                recents_rows.extend(
-                    _tag(_slice(db, exclude=recents_exclude_list, cap=recents_cap), name)
-                )
-                rtotal = db.session_count(
-                    exclude_sources=recents_exclude_list or None,
-                    min_message_count=1,
-                    include_archived=False,
-                    archived_only=False,
-                    exclude_children=True,
-                )
-                recents_total += rtotal
-                recents_profile_totals[name] = rtotal
+                profile_rows = _slice(db, exclude=recents_exclude_list, cap=recents_cap)
+                # A full window means more rows remain on disk. That is all the
+                # sidebar's "load more" needs, and unlike an exact COUNT(*) per
+                # profile per refresh it costs nothing beyond the rows already
+                # read.
+                recents_truncated[name] = len(profile_rows) >= recents_cap
+                recents_rows.extend(_tag(profile_rows, name))
             cron_rows.extend(_tag(_slice(db, source="cron", cap=cron_cap), name))
             messaging_rows.extend(
                 _tag(_slice(db, exclude=messaging_exclude_list, cap=messaging_cap), name)
@@ -5051,8 +5075,7 @@ def get_profiles_sessions_sidebar(
     return {
         "recents": {
             "sessions": _window(recents_rows, recents_cap),
-            "total": recents_total,
-            "profile_totals": recents_profile_totals,
+            "profiles_truncated": recents_truncated,
         },
         "cron": {"sessions": _window(cron_rows, cron_cap)},
         "messaging": {
@@ -5064,7 +5087,14 @@ def get_profiles_sessions_sidebar(
 
 
 @app.get("/api/sessions/search")
-async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] = None):
+async def search_sessions(
+    q: str = "",
+    limit: int = 20,
+    profile: Optional[str] = None,
+    source: str = None,
+    sources: str = None,
+    exclude_sources: str = None,
+):
     """Search sessions by ID plus full-text message content using FTS5.
 
     Direct session-id matches are surfaced first, then FTS message-content
@@ -5081,6 +5111,11 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
         db = _open_session_db_for_profile(profile)
         try:
             safe_limit = max(1, min(int(limit or 20), 100))
+            source_filter = source or None
+            source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
+            include_sources = [source_filter] if source_filter else (source_list or None)
+            exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            now = time.time()
 
             # Walk parent_session_id to the compression root, memoized so a
             # chain of compression segments only costs one walk. We deliberately
@@ -5165,15 +5200,52 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
                 if root in seen or len(seen) >= safe_limit:
                     return
                 payload = dict(payload)
-                payload["session_id"] = lineage_tip(root)
+                sid = lineage_tip(root)
+                payload["session_id"] = sid
                 payload["lineage_root"] = root
+                try:
+                    row = db.get_session_rich_row(sid)
+                except Exception:
+                    row = None
+                if row:
+                    payload.update(
+                        {
+                            "id": row.get("id") or sid,
+                            "source": row.get("source"),
+                            "model": row.get("model"),
+                            "title": row.get("title"),
+                            "started_at": row.get("started_at"),
+                            "ended_at": row.get("ended_at"),
+                            "last_active": row.get("last_active") or row.get("started_at"),
+                            "is_active": (
+                                row.get("ended_at") is None
+                                and (now - (row.get("last_active") or row.get("started_at") or 0)) < 300
+                            ),
+                            "message_count": row.get("message_count") or 0,
+                            "tool_call_count": row.get("tool_call_count") or 0,
+                            "input_tokens": row.get("input_tokens") or 0,
+                            "output_tokens": row.get("output_tokens") or 0,
+                            "preview": row.get("preview"),
+                            "parent_session_id": row.get("parent_session_id"),
+                            "archived": bool(row.get("archived")),
+                        }
+                    )
+                else:
+                    payload["id"] = sid
                 seen[root] = payload
 
             # Direct ID matches first: users often paste a session id from CLI,
             # logs, or another Hermes surface. FTS can't find those unless the
             # id happens to appear in message text. search_sessions_by_id is
             # SQL-bounded, so this stays cheap even with thousands of sessions.
-            for row in db.search_sessions_by_id(q, limit=safe_limit, include_archived=True):
+            for row in db.search_sessions_by_id(
+                q,
+                limit=safe_limit,
+                include_archived=True,
+                source=source_filter,
+                sources=source_list or None,
+                exclude_sources=exclude_list or None,
+            ):
                 sid = row.get("id")
                 preview = (row.get("preview") or "").strip()
                 snippet = preview or f"Session ID: {sid}"
@@ -5202,7 +5274,12 @@ async def search_sessions(q: str = "", limit: int = 20, profile: Optional[str] =
             # Over-fetch so lineage dedup can still surface `limit` distinct
             # conversations even when several hits collapse onto one root.
             fetch_limit = max(safe_limit * 5, 50)
-            matches = db.search_messages(query=prefix_query, limit=fetch_limit)
+            matches = db.search_messages(
+                query=prefix_query,
+                source_filter=include_sources,
+                exclude_sources=exclude_list or None,
+                limit=fetch_limit,
+            )
 
             for m in matches:
                 if len(seen) >= safe_limit:
@@ -5694,7 +5771,10 @@ def _trim_setup_output(value: Optional[str], limit: int = 4000) -> str:
 
 
 def _memory_provider_setup_env() -> Dict[str, str]:
-    env = os.environ.copy()
+    # External package-manager child (npm/uv/pip): exact env preservation —
+    # scrubbing or HOME rewriting could break user tool auth/config.
+    from tools.environments.local import build_subprocess_env
+    env = build_subprocess_env(scrub_secrets=False, inherit_profile_home=False)
     home = Path.home()
     extra_bins = [
         home / ".brv-cli" / "bin",
@@ -5743,6 +5823,10 @@ def _run_setup_command(
         env=_memory_provider_setup_env(),
         capture_output=True,
         text=True,
+        # Lossy UTF-8 decode — setup tools emit UTF-8; never let a
+        # locale-mismatched byte raise in the reader thread (#52649).
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -5787,24 +5871,38 @@ def _install_memory_provider_pip_dependencies(dependencies: List[str]) -> List[D
             _command_result(kind="pip", name=", ".join(dependencies), status="already_installed")
         ]
 
-    uv_path = shutil.which("uv")
-    if uv_path:
-        command: Any = [uv_path, "pip", "install", "--python", sys.executable, "--quiet", *missing]
-        display = f"uv pip install --python {sys.executable} {' '.join(missing)}"
-    else:
-        command = [sys.executable, "-m", "pip", "install", "--quiet", *missing]
-        display = f"{sys.executable} -m pip install {' '.join(missing)}"
-
+    # Route through the lazy-install pipeline (tools.lazy_deps.install_specs)
+    # instead of shelling out to pip against sys.executable directly. That
+    # pipeline is environment-aware: on hosted/immutable images the agent venv
+    # under /opt/hermes is sealed read-only, and installs must be redirected
+    # to the writable durable target on the data volume
+    # (HERMES_LAZY_INSTALL_TARGET, e.g. /opt/data/lazy-packages) — the same
+    # path every lazy backend already uses. A direct `pip install --python
+    # sys.executable` on those images fails with a permission error (NS-605).
+    # install_specs also activates the target on sys.path post-install so the
+    # availability recheck below sees the new packages without a restart.
     try:
-        completed = _run_setup_command(command, display=display, timeout=240)
+        from tools.lazy_deps import install_specs
+
+        outcome = install_specs(missing, timeout=240)
     except Exception as exc:
         return [
             _command_result(
                 kind="pip",
                 name=", ".join(missing),
                 status="failed",
-                command=display,
                 error=str(exc),
+            )
+        ]
+
+    if outcome.blocked:
+        return [
+            _command_result(
+                kind="pip",
+                name=", ".join(missing),
+                status="failed",
+                command=outcome.command,
+                error=outcome.reason,
             )
         ]
 
@@ -5812,9 +5910,14 @@ def _install_memory_provider_pip_dependencies(dependencies: List[str]) -> List[D
         _command_result(
             kind="pip",
             name=", ".join(missing),
-            status="installed" if completed.returncode == 0 else "failed",
-            command=display,
-            completed=completed,
+            status="installed" if outcome.ok else "failed",
+            command=outcome.command,
+            completed=subprocess.CompletedProcess(
+                args=outcome.command,
+                returncode=0 if outcome.ok else 1,
+                stdout=outcome.stdout,
+                stderr=outcome.stderr,
+            ),
         )
     ]
 
@@ -6458,6 +6561,14 @@ async def get_schema(profile: Optional[str] = None):
     return {"fields": fields, "category_order": _CATEGORY_ORDER}
 
 
+@app.get("/api/egress/status")
+async def get_egress_status():
+    """Dashboard/Desktop-readable egress proxy status and remediation text."""
+    from hermes_cli.proxy_cli import format_status_text
+
+    return {"text": format_status_text()}
+
+
 _EMPTY_MODEL_INFO: dict = {
     "model": "",
     "provider": "",
@@ -6574,7 +6685,7 @@ _AUX_TASK_SLOTS: Tuple[str, ...] = (
 
 
 @app.get("/api/model/options")
-def get_model_options(
+async def get_model_options(
     profile: Optional[str] = None,
     refresh: bool = False,
     include_unconfigured: bool = False,
@@ -6596,25 +6707,21 @@ def get_model_options(
     Models" control. Normal opens leave it false to stay on the 1h cache.
     """
     try:
-        from hermes_cli.inventory import build_models_payload, load_picker_context
+        from hermes_cli.inventory import build_model_options_payload, load_picker_context
 
-        # Most desktop surfaces should only list providers the user has already
-        # configured. Onboarding opts into the full provider universe via
-        # include_unconfigured=1 so it can still render setup affordances for
-        # providers that are not yet authenticated.
-        with _profile_scope(profile):
-            return build_models_payload(
-                load_picker_context(),
-                explicit_only=bool(explicit_only),
-                include_unconfigured=bool(include_unconfigured),
-                picker_hints=True,
-                canonical_order=True,
-                pricing=True,
-                capabilities=True,
-                refresh=bool(refresh),
-                probe_custom_providers=bool(refresh),
-                probe_current_custom_provider=not bool(refresh),
-            )
+        def _build_payload_scoped() -> dict:
+            # Keep the profile override inside the worker thread so the full
+            # sync picker build (config load, pricing, refresh probes) runs
+            # off the event loop under the requested profile.
+            with _profile_scope(profile):
+                return build_model_options_payload(
+                    load_picker_context(),
+                    explicit_only=bool(explicit_only),
+                    include_unconfigured=bool(include_unconfigured),
+                    refresh=bool(refresh),
+                )
+
+        return await run_in_threadpool(_build_payload_scoped)
     except HTTPException:
         raise
     except Exception:
@@ -6782,6 +6889,8 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
                 "aggregator": _slot_dict(preset.aggregator),
                 "reference_temperature": preset.reference_temperature,
                 "aggregator_temperature": preset.aggregator_temperature,
+                "reference_timeout": preset.reference_timeout,
+                "degraded_reference_policy": preset.degraded_reference_policy,
                 "max_tokens": preset.max_tokens,
                 "reference_max_tokens": preset.reference_max_tokens,
                 "fanout": preset.fanout,
@@ -6803,6 +6912,8 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
                         aggregator=body.aggregator,
                         reference_temperature=body.reference_temperature,
                         aggregator_temperature=body.aggregator_temperature,
+                        reference_timeout=body.reference_timeout,
+                        degraded_reference_policy=body.degraded_reference_policy,
                         max_tokens=body.max_tokens,
                         reference_max_tokens=body.reference_max_tokens,
                         fanout=body.fanout,
@@ -6822,7 +6933,6 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
                     status_code=422,
                     detail="Invalid MoA config: " + "; ".join(problems),
                 )
-
             normalized = normalize_moa_config(raw)
             # Merge instead of overwrite so that hand-edited keys not declared
             # in MoaConfigPayload (e.g. save_traces, trace_dir) survive a GUI
@@ -7058,7 +7168,19 @@ def _apply_model_assignment_sync(
         new_provider = provider.strip().lower()
         slot_cfg["provider"] = provider
         slot_cfg["model"] = model
-        if new_provider != prev_provider and new_provider != "custom":
+        if base_url:
+            # Sibling of the main-slot endpoint handling (#65254): an aux
+            # assignment for a custom/local endpoint must carry its own
+            # base_url, or the slot silently rebinds to whatever
+            # model.base_url happens to hold — and breaks entirely once the
+            # main slot switches away and clears it. The auxiliary resolver
+            # already reads auxiliary.<task>.base_url/api_key
+            # (_resolve_task_provider_model), so persisting them here is
+            # what actually wires the endpoint in.
+            slot_cfg["base_url"] = base_url
+            if api_key:
+                slot_cfg["api_key"] = api_key
+        elif new_provider != prev_provider and new_provider != "custom":
             slot_cfg.pop("base_url", None)
             clear_model_endpoint_credentials(slot_cfg)
         aux[slot] = slot_cfg
@@ -7479,6 +7601,38 @@ def _models_from_custom_endpoint_entry(entry: Dict[str, Any]) -> List[str]:
     return [model for model in models if model and not (model in seen or seen.add(model))]
 
 
+def _api_key_display(entry: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Return ``(has_api_key, preview)`` for a provider or model config block.
+
+    Keys live in ``.env`` behind ``key_env``; only entries written before
+    #69449 still carry a plaintext ``api_key``. Checking both keeps the panel
+    honest either way — reading only ``api_key`` reported "no API key" for
+    every endpoint whose key had been moved to ``.env``.
+    """
+    plaintext = str(entry.get("api_key") or "").strip()
+    if plaintext:
+        return True, redact_key(plaintext)
+    key_env = str(entry.get("key_env") or "").strip()
+    if key_env:
+        return True, f"${{{key_env}}}"
+    return False, None
+
+
+def _config_api_key_is_env_ref(endpoint_id: str) -> bool:
+    """True when this endpoint's on-disk ``api_key`` is a ``${VAR}`` template.
+
+    ``load_config()`` expands env refs, so a hand-written
+    ``api_key: ${MY_KEY}`` is indistinguishable from a literal secret by the
+    time it reaches us. Such an entry is already keeping its secret out of
+    config.yaml, so migrating it would only copy that secret into a second
+    env var the user didn't ask for.
+    """
+    providers = read_raw_config().get("providers")
+    entry = providers.get(endpoint_id) if isinstance(providers, dict) else None
+    raw_key = entry.get("api_key") if isinstance(entry, dict) else None
+    return bool(isinstance(raw_key, str) and re.search(r"\$\{[^}]+\}", raw_key))
+
+
 def _custom_endpoint_response(cfg: Dict[str, Any]) -> Dict[str, Any]:
     model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
     current_provider = str(model_cfg.get("provider", "") or "")
@@ -7497,6 +7651,7 @@ def _custom_endpoint_response(cfg: Dict[str, Any]) -> Dict[str, Any]:
             endpoint_id = str(provider_id)
             models = _models_from_custom_endpoint_entry(raw_entry)
             endpoint_model = str(raw_entry.get("model") or raw_entry.get("default_model") or (models[0] if models else ""))
+            has_api_key, api_key_preview = _api_key_display(raw_entry)
             endpoints.append({
                 "id": endpoint_id,
                 "name": str(raw_entry.get("name") or endpoint_id),
@@ -7505,13 +7660,14 @@ def _custom_endpoint_response(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "models": models,
                 "context_length": raw_entry.get("context_length"),
                 "discover_models": bool(raw_entry.get("discover_models", True)),
-                "has_api_key": bool(str(raw_entry.get("api_key", "") or "").strip()),
-                "api_key_preview": redact_key(str(raw_entry.get("api_key", "") or "")) if raw_entry.get("api_key") else None,
+                "has_api_key": has_api_key,
+                "api_key_preview": api_key_preview,
                 "is_current": endpoint_id == current_provider,
                 "source": "providers",
             })
 
     if current_provider.lower() == "custom" and current_base_url and not any(e["id"] == "custom" for e in endpoints):
+        has_api_key, api_key_preview = _api_key_display(model_cfg)
         endpoints.insert(0, {
             "id": "custom",
             "name": "Custom",
@@ -7520,8 +7676,8 @@ def _custom_endpoint_response(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "models": [current_model] if current_model else [],
             "context_length": model_cfg.get("context_length"),
             "discover_models": True,
-            "has_api_key": bool(str(model_cfg.get("api_key", "") or "").strip()),
-            "api_key_preview": redact_key(str(model_cfg.get("api_key", "") or "")) if model_cfg.get("api_key") else None,
+            "has_api_key": has_api_key,
+            "api_key_preview": api_key_preview,
             "is_current": True,
             "source": "direct-config",
         })
@@ -7554,7 +7710,7 @@ def _detach_main_model_from_provider(cfg: Dict[str, Any], provider_key: str) -> 
         return
     if str(model_cfg.get("provider") or "").strip().lower() != provider_key:
         return
-    for field in ("provider", "base_url", "api_key"):
+    for field in ("provider", "base_url", "api_key", "key_env"):
         model_cfg.pop(field, None)
     cfg["model"] = model_cfg
 
@@ -7596,19 +7752,47 @@ def _write_custom_endpoint(cfg: Dict[str, Any], body: CustomEndpointUpdate) -> T
         "model": model,
         "discover_models": bool(body.discover_models),
     })
-    # Same for the model map: the panel names one default model, it does not
-    # enumerate the provider's catalogue. Keep the other models (and their
-    # context lengths) and just ensure this one is present.
+    # Same for the model map: merge rather than replace, so existing models
+    # keep their context lengths. ``body.models`` is the catalogue the panel's
+    # Test button already discovered — without it only the one hand-typed
+    # model survived Save, and every picker showed a single-entry list for a
+    # provider serving dozens (#69988). A payload with no ``models`` (older
+    # UI) still just ensures the named default is present.
     existing_models = entry.get("models")
     models_map: Dict[str, Any] = dict(existing_models) if isinstance(existing_models, dict) else {}
-    current_model_entry = models_map.get(model)
-    models_map[model] = dict(current_model_entry) if isinstance(current_model_entry, dict) else {}
+    for candidate in (*(body.models or ()), model):
+        model_id = str(candidate).strip()
+        if not model_id:
+            continue
+        current = models_map.get(model_id)
+        models_map[model_id] = dict(current) if isinstance(current, dict) else {}
     entry["models"] = models_map
     if body.context_length and body.context_length > 0:
         entry["context_length"] = int(body.context_length)
         entry["models"][model]["context_length"] = int(body.context_length)
-    if body.api_key is not None and body.api_key.strip():
-        entry["api_key"] = body.api_key.strip()
+
+    # API keys never belong in config.yaml (#69449). Write to .env and
+    # reference it via ``key_env`` — the same indirection built-in providers
+    # use and that runtime_provider.py already resolves at load time.
+    env_var = custom_endpoint_key_env(endpoint_id)
+    submitted_key = body.api_key.strip() if body.api_key is not None else None
+    if submitted_key:
+        save_env_value(env_var, submitted_key)
+        entry["key_env"] = env_var
+        entry.pop("api_key", None)
+    elif submitted_key is not None:
+        # Blank field means "clear the key", not "leave it alone".
+        remove_env_value(env_var)
+        entry.pop("key_env", None)
+        entry.pop("api_key", None)
+    elif str(entry.get("api_key") or "").strip() and not _config_api_key_is_env_ref(endpoint_id):
+        # No new key submitted, but this entry still carries one an earlier
+        # release wrote in plaintext. Migrate it on the next save so endpoints
+        # configured before the fix get cleaned up too, without the user
+        # having to re-enter the key.
+        save_env_value(env_var, entry["api_key"].strip())
+        entry["key_env"] = env_var
+        entry.pop("api_key", None)
 
     providers[endpoint_id] = entry
     cfg["providers"] = providers
@@ -7617,8 +7801,9 @@ def _write_custom_endpoint(cfg: Dict[str, Any], body: CustomEndpointUpdate) -> T
         cfg["model"] = _apply_main_model_assignment(
             cfg.get("model", {}), endpoint_id, model, base_url
         )
-        if entry.get("api_key") and isinstance(cfg["model"], dict):
-            cfg["model"]["api_key"] = entry["api_key"]
+        if entry.get("key_env") and isinstance(cfg["model"], dict):
+            cfg["model"]["key_env"] = entry["key_env"]
+            cfg["model"].pop("api_key", None)
 
     return endpoint_id, entry
 
@@ -7669,7 +7854,10 @@ def activate_custom_endpoint(endpoint_id: str):
             raise HTTPException(status_code=400, detail="custom endpoint is incomplete")
 
         model_cfg = _apply_main_model_assignment(cfg.get("model", {}), provider_key, model, base_url)
-        if entry.get("api_key"):
+        if entry.get("key_env"):
+            model_cfg["key_env"] = entry["key_env"]
+            model_cfg.pop("api_key", None)
+        elif entry.get("api_key"):
             model_cfg["api_key"] = entry["api_key"]
         cfg["model"] = model_cfg
         save_config(cfg)
@@ -7693,6 +7881,7 @@ def delete_custom_endpoint(endpoint_id: str):
         providers.pop(provider_key, None)
         cfg["providers"] = providers
         _detach_main_model_from_provider(cfg, provider_key)
+        remove_env_value(custom_endpoint_key_env(provider_key))
         save_config(cfg)
         response = _custom_endpoint_response(cfg)
         response["ok"] = True
@@ -7873,7 +8062,6 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "env_vars": (
             "DISCORD_BOT_TOKEN",
             "DISCORD_ALLOWED_USERS",
-            "DISCORD_REPLY_TO_MODE",
         ),
         "required_env": ("DISCORD_BOT_TOKEN",),
     },
@@ -8030,7 +8218,35 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     # plugin registry. Only the docs link needs an override here so the
     # Channels page can point at the Microsoft Teams setup guide.
     "teams": {
+        "description": "Connect Hermes to Microsoft Teams chats via the Bot Framework.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/teams",
+    },
+    # Bundled platform plugins: name comes from the plugin registry label;
+    # give each a human description (the registry's install_hint is a
+    # dependency note, not a description) and a docs link.
+    "irc": {
+        "description": "Relay messages between an IRC channel (or DMs) and Hermes.",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/irc",
+    },
+    "line": {
+        "description": "Use Hermes from LINE via the LINE Messaging API webhook.",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/line",
+    },
+    "ntfy": {
+        "description": "Chat with Hermes over ntfy push topics (ntfy.sh or self-hosted).",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/ntfy",
+    },
+    "photon": {
+        "description": "Use Hermes through iMessage via Photon's managed Spectrum platform.",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/photon",
+    },
+    "raft": {
+        "description": "Join a Raft workspace as an external agent.",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/raft",
+    },
+    "simplex": {
+        "description": "Talk to Hermes over SimpleX Chat via a local simplex-chat daemon.",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/simplex",
     },
     "yuanbao": {
         "name": "Yuanbao (元宝)",
@@ -8056,6 +8272,23 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "description": "Receive events from GitHub, GitLab, and other webhook sources.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/",
         "env_vars": ("WEBHOOK_ENABLED", "WEBHOOK_PORT", "WEBHOOK_SECRET"),
+        "required_env": (),
+    },
+    "msgraph_webhook": {
+        "name": "Microsoft Graph Webhook",
+        "description": "Receive Microsoft Graph change notifications (Teams meetings, Outlook, …).",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/msgraph-webhook",
+        "required_env": (),
+    },
+    "whatsapp_cloud": {
+        "name": "WhatsApp Cloud API",
+        "description": "Use Hermes via Meta's hosted WhatsApp Cloud API (no local bridge).",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp-cloud",
+    },
+    "relay": {
+        "name": "Relay (experimental)",
+        "description": "Generic relay adapter fronted by the Hermes Relay connector.",
+        "docs_url": "",
         "required_env": (),
     },
 }
@@ -8239,6 +8472,28 @@ def _messaging_platform_catalog() -> tuple[dict[str, Any], ...]:
     """
     from gateway.config import Platform
 
+    # Resolve plugin entries FIRST. Plugin platforms (irc, ntfy, photon, …)
+    # leak into ``Platform.__members__`` as pseudo-members the moment any
+    # earlier code path calls ``Platform("<plugin id>")`` — and iterating the
+    # enum first would then claim them with no plugin metadata, rendering
+    # nameless "Irc"/"Ntfy" cards with empty descriptions on the Channels
+    # page while the real label/install-hint sat unused in the registry.
+    plugin_map: dict[str, Any] = {}
+    try:
+        # Plugin discovery only runs as a side effect of importing
+        # model_tools; this server process doesn't do that, so trigger it
+        # explicitly (idempotent) or plugin_entries() is empty here and
+        # every plugin platform renders nameless.
+        from hermes_cli.plugins import discover_plugins
+
+        discover_plugins()
+        from gateway.platform_registry import platform_registry
+
+        for plugin_entry in platform_registry.plugin_entries():
+            plugin_map[plugin_entry.name] = plugin_entry
+    except Exception:
+        _log.debug("plugin platform registry unavailable", exc_info=True)
+
     seen: set[str] = set()
     entries: list[dict[str, Any]] = []
 
@@ -8248,18 +8503,15 @@ def _messaging_platform_catalog() -> tuple[dict[str, Any], ...]:
         if member.value in seen:
             continue
         seen.add(member.value)
-        entries.append(_build_catalog_entry(member.value))
+        entries.append(
+            _build_catalog_entry(member.value, plugin_map.get(member.value))
+        )
 
-    try:
-        from gateway.platform_registry import platform_registry
-
-        for plugin_entry in platform_registry.plugin_entries():
-            if plugin_entry.name in seen:
-                continue
-            seen.add(plugin_entry.name)
-            entries.append(_build_catalog_entry(plugin_entry.name, plugin_entry))
-    except Exception:
-        _log.debug("plugin platform registry unavailable", exc_info=True)
+    for name, plugin_entry in plugin_map.items():
+        if name in seen:
+            continue
+        seen.add(name)
+        entries.append(_build_catalog_entry(name, plugin_entry))
 
     order = {pid: idx for idx, pid in enumerate(_PLATFORM_ORDER)}
     entries.sort(
@@ -8312,6 +8564,14 @@ def _platform_env_prefixes(platform_id: str) -> tuple[str, ...]:
     return (platform_id.upper().replace("-", "_") + "_",)
 
 
+# Which per-platform knobs the setup UI hides, and why: see
+# hermes_cli/setup_hidden_env.py. Shared with the `hermes setup gateway`
+# wizard so the surfaces ask for the same things.
+from hermes_cli.setup_hidden_env import (  # noqa: E402
+    is_setup_hidden_env as _is_setup_hidden_env,
+)
+
+
 def _discover_platform_env_vars(platform_id: str) -> tuple[str, ...]:
     """All messaging-category env vars for a platform (override + plugin + prefix)."""
     prefixes = _platform_env_prefixes(platform_id)
@@ -8320,6 +8580,8 @@ def _discover_platform_env_vars(platform_id: str) -> tuple[str, ...]:
         if info.get("category") != "messaging":
             continue
         if name in _MESSAGING_KEYS_PAGE_KEYS:
+            continue
+        if _is_setup_hidden_env(name):
             continue
         if not any(name.startswith(prefix) for prefix in prefixes):
             continue
@@ -8332,10 +8594,18 @@ def _merge_platform_env_vars(
     override: dict[str, Any],
     plugin_entry: Any | None,
 ) -> tuple[str, ...]:
-    """Canonical env-var list for a messaging platform card."""
+    """Canonical env-var list for a messaging platform card.
+
+    Required credentials always survive: a platform that genuinely needs one of
+    the hidden-suffix vars to connect keeps it, since hiding a required field
+    would make the platform unconfigurable.
+    """
     discovered = _discover_platform_env_vars(platform_id)
     if "env_vars" in override:
-        return tuple(dict.fromkeys((*override["env_vars"], *discovered)))
+        explicit = tuple(
+            key for key in override["env_vars"] if not _is_setup_hidden_env(key)
+        )
+        return tuple(dict.fromkeys((*explicit, *discovered)))
     if plugin_entry is not None and plugin_entry.required_env:
         return tuple(dict.fromkeys((*tuple(plugin_entry.required_env), *discovered)))
     return discovered
@@ -8409,6 +8679,7 @@ def _messaging_platform_payload(
     env_on_disk: dict[str, str],
     runtime: dict | None,
     scoped: bool = False,
+    profile_home: Optional[Path] = None,
 ) -> dict[str, Any]:
     platform_id = entry["id"]
     runtime_platforms = runtime.get("platforms") if runtime else {}
@@ -8417,10 +8688,29 @@ def _messaging_platform_payload(
         if isinstance(runtime_platforms, dict)
         else {}
     )
-    gateway_running = (
-        get_running_pid() is not None
-        or get_runtime_status_running_pid(runtime) is not None
+    # Same shared ladder /api/status uses. Before this was unified, the two
+    # endpoints disagreed on the same page load — the sidebar strip read
+    # "running" (it probed GATEWAY_HEALTH_URL and scoped to the requested
+    # profile) while the Channels page rendered "The gateway is not running"
+    # (it did neither). Cross-container, profile-scoped, and
+    # launch-service-managed deployments each hit that split.
+    #
+    # profile_home is passed when the request was scoped to a named profile:
+    # gateway/status readers resolve process-level paths and do NOT follow the
+    # HERMES_HOME contextvar override (#56986 / #69143), so the profile's
+    # directory has to be handed over explicitly or messaging silently reports
+    # another profile's gateway (#71211).
+    liveness = resolve_gateway_liveness(
+        profile_dir=profile_home,
+        runtime=runtime,
+        health_probe=(
+            _probe_gateway_health if _GATEWAY_HEALTH_URL else None
+        ),
+        pid_probe=get_running_pid_cached,
+        runtime_reader=read_runtime_status,
+        runtime_pid_probe=get_runtime_status_running_pid,
     )
+    gateway_running = liveness.running
     env_vars = []
 
     for key in entry["env_vars"]:
@@ -8671,6 +8961,10 @@ def _ensure_whatsapp_bridge_dependencies(bridge_dir: Path) -> None:
             cwd=str(bridge_dir),
             capture_output=True,
             text=True,
+            # npm output is UTF-8; guard the Windows ANSI-code-page default
+            # against undefined bytes crashing the reader thread (#52649).
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=with_hermes_node_path(),
             creationflags=windows_hide_flags(),
@@ -9418,17 +9712,26 @@ async def cancel_telegram_onboarding(pairing_id: str):
 async def get_messaging_platforms(profile: Optional[str] = None):
     # Profile-scoped so the dashboard's global profile switcher shows the
     # TARGET profile's channel credentials/state, not the root install's.
-    # Inside _profile_scope, load_env()/read_runtime_status()/get_running_pid()
-    # all resolve against the requested profile's HERMES_HOME.
+    # load_env() honors the HERMES_HOME contextvar override; the gateway
+    # status readers do NOT (they resolve process-level paths), so the
+    # profile directory is passed explicitly for those (#71211).
     with _profile_scope(profile) as scoped_dir:
         env_on_disk = load_env()
-        runtime = read_runtime_status()
+        runtime = (
+            read_runtime_status(path=scoped_dir / "gateway_state.json")
+            if scoped_dir is not None
+            else read_runtime_status()
+        )
         return {
             "env_path": str(get_env_path()),
             "gateway_start_command": _gateway_display_command(profile, "start"),
             "platforms": [
                 _messaging_platform_payload(
-                    entry, env_on_disk, runtime, scoped=scoped_dir is not None
+                    entry,
+                    env_on_disk,
+                    runtime,
+                    scoped=scoped_dir is not None,
+                    profile_home=scoped_dir,
                 )
                 for entry in _messaging_platform_catalog()
             ]
@@ -9563,8 +9866,17 @@ async def test_messaging_platform(platform_id: str, profile: Optional[str] = Non
 
     with _profile_scope(profile) as scoped_dir:
         env_on_disk = load_env()
+        runtime = (
+            read_runtime_status(path=scoped_dir / "gateway_state.json")
+            if scoped_dir is not None
+            else read_runtime_status()
+        )
         payload = _messaging_platform_payload(
-            entry, env_on_disk, read_runtime_status(), scoped=scoped_dir is not None
+            entry,
+            env_on_disk,
+            runtime,
+            scoped=scoped_dir is not None,
+            profile_home=scoped_dir,
         )
     if not payload["enabled"]:
         message = f"{entry['name']} is disabled. Enable it, then restart the gateway."
@@ -9938,7 +10250,9 @@ def _resolve_provider_status(provider_id: str, status_fn) -> Dict[str, Any]:
     try:
         from hermes_cli import auth as hauth
         if provider_id == "nous":
-            raw = hauth.get_nous_auth_status()
+            # Read-only accounts-tab card: refresh-free snapshot so listing
+            # providers never performs an OAuth refresh.
+            raw = hauth.get_nous_auth_status_local()
             return {
                 "logged_in": bool(raw.get("logged_in")),
                 "source": "nous_portal",
@@ -10974,6 +11288,7 @@ def _xai_device_poller(session_id: str) -> None:
         _save_xai_oauth_tokens,
         _xai_oauth_discovery,
         _xai_oauth_poll_device_token,
+        mark_provider_active_if_unset,
         unsuppress_credential_source,
     )
 
@@ -11010,7 +11325,13 @@ def _xai_device_poller(session_id: str) -> None:
                 discovery=discovery,
                 last_refresh=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 auth_mode="oauth_device_code",
+                # Persist credentials without hijacking an existing active
+                # chat provider.
+                set_active=False,
             )
+            # Mirror `hermes auth add xai-oauth`: first credential may become
+            # active when none is set yet; never overwrite an existing choice.
+            mark_provider_active_if_unset("xai-oauth")
             # The singleton write above is the single source of truth: the
             # credential-pool load seeds it as the canonical ``device_code``
             # entry. Do NOT also insert a parallel ``manual:dashboard_*`` pool
@@ -11236,11 +11557,6 @@ async def start_oauth_login(
     raise HTTPException(status_code=400, detail="Unsupported flow")
 
 
-class OAuthSubmitBody(BaseModel):
-    session_id: str
-    code: str
-
-
 @app.post("/api/providers/oauth/{provider_id}/submit")
 async def submit_oauth_code(
     provider_id: str,
@@ -11395,16 +11711,6 @@ def _session_latest_descendant(session_id: str, db):
 # succeed and delete the wrong row). Same story as the older
 # ``/api/sessions/search`` endpoint up at line ~1191. If you split or
 # reorder this block, move every route in it together.
-class BulkDeleteSessions(BaseModel):
-    ids: List[str]
-    profile: Optional[str] = None
-
-
-class SessionImport(BaseModel):
-    sessions: List[Dict[str, Any]]
-    profile: Optional[str] = None
-
-
 # Keep the dashboard import endpoint stream-safe: FastAPI otherwise parses and
 # buffers an arbitrarily large JSON body before SessionDB can enforce its own
 # per-session and transaction-work limits.
@@ -11571,9 +11877,10 @@ async def get_session_stats(profile: Optional[str] = None):
         messages = db.message_count()
         by_source: Dict[str, int] = {}
         try:
-            for s in db.list_sessions_rich(limit=10000, include_archived=True, compact_rows=True):
-                src = str(s.get("source") or "cli")
-                by_source[src] = by_source.get(src, 0) + 1
+            by_source = db.session_count_by_source(
+                include_archived=True,
+                exclude_children=True,
+            )
         except Exception:
             pass
         return {
@@ -11600,6 +11907,71 @@ def _open_session_db_for_profile(profile: Optional[str]):
         return SessionDB()
     _name, home = _cron_profile_home(profile)
     return SessionDB(db_path=Path(home) / "state.db")
+
+
+# In-process throttle for the opportunistic auto-archive trigger, keyed by
+# profile. Bounds the config.yaml read to at most once per this window per
+# profile; the actual sweep is throttled far more coarsely by state_meta
+# (sessions.min_interval_hours) inside maybe_auto_archive.
+_AUTO_ARCHIVE_CHECK_INTERVAL_S = 300.0
+_last_auto_archive_check: Dict[str, float] = {}
+
+
+def _maybe_auto_archive_for_profile(db, profile: Optional[str]) -> None:
+    """Run the config-gated stale-session auto-archive for ``profile``.
+
+    The Desktop backend is spawned as ``hermes serve`` — it runs neither the
+    interactive CLI nor the messaging gateway, so neither of those startup
+    hooks fire for Desktop users. Triggering the (double-throttled, config-off
+    by default) sweep from the session-list path is what makes
+    ``sessions.auto_archive`` take effect there. Never raises.
+    """
+    try:
+        key = profile or ""
+        now = time.monotonic()
+        last = _last_auto_archive_check.get(key)
+        if last is not None and now - last < _AUTO_ARCHIVE_CHECK_INTERVAL_S:
+            return
+        _last_auto_archive_check[key] = now
+
+        from hermes_cli.config import load_config as _load_full_config
+        cfg = (_load_full_config().get("sessions") or {})
+        if not cfg.get("auto_archive", False):
+            return
+        db.maybe_auto_archive(
+            idle_days=float(cfg.get("auto_archive_days", 3)),
+            min_interval_hours=int(cfg.get("min_interval_hours", 24)),
+        )
+    except Exception as exc:
+        _log.debug("opportunistic auto-archive skipped: %s", exc)
+
+
+async def _auto_archive_ticker_loop(
+    interval_s: float = 3600.0, initial_delay_s: float = 90.0
+) -> None:
+    """Live timer for the stale-session auto-archive (primary profile).
+
+    A long-running Desktop/serve backend must keep sweeping on schedule even
+    when no ``/api/sessions`` request arrives to fire the opportunistic
+    trigger — e.g. the app sits open for days on an idle chat. The real
+    cadence is still owned by state_meta (``sessions.min_interval_hours``)
+    inside ``maybe_auto_archive``; this loop is only the poll rate.
+    """
+
+    def _sweep() -> None:
+        db = _open_session_db_for_profile(None)
+        try:
+            _maybe_auto_archive_for_profile(db, None)
+        finally:
+            db.close()
+
+    await asyncio.sleep(initial_delay_s)
+    while True:
+        try:
+            await asyncio.to_thread(_sweep)
+        except Exception as exc:
+            _log.debug("auto-archive tick skipped: %s", exc)
+        await asyncio.sleep(interval_s)
 
 
 @app.get("/api/sessions/{session_id}")
@@ -11703,31 +12075,24 @@ async def delete_session_endpoint(session_id: str, profile: Optional[str] = None
     return await asyncio.to_thread(_delete)
 
 
-class SessionRename(BaseModel):
-    title: Optional[str] = None
-    archived: Optional[bool] = None
-    # Mutate a session belonging to another profile (opens its state.db). Omit
-    # for the current/default profile.
-    profile: Optional[str] = None
-
-
 @app.patch("/api/sessions/{session_id}")
 async def rename_session_endpoint(session_id: str, body: SessionRename):
-    """Update a session: rename (or clear its title) and/or archive it.
+    """Update a session: rename, archive, and/or pin it.
 
     ``title`` renames (empty/null clears the title); ``archived`` soft-hides or
-    restores the session. Either field may be omitted. ``profile`` targets
-    another profile's session.
+    restores the session; ``pinned`` sets the durable keep flag (exempts the
+    session from the auto-archive sweep). Any field may be omitted. ``profile``
+    targets another profile's session.
     """
     db = _open_session_db_for_profile(body.profile)
     try:
         sid = db.resolve_session_id(session_id)
         if not sid:
             raise HTTPException(status_code=404, detail="Session not found")
-        if body.title is None and body.archived is None:
+        if body.title is None and body.archived is None and body.pinned is None:
             raise HTTPException(
                 status_code=400,
-                detail="Nothing to update; provide 'title' and/or 'archived'.",
+                detail="Nothing to update; provide 'title', 'archived', and/or 'pinned'.",
             )
         if body.title is not None:
             try:
@@ -11737,9 +12102,13 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
                 raise HTTPException(status_code=400, detail=str(e))
         if body.archived is not None:
             db.set_session_archived(sid, body.archived)
+        if body.pinned is not None:
+            db.set_session_pinned(sid, body.pinned)
         result = {"ok": True, "title": db.get_session_title(sid) or ""}
         if body.archived is not None:
             result["archived"] = bool(body.archived)
+        if body.pinned is not None:
+            result["pinned"] = bool(body.pinned)
         return result
     finally:
         db.close()
@@ -11760,34 +12129,6 @@ async def export_session_endpoint(session_id: str, profile: Optional[str] = None
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return data
-
-
-class SessionPrune(BaseModel):
-    older_than_days: Optional[float] = 90
-    source: Optional[str] = None
-    profile: Optional[str] = None
-    # Extended filters (all optional, AND together — mirrors the CLI flags)
-    started_before: Optional[float] = None  # epoch seconds
-    started_after: Optional[float] = None  # epoch seconds
-    title_like: Optional[str] = None
-    end_reason: Optional[str] = None
-    cwd_prefix: Optional[str] = None
-    min_messages: Optional[int] = None
-    max_messages: Optional[int] = None
-    model_like: Optional[str] = None
-    provider: Optional[str] = None
-    user_id: Optional[str] = None
-    chat_id: Optional[str] = None
-    chat_type: Optional[str] = None
-    branch_like: Optional[str] = None
-    min_tokens: Optional[int] = None
-    max_tokens: Optional[int] = None
-    min_cost: Optional[float] = None
-    max_cost: Optional[float] = None
-    min_tool_calls: Optional[int] = None
-    max_tool_calls: Optional[int] = None
-    include_archived: bool = False
-    dry_run: bool = False
 
 
 def _prune_sessions(body: SessionPrune):
@@ -11847,9 +12188,15 @@ def _prune_sessions(body: SessionPrune):
                 "ok": True,
                 "removed": 0,
                 "matched": len(rows),
-                # Rows are ordered oldest-first.
-                "oldest_started_at": rows[0]["started_at"] if rows else None,
-                "newest_started_at": rows[-1]["started_at"] if rows else None,
+                # Rows are ordered by last activity, not creation time.
+                "oldest_last_active": rows[0]["last_active"] if rows else None,
+                "newest_last_active": rows[-1]["last_active"] if rows else None,
+                "oldest_started_at": (
+                    min(r["started_at"] for r in rows) if rows else None
+                ),
+                "newest_started_at": (
+                    max(r["started_at"] for r in rows) if rows else None
+                ),
                 "sessions": [
                     {
                         "id": r["id"],
@@ -11857,6 +12204,7 @@ def _prune_sessions(body: SessionPrune):
                         "title": r.get("title"),
                         "model": r.get("model"),
                         "started_at": r["started_at"],
+                        "last_active": r["last_active"],
                         "message_count": r["message_count"],
                     }
                     for r in rows
@@ -11939,26 +12287,6 @@ async def get_logs(
 # ---------------------------------------------------------------------------
 # Cron job management endpoints
 # ---------------------------------------------------------------------------
-
-
-class CronJobCreate(BaseModel):
-    prompt: str = ""
-    schedule: str
-    name: str = ""
-    deliver: str = "local"
-    skills: Optional[List[str]] = None
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    base_url: Optional[str] = None
-    script: Optional[str] = None
-    context_from: Optional[Any] = None
-    enabled_toolsets: Optional[List[str]] = None
-    workdir: Optional[str] = None
-    no_agent: bool = False
-
-
-class CronJobUpdate(BaseModel):
-    updates: dict
 
 
 def _cron_optional_text(value: Any, *, strip_trailing_slash: bool = False) -> Optional[str]:
@@ -12530,11 +12858,6 @@ async def cron_fire_webhook(request: Request):
 # slot schema as a form; submitting instantiates a real cron job via the same
 # create_job path. See cron/blueprint_catalog.py for the single source of truth.
 # ---------------------------------------------------------------------------
-class AutomationBlueprintInstantiate(BaseModel):
-    blueprint: str                      # blueprint key, e.g. "morning-brief"
-    values: Dict[str, Any] = {}      # filled slot values from the form
-
-
 @app.get("/api/cron/blueprints")
 async def list_cron_blueprints():
     """Return the blueprint catalog as form schemas for the dashboard gallery.
@@ -12606,26 +12929,6 @@ async def instantiate_blueprint(body: AutomationBlueprintInstantiate, profile: s
 # in stdio `env` blocks are redacted on read; the agent picks them up from
 # config.yaml at session start exactly as with CLI-added servers.
 # ---------------------------------------------------------------------------
-
-
-class MCPServerCreate(BaseModel):
-    name: str
-    url: Optional[str] = None
-    command: Optional[str] = None
-    args: List[str] = []
-    # env: KEY=VALUE map for stdio servers (API keys, etc.)
-    env: Dict[str, str] = {}
-    # auth: "none" | "oauth" | "header" | None
-    auth: Optional[str] = None
-    # One-time provisioning input; persisted only to the profile's .env.
-    bearer_token: Optional[SecretStr] = None
-    profile: Optional[str] = None
-
-
-class MCPServersReplace(BaseModel):
-    # Whole-map replace (name → raw server config) for the GUI mcp.json editor.
-    servers: Dict[str, Dict[str, Any]] = {}
-    profile: Optional[str] = None
 
 
 def _normalize_mcp_server_create(
@@ -12986,15 +13289,18 @@ def _run_dashboard_mcp_oauth(flow, cfg: dict) -> None:
         # (Figma's MCP catalog, etc.) 403 the register call before any
         # authorization URL exists — surface what's actually happening
         # instead of a bare "403 Forbidden".
-        lowered = msg.lower()
-        if "403" in msg and ("regist" in lowered or "forbidden" in lowered):
-            msg = (
-                f"'{flow.server_name}' only allows pre-approved OAuth clients — it rejected "
-                "client registration (403), so no browser flow can start. "
-                "Options: add a pre-registered client to this server's entry "
-                "(oauth: {client_id: ..., client_secret: ...}), or use the "
-                "provider's stdio / API-key server instead."
+        try:
+            from tools.mcp_oauth import humanize_oauth_registration_error
+
+            humanized = humanize_oauth_registration_error(
+                flow.server_name,
+                exc,
+                server_url=cfg.get("url") if isinstance(cfg, dict) else None,
             )
+            if humanized:
+                msg = humanized
+        except Exception:
+            pass
         flow.mark_error(msg)
     finally:
         flow.mark_worker_done()
@@ -13121,11 +13427,6 @@ async def mcp_oauth_callback(
     return HTMLResponse("<h1>Authorization received</h1><p>You can close this tab and return to Hermes.</p>")
 
 
-class MCPEnabledToggle(BaseModel):
-    enabled: bool
-    profile: Optional[str] = None
-
-
 @app.put("/api/mcp/servers/{name}/enabled")
 async def set_mcp_server_enabled(
     name: str, body: MCPEnabledToggle, profile: Optional[str] = None
@@ -13225,14 +13526,6 @@ async def list_mcp_catalog(profile: Optional[str] = None):
     return {"entries": entries, "diagnostics": diagnostics}
 
 
-class MCPCatalogInstall(BaseModel):
-    name: str
-    # env: KEY=VALUE map for catalog entries that declare required env vars.
-    env: Dict[str, str] = {}
-    enable: bool = True
-    profile: Optional[str] = None
-
-
 @app.post("/api/mcp/catalog/install")
 async def install_mcp_catalog_entry(body: MCPCatalogInstall, profile: Optional[str] = None):
     """Install a catalog MCP into config.yaml.
@@ -13319,16 +13612,6 @@ _ACTION_LOG_FILES.setdefault("computer-use-grant", "action-computer-use-grant.lo
 # ---------------------------------------------------------------------------
 
 
-class PairingApprove(BaseModel):
-    platform: str
-    code: str
-
-
-class PairingRevoke(BaseModel):
-    platform: str
-    user_id: str
-
-
 def _pairing_store():
     from gateway.pairing import PairingStore
 
@@ -13394,20 +13677,6 @@ async def clear_pending_pairing():
 # adapter hot-reloads it without a gateway restart.  Per-route HMAC secrets
 # are redacted on read and surfaced once on create.
 # ---------------------------------------------------------------------------
-
-
-class WebhookCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    events: List[str] = []
-    prompt: Optional[str] = None
-    script: Optional[str] = None
-    skills: List[str] = []
-    deliver: str = "log"
-    deliver_only: bool = False
-    deliver_chat_id: Optional[str] = None
-    # secret: omit to auto-generate
-    secret: Optional[str] = None
 
 
 def _webhook_route_summary(name: str, route: Dict[str, Any], base_url: str) -> Dict[str, Any]:
@@ -13533,10 +13802,6 @@ async def delete_webhook(name: str):
     return {"ok": True}
 
 
-class WebhookEnabledToggle(BaseModel):
-    enabled: bool
-
-
 @app.put("/api/webhooks/{name}/enabled")
 async def set_webhook_enabled(name: str, body: WebhookEnabledToggle):
     """Enable or disable a webhook route.
@@ -13598,14 +13863,6 @@ async def stop_gateway(profile: Optional[str] = None):
 # rotating API keys the agent round-robins through.  Secrets are redacted on
 # read; only the agent ever sees the raw values at session start.
 # ---------------------------------------------------------------------------
-
-
-class CredentialPoolAdd(BaseModel):
-    provider: str
-    # api_key for API-key providers; OAuth pooling stays CLI-only (it needs
-    # an interactive browser flow that doesn't belong in a single POST).
-    api_key: str
-    label: Optional[str] = None
 
 
 def _pool_entry_summary(entry: Any, index: int) -> Dict[str, Any]:
@@ -13774,16 +14031,6 @@ async def remove_credential_pool_entry(provider: str, index: int):
 # ---------------------------------------------------------------------------
 
 
-class MemoryProviderSelect(BaseModel):
-    # "" or "built-in" disables the external provider (built-in only).
-    provider: str
-
-
-class MemoryReset(BaseModel):
-    # "all" | "memory" | "user"
-    target: str = "all"
-
-
 @app.get("/api/memory")
 async def get_memory_status():
     cfg = load_config()
@@ -13877,11 +14124,6 @@ async def run_security_audit():
     return {"ok": True, "pid": proc.pid, "name": "security-audit"}
 
 
-class BackupRequest(BaseModel):
-    # Optional output path; defaults to a timestamped zip in the home dir.
-    output: Optional[str] = None
-
-
 def _dashboard_backup_dir() -> Path:
     return get_hermes_home() / "backups"
 
@@ -13940,18 +14182,6 @@ async def download_dashboard_backup(archive: str):
         filename=target.name,
         content_disposition_type="attachment",
     )
-
-
-class ImportRequest(BaseModel):
-    archive: str
-    # Pass --force to `hermes import`. The spawned action runs with
-    # stdin=DEVNULL, so the CLI's interactive "Continue? [y/N]" overwrite
-    # prompt hits EOF and auto-aborts ("Aborted.", exit 1) whenever the
-    # target already has a config — which it always does when the dashboard
-    # itself is running from it. The dashboard shows its own confirm modal
-    # before calling this endpoint, then sends force=True so the restore
-    # proceeds non-interactively.
-    force: bool = False
 
 
 @app.post("/api/ops/import")
@@ -14108,17 +14338,6 @@ async def list_hooks():
     return {"hooks": out, "valid_events": valid_events}
 
 
-class HookCreate(BaseModel):
-    event: str
-    command: str
-    matcher: Optional[str] = None
-    timeout: Optional[int] = None
-    # approve: write the consent allowlist entry too (the operator using the
-    # authenticated dashboard is giving consent). Without it the hook is
-    # configured but won't fire until approved.
-    approve: bool = True
-
-
 @app.post("/api/ops/hooks")
 async def create_hook(body: HookCreate):
     """Add a shell hook to config.yaml (and optionally approve it).
@@ -14174,11 +14393,6 @@ async def create_hook(body: HookCreate):
             _log.exception("hook consent record failed")
 
     return {"ok": True, "event": event, "command": command, "approved": approved}
-
-
-class HookDelete(BaseModel):
-    event: str
-    command: str
 
 
 @app.delete("/api/ops/hooks")
@@ -14270,11 +14484,6 @@ async def prune_checkpoints():
 # ---------------------------------------------------------------------------
 
 
-class SkillInstallRequest(BaseModel):
-    identifier: str
-    profile: Optional[str] = None
-
-
 def _profile_cli_args(profile: Optional[str]) -> List[str]:
     """Return ``["-p", <name>]`` for a validated non-default profile.
 
@@ -14327,11 +14536,6 @@ async def install_skill_hub(body: SkillInstallRequest, profile: Optional[str] = 
     return {"ok": True, "pid": proc.pid, "name": name}
 
 
-class SkillUninstallRequest(BaseModel):
-    name: str
-    profile: Optional[str] = None
-
-
 @app.post("/api/skills/hub/uninstall")
 async def uninstall_skill_hub(body: SkillUninstallRequest, profile: Optional[str] = None):
     name = (body.name or "").strip()
@@ -14349,10 +14553,6 @@ async def uninstall_skill_hub(body: SkillUninstallRequest, profile: Optional[str
         _log.exception("Failed to spawn skills uninstall")
         raise HTTPException(status_code=500, detail=f"Failed to uninstall skill: {exc}")
     return {"ok": True, "pid": proc.pid, "name": action}
-
-
-class SkillsUpdateRequest(BaseModel):
-    profile: Optional[str] = None
 
 
 @app.post("/api/skills/hub/update")
@@ -14382,7 +14582,6 @@ _SKILL_HUB_SOURCE_LABELS = {
     "url": "Direct URL",
     "github": "GitHub",
     "clawhub": "ClawHub",
-    "claude-marketplace": "Claude Marketplace",
     "lobehub": "LobeHub",
     "browse-sh": "browse.sh",
 }
@@ -14484,7 +14683,7 @@ async def list_skills_hub_sources(profile: Optional[str] = None):
         # calls per keystroke. Keep this set in sync with that function's
         # ``_api_source_ids``.
         _api_source_ids = frozenset(
-            {"github", "skills-sh", "clawhub", "claude-marketplace", "lobehub", "well-known"}
+            {"github", "skills-sh", "clawhub", "lobehub", "well-known"}
         )
         for entry in out:
             entry["searchable"] = not (index_available and entry["id"] in _api_source_ids)
@@ -14718,59 +14917,6 @@ async def scan_skill_hub(identifier: str = "", profile: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Profile management endpoints (minimal — list/create/rename/delete + SOUL.md)
 # ---------------------------------------------------------------------------
-
-
-class ProfileCreate(BaseModel):
-    name: str
-    clone_from: Optional[str] = None
-    # Backward compatibility for older dashboard/desktop clients. New clients
-    # send clone_from="default" (or another profile name) explicitly.
-    clone_from_default: bool = False
-    clone_all: bool = False
-    no_skills: bool = False
-    description: Optional[str] = None
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    # Profile-builder additions — all optional, all applied best-effort AFTER
-    # the profile directory exists, so a hiccup in any of them never 500s the
-    # create (the user can fix it from the relevant dashboard page afterward).
-    # MCP servers to write into the new profile's config.yaml.
-    mcp_servers: List["MCPServerCreate"] = []
-    # Built-in / optional skills to KEEP active. When this list is non-empty,
-    # the builder uses "replace" semantics: the bundle is seeded, then every
-    # seeded skill NOT in this list is added to the profile's disabled list.
-    # Empty list = leave the seeded bundle untouched (legacy behaviour).
-    keep_skills: List[str] = []
-    # Skills-hub identifiers to install into the new profile. Installed async
-    # via a subprocess scoped to the profile (`hermes -p <name> skills install`)
-    # because skills_hub.SKILLS_DIR is import-time-bound and the HERMES_HOME
-    # override can't redirect it. Returns spawned PIDs for the UI to poll.
-    hub_skills: List[str] = []
-
-
-class ProfileRename(BaseModel):
-    new_name: str
-
-
-class ProfileSoulUpdate(BaseModel):
-    content: str
-
-
-class ProfileActiveUpdate(BaseModel):
-    name: str
-
-
-class ProfileDescriptionUpdate(BaseModel):
-    description: str = ""
-
-
-class ProfileModelUpdate(BaseModel):
-    provider: str
-    model: str
-
-
-class ProfileDescribeAuto(BaseModel):
-    overwrite: bool = False
 
 
 def _profile_attr(info, name: str, default: Any = None) -> Any:
@@ -15435,12 +15581,6 @@ def _config_profile_scope(profile: Optional[str]):
         reset_hermes_home_override(token)
 
 
-class SkillToggle(BaseModel):
-    name: str
-    enabled: bool
-    profile: Optional[str] = None
-
-
 @app.get("/api/skills")
 async def get_skills(profile: Optional[str] = None):
     from tools.skills_tool import _find_all_skills
@@ -15485,19 +15625,6 @@ async def toggle_skill(body: SkillToggle, profile: Optional[str] = None):
             disabled.add(body.name)
         save_disabled_skills(config, disabled)
     return {"ok": True, "name": body.name, "enabled": body.enabled}
-
-
-class SkillCreate(BaseModel):
-    name: str
-    content: str
-    category: Optional[str] = None
-    profile: Optional[str] = None
-
-
-class SkillContentUpdate(BaseModel):
-    name: str
-    content: str
-    profile: Optional[str] = None
 
 
 def _clear_skills_prompt_cache() -> None:
@@ -15569,6 +15696,7 @@ async def update_skill_content(body: SkillContentUpdate):
 @app.get("/api/tools/toolsets")
 async def get_toolsets(profile: Optional[str] = None):
     from hermes_cli.tools_config import (
+        _CONFIG_ONLY_TOOLSETS,
         _get_effective_configurable_toolsets,
         _get_platform_tools,
         _toolset_configuration_platform,
@@ -15599,7 +15727,16 @@ async def get_toolsets(profile: Optional[str] = None):
         except Exception:
             tools = []
         target_platform = _toolset_configuration_platform(name)
-        is_enabled = name in enabled_by_platform[target_platform]
+        if name in _CONFIG_ONLY_TOOLSETS:
+            # Config-only capabilities (stt) have no per-platform toolset —
+            # their switch is their own config section (e.g. stt.enabled).
+            from utils import is_truthy_value
+
+            section = config.get(name)
+            section = section if isinstance(section, dict) else {}
+            is_enabled = is_truthy_value(section.get("enabled", True), default=True)
+        else:
+            is_enabled = name in enabled_by_platform[target_platform]
         result.append({
             "name": name,
             "label": gui_toolset_label(label),
@@ -15616,11 +15753,6 @@ async def get_toolsets(profile: Optional[str] = None):
     return result
 
 
-class ToolsetToggle(BaseModel):
-    enabled: bool
-    profile: Optional[str] = None
-
-
 @app.put("/api/tools/toolsets/{name}")
 async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] = None):
     """Enable/disable a configurable toolset for its configuration platform.
@@ -15632,6 +15764,7 @@ async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] 
     to ``body.profile`` when provided. Returns 400 for unknown toolset keys.
     """
     from hermes_cli.tools_config import (
+        _CONFIG_ONLY_TOOLSETS,
         _get_effective_configurable_toolsets,
         _get_platform_tools,
         _save_platform_tools,
@@ -15643,6 +15776,23 @@ async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] 
         raise HTTPException(status_code=400, detail=f"Unknown toolset: {name}")
 
     target_platform = _toolset_configuration_platform(name)
+    if name in _CONFIG_ONLY_TOOLSETS:
+        # Config-only capabilities (stt) toggle their own config section's
+        # ``enabled`` flag — there is no platform_toolsets entry to write.
+        with _profile_scope(body.profile or profile):
+            config = load_config()
+            section = config.setdefault(name, {})
+            if not isinstance(section, dict):
+                section = {}
+                config[name] = section
+            section["enabled"] = bool(body.enabled)
+            save_config(config)
+        return {
+            "ok": True,
+            "name": name,
+            "platform": target_platform,
+            "enabled": body.enabled,
+        }
     with _profile_scope(body.profile or profile):
         config = load_config()
         enabled = set(
@@ -15775,14 +15925,6 @@ async def get_toolset_config(name: str, profile: Optional[str] = None):
     return payload
 
 
-class ToolsetProviderSelect(BaseModel):
-    provider: str
-    # Web-only capability scope: 'search' | 'extract'. Omitted → whole-provider
-    # selection through the legacy apply_provider_selection path (web.backend).
-    capability: Optional[str] = None
-    profile: Optional[str] = None
-
-
 # Toolsets whose backends carry a selectable model catalog, mapped to the
 # config.yaml section their `model` key lives in. Mirrors the CLI's
 # post-selection model pickers (`_configure_imagegen_model_for_plugin` /
@@ -15898,12 +16040,6 @@ async def get_toolset_models(
         "current": current,
         "default": default_model,
     }
-
-
-class ToolsetModelSelect(BaseModel):
-    model: str
-    provider: Optional[str] = None
-    profile: Optional[str] = None
 
 
 @app.put("/api/tools/toolsets/{name}/model")
@@ -16086,11 +16222,6 @@ async def select_toolset_provider(
     return response
 
 
-class ToolsetEnvUpdate(BaseModel):
-    env: Dict[str, str]
-    profile: Optional[str] = None
-
-
 @app.put("/api/tools/toolsets/{name}/env")
 async def save_toolset_env(name: str, body: ToolsetEnvUpdate, profile: Optional[str] = None):
     """Persist API keys for a toolset's provider env vars.
@@ -16144,11 +16275,6 @@ async def save_toolset_env(name: str, body: ToolsetEnvUpdate, profile: Optional[
 
         status = {k: bool(get_env_value(k)) for k in allowed}
     return {"ok": True, "name": name, "saved": saved, "skipped": skipped, "is_set": status}
-
-
-class ToolsetPostSetup(BaseModel):
-    key: str
-    profile: Optional[str] = None
 
 
 @app.post("/api/tools/toolsets/{name}/post-setup")
@@ -16273,6 +16399,8 @@ def _probe_docker_backend() -> tuple:
             ["docker", "info", "--format", "{{.ServerVersion}}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=2,
         )
         if proc.returncode == 0:
@@ -16397,11 +16525,6 @@ async def get_terminal_backends(profile: Optional[str] = None):
     return {"active": active, "backends": backends}
 
 
-class TerminalBackendSelect(BaseModel):
-    backend: str
-    profile: Optional[str] = None
-
-
 @app.put("/api/tools/terminal/backend")
 async def select_terminal_backend(
     body: TerminalBackendSelect, profile: Optional[str] = None
@@ -16491,11 +16614,6 @@ async def grant_computer_use_permissions(profile: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Raw YAML config endpoint
 # ---------------------------------------------------------------------------
-
-
-class RawConfigUpdate(BaseModel):
-    yaml_text: str
-    profile: Optional[str] = None
 
 
 @app.get("/api/config/raw")
@@ -17340,7 +17458,11 @@ def _resolve_chat_argv(
         profile_dir = _resolve_profile_dir(requested)
 
     argv, cwd = _make_tui_argv(PROJECT_ROOT / "ui-tui", tui_dev=False)
-    env = os.environ.copy()
+    # Hermes TUI child: build via the single spawn-env factory (profile-home
+    # contract applied; secrets kept — the spawned agent needs provider creds).
+    # An explicit profile scope below still overrides HERMES_HOME afterwards.
+    from tools.environments.local import build_subprocess_env
+    env = build_subprocess_env(scrub_secrets=False, inherit_profile_home=True)
     try:
         from hermes_cli.config import apply_terminal_config_to_env
         apply_terminal_config_to_env(env=env)
@@ -18984,10 +19106,6 @@ async def get_dashboard_themes():
     return {"themes": themes, "active": active}
 
 
-class ThemeSetBody(BaseModel):
-    name: str
-
-
 @app.put("/api/dashboard/theme")
 async def set_dashboard_theme(body: ThemeSetBody):
     """Set the active dashboard theme (persists to config.yaml)."""
@@ -19021,10 +19139,6 @@ async def get_dashboard_font():
     if font not in _FONT_CHOICES:
         font = _FONT_DEFAULT_ID
     return {"font": font}
-
-
-class FontSetBody(BaseModel):
-    font: str
 
 
 @app.put("/api/dashboard/font")
@@ -19255,12 +19369,6 @@ async def rescan_dashboard_plugins():
     return {"ok": True, "count": len(plugins)}
 
 
-class _AgentPluginInstallBody(BaseModel):
-    identifier: str
-    force: bool = False
-    enable: bool = True
-
-
 def _strip_dashboard_manifest(p: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in p.items() if not k.startswith("_")}
 
@@ -19470,11 +19578,6 @@ async def delete_agent_plugin(request: Request, name: str):
     return result
 
 
-class _PluginProvidersPutBody(BaseModel):
-    memory_provider: Optional[str] = None
-    context_engine: Optional[str] = None
-
-
 @app.put("/api/dashboard/plugin-providers")
 async def put_plugin_providers(request: Request, body: _PluginProvidersPutBody):
     """Persist memory provider / context engine selection (writes config.yaml)."""
@@ -19491,10 +19594,6 @@ async def put_plugin_providers(request: Request, body: _PluginProvidersPutBody):
     if body.context_engine is not None:
         _save_context_engine(body.context_engine)
     return {"ok": True}
-
-
-class _PluginVisibilityBody(BaseModel):
-    hidden: bool
 
 
 @app.post("/api/dashboard/plugins/{name:path}/visibility")
@@ -20020,6 +20119,7 @@ def start_server(
         # reaped via the WebSocketDisconnect → disconnect/reap path.
         ws_ping_interval=None if _is_loopback else 20.0,
         ws_ping_timeout=None if _is_loopback else 20.0,
+        ws_max_size=_DESKTOP_ATTACHMENT_WS_MAX_BYTES,
     )
     server = uvicorn.Server(config)
 

@@ -55,7 +55,12 @@ def gh_available() -> bool:
 
 def _run(cmd: List[str], timeout: int = 15) -> str:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
+        )
         return (result.stdout or "").strip()
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -208,7 +213,12 @@ def file_issue(
         cmd += ["--label", label]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            timeout=60,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "error": f"gh issue create failed: {exc}", "title": title}
 
@@ -219,7 +229,7 @@ def file_issue(
             retry = subprocess.run(
                 ["gh", "issue", "create", "--repo", REPO, "--title", title, "--body", body],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=60,
             )
             if retry.returncode == 0:

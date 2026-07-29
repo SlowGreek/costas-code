@@ -28,19 +28,22 @@ guarantee.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
-from typing import Sequence
+from typing import Mapping, Sequence
 
 __all__ = [
     "IS_WINDOWS",
     "resolve_node_command",
+    "suppress_platform_ver_console",
     "windows_detach_flags",
     "windows_detach_flags_without_breakaway",
     "windows_hide_flags",
     "windows_detach_popen_kwargs",
     "bounded_git_probe",
+    "noninteractive_git_env",
 ]
 
 
@@ -226,6 +229,43 @@ def windows_hide_flags() -> int:
     return _CREATE_NO_WINDOW
 
 
+def suppress_platform_ver_console() -> None:
+    """Stub out ``platform._syscmd_ver`` on Windows so it can never flash a
+    console window.  No-op on non-Windows.
+
+    CPython's ``platform.win32_ver()`` — reached by ``platform.uname()``,
+    ``platform.version()``, and ``platform.platform()`` — unconditionally
+    shells out ``cmd /c ver`` via ``subprocess.check_output(..., shell=True)``
+    with no ``CREATE_NO_WINDOW``.  From a windowless parent (the pythonw
+    gateway and every kanban worker it spawns) that allocates a fresh
+    *visible* console: one flashing ``cmd`` window per process, triggered by
+    any dependency that merely touches ``platform.uname()`` at import time.
+
+    With ``_syscmd_ver`` stubbed to return its inputs, ``win32_ver()`` hits
+    the documented ``ValueError`` fallback and reads the version from
+    ``sys.getwindowsversion().platform_version`` — same information, queried
+    in-process, no subprocess, no window.  Verified equivalent on
+    CPython 3.11 (``platform()`` → ``Windows-10-10.0.xxxxx-SP0`` either way).
+
+    Call early, before heavyweight imports — the flash typically happens
+    during a dependency's import, not from Hermes' own code.
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        import platform
+
+        if hasattr(platform, "_syscmd_ver"):
+            def _quiet_syscmd_ver(system="", release="", version="",
+                                  supported_platforms=("win32", "win16", "dos")):
+                return system, release, version
+
+            platform._syscmd_ver = _quiet_syscmd_ver
+    except Exception:
+        # Purely cosmetic hardening — never let it break startup.
+        pass
+
+
 def windows_detach_popen_kwargs() -> dict:
     """Return a dict of Popen kwargs that detach a child on Windows and
     fall back to the POSIX equivalent (``start_new_session=True``) on
@@ -257,6 +297,51 @@ def windows_detach_popen_kwargs() -> dict:
     if IS_WINDOWS:
         return {"creationflags": windows_detach_flags()}
     return {"start_new_session": True}
+
+
+# -----------------------------------------------------------------------------
+# Non-interactive git environment (credential-prompt hang guard)
+# -----------------------------------------------------------------------------
+
+
+def noninteractive_git_env(
+    base: "Mapping[str, str] | None" = None,
+) -> dict[str, str]:
+    """Environment for *internal* git invocations that must never prompt.
+
+    Hermes shells out to git from many non-interactive contexts — MCP catalog
+    installs, plugin install/update, profile distribution staging, worktree
+    base fetches, desktop review-pane fetch/push. When the remote is private,
+    misconfigured, or requires auth, git's default behavior is to prompt on
+    the inherited terminal (or via an askpass helper), which silently hangs
+    the operation until its timeout — or forever at call sites without one.
+    Ported from openai/codex#34540 / #34612 ("detach non-interactive
+    subprocesses from stdin"): a background tool invocation must fail fast
+    with a readable error, not wait for input nobody can type.
+
+    Returns a copy of ``base`` (default ``os.environ``) with:
+
+    * ``GIT_TERMINAL_PROMPT=0`` — git fails with "terminal prompts disabled"
+      instead of prompting for credentials.
+    * ``GCM_INTERACTIVE=Never`` — Git Credential Manager (the default
+      credential helper on Windows installs) never pops its own dialog.
+
+    ``GIT_ASKPASS`` / ``SSH_ASKPASS`` are deliberately left alone: when the
+    user has a *working* askpass helper or ssh-agent configured, auth should
+    still succeed non-interactively. The env only disables paths that block
+    on a human.
+
+    Pair with ``stdin=subprocess.DEVNULL`` so git (and any credential helper
+    it spawns) also can't read the parent's inherited stdin.
+
+    This is for internal plumbing calls only — the agent-facing terminal tool
+    has its own policy layer and user-visible PTY, where prompting can be
+    legitimate.
+    """
+    env = dict(base if base is not None else os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "Never"
+    return env
 
 
 # -----------------------------------------------------------------------------

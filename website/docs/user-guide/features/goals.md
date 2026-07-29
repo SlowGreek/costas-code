@@ -140,7 +140,7 @@ After every turn, Hermes calls an auxiliary model with:
 - The standing goal text
 - The agent's most recent final response (last ~4 KB of text), **fenced as untrusted data** — the judge is explicitly told never to follow any instruction inside the response or background-process output, so a task can't prompt-inject the judge into a false "done".
 - Any live background processes, also fenced as untrusted.
-- A system prompt telling the judge to reply with strict JSON and one of four verdicts: `done`, `blocked`, `continue`, or `wait`. The legacy `{"done": <bool>, "reason": "…"}` shape is still accepted.
+- A system prompt telling the judge to reply with strict one-line JSON and one of four verdicts: `{"verdict": "done" | "blocked" | "continue" | "wait", "reason": "<one-sentence rationale>"}` (wait verdicts add `wait_on_session` / `wait_on_pid` / `wait_for_seconds`; the legacy `{"done": <bool>, "reason": "..."}` shape is still accepted)
 
 The judge is deliberately conservative: it marks a goal `done` only when the response shows **concrete evidence** the goal is complete (a command result, file contents, a test/benchmark output) — not a bare "looks done" claim. If the agent is stuck needing you (missing input, a decision, credentials) or the goal is unachievable, the judge returns **`blocked`** instead — an honest "not achieved, needs you" state, never dressed up as success. The judge is also given explicit **test-theater** guidance: it rejects hardcoded expectations, mocking the unit under test, assertions fitted to after-the-fact output, and skipped/ignored tests dressed up as passing (honest fakes at a real environment boundary are fine).
 

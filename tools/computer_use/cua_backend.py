@@ -295,7 +295,7 @@ def _linux_x11_active_window_id() -> Optional[int]:
         proc = subprocess.run(
             ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=2,
             check=False,
         )
@@ -379,7 +379,7 @@ def _resolve_mcp_invocation(
         from tools.environments.local import _sanitize_subprocess_env
         proc = subprocess.run(
             [driver_cmd, "manifest"],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             stdin=subprocess.DEVNULL,
             # cua-driver is a third-party binary — never hand it provider
             # API keys via inherited env (same policy as the MCP and CLI
@@ -445,7 +445,7 @@ def _cua_driver_supports_no_overlay(driver_cmd: str) -> bool:
         from tools.environments.local import _sanitize_subprocess_env
         proc = subprocess.run(
             [driver_cmd, "--help"],
-            capture_output=True, text=True, timeout=3.0,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3.0,
             stdin=subprocess.DEVNULL,
             env=_sanitize_subprocess_env(cua_driver_child_env()),
         )
@@ -557,11 +557,17 @@ def cua_driver_binary_available() -> bool:
     return resolve_cua_driver_cmd() is not None
 
 
-def cua_driver_update_check(*, timeout: float = 8.0) -> Optional[Dict[str, Any]]:
+def cua_driver_update_check(*, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Run ``cua-driver check-update --json`` and return its parsed state.
 
     The payload mirrors the ``check_for_update`` MCP tool:
     ``{current_version, latest_version, update_available, ...}``.
+
+    ``timeout`` defaults to 8s on POSIX and 25s on Windows — first-spawn of
+    the exe there routinely eats several seconds in Defender/SmartScreen
+    scanning, and a false timeout is expensive: callers treat ``None`` as
+    indeterminate, and the ``install_cua_driver(upgrade=True)`` path used to
+    fall through to a full multi-minute reinstall on it.
 
     Returns ``None`` (callers should stay quiet) when the result is
     indeterminate: the binary is missing, the driver is too old to support
@@ -569,6 +575,8 @@ def cua_driver_update_check(*, timeout: float = 8.0) -> Optional[Dict[str, Any]]
     ``error`` field is set), or the output didn't parse. Best-effort; never
     raises.
     """
+    if timeout is None:
+        timeout = 25.0 if sys.platform == "win32" else 8.0
     driver_cmd = resolve_cua_driver_cmd()
     if not driver_cmd:
         return None
@@ -576,7 +584,7 @@ def cua_driver_update_check(*, timeout: float = 8.0) -> Optional[Dict[str, Any]]
         from tools.environments.local import _sanitize_subprocess_env
         proc = subprocess.run(
             [driver_cmd, "check-update", "--json"],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             # Some older drivers don't have the verb and fall through to a
             # stdin-reading mode rather than erroring — DEVNULL gives them EOF
             # so they exit fast instead of blocking until the timeout.
@@ -901,6 +909,10 @@ class _CuaDriverSession:
         self._shutdown_event: Optional[asyncio.Event] = None  # created on bridge loop
         self._lifecycle_future = None  # concurrent.futures.Future
         self._setup_error: Optional[BaseException] = None
+        # Stable driver-side identity declared through start_session.
+        # Used to revive a logical ended-session rejection without
+        # recursive call_tool re-entry or backend-owned state (#71166).
+        self._declared_session_id: Optional[str] = None
 
     def _require_started(self) -> None:
         if not self._started:
@@ -1162,6 +1174,67 @@ class _CuaDriverSession:
         return self._capability_version
 
     @staticmethod
+    def _logical_error_text(result: Dict[str, Any]) -> str:
+        """Flatten a logical MCP error into text for narrow classification."""
+        chunks: List[str] = []
+        for value in (result.get("data"), result.get("structuredContent")):
+            if isinstance(value, str):
+                chunks.append(value)
+            elif value is not None:
+                try:
+                    chunks.append(json.dumps(value, sort_keys=True))
+                except (TypeError, ValueError):
+                    chunks.append(str(value))
+        return "\n".join(chunks)
+
+    @classmethod
+    def _is_ended_session_result(cls, result: Any) -> bool:
+        """Recognise cua-driver's explicit recoverable ended-session result."""
+        if not isinstance(result, dict) or result.get("isError") is not True:
+            return False
+        message = cls._logical_error_text(result).lower()
+        return (
+            "session" in message
+            and ("has ended" in message or "session ended" in message)
+            and "start_session" in message
+        )
+
+    def _revive_declared_session_once(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        first_result: Dict[str, Any],
+        timeout: float,
+    ) -> Dict[str, Any]:
+        """Revive the stable session and replay one rejected tool call once."""
+        session_id = self._declared_session_id
+        if not session_id or name in self._LIFECYCLE_CALLS:
+            return first_result
+
+        logger.warning(
+            "cua-driver session %s ended during %s; reviving and retrying once",
+            session_id,
+            name,
+        )
+        revive_result = self._bridge.run(
+            self._call_tool_async("start_session", {"session": session_id}),
+            timeout=timeout,
+        )
+        if revive_result.get("isError") is True:
+            logger.warning(
+                "cua-driver session %s could not be revived: %s",
+                session_id,
+                self._logical_error_text(revive_result),
+            )
+            return first_result
+
+        # Return the second result as-is. A second rejection is surfaced; no loop.
+        return self._bridge.run(
+            self._call_tool_async(name, args),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def _is_closed_session_error(exc: Exception) -> bool:
         """Return True for MCP/stdio failures that are recoverable by reconnecting."""
         name = exc.__class__.__name__
@@ -1256,7 +1329,7 @@ class _CuaDriverSession:
             for attempt in range(attempts):
                 try:
                     proc = _subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=max(15.0, timeout),
+                        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=max(15.0, timeout),
                         env=_sanitize_subprocess_env(cua_driver_child_env()),
                     )
                 except Exception as e:  # pragma: no cover - subprocess spawn failure
@@ -1339,28 +1412,19 @@ class _CuaDriverSession:
 
     def call_tool(self, name: str, args: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
         # A prior session may have died (MCP drop / driver crash): its
-        # lifecycle coro reset _started to False in its finally (#55048
-        # Bug 1). Re-enter start() so we rebuild the session instead of
-        # calling _require_started() straight into a "not started" raise or
-        # a None session. start() is idempotent when already started. Skip
-        # this for the start_session/end_session handshake, which start()/
-        # stop() drive directly while _started is still in flux.
+        # lifecycle coro reset _started to False in its finally (#55048).
         if not self._started and name not in self._LIFECYCLE_CALLS:
             logger.warning(
                 "cua-driver session not active on %s; (re)starting before call", name
             )
             self.start()
         self._require_started()
-        # The cua-driver daemon proxy returns POSIX EAGAIN ("Resource
-        # temporarily unavailable") for heavier calls like get_window_state when
-        # its non-blocking socket buffer is full. On some machines/builds this
-        # is persistent for get_window_state over the MCP stdio bridge, while
-        # the direct CLI transport keeps working. So: try the MCP path ONCE,
-        # and on the transient/transport error fall straight through to the CLI
-        # transport (which has its own retry + screenshot-to-file mitigation)
-        # rather than burning a long backoff chain on a path that won't recover.
+
         try:
-            return self._bridge.run(self._call_tool_async(name, args), timeout=timeout)
+            result = self._bridge.run(
+                self._call_tool_async(name, args),
+                timeout=timeout,
+            )
         except Exception as e:
             if self._is_transient_daemon_error(e):
                 logger.warning(
@@ -1370,13 +1434,31 @@ class _CuaDriverSession:
                 return self._call_tool_via_cli(name, args, timeout)
             if not self._is_closed_session_error(e):
                 raise
-            # Daemon restart closes the cached stdio channel. Reconnect once and
-            # retry exactly one more time — never loop, to avoid hammering a
-            # genuinely dead daemon.
             logger.warning("cua-driver MCP session closed during %s; reconnecting once", name)
             with self._lock:
                 self._restart_session_locked()
-            return self._bridge.run(self._call_tool_async(name, args), timeout=timeout)
+            result = self._bridge.run(
+                self._call_tool_async(name, args),
+                timeout=timeout,
+            )
+
+        # Remember only a successfully declared stable identity. Failed
+        # start_session calls must not leave stale recovery state behind.
+        if name == "start_session" and result.get("isError") is not True:
+            declared_id = args.get("session")
+            if isinstance(declared_id, str) and declared_id:
+                self._declared_session_id = declared_id
+
+        if self._is_ended_session_result(result):
+            result = self._revive_declared_session_once(name, args, result, timeout)
+
+        if (
+            name == "end_session"
+            and result.get("isError") is not True
+            and args.get("session") == self._declared_session_id
+        ):
+            self._declared_session_id = None
+        return result
 
 
 def _extract_tool_result(mcp_result: Any) -> Dict[str, Any]:

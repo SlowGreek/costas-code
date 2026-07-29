@@ -191,7 +191,9 @@ def test_check_via_local_git_shallow_clone_behind_reports_no_count(tmp_path):
         result = banner._check_via_local_git(repo_dir)
 
     assert result == banner.UPDATE_AVAILABLE_NO_COUNT
-    # The shallow fetch must preserve the boundary (--depth 1), not unshallow.
+    # The shallow fetch must preserve the boundary (--depth 1), not unshallow,
+    # and must stay scoped to the update branch (unscoped fetches transfer
+    # ~1,400 heads).
     assert [
         "git",
         "fetch",

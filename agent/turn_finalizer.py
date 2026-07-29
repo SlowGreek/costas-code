@@ -488,7 +488,7 @@ def finalize_turn(
     # First hook to return a string wins; None/empty return leaves text unchanged.
     if final_response and not interrupted:
         try:
-            from hermes_cli.plugins import invoke_hook as _invoke_hook
+            from hermes_cli.lifecycle import invoke_hook as _invoke_hook
             _transform_results = _invoke_hook(
                 "transform_llm_output",
                 response_text=final_response,
@@ -510,7 +510,7 @@ def finalize_turn(
     # to an external memory system).
     if final_response and not interrupted:
         try:
-            from hermes_cli.plugins import invoke_hook as _invoke_hook
+            from hermes_cli.lifecycle import invoke_hook as _invoke_hook
             _invoke_hook(
                 "post_llm_call",
                 session_id=agent.session_id,
@@ -524,6 +524,34 @@ def finalize_turn(
             )
         except Exception as exc:
             logger.warning("post_llm_call hook failed: %s", exc)
+
+    # Context engine observation hook: notify the active engine that this
+    # turn has finished, with the finalized transcript. Complements the
+    # per-request select_context() hook (selection before the request;
+    # observation after the turn). No-op default, fail-open.
+    try:
+        from agent.conversation_loop import _notify_context_engine_turn_complete
+        # Forward the turn's canonical usage when the host has it. The loop
+        # stashes the most recent API response's usage dict (the same
+        # canonical buckets fed to ``update_from_response``) on the agent as
+        # ``_last_turn_usage``. It is ``None`` on turns that never reached a
+        # provider response (early failure / interrupt), which is exactly the
+        # contract: real usage when available, ``None`` otherwise.
+        _turn_usage = getattr(agent, "_last_turn_usage", None)
+        _notify_context_engine_turn_complete(
+            agent,
+            messages,
+            usage=_turn_usage,
+            logger=logger,
+            turn_id=turn_id,
+            task_id=effective_task_id,
+            api_call_count=api_call_count,
+            interrupted=interrupted,
+            failed=failed,
+            turn_exit_reason=_turn_exit_reason,
+        )
+    except Exception as exc:
+        logger.warning("on_turn_complete notification failed: %s", exc)
 
     # Extract reasoning from the CURRENT turn only.  Walk backwards
     # but stop at the user message that started this turn — anything
@@ -641,14 +669,16 @@ def finalize_turn(
     # Fired at the very end of every run_conversation call.
     # Plugins can use this for cleanup, flushing buffers, etc.
     try:
-        from hermes_cli.plugins import invoke_hook as _invoke_hook
+        from hermes_cli.lifecycle import invoke_hook as _invoke_hook
         _invoke_hook(
             "on_session_end",
             session_id=agent.session_id,
             task_id=effective_task_id,
             turn_id=turn_id,
             completed=completed,
+            failed=failed,
             interrupted=interrupted,
+            turn_exit_reason=_turn_exit_reason,
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
         )

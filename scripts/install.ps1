@@ -70,6 +70,24 @@ $ErrorActionPreference = "Stop"
 # automatically when the script exits.
 $ProgressPreference = "SilentlyContinue"
 
+# Windows installers should trust the Windows certificate store by default.
+# uv otherwise uses bundled Mozilla roots, which reject a corporate MITM /
+# mandatory-proxy certificate even when Windows itself trusts it.
+#
+# This MUST be script scope, not inside a stage function.  It was originally
+# set inside Install-Dependencies, which left the FIRST uv download of a fresh
+# run -- `uv python install` in Test-Python, ~1400 lines earlier -- using the
+# bundled root store.  On a managed machine with no compatible interpreter
+# present, TLS inspection killed the managed-CPython download and the run died
+# with an opaque "Failed to install Python" long before the dependencies stage
+# could apply the opt-in.  Set it once, before any uv invocation.
+#
+# Respect an explicit user/IT override, but make the zero-config path work
+# behind normal corporate TLS inspection.
+if (-not $env:UV_SYSTEM_CERTS) {
+    $env:UV_SYSTEM_CERTS = "true"
+}
+
 # Force the console to UTF-8 so non-ASCII output from native commands
 # (e.g. playwright's box-drawing progress bars and download banners,
 # git's bullet glyphs, npm's check marks) renders correctly instead of
@@ -1518,7 +1536,7 @@ function Install-Repository {
                 }
                 git -c windows.appendAtomically=false remote set-branches origin $Branch
                 if ($LASTEXITCODE -ne 0) { throw "git remote set-branches failed (exit $LASTEXITCODE)" }
-                git -c windows.appendAtomically=false fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"
+                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"
                 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
                 # Precedence: Commit > Tag > Branch.  Commit and Tag check
                 # out as detached HEAD intentionally -- they're meant to be
@@ -1526,11 +1544,11 @@ function Install-Repository {
                 if ($Commit) {
                     # Make sure we have the commit locally (a tag-less commit
                     # SHA isn't always reachable from any one branch fetch).
-                    git -c windows.appendAtomically=false fetch origin $Commit
+                    git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin $Commit
                     git -c windows.appendAtomically=false checkout --detach $Commit
                     if ($LASTEXITCODE -ne 0) { throw "git checkout $Commit failed (exit $LASTEXITCODE)" }
                 } elseif ($Tag) {
-                    git -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
+                    git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
                     git -c windows.appendAtomically=false checkout --detach "refs/tags/$Tag"
                     if ($LASTEXITCODE -ne 0) { throw "git checkout tag $Tag failed (exit $LASTEXITCODE)" }
                 } else {
@@ -1540,7 +1558,7 @@ function Install-Repository {
                     # the checkout has diverged (or has local-only commits),
                     # ff-only pull cannot succeed -- mirror ``hermes update`` and
                     # reset to the fetched remote so bootstrap/install can recover.
-                    git -c windows.appendAtomically=false pull --ff-only origin $Branch
+                    git -c http.sslBackend=schannel -c windows.appendAtomically=false pull --ff-only origin $Branch
                     if ($LASTEXITCODE -ne 0) {
                         Write-Warn "Fast-forward not possible; resetting managed install to origin/$Branch..."
                         git -c windows.appendAtomically=false reset --hard "origin/$Branch"
@@ -1659,6 +1677,19 @@ function Install-Repository {
         git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
+        #
+        # Windows TLS note: git validates certificates with its bundled OpenSSL
+        # CA bundle unless told otherwise. UV_SYSTEM_CERTS does NOT apply to
+        # git. On a managed machine behind corporate TLS inspection that makes
+        # every HTTPS git operation fail even though Windows trusts the
+        # corporate root, so we pin http.sslBackend=schannel to use the native
+        # certificate store.
+        #
+        # Never let git open a credential prompt either: the desktop bootstrap
+        # drives this script non-interactively, so a prompt hangs the installer
+        # with no visible cause. We authenticate explicitly via gh below.
+        if ($NonInteractive) { $env:GIT_TERMINAL_PROMPT = "0" }
+
         Write-Info "Trying SSH clone..."
         $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
         try {
@@ -1671,9 +1702,43 @@ function Install-Repository {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
             Write-Info "SSH failed, trying HTTPS..."
             try {
-                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
+                Invoke-NativeWithRelaxedErrorAction { git -c http.sslBackend=schannel -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
                 if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
             } catch { }
+        }
+
+        # Authenticated clone via the GitHub CLI.
+        #
+        # The distribution repo is PRIVATE, so on a corporate machine the
+        # anonymous transports above routinely all fail: port 22 is blocked for
+        # SSH, plain HTTPS needs a credential helper that may never have been
+        # configured, and the ZIP fallback below is unauthenticated (a
+        # guaranteed 404/403 on a private repo). The desktop app has already
+        # proven the user has working `gh` credentials -- it used them to fetch
+        # this very script -- so reuse that transport rather than failing with
+        # an opaque "tried SSH, HTTPS, and ZIP".
+        if (-not $cloneSuccess) {
+            $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+            if ($ghCmd) {
+                Invoke-NativeWithRelaxedErrorAction { gh auth status }
+                if ($LASTEXITCODE -eq 0) {
+                    if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+                    Write-Info "Trying authenticated clone via the GitHub CLI..."
+                    # Teach git to use gh's credentials, then clone normally so
+                    # --depth/--branch behave exactly as above.
+                    Invoke-NativeWithRelaxedErrorAction { gh auth setup-git }
+                    Invoke-NativeWithRelaxedErrorAction { git -c http.sslBackend=schannel -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
+                    if ($LASTEXITCODE -eq 0) {
+                        $cloneSuccess = $true
+                        Write-Success "Cloned using your GitHub CLI credentials"
+                    }
+                } else {
+                    Write-Warn "The GitHub CLI is installed but not authenticated. Run: gh auth login"
+                    $script:CloneAuthHint = $true
+                }
+            } else {
+                $script:CloneAuthHint = $true
+            }
         }
 
         # Fallback: download ZIP archive (bypasses git file I/O issues entirely)
@@ -1731,7 +1796,7 @@ function Install-Repository {
                     $prevZipEAP = $ErrorActionPreference
                     $ErrorActionPreference = "Continue"
                     try {
-                        git -c windows.appendAtomically=false fetch --depth 1 origin $fetchRef 2>&1 | Out-Null
+                        git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch --depth 1 origin $fetchRef 2>&1 | Out-Null
                         if ($LASTEXITCODE -eq 0) {
                             if ($Commit -or $Tag) {
                                 git -c windows.appendAtomically=false checkout -f --detach FETCH_HEAD 2>&1 | Out-Null
@@ -1771,7 +1836,10 @@ function Install-Repository {
         }
 
         if (-not $cloneSuccess) {
-            throw "Failed to download repository (tried git clone SSH, HTTPS, and ZIP)"
+            if ($script:CloneAuthHint) {
+                throw "Failed to download the repository. The distribution repo is PRIVATE and no authenticated transport was available: SSH, HTTPS, the GitHub CLI, and the anonymous ZIP all failed. Install the GitHub CLI and run 'gh auth login' (then re-run this installer) so the clone can use your credentials. If you are on a managed network, a proxy or TLS inspection may also be blocking github.com."
+            }
+            throw "Failed to download repository (tried git clone SSH, HTTPS, gh, and ZIP)"
         }
     }
 
@@ -1797,14 +1865,14 @@ function Install-Repository {
         try {
             if ($Commit) {
                 Write-Info "Pinning to commit $Commit..."
-                git -c windows.appendAtomically=false fetch origin $Commit
+                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin $Commit
                 git -c windows.appendAtomically=false checkout --detach $Commit
                 if ($LASTEXITCODE -ne 0) {
                     throw "git checkout $Commit failed (exit $LASTEXITCODE)"
                 }
             } elseif ($Tag) {
                 Write-Info "Pinning to tag $Tag..."
-                git -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
+                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
                 git -c windows.appendAtomically=false checkout --detach "refs/tags/$Tag"
                 if ($LASTEXITCODE -ne 0) {
                     throw "git checkout tag $Tag failed (exit $LASTEXITCODE)"
@@ -2011,14 +2079,10 @@ function Install-Venv {
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
 
-    # Windows installers should trust the Windows certificate store by default.
-    # uv otherwise uses bundled Mozilla roots, which reject a corporate MITM /
-    # mandatory-proxy certificate even when Windows itself trusts it. That makes
-    # EVERY tier fail identically -- lock sync, all extras, and bare core -- on a
-    # managed enterprise machine. Respect an explicit user override, but make
-    # the zero-config path work behind normal corporate TLS inspection.
-    if (-not $env:UV_SYSTEM_CERTS) {
-        $env:UV_SYSTEM_CERTS = "true"
+    # UV_SYSTEM_CERTS is set once at script scope (see the top of this file) so
+    # it covers every uv download, including `uv python install`, not just the
+    # dependency resolve below.
+    if ($env:UV_SYSTEM_CERTS -eq "true") {
         Write-Info "Using the Windows certificate store for uv downloads."
     }
     

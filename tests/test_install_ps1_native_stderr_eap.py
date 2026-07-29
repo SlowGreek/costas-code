@@ -37,13 +37,18 @@ def _assert_relaxed_call(text: str, command_pattern: str) -> None:
 def test_repository_stage_relieves_eap_for_ssh_and_https_git_clone() -> None:
     text = _install_ps1()
     assert "function Invoke-NativeWithRelaxedErrorAction" in text
+    # Match the clone by its stable parts (the git call and the remote URL
+    # variable) rather than by an exact flag list -- the HTTPS clone also
+    # carries `-c http.sslBackend=schannel` so it validates TLS against the
+    # Windows certificate store behind corporate inspection, and future flags
+    # shouldn't break a test about ErrorActionPreference.
     _assert_relaxed_call(
         text,
-        r"git -c windows\.appendAtomically=false clone --depth 1 --branch \$Branch \$RepoUrlSsh \$InstallDir",
+        r"git [^}\n]*clone --depth 1 --branch \$Branch \$RepoUrlSsh \$InstallDir",
     )
     _assert_relaxed_call(
         text,
-        r"git -c windows\.appendAtomically=false clone --depth 1 --branch \$Branch \$RepoUrlHttps \$InstallDir",
+        r"git [^}\n]*clone --depth 1 --branch \$Branch \$RepoUrlHttps \$InstallDir",
     )
 
 

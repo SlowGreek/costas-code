@@ -47,19 +47,52 @@ def _clone_invocations(source: str) -> list[str]:
 def _uses_schannel(command: str, source: str) -> bool:
     """True when a git command opts into the Windows certificate store.
 
-    Accepts either the literal `-c http.sslBackend=schannel` or a splatted
-    variable (`git @GitTls ...`) whose definition sets it -- the contract is
-    that Schannel is in effect, not how the argument is spelled.
+    Accepts the literal `-c http.sslBackend=schannel` or a splatted variable
+    (`git @GitTls ...`) whose definition supplies it. The splat is the shipping
+    form and is deliberately platform-aware: install.ps1 also runs under
+    PowerShell Core on macOS/Linux, where git has no schannel backend and the
+    flag is a hard error ("fatal: Unsupported SSL backend 'schannel'") that
+    kills every git operation in the stage. So the contract is "Schannel is in
+    effect on Windows", not "this literal string appears".
     """
     if "http.sslBackend=schannel" in command:
         return True
 
     for splat in re.findall(r"@(\w+)", command):
-        definition = re.search(rf"\${splat}\s*=\s*@\([^)]*\)", source, re.DOTALL)
+        # The splat may be assigned conditionally, so scan the whole statement.
+        definition = re.search(rf"\${splat}\s*=\s*(?:if\b[^\n]*|@\([^)]*\))", source)
         if definition and "http.sslBackend=schannel" in definition.group(0):
             return True
 
     return False
+
+
+def test_git_tls_splat_is_windows_gated(source):
+    """The schannel opt-in must not fire off-Windows.
+
+    install.ps1 runs under PowerShell Core on macOS/Linux too (CI exercises its
+    repository stage there). Git on those platforms is built without the
+    schannel backend, so an unconditional flag aborts every clone/fetch with
+    "fatal: Unsupported SSL backend 'schannel'".
+    """
+    definition = re.search(r"\$GitTls\s*=\s*[^\n]+", source)
+
+    assert definition, "expected a $GitTls definition supplying the TLS backend args"
+
+    line = definition.group(0)
+
+    assert "if" in line and "@()" in line, (
+        "$GitTls must be conditional with an empty non-Windows branch, or "
+        f"git fails outright on macOS/Linux. Got: {line}"
+    )
+
+    guard = re.search(r"\$IsWindowsHost\s*=\s*[^\n]+", source)
+
+    assert guard, "expected an $IsWindowsHost guard driving $GitTls"
+    assert "IsWindows" in guard.group(0), (
+        "the guard should consult $IsWindows (PowerShell Core) so the flag is "
+        f"Windows-only. Got: {guard.group(0)}"
+    )
 
 
 def test_https_clone_uses_the_windows_certificate_store(source):
@@ -81,12 +114,12 @@ def test_https_clone_uses_the_windows_certificate_store(source):
 
 def test_git_fetch_operations_also_use_schannel(source):
     """Update/fetch paths need the same treatment as the initial clone."""
-    fetches = [
+    remote_fetches = [
         m.group(0)
         for m in re.finditer(r"git [^\n]*(?:fetch|pull)[^\n]*", source)
-        if "sslBackend" not in m.group(0)
+        if not _uses_schannel(m.group(0), source)
+        and ("origin" in m.group(0) or "http" in m.group(0).lower())
     ]
-    remote_fetches = [f for f in fetches if "origin" in f or "http" in f.lower()]
 
     assert not remote_fetches, (
         "these remote git operations don't opt into the Windows certificate "

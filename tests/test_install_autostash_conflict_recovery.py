@@ -9,6 +9,7 @@ reset the worktree clean, and complete the real repository stage.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,6 +23,29 @@ POWERSHELL = next(
     (candidate for candidate in ("pwsh", "powershell") if shutil.which(candidate)),
     None,
 )
+
+
+def _installer_default_branch() -> str:
+    """The branch the installer actually tracks.
+
+    Derived from install.sh rather than hardcoded. These fixtures build a
+    throwaway origin, and every git operation in the repository stage targets
+    ``$BRANCH`` -- so a fixture branch that doesn't match makes each one fail
+    with ``couldn't find remote ref``, the update silently does nothing, and
+    the assertions fail on stale file contents.
+
+    That is exactly what happened: the fork retargeted the distribution branch
+    from ``main`` to ``costas-code`` (bd4a1e15a), the fixtures kept seeding
+    ``main``, and these tests went red. Reading the value keeps them correct
+    across any future rebrand.
+    """
+    match = re.search(r'^BRANCH="([^"]+)"', INSTALL_SH.read_text(encoding="utf-8"), re.MULTILINE)
+    assert match, "install.sh must declare a default BRANCH"
+
+    return match.group(1)
+
+
+BRANCH = _installer_default_branch()
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -42,23 +66,23 @@ def _make_conflicted_managed_checkout(tmp_path: Path) -> Path:
     (seed / "tracked.txt").write_text("base\n", encoding="utf-8")
     _git(seed, "add", "tracked.txt")
     _git(seed, "commit", "-m", "base")
-    _git(seed, "branch", "-M", "main")
+    _git(seed, "branch", "-M", BRANCH)
 
     remote = tmp_path / "origin.git"
     _git(tmp_path, "init", "--bare", str(remote))
     _git(seed, "remote", "add", "origin", str(remote))
-    _git(seed, "push", "-u", "origin", "main")
+    _git(seed, "push", "-u", "origin", BRANCH)
 
     managed = tmp_path / "hermes-agent"
-    _git(tmp_path, "clone", "--branch", "main", str(remote), str(managed))
+    _git(tmp_path, "clone", "--branch", BRANCH, str(remote), str(managed))
 
     (managed / "tracked.txt").write_text("local edit\n", encoding="utf-8")
 
     upstream = tmp_path / "upstream"
-    _git(tmp_path, "clone", "--branch", "main", str(remote), str(upstream))
+    _git(tmp_path, "clone", "--branch", BRANCH, str(remote), str(upstream))
     (upstream / "tracked.txt").write_text("upstream edit\n", encoding="utf-8")
     _git(upstream, "commit", "-am", "upstream")
-    _git(upstream, "push", "origin", "main")
+    _git(upstream, "push", "origin", BRANCH)
 
     return managed
 
@@ -155,24 +179,24 @@ def test_install_sh_repository_stage_clean_apply_drops_stash(
     (seed / "tracked.txt").write_text("base\n", encoding="utf-8")
     _git(seed, "add", "tracked.txt")
     _git(seed, "commit", "-m", "base")
-    _git(seed, "branch", "-M", "main")
+    _git(seed, "branch", "-M", BRANCH)
 
     remote = tmp_path / "origin.git"
     _git(tmp_path, "init", "--bare", str(remote))
     _git(seed, "remote", "add", "origin", str(remote))
-    _git(seed, "push", "-u", "origin", "main")
+    _git(seed, "push", "-u", "origin", BRANCH)
 
     managed = tmp_path / "hermes-agent"
-    _git(tmp_path, "clone", "--branch", "main", str(remote), str(managed))
+    _git(tmp_path, "clone", "--branch", BRANCH, str(remote), str(managed))
 
     # Local edit on a file upstream will NOT touch — no conflict on apply.
     (managed / "local-only.txt").write_text("local edit\n", encoding="utf-8")
 
     upstream = tmp_path / "upstream"
-    _git(tmp_path, "clone", "--branch", "main", str(remote), str(upstream))
+    _git(tmp_path, "clone", "--branch", BRANCH, str(remote), str(upstream))
     (upstream / "tracked.txt").write_text("upstream edit\n", encoding="utf-8")
     _git(upstream, "commit", "-am", "upstream")
-    _git(upstream, "push", "origin", "main")
+    _git(upstream, "push", "origin", BRANCH)
 
     env = os.environ | {
         "HERMES_HOME": str(tmp_path / "hermes-home"),

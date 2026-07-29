@@ -88,6 +88,23 @@ if (-not $env:UV_SYSTEM_CERTS) {
     $env:UV_SYSTEM_CERTS = "true"
 }
 
+# Git TLS backend for remote operations.
+#
+# Git for Windows / PortableGit validate certificates against their bundled
+# OpenSSL CA bundle, NOT the Windows certificate store, so corporate TLS
+# inspection breaks clone/fetch even when Windows itself trusts the corporate
+# root. (UV_SYSTEM_CERTS above fixes uv; it does nothing for git.) Pinning
+# http.sslBackend=schannel makes git use the native store.
+#
+# This MUST be Windows-only. install.ps1 also runs under PowerShell Core on
+# macOS/Linux (CI runs its repository stage there), where git is built without
+# the schannel backend and the flag is a hard error:
+#   fatal: Unsupported SSL backend 'schannel'
+# which kills every git operation in the stage. Splat $GitTls into remote git
+# calls; it is empty off-Windows.
+$IsWindowsHost = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+$GitTls = if ($IsWindowsHost) { @("-c", "http.sslBackend=schannel") } else { @() }
+
 # Force the console to UTF-8 so non-ASCII output from native commands
 # (e.g. playwright's box-drawing progress bars and download banners,
 # git's bullet glyphs, npm's check marks) renders correctly instead of
@@ -1536,7 +1553,7 @@ function Install-Repository {
                 }
                 git -c windows.appendAtomically=false remote set-branches origin $Branch
                 if ($LASTEXITCODE -ne 0) { throw "git remote set-branches failed (exit $LASTEXITCODE)" }
-                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"
+                git @GitTls -c windows.appendAtomically=false fetch origin "+refs/heads/${Branch}:refs/remotes/origin/${Branch}"
                 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
                 # Precedence: Commit > Tag > Branch.  Commit and Tag check
                 # out as detached HEAD intentionally -- they're meant to be
@@ -1544,11 +1561,11 @@ function Install-Repository {
                 if ($Commit) {
                     # Make sure we have the commit locally (a tag-less commit
                     # SHA isn't always reachable from any one branch fetch).
-                    git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin $Commit
+                    git @GitTls -c windows.appendAtomically=false fetch origin $Commit
                     git -c windows.appendAtomically=false checkout --detach $Commit
                     if ($LASTEXITCODE -ne 0) { throw "git checkout $Commit failed (exit $LASTEXITCODE)" }
                 } elseif ($Tag) {
-                    git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
+                    git @GitTls -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
                     git -c windows.appendAtomically=false checkout --detach "refs/tags/$Tag"
                     if ($LASTEXITCODE -ne 0) { throw "git checkout tag $Tag failed (exit $LASTEXITCODE)" }
                 } else {
@@ -1558,7 +1575,7 @@ function Install-Repository {
                     # the checkout has diverged (or has local-only commits),
                     # ff-only pull cannot succeed -- mirror ``hermes update`` and
                     # reset to the fetched remote so bootstrap/install can recover.
-                    git -c http.sslBackend=schannel -c windows.appendAtomically=false pull --ff-only origin $Branch
+                    git @GitTls -c windows.appendAtomically=false pull --ff-only origin $Branch
                     if ($LASTEXITCODE -ne 0) {
                         Write-Warn "Fast-forward not possible; resetting managed install to origin/$Branch..."
                         git -c windows.appendAtomically=false reset --hard "origin/$Branch"
@@ -1702,7 +1719,7 @@ function Install-Repository {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
             Write-Info "SSH failed, trying HTTPS..."
             try {
-                Invoke-NativeWithRelaxedErrorAction { git -c http.sslBackend=schannel -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
+                Invoke-NativeWithRelaxedErrorAction { git @GitTls -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
                 if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
             } catch { }
         }
@@ -1727,7 +1744,7 @@ function Install-Repository {
                     # Teach git to use gh's credentials, then clone normally so
                     # --depth/--branch behave exactly as above.
                     Invoke-NativeWithRelaxedErrorAction { gh auth setup-git }
-                    Invoke-NativeWithRelaxedErrorAction { git -c http.sslBackend=schannel -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
+                    Invoke-NativeWithRelaxedErrorAction { git @GitTls -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
                     if ($LASTEXITCODE -eq 0) {
                         $cloneSuccess = $true
                         Write-Success "Cloned using your GitHub CLI credentials"
@@ -1796,7 +1813,7 @@ function Install-Repository {
                     $prevZipEAP = $ErrorActionPreference
                     $ErrorActionPreference = "Continue"
                     try {
-                        git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch --depth 1 origin $fetchRef 2>&1 | Out-Null
+                        git @GitTls -c windows.appendAtomically=false fetch --depth 1 origin $fetchRef 2>&1 | Out-Null
                         if ($LASTEXITCODE -eq 0) {
                             if ($Commit -or $Tag) {
                                 git -c windows.appendAtomically=false checkout -f --detach FETCH_HEAD 2>&1 | Out-Null
@@ -1865,14 +1882,14 @@ function Install-Repository {
         try {
             if ($Commit) {
                 Write-Info "Pinning to commit $Commit..."
-                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin $Commit
+                git @GitTls -c windows.appendAtomically=false fetch origin $Commit
                 git -c windows.appendAtomically=false checkout --detach $Commit
                 if ($LASTEXITCODE -ne 0) {
                     throw "git checkout $Commit failed (exit $LASTEXITCODE)"
                 }
             } elseif ($Tag) {
                 Write-Info "Pinning to tag $Tag..."
-                git -c http.sslBackend=schannel -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
+                git @GitTls -c windows.appendAtomically=false fetch origin "refs/tags/${Tag}:refs/tags/${Tag}"
                 git -c windows.appendAtomically=false checkout --detach "refs/tags/$Tag"
                 if ($LASTEXITCODE -ne 0) {
                     throw "git checkout tag $Tag failed (exit $LASTEXITCODE)"

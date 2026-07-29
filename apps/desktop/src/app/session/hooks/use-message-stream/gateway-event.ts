@@ -892,6 +892,24 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
             title: translateNow('notifications.native.inputTitle')
           })
         }
+      } else if (event.type === 'clarify.expire') {
+        // The server-side wait elapsed (agent.clarify_timeout) and the tool
+        // returned empty. Without this the card kept offering choices that
+        // could no longer resolve anything — the request is gone from the
+        // gateway's `_pending`. Drop the live request so the row settles into
+        // the "Skipped" card (which keeps the options actionable as a drafted
+        // follow-up) instead of pretending to still be answerable.
+        const expiredId = typeof payload?.request_id === 'string' ? payload.request_id : ''
+
+        const cleared = clearClarifyRequest(expiredId || undefined, sessionId ?? undefined)
+
+        // Only when THIS session's live request was the one that expired. A
+        // stale expire (the request was already superseded or answered) is a
+        // no-op, and must not drop the sidebar indicator on a session that is
+        // still blocked on a newer question.
+        if (cleared && sessionId) {
+          updateSessionState(sessionId, state => (state.needsInput ? { ...state, needsInput: false } : state))
+        }
       } else if (event.type === 'approval.request') {
         // Dangerous-command / execute_code approval. The Python side is blocked
         // in _await_gateway_decision() until approval.respond lands; without

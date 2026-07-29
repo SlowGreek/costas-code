@@ -9,6 +9,7 @@ import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
 import { setSessionYolo } from '@/lib/yolo-session'
+import { rearmPendingPrompts } from '@/store/clarify'
 import { migrateSessionDraft } from '@/store/composer'
 import { clearQueuedPrompts, migrateQueuedPrompts } from '@/store/composer-queue'
 import { $pinnedSessionIds } from '@/store/layout'
@@ -751,6 +752,11 @@ export function useSessionActions({
               sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
               dropSessionState(cachedRuntimeId)
             } else {
+              // Same re-arm as the cold path: session.activate is how a
+              // reopened window attaches to an already-live session, which is
+              // exactly the case where the one-shot clarify.request was missed.
+              rearmPendingPrompts(cachedRuntimeId, activated.pending_prompts)
+
               const runtimeInfo = applyRuntimeInfo(activated.info)
 
               let activatedMessages =
@@ -994,6 +1000,13 @@ export function useSessionActions({
 
         setActiveSessionId(resumed.session_id)
         activeSessionIdRef.current = resumed.session_id
+        // Re-arm anything the session is still blocked on. `clarify.request` is
+        // a one-shot event, so a window that opened after the tool blocked has
+        // no live request to answer with — the inline card would render the
+        // stored question and then be unable to resolve it. A cold resume mints
+        // a fresh runtime id and so normally carries nothing here; the payload
+        // is populated on the reuse-live path a genuinely blocked session takes.
+        rearmPendingPrompts(resumed.session_id, resumed.pending_prompts)
         const runtimeInfo = applyRuntimeInfo(resumed.info)
 
         patchSessionWorkspace(storedSessionId, runtimeInfo?.cwd)

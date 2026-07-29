@@ -8140,6 +8140,35 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, info)
 
 
+def _session_pending_prompts(sid: str) -> list[dict]:
+    """Every blocking prompt still waiting on ``sid``, newest last.
+
+    A ``clarify.request`` / ``sudo.request`` / ``secret.request`` /
+    ``terminal.read.request`` is emitted ONCE, at the moment the tool blocks.
+    A renderer that was not connected then — a reopened window, an app
+    restart, a reconnect that dropped the frame — has no way to learn the
+    question exists, so the card can never become answerable and the agent
+    stays blocked until its timeout. The state is already tracked for the
+    lifetime of the wait (``_pending`` + ``_pending_prompt_payloads``); this
+    hands it back so a resuming client can re-arm.
+
+    Payloads are returned verbatim (they already carry ``request_id``), under
+    the same lock that writes them, so a prompt resolving concurrently cannot
+    be half-read.
+    """
+    prompts: list[dict] = []
+    with _prompt_lock:
+        for rid, (owner_sid, _ev) in list(_pending.items()):
+            if owner_sid != sid:
+                continue
+            entry = _pending_prompt_payloads.get(rid)
+            if not entry:
+                continue
+            event, payload = entry
+            prompts.append({"event": event, "payload": dict(payload)})
+    return prompts
+
+
 def _session_pending_kind(sid: str) -> str:
     for rid, (owner_sid, _ev) in list(_pending.items()):
         if owner_sid != sid:
@@ -8354,6 +8383,19 @@ def _live_session_payload(
         payload["inflight"] = inflight
     if queued:
         payload["queued"] = queued
+    # Blocking prompts outlive the one-shot event that announced them, so a
+    # client attaching to a live session must be able to re-arm from the
+    # payload rather than depending on having been connected when the tool
+    # blocked. This is the only payload that can carry them: a prompt is
+    # inseparable from the live session whose agent thread is blocked on it, so
+    # the cold-resume branches (which mint a NEW sid and have no blocked
+    # thread) have nothing to report by construction. A session actually
+    # waiting on a clarify is still live, so its resume takes the
+    # reuse-live fast path through here. Omitted when empty to keep the common
+    # payload unchanged.
+    pending_prompts = _session_pending_prompts(sid)
+    if pending_prompts:
+        payload["pending_prompts"] = pending_prompts
     return payload
 
 

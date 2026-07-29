@@ -197,10 +197,65 @@ export const ClarifyTool = (props: ToolCallMessagePartProps) => {
   return <ClarifyToolLive {...props} />
 }
 
+/**
+ * Whether `request` is the one THIS row is showing.
+ *
+ * A transcript can hold several clarify rows, so "the session has a clarify
+ * parked" is not enough to decide a given row is live — an older, un-resulted
+ * row would otherwise claim a newer request and then reject it downstream,
+ * leaving a spinner with no exit. Correlate on the request id first (a row
+ * hydrated from `clarify.request` carries it as its tool call id), then on the
+ * question text (the `tool.start` row carries the model's own tool_call_id, so
+ * ids differ and only the args can match them up).
+ */
+export function clarifyRequestMatchesRow(
+  request: { question: string; requestId: string } | null,
+  toolCallId: string | undefined,
+  argsQuestion: string | undefined
+): boolean {
+  if (!request) {
+    return false
+  }
+
+  if (toolCallId && request.requestId && toolCallId === request.requestId) {
+    return true
+  }
+
+  // No question on either side to compare — fall back to accepting, which
+  // preserves the pre-correlation behaviour for rows whose args never arrived.
+  if (!argsQuestion || !request.question) {
+    return true
+  }
+
+  return argsQuestion === request.question
+}
+
 function ClarifyToolLive(props: ToolCallMessagePartProps) {
   const messageRunning = useAuiState(selectMessageRunning)
+  // The clarify parked on the session this row belongs to. Its presence — not
+  // the thread's running flag — is what makes the card answerable.
+  const sessionId = useStore(useSessionView().$runtimeId)
+  const $request = useMemo(() => sessionClarifyRequest(sessionId), [sessionId])
+  const request = useStore($request)
+  const fromArgs = useMemo(() => readClarifyArgs(props.args), [props.args])
 
-  // Stopped mid-prompt with no result — don't leave a dead interactive panel.
+  // A live request for THIS row outranks `messageRunning`. The thread's running
+  // flag is a renderer-side turn indicator, and a `session.resume` deliberately
+  // clears it (use-session-actions sets busy=true on entry, then back to the
+  // resumed `running`, which the deferred-resume path reports as false). Gating
+  // the panel on it tore a still-live question off the screen the moment the
+  // user clicked into the chat — the box appeared, then vanished, with the agent
+  // still blocked on `clarify.respond`. The card now lives and dies with its own
+  // request: answered, skipped, expired, or interrupted.
+  if (clarifyRequestMatchesRow(request, props.toolCallId, fromArgs.question)) {
+    return <ClarifyToolPending {...props} />
+  }
+
+  // No live request of our own — either this row is a stale earlier clarify, or
+  // the turn was stopped mid-prompt. Don't leave a dead interactive panel.
+  // `messageRunning` still covers the tool.start → clarify.request race, where
+  // the row mounts a tick before the request lands (ClarifyToolPending holds a
+  // spinner until it does).
   if (!messageRunning) {
     return <ToolFallback {...props} />
   }

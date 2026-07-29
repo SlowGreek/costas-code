@@ -4,6 +4,7 @@ import { resetLiveRuntimeTracking } from '@/app/contrib/hooks/use-background-syn
 import { resetSidebarBatchCapability } from '@/hermes'
 import { invalidateProfileScopedQueries } from '@/lib/query-client'
 import { clearArtifactRegistry } from '@/store/artifacts'
+import { clearClarifyRequest } from '@/store/clarify'
 import { resetSessionsLimit } from '@/store/layout'
 import { resetLiveSync } from '@/store/live-sync'
 import {
@@ -55,6 +56,10 @@ export function wipeSessionListsForGatewaySwitch(): void {
   clearAllSessionStates()
   resetLiveRuntimeTracking()
   resetLiveSync()
+  // Blocking prompts are keyed by runtime session id, which the next backend
+  // mints fresh — a leftover entry would be unanswerable and, since the card no
+  // longer self-limits on the running flag, could surface on an unrelated row.
+  clearClarifyRequest()
   $unreadFinishedSessionIds.set([])
   setSessionsLoading(true)
   resetSessionsLimit()

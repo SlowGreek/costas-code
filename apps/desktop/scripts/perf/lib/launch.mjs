@@ -240,6 +240,7 @@ export async function startIsolatedInstance({
       HERMES_HOME: home,
       XCURSOR_SIZE: '24'
     }
+    if (prod) {env.HERMES_DESKTOP_IS_PACKAGED = '1'}
 
     if (devUrl) {
       env.HERMES_DESKTOP_DEV_SERVER = devUrl

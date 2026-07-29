@@ -476,7 +476,9 @@ function loadInstallStamp() {
         })
       }
     } catch (e) {
-      console.warn(`[hermes] install-stamp.json found at ${p} , but parsing failed with ${e}`)
+        if (e?.code !== 'ENOENT') {
+          console.warn(`[hermes] install-stamp.json found at ${p}, but parsing failed with ${e}`)
+        }
       // Either ENOENT or malformed JSON; try the next candidate
     }
   }
@@ -3535,18 +3537,24 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
   const venvRoot = path.join(root, 'venv')
   const venvPython = getVenvPython(venvRoot)
   const command = IS_WINDOWS && fileExists(venvPython) ? venvPython : python
+  const env = buildDesktopBackendEnv({
+    hermesHome: HERMES_HOME,
+    pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
+    extraPathEntries: [AE_RUNTIME_BIN],
+    venvRoot
+  })
+
+  if (!canImportHermesCli(command, { env })) {
+    rememberLog(`Ignoring ${label}: Python runtime dependencies are incomplete; trying next backend.`)
+    return null
+  }
 
   return {
     kind: 'python',
     label,
     command,
     args: ['-m', 'hermes_cli.main', ...backendArgs],
-    env: buildDesktopBackendEnv({
-      hermesHome: HERMES_HOME,
-      pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
-      extraPathEntries: [AE_RUNTIME_BIN],
-      venvRoot
-    }),
+    env,
     root,
     bootstrap: Boolean(options.bootstrap),
     shell: false

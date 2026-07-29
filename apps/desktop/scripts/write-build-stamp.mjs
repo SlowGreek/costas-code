@@ -36,8 +36,7 @@ const STAMP_SCHEMA_VERSION = 1
 
 /** All-zero placeholder used when no real commit can be resolved. */
 export const FALLBACK_COMMIT = "0000000000000000000000000000000000000000"
-export const FALLBACK_BRANCH = "costas-code"
-export const DISTRIBUTION_BRANCH = "costas-code"
+export const FALLBACK_BRANCH = "develop"
 
 const DESKTOP_ROOT = resolve(import.meta.dirname, "..")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "..", "..")
@@ -57,7 +56,7 @@ export function fromCI(env = process.env) {
   if (!sha) return null
   return {
     commit: sha,
-    branch: DISTRIBUTION_BRANCH,
+    branch: env.GITHUB_REF_NAME || FALLBACK_BRANCH,
     dirty: false, // CI builds from a checkout-of-ref by definition
     source: "ci"
   }
@@ -74,10 +73,11 @@ export function fromLocalGit(repoRoot = REPO_ROOT, execFn = tryExec) {
   // tracked-but-modified files because those mean the .exe content
   // differs from the commit being pinned.
   const status = execFn("git status --porcelain -uno", { cwd: repoRoot })
+  const branch = execFn("git rev-parse --abbrev-ref HEAD", { cwd: repoRoot })
   const dirty = status !== null && status.length > 0
   return {
     commit: sha,
-    branch: DISTRIBUTION_BRANCH,
+    branch: branch && branch !== "HEAD" ? branch : FALLBACK_BRANCH,
     dirty: dirty,
     source: "local"
   }

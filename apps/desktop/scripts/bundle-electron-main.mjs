@@ -25,13 +25,7 @@ const preloadEntry = resolve(root, 'electron/preload.ts')
 const preloadOut = resolve(distDir, 'electron-preload.js')
 
 const external = ['electron', 'node-pty', 'fs']
-// Production bundles bake packaged=true so unpackaged `electron .` still
-// behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
-// so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
 const isDev = process.argv.includes('--dev')
-const define = isDev
-  ? {}
-  : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true) }
 
 // Bundle main.ts → dist/electron-main.mjs
 await build({
@@ -45,7 +39,6 @@ await build({
   banner: {
     js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
   },
-  define,
   logLevel: 'info',
 })
 console.log(`bundled ${mainOut}${isDev ? ' (dev)' : ''}`)
@@ -59,7 +52,6 @@ await build({
   target: 'node20',
   outfile: preloadOut,
   external,
-  define,
   logLevel: 'info',
 })
 console.log(`bundled ${preloadOut}${isDev ? ' (dev)' : ''}`)

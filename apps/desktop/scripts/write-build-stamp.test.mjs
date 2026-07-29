@@ -14,7 +14,7 @@ import {
 test('fromCI reads GITHUB_SHA / GITHUB_REF_NAME', () => {
   assert.deepEqual(
     fromCI({ GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: 'release' }),
-    { commit: 'a'.repeat(40), branch: 'costas-code', dirty: false, source: 'ci' }
+    { commit: 'a'.repeat(40), branch: 'release', dirty: false, source: 'ci' }
   )
   assert.equal(fromCI({}), null)
 })
@@ -35,7 +35,7 @@ test('fromLocalGit reads HEAD + branch + dirty status', () => {
   }
   assert.deepEqual(fromLocalGit('/repo', execFn), {
     commit: 'b'.repeat(40),
-    branch: 'costas-code',
+    branch: 'main',
     dirty: true,
     source: 'local'
   })

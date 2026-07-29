@@ -313,6 +313,27 @@ fn upgrade_cached_script(kind: ScriptKind, cached: &Path, emit_log: &impl Fn(&st
     }
 }
 
+/// The repository the installer payload is fetched from.
+///
+/// This is the Costas distribution fork, NOT public upstream. It previously
+/// pointed at `NousResearch/hermes-agent` while the Electron bootstrap runner
+/// fetched the fork — a downstream SHA or the `costas-code` branch does not
+/// exist upstream, so `Hermes-Setup.exe` either 404'd before running a single
+/// stage or silently installed upstream Hermes instead of Catalyst. Keep this
+/// in sync with `DISTRIBUTION_REPO` in
+/// `apps/desktop/electron/bootstrap-runner.ts`.
+pub const DISTRIBUTION_REPO: &str = "SlowGreek/costas-code";
+
+/// Build the GitHub raw URL for an install script at a given ref.
+pub fn install_script_url(commit_or_ref: &str, kind: ScriptKind) -> String {
+    format!(
+        "https://raw.githubusercontent.com/{}/{}/scripts/{}",
+        DISTRIBUTION_REPO,
+        commit_or_ref,
+        kind.filename()
+    )
+}
+
 /// Downloads to `dest_path` via reqwest with rustls. Atomically renames
 /// `dest_path.tmp` → `dest_path` so partial writes don't poison the cache.
 ///
@@ -323,11 +344,7 @@ fn upgrade_cached_script(kind: ScriptKind, cached: &Path, emit_log: &impl Fn(&st
 /// packets) never errors — the whole bootstrap would hang here instead of
 /// falling back to the cached script.
 async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Result<()> {
-    let url = format!(
-        "https://raw.githubusercontent.com/NousResearch/hermes-agent/{}/scripts/{}",
-        commit_or_ref,
-        kind.filename()
-    );
+    let url = install_script_url(commit_or_ref, kind);
 
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
@@ -394,6 +411,34 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_script_url_targets_the_distribution_repo() {
+        // Field report: Hermes-Setup.exe hardcoded the PUBLIC upstream repo
+        // (NousResearch/hermes-agent) while the Electron bootstrap fetched the
+        // Costas distribution fork. A downstream SHA or the `costas-code`
+        // branch does not exist upstream, so setup either 404s before running
+        // any stage, or silently installs upstream Hermes instead of Catalyst.
+        //
+        // Both surfaces must name the same repo.
+        assert_eq!(
+            DISTRIBUTION_REPO, "SlowGreek/costas-code",
+            "the Tauri setup path must fetch install.ps1 from the distribution \
+             fork, not from public upstream"
+        );
+
+        let url = install_script_url("abc1234", ScriptKind::Ps1);
+        assert!(
+            url.contains("SlowGreek/costas-code"),
+            "install script URL must point at the distribution fork, got: {url}"
+        );
+        assert!(
+            !url.contains("NousResearch/hermes-agent"),
+            "install script URL must not fall back to public upstream, got: {url}"
+        );
+        assert!(url.ends_with("/scripts/install.ps1"), "got: {url}");
+        assert!(url.contains("abc1234"), "ref must be interpolated, got: {url}");
+    }
 
     #[test]
     fn is_valid_commit_accepts_short_and_full_shas() {

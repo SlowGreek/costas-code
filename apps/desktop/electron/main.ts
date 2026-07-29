@@ -38,6 +38,7 @@ import { canImportHermesCli, shouldTrustHermesOverride, verifyHermesCli } from '
 import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { shouldLatchBackendStartFailure } from './backend-start-failure'
 import { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } from './bootstrap-platform'
+import { performBootstrapRepair } from './bootstrap-repair'
 import { runBootstrap } from './bootstrap-runner'
 import { downscaleComposerImage } from './composer-image-downscale'
 import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
@@ -190,6 +191,7 @@ import {
   buildPathExtCandidates,
   chooseUpdaterArgs,
   getVenvSitePackagesEntries,
+  hasUsableInstall,
   resolveVenvHermesCommand
 } from './windows-hermes-path'
 import {
@@ -1020,6 +1022,11 @@ let rendererReloadTimes = []
 // instead of re-running install.ps1 in a hot loop. Cleared explicitly by
 // the renderer's "Reload and retry" path or by quitting the app.
 let bootstrapFailure = null
+// Set by the renderer's "Repair install" path. Makes the next bootstrap pass
+// bypass the commit-keyed install-script cache and refetch a current installer;
+// without it, Repair re-runs the very script that failed and can never recover.
+// Cleared once consumed by runBootstrap.
+let bootstrapForceRefresh = false
 // Latched non-bootstrap backend spawn failure — stops getConnection() from
 // respawning hermes serve backend children in a tight loop while boot is broken.
 let backendStartFailure = null
@@ -2805,14 +2812,20 @@ async function handOffWindowsBootstrapRecovery(reason) {
   const venvHermes = path.join(venvBin, IS_WINDOWS ? 'hermes.exe' : 'hermes')
   const venvPython = path.join(venvBin, IS_WINDOWS ? 'python.exe' : 'python')
 
-  // Choose the gentle in-place --update when ANY real-install signal is present,
-  // not just the `hermes.exe` console-script shim. That shim is generated at the
-  // END of venv setup and is absent in exactly the interrupted/quarantined states
-  // this recovery exists to heal — gating on it alone forced the destructive
-  // --repair (full venv recreate) and drove reinstall loops. The venv interpreter
-  // and the bootstrap-complete marker are present earlier and are better signals.
-  const haveRealInstall =
-    fileExists(venvPython) || fileExists(venvHermes) || fileExists(path.join(updateRoot, '.hermes-bootstrap-complete'))
+  // Choose the gentle in-place --update only when the install is actually
+  // USABLE — meaning the updater has a CLI entry point it can drive, or a
+  // completed bootstrap marker proving a full install previously succeeded.
+  //
+  // A bare venv interpreter is NOT enough: when the venv stage succeeds and the
+  // dependencies stage fails, python.exe exists but hermes.exe never gets
+  // written, so --update dies in resolve_hermes() with "Could not find the
+  // hermes CLI. Re-run the installer to repair the install." — the very repair
+  // this branch then refuses to choose. See hasUsableInstall().
+  const haveRealInstall = hasUsableInstall({
+    venvPython: fileExists(venvPython),
+    venvHermes: fileExists(venvHermes),
+    bootstrapMarker: fileExists(path.join(updateRoot, '.hermes-bootstrap-complete'))
+  })
 
   const updaterArgs = chooseUpdaterArgs(haveRealInstall, branch)
 
@@ -3745,6 +3758,11 @@ async function ensureRuntime(backend) {
 
     bootstrapAbortController = new AbortController()
 
+    // Consume the repair flag: this pass refetches the installer, subsequent
+    // normal launches go back to the fast immutable-cache path.
+    const forceRefresh = bootstrapForceRefresh
+    bootstrapForceRefresh = false
+
     const bootstrapResult = await runBootstrap({
       installStamp: backend.installStamp,
       activeRoot: backend.activeRoot,
@@ -3752,6 +3770,7 @@ async function ensureRuntime(backend) {
       hermesHome: HERMES_HOME,
       logRoot: path.join(HERMES_HOME, 'logs'),
       abortSignal: bootstrapAbortController.signal,
+      forceRefresh,
       onEvent: ev => {
         // Tee every bootstrap event to (a) the desktop log for forensics
         // and (b) the renderer for live progress UI. Either may be absent;
@@ -8909,21 +8928,32 @@ ipcMain.handle('hermes:bootstrap:repair', async () => {
   // startHermes() re-runs the full installer (refreshing a broken/partial
   // venv), and clear any latched failure + live connection. The renderer
   // reloads afterwards to re-drive the boot flow from scratch.
-  rememberLog('[bootstrap] repair requested by renderer; clearing marker + latched failure')
+  //
+  // Delegated to performBootstrapRepair so the ordering (teardown before
+  // marker removal) and the failure reporting are covered by real tests.
+  const result = await performBootstrapRepair({
+    markerPath: BOOTSTRAP_COMPLETE_MARKER,
+    teardown: teardownPrimaryBackendAndWait,
+    resetConnection: resetHermesConnection,
+    log: rememberLog,
+    removeFile: p => fs.rmSync(p, { force: true }),
+    fileExists
+  })
 
-  try {
-    if (fileExists(BOOTSTRAP_COMPLETE_MARKER)) {
-      fs.rmSync(BOOTSTRAP_COMPLETE_MARKER, { force: true })
-    }
-  } catch (error) {
-    rememberLog(`[bootstrap] failed to remove marker during repair: ${error.message}`)
+  if (!result.ok) {
+    // Surface the failure instead of letting the renderer reload into the
+    // same broken state believing the repair worked.
+    return result
   }
 
   bootstrapFailure = null
   backendStartFailure = null
-  resetHermesConnection()
+  // The next bootstrap pass must refetch the installer rather than reuse the
+  // commit-keyed cache, otherwise Repair keeps re-running the same broken
+  // script that caused the failure.
+  bootstrapForceRefresh = true
 
-  return { ok: true }
+  return result
 })
 ipcMain.handle('hermes:bootstrap:cancel', async () => {
   // Renderer's Cancel button during first-launch install. Abort the running

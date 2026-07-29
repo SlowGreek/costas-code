@@ -80,6 +80,40 @@ export function chooseUpdaterArgs(haveRealInstall: boolean, branch: string): str
   return haveRealInstall ? ['--update', '--branch', branch] : ['--repair', '--branch', branch]
 }
 
+/** File-existence signals gathered from the update root. */
+export interface InstallSignals {
+  /** `venv/Scripts/python.exe` — created by the venv stage. */
+  venvPython: boolean
+  /** `venv/Scripts/hermes.exe` — the console script, written at the END of a
+   *  SUCCESSFUL dependency install. */
+  venvHermes: boolean
+  /** `.hermes-bootstrap-complete` — written only after every stage passed. */
+  bootstrapMarker: boolean
+}
+
+/**
+ * Decide whether the install is USABLE, i.e. whether the updater can actually
+ * be driven with the gentle in-place `--update`.
+ *
+ * This is deliberately not "did any file appear". The updater's
+ * `resolve_hermes()` needs a CLI entry point; without one, `--update` exits
+ * with "Could not find the hermes CLI. Re-run the installer to repair the
+ * install." A venv whose `dependencies` stage failed has `python.exe` but no
+ * `hermes.exe` and no marker — classifying that as a real install sends the
+ * user to an `--update` that cannot run, while `--repair` is never chosen.
+ * Retry and Repair both return through here, so the user gets told to run the
+ * repair the app refuses to run.
+ *
+ * A bare interpreter is therefore NOT sufficient. Either an entry point the
+ * updater can invoke (`venvHermes`) or proof that a full bootstrap previously
+ * completed (`bootstrapMarker`, which covers a PATH-installed hermes with no
+ * venv shim in the update root) means usable. Both absent means the install is
+ * half-built and must be repaired.
+ */
+export function hasUsableInstall(signals: InstallSignals): boolean {
+  return signals.venvHermes || signals.bootstrapMarker
+}
+
 /**
  * Resolve the site-packages directory entries for a Python venv.
  *

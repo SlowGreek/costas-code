@@ -230,6 +230,16 @@ function cachedScriptPath(hermesHome, commit) {
 
 const DISTRIBUTION_REPO = 'SlowGreek/costas-code'
 
+/**
+ * Idle-socket timeout for anonymous install-script fetches.
+ *
+ * Generous enough for a slow corporate link, short enough that a black-holed
+ * connection surfaces an actionable error (and lets the `gh` fallback run)
+ * rather than hanging bootstrap forever.
+ */
+const BOOTSTRAP_FETCH_TIMEOUT_MS = 30_000
+
+
 function installScriptUrl(ref, scriptName = installScriptName()) {
   return `https://raw.githubusercontent.com/${DISTRIBUTION_REPO}/${ref}/scripts/${scriptName}`
 }
@@ -262,35 +272,65 @@ const ghProbe: GhProbe = {
   }
 }
 
-/** Anonymous HTTPS GET that rejects with an `{status}`-bearing error. */
-function httpGetBuffer(url: string, redirectsLeft = 1): Promise<Buffer> {
+/**
+ * Anonymous HTTPS GET that rejects with an `{status}`-bearing error.
+ *
+ * Carries an explicit timeout. Without one, a corporate proxy or firewall that
+ * accepts the connection and then silently drops the traffic — a very common
+ * shape on managed enterprise networks — never produces an error event, so the
+ * promise never settles. Bootstrap then sits at "fetching manifest" forever:
+ * no rejection means no `gh` fallback, no failed event, no boot error, and no
+ * Retry/Repair affordance for the user to escape with.
+ *
+ * `deps` is injected for testability only; production callers use the defaults.
+ */
+function httpGetBuffer(
+  url: string,
+  redirectsLeft = 1,
+  deps: { timeoutMs?: number; get?: typeof https.get } = {}
+): Promise<Buffer> {
+  const timeoutMs = deps.timeoutMs ?? BOOTSTRAP_FETCH_TIMEOUT_MS
+  const get = deps.get ?? https.get
+
   return new Promise((resolve, reject) => {
-    https
-      .get(url, res => {
-        const status = res.statusCode
+    const req = get(url, (res: any) => {
+      const status = res.statusCode
 
-        if ((status === 301 || status === 302) && res.headers.location && redirectsLeft > 0) {
-          res.resume()
-          httpGetBuffer(res.headers.location, redirectsLeft - 1).then(resolve, reject)
+      if ((status === 301 || status === 302) && res.headers.location && redirectsLeft > 0) {
+        res.resume()
+        httpGetBuffer(res.headers.location, redirectsLeft - 1, deps).then(resolve, reject)
 
-          return
-        }
+        return
+      }
 
-        if (status !== 200) {
-          res.resume()
-          const err: any = new Error(`HTTP ${status} from ${url}`)
-          err.status = status
-          reject(err)
+      if (status !== 200) {
+        res.resume()
+        const err: any = new Error(`HTTP ${status} from ${url}`)
+        err.status = status
+        reject(err)
 
-          return
-        }
+        return
+      }
 
-        const chunks: Buffer[] = []
-        res.on('data', c => chunks.push(c))
-        res.on('end', () => resolve(Buffer.concat(chunks)))
-        res.on('error', reject)
-      })
-      .on('error', reject)
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => resolve(Buffer.concat(chunks)))
+      res.on('error', reject)
+    })
+
+    // Fires when the socket is idle for timeoutMs — covers both "never
+    // connected" and "connected then went silent mid-body".
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      const err: any = new Error(
+        `Timed out after ${timeoutMs}ms fetching ${url}. A proxy or firewall may be ` +
+          'silently dropping the connection.'
+      )
+      err.timeout = true
+      reject(err)
+    })
+
+    req.on('error', reject)
   })
 }
 
@@ -330,6 +370,7 @@ async function resolveInstallScript({
   sourceRepoRoot,
   hermesHome,
   emit,
+  forceRefresh = false,
   _download = downloadInstallScript
 }) {
   // 1. Dev shortcut: prefer a local checkout's installer so we can iterate
@@ -358,16 +399,31 @@ async function resolveInstallScript({
   const cached = cachedScriptPath(hermesHome, installRef.cacheKey)
   const resolvedCommit = installRef.pinned ? installRef.ref : null
 
-  try {
-    await fsp.access(cached, fs.constants.R_OK)
+  // `forceRefresh` is the recovery path (Repair install). The cache is keyed by
+  // the packaged app's build SHA and a pinned entry is otherwise treated as
+  // immutable, so a build whose installer fails would re-run that same broken
+  // script on every Retry and Repair forever — a corrected installer on the
+  // distribution branch would be unreachable from inside the failing app.
+  // Repair therefore bypasses the cache and refetches; if that fetch fails we
+  // still fall back to the cached copy below, so recovery is never *worse*
+  // than not repairing.
+  if (!forceRefresh) {
+    try {
+      await fsp.access(cached, fs.constants.R_OK)
+      emit({
+        type: 'log',
+        line: `[bootstrap] using cached ${installScriptName()} for ${installRef.ref.slice(0, 12)}`
+      })
+
+      return { path: cached, source: 'cache', commit: resolvedCommit, kind: installScriptKind() }
+    } catch {
+      // not cached; download
+    }
+  } else {
     emit({
       type: 'log',
-      line: `[bootstrap] using cached ${installScriptName()} for ${installRef.ref.slice(0, 12)}`
+      line: `[bootstrap] repair: bypassing cached ${installScriptName()} to refetch a current installer`
     })
-
-    return { path: cached, source: 'cache', commit: resolvedCommit, kind: installScriptKind() }
-  } catch {
-    // not cached; download
   }
 
   emit({
@@ -406,6 +462,23 @@ async function resolveInstallScript({
       } catch {
         // Cache copy failed (read-only FS, etc.) -- use the source path directly.
         return { path: installed, source: 'installed-agent', commit: resolvedCommit, kind: installScriptKind() }
+      }
+    }
+
+    // Repair on a briefly-offline machine must not be worse than not
+    // repairing: if the deliberate refetch failed but a cached installer is
+    // still on disk, use it rather than failing outright.
+    if (forceRefresh) {
+      try {
+        await fsp.access(cached, fs.constants.R_OK)
+        emit({
+          type: 'log',
+          line: `[bootstrap] repair refetch failed (${err.message}); falling back to the cached ${installScriptName()}`
+        })
+
+        return { path: cached, source: 'cache', commit: resolvedCommit, kind: installScriptKind() }
+      } catch {
+        // no cached copy either; fall through to the throw
       }
     }
 
@@ -876,6 +949,7 @@ async function runBootstrap(opts) {
     logRoot,
     onEvent,
     abortSignal,
+    forceRefresh = false, // Repair path: bypass the commit-keyed script cache
     writeMarker // callback to write the bootstrap-complete marker; main.ts provides
   } = opts
 
@@ -938,7 +1012,13 @@ async function runBootstrap(opts) {
     }
 
     // 1. Resolve the platform installer.
-    const scriptInfo = await resolveInstallScript({ installStamp, sourceRepoRoot, hermesHome, emit })
+    const scriptInfo = await resolveInstallScript({
+      installStamp,
+      sourceRepoRoot,
+      hermesHome,
+      emit,
+      forceRefresh
+    })
     const installerKind = scriptInfo.kind || 'powershell'
 
     // 2. Fetch manifest
@@ -1035,6 +1115,7 @@ export {
   buildPosixPinArgs,
   cachedScriptPath,
   hasExistingGitCheckout,
+  httpGetBuffer,
   installedAgentInstallScript,
   installRefForStamp,
   installScriptUrl,

@@ -168,3 +168,107 @@ Resolve-AvailablePythonVersion
         "the resolver must probe uv with the arch-qualified request on arm64, "
         f"got: {calls[0]!r}"
     )
+
+
+# --------------------------------------------------------------------------
+# Assert-Arm64WheelSupport must gate on the INTERPRETER, not the CPU.
+#
+# The guard added in b28d9f841 correctly diagnosed the missing-wheel problem
+# and told the user to "install the x64 build of Python 3.11 and re-run this
+# installer" -- but it threw whenever *the machine* was ARM64, so following
+# that instruction could never work.  Windows on ARM runs x64 under emulation;
+# an x64 CPython reports win-amd64 and resolves every existing amd64 wheel.
+# --------------------------------------------------------------------------
+
+
+def _guard_harness(source: str, *, arch: str, tag: str | None) -> str:
+    """Harness for Assert-Arm64WheelSupport with its two seams stubbed.
+
+    Get-PythonPlatformTag is exercised for real against a live interpreter in
+    the tests below; here it is stubbed so the guard's *decision* can be driven
+    across arches and tags that this runner does not physically have.
+    """
+    stub_tag = "$null" if tag is None else f"'{tag}'"
+    return (
+        _harness(source, "Assert-Arm64WheelSupport")
+        + f"\nfunction Get-WindowsArch {{ '{arch}' }}\n"
+        + f"function Get-PythonPlatformTag {{ param([string]$PythonExe) {stub_tag} }}\n"
+        + "try { Assert-Arm64WheelSupport 'C:\\fake\\python.exe'; 'NO-THROW' }\n"
+        + "catch { \"THREW: $($_.Exception.Message)\" }\n"
+    )
+
+
+def test_x64_interpreter_on_an_arm64_machine_is_allowed(source, tmp_path):
+    """The regression that made the guard's own advice unreachable.
+
+    An ARM64 machine running an x64 (win-amd64) Python is the supported,
+    working configuration -- it is what the installer now provisions, and it is
+    verifiably able to install cryptography and pywinpty from prebuilt wheels.
+    Blocking it turns a working setup into a hard failure.
+    """
+    out = _run_pwsh(tmp_path, _guard_harness(source, arch="arm64", tag="win-amd64"))
+    assert out.strip() == "NO-THROW"
+
+
+def test_arm64_interpreter_still_fails_fast_with_actionable_guidance(source, tmp_path):
+    """The case the guard exists for must keep failing -- and stay diagnostic.
+
+    Without this, uv falls back to an sdist build of cryptography that needs a
+    Rust toolchain and OpenSSL, and the four-tier cascade buries the cause
+    under "even with no extras", which reads like a Hermes bug.
+    """
+    out = _run_pwsh(tmp_path, _guard_harness(source, arch="arm64", tag="win-arm64"))
+    assert out.startswith("THREW:")
+    lowered = out.lower()
+    # Name the blocked thing, both culprits, and a way out.
+    assert "arm" in lowered
+    assert "wheel" in lowered
+    assert "cryptography" in lowered and "pywinpty" in lowered
+    assert "uv_python" in lowered
+
+
+def test_an_unprobeable_interpreter_fails_closed(source, tmp_path):
+    """A probe that returns nothing must not be read as "not arm64".
+
+    Failing open here would restore the original silent fallthrough into the
+    Rust build for exactly the broken environments least able to diagnose it.
+    """
+    out = _run_pwsh(tmp_path, _guard_harness(source, arch="arm64", tag=None))
+    assert out.startswith("THREW:")
+
+
+@pytest.mark.parametrize("arch", ["x64", "x86"])
+def test_non_arm64_machines_are_never_gated(source, tmp_path, arch):
+    """Native x64/x86 hosts must not pay for this check at all."""
+    out = _run_pwsh(tmp_path, _guard_harness(source, arch=arch, tag="win-arm64"))
+    assert out.strip() == "NO-THROW"
+
+
+def test_platform_tag_matches_what_the_interpreter_itself_reports(source, tmp_path):
+    """Get-PythonPlatformTag must return the real wheel tag, not the CPU.
+
+    This is the value pip and uv match wheels against -- the same string
+    maturin echoed as "Python reports platform: win-arm64" in the failing log.
+    Asserted against the live interpreter running this test, so it stays true
+    on any runner arch.
+    """
+    import sys
+    import sysconfig
+
+    out = _run_pwsh(
+        tmp_path,
+        _harness(source, "Get-PythonPlatformTag")
+        + f"\nGet-PythonPlatformTag '{sys.executable}'\n",
+    )
+    assert out.strip() == sysconfig.get_platform()
+
+
+def test_platform_tag_is_null_for_a_nonexistent_interpreter(source, tmp_path):
+    """A missing path must probe to $null rather than crashing the installer."""
+    out = _run_pwsh(
+        tmp_path,
+        _harness(source, "Get-PythonPlatformTag")
+        + "\n$t = Get-PythonPlatformTag 'C:\\definitely\\not\\here\\python.exe'\n"
+        + "if ($null -eq $t) { 'NULL' } else { \"GOT: $t\" }\n",
+    )
+    assert out.strip() == "NULL"

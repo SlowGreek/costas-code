@@ -2127,10 +2127,40 @@ function Install-Venv {
     Write-Success "Virtual environment ready (Python $PythonVersion)"
 }
 
+function Get-PythonPlatformTag {
+    <#
+    .SYNOPSIS
+        Return an interpreter's wheel platform tag ("win-amd64", "win-arm64").
+
+    .DESCRIPTION
+        This is the tag pip/uv match wheels against, so it -- not the CPU --
+        decides whether a prebuilt wheel applies.  An x64 CPython on an ARM64
+        machine reports win-amd64 and resolves amd64 wheels under emulation.
+        Returns $null when the interpreter is missing or can't be probed.
+    #>
+    param([string]$PythonExe)
+
+    if (-not $PythonExe -or -not (Test-Path $PythonExe)) { return $null }
+    $prevEAP = $ErrorActionPreference
+    try {
+        # Python writes assorted noise to stderr; EAP=Stop would turn that into
+        # a terminating NativeCommandError even on a successful probe.
+        $ErrorActionPreference = "Continue"
+        $tag = & $PythonExe -c "import sysconfig; print(sysconfig.get_platform())" 2>$null
+        $exit = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($exit -eq 0 -and $tag) { return ([string]$tag).Trim() }
+    } catch {
+        $ErrorActionPreference = $prevEAP
+    }
+    return $null
+}
+
 function Assert-Arm64WheelSupport {
     <#
     .SYNOPSIS
-        Fail fast on Windows ARM64 instead of cascading through four tiers.
+        Fail fast on a win-arm64 interpreter instead of cascading through four
+        tiers.
 
     .DESCRIPTION
         Two core dependencies publish no win_arm64 wheel:
@@ -2148,24 +2178,45 @@ function Assert-Arm64WheelSupport {
         cascade ending in "even with no extras", which reads like a Hermes bug
         rather than an unsupported CPU architecture.
 
-        Reuse Get-WindowsArch: it already resolves the case where an ARM64
-        machine reports X64 from an emulated x64 PowerShell host.
+        What actually decides this is the INTERPRETER's platform tag, not the
+        CPU: Windows on ARM runs x64 under emulation, and an x64 CPython
+        reports win-amd64 and resolves every existing amd64 wheel.  That is why
+        Get-UvPythonRequest pins an x64 build on arm64 -- so this guard is now
+        the backstop for the case where an arm64 interpreter is used anyway
+        (an inherited $env:UV_PYTHON, a hand-made venv, -NoVenv against a
+        pre-existing arm64 Python), rather than the common path.
+
+        Gating on the CPU alone would reject the very workaround this message
+        recommends: on an ARM64 machine an x64 Python installs fine, so
+        Get-WindowsArch is only the cheap pre-filter. Get-WindowsArch is still
+        what resolves the emulation edge case where an ARM64 machine reports
+        X64 from an emulated x64 PowerShell host.
     #>
+    param([string]$PythonExe)
+
     if ((Get-WindowsArch) -ne 'arm64') { return }
 
+    # An x64 interpreter under emulation gets amd64 wheels -- nothing to block.
+    # A failed probe ($null) stays conservative and throws.
+    $tag = Get-PythonPlatformTag $PythonExe
+    if ($tag -and $tag -ne 'win-arm64') { return }
+
     throw @"
-Windows on ARM is not supported yet.
+Windows on ARM needs an x64 Python, and this install has an ARM64 one.
 
-This machine reports an ARM64 processor. Two of Hermes's Python dependencies
-(cryptography and pywinpty) publish no prebuilt ARM64 wheel, so installing
-them would require compiling from source with a Rust toolchain and a full
-OpenSSL development environment.
+Two of Hermes's Python dependencies (cryptography and pywinpty) publish no
+prebuilt ARM64 wheel, so installing them would require compiling from source
+with a Rust toolchain and a full OpenSSL development environment.
 
-Workaround -- install the x64 build of Python 3.11 and re-run this installer.
-Windows on ARM runs x64 programs under emulation, so every existing amd64
-wheel applies:
+Windows on ARM runs x64 programs under emulation, so an x64 (amd64) Python
+makes every existing wheel apply. The installer normally provisions one for
+you; something pinned an ARM64 interpreter instead -- most often an inherited
+UV_PYTHON, a hand-made venv, or -NoVenv against a pre-existing ARM64 Python.
 
-  https://www.python.org/downloads/windows/  (choose "Windows installer (64-bit)")
+Fix -- clear UV_PYTHON, delete the venv, and re-run this installer:
+
+  Remove-Item Env:\UV_PYTHON -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force "$InstallDir\venv"
 
 Native ARM64 support is tracked as a known gap.
 "@
@@ -2174,9 +2225,16 @@ Native ARM64 support is tracked as a known gap.
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
 
-    # Preflight: bail out on Windows ARM64 before the four-tier cascade below
-    # can bury the real cause under "even with no extras".
-    Assert-Arm64WheelSupport
+    # Preflight: bail out on a win-arm64 interpreter before the four-tier
+    # cascade below can bury the real cause under "even with no extras".
+    # Probe the interpreter the tiers will actually install into: the venv's,
+    # or uv's resolved one under -NoVenv.
+    $preflightPython = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        (& $UvCmd python find (Get-UvPythonRequest $PythonVersion) 2>$null)
+    }
+    Assert-Arm64WheelSupport $preflightPython
 
     # UV_SYSTEM_CERTS is set once at script scope (see the top of this file) so
     # it covers every uv download, including `uv python install`, not just the

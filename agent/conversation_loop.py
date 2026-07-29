@@ -750,6 +750,62 @@ def run_conversation(
     persist_user_timestamp: Optional[float] = None,
     moa_config: Optional[dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """Run a turn, guaranteeing a steer follow-up can never lose an answer.
+
+    ``_run_conversation_inner`` has ~25 early ``return`` sites for hard
+    failures (context overflow, 413, billing walls, retry exhaustion) that
+    bypass ``finalize_turn`` entirely. When a pending steer reopens a turn
+    it withholds the answer the model already produced, so ANY of those
+    exits could replace a real answer with an error string and swallow the
+    steer. Rather than patching each site, this wrapper restores the
+    withheld answer and re-queues the steer at the one place every exit
+    must pass through.
+    """
+    agent._steer_followup_withheld = None
+    agent._steer_followup_text = None
+    try:
+        result = _run_conversation_inner(
+            agent,
+            user_message,
+            system_message=system_message,
+            conversation_history=conversation_history,
+            task_id=task_id,
+            stream_callback=stream_callback,
+            persist_user_message=persist_user_message,
+            persist_user_timestamp=persist_user_timestamp,
+            moa_config=moa_config,
+        )
+    finally:
+        _withheld = getattr(agent, "_steer_followup_withheld", None)
+        _steer_text = getattr(agent, "_steer_followup_text", None)
+        agent._steer_followup_withheld = None
+        agent._steer_followup_text = None
+
+    if not _withheld or not isinstance(result, dict):
+        return result
+
+    # The follow-up produced its own answer — nothing was lost.
+    if result.get("final_response") and not (result.get("failed") or result.get("error")):
+        return result
+
+    logger.info("Steer follow-up did not complete — restoring the withheld answer")
+    result["final_response"] = _withheld
+    if _steer_text and not result.get("pending_steer"):
+        result["pending_steer"] = _steer_text
+    return result
+
+
+def _run_conversation_inner(
+    agent,
+    user_message: Any,
+    system_message: str = None,
+    conversation_history: List[Dict[str, Any]] = None,
+    task_id: str = None,
+    stream_callback: Optional[callable] = None,
+    persist_user_message: Optional[Any] = None,
+    persist_user_timestamp: Optional[float] = None,
+    moa_config: Optional[dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Run a complete conversation with tool calling until completion.
 
@@ -860,11 +916,6 @@ def run_conversation(
     # user-facing result available; it must not be confused with error or
     # recovery text produced by unrelated exit paths.
     _pending_verification_response = None
-    # Set when a pending steer reopens the turn: the answer withheld while the
-    # follow-up request runs, plus the steer text, so a failed/interrupted
-    # follow-up can restore both instead of losing them.
-    _steer_followup_withheld_response = None
-    _steer_followup_pending_text = None
     # Tracks whether the pending verification candidate was already streamed
     # to the user as interim content. The finalizer uses this to set
     # ``_response_was_previewed`` ONLY when the pending candidate is actually
@@ -4812,21 +4863,6 @@ def run_conversation(
                             "execute_code with Python's open() for large "
                             "files, or to write in smaller sections."
                         )
-                    # A steer had reopened this turn, withholding an answer the
-                    # model already produced. This hard-failure path returns
-                    # directly and never reaches finalize_turn, so restore that
-                    # answer and hand the steer back here — otherwise a network
-                    # hiccup destroys both.
-                    if _steer_followup_withheld_response:
-                        return {
-                            "final_response": _steer_followup_withheld_response,
-                            "messages": messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "failed": False,
-                            "error": _final_summary,
-                            "pending_steer": _steer_followup_pending_text,
-                        }
                     return {
                         "final_response": _final_response,
                         "messages": messages,
@@ -6357,10 +6393,10 @@ def run_conversation(
                         len(_steer_followup),
                     )
                     # If the follow-up request fails or is interrupted, the
-                    # finalizer must still deliver this answer and hand the
-                    # steer back for the next turn rather than swallowing both.
-                    _steer_followup_withheld_response = final_response
-                    _steer_followup_pending_text = _steer_followup
+                    # run_conversation wrapper restores this answer and
+                    # re-queues the steer, so no exit path can lose either.
+                    agent._steer_followup_withheld = final_response
+                    agent._steer_followup_text = _steer_followup
                     _pending_verification_response = final_response
                     _pending_verification_response_previewed = (
                         agent._interim_content_was_streamed(final_response or "")
@@ -6470,18 +6506,6 @@ def run_conversation(
                 messages.append({"role": "assistant", "content": final_response})
                 break
     
-    # ── Steer follow-up safety net ────────────────────────────────────────
-    # A steer reopened the turn, which withheld the answer the model had
-    # already produced. If the follow-up request then failed or was
-    # interrupted, the finalizer's budget-exhaustion fallback does not apply
-    # (it requires ``not failed``) and ``final_response`` holds an error
-    # string rather than an answer. Restore the real answer and hand the
-    # steer back for the next turn instead of losing both.
-    if _steer_followup_withheld_response and (failed or interrupted):
-        final_response = _steer_followup_withheld_response
-        if _steer_followup_pending_text:
-            agent.steer(_steer_followup_pending_text)
-
     # Post-loop turn finalization extracted to agent/turn_finalizer.finalize_turn
     # (god-file decomposition Phase 1 step 4). Behavior-neutral: the assembled
     # result dict is returned exactly as before.

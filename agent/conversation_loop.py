@@ -4108,6 +4108,19 @@ def _run_conversation_inner(
 
                     original_len = len(messages)
                     original_tokens = estimate_messages_tokens_rough(messages)
+                    # 413 is a BYTE error, so byte progress is the only
+                    # progress that counts here.  Token accounting bills a
+                    # flat per-image estimate regardless of actual payload
+                    # size, so dropping a few text messages out of an
+                    # image-heavy history reads as a large token win while the
+                    # wire body is essentially unchanged.  Gating the retry on
+                    # tokens burns all three compression attempts re-sending a
+                    # body the provider already rejected, and never reaches the
+                    # image-shedding fallback below that would actually fix it.
+                    from agent.context_compressor import (
+                        estimate_messages_payload_bytes,
+                    )
+                    original_payload_bytes = estimate_messages_payload_bytes(messages)
                     _overflow_input = messages
                     messages, active_system_prompt = agent._compress_context(
                         messages, system_message, approx_tokens=approx_tokens,
@@ -4135,8 +4148,20 @@ def _run_conversation_inner(
                     # message array.  (#39550)
                     new_tokens = estimate_messages_tokens_rough(messages)
                     approx_tokens = new_tokens  # update for downstream logging
+                    new_payload_bytes = estimate_messages_payload_bytes(messages)
 
-                    if len(messages) < original_len or (new_tokens > 0 and new_tokens < original_tokens * 0.95):
+                    # Byte-denominated progress check.  A shorter message list
+                    # or a token drop only counts when the wire body actually
+                    # shrank too — otherwise this is the image-heavy case and
+                    # retrying just re-sends a body the provider rejected.
+                    _bytes_shrank = (
+                        original_payload_bytes <= 0
+                        or new_payload_bytes < original_payload_bytes * 0.95
+                    )
+                    if _bytes_shrank and (
+                        len(messages) < original_len
+                        or (new_tokens > 0 and new_tokens < original_tokens * 0.95)
+                    ):
                         if len(messages) < original_len:
                             agent._buffer_status(COMPRESSION_RETRY_MESSAGES_STATUS_TEMPLATE.format(before=original_len, after=len(messages)))
                         else:
@@ -4145,10 +4170,17 @@ def _run_conversation_inner(
                         _retry.restart_with_compressed_messages = True
                         break
                     else:
+                        # Strip the persisted history too, not just the
+                        # per-call copy — otherwise the vision payloads are
+                        # rebuilt at full size on the very next turn.
+                        _stripped_tool_media = agent._try_strip_image_parts_from_tool_messages(
+                            messages,
+                            remember_model=False,
+                        )
                         if agent._try_strip_image_parts_from_tool_messages(
                             api_messages,
                             remember_model=False,
-                        ):
+                        ) or _stripped_tool_media:
                             agent._buffer_status(
                                 "📐 Compression could not reduce the request further — "
                                 "removed retained vision payloads and retrying..."

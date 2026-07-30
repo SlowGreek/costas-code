@@ -1,5 +1,5 @@
 {
-  "$schema": "quine-area/v1",
+  "$schema": "quine-area/1",
   "_doc": "Catalyst-owned Node quality boundary for the Desktop renderer and Electron host. The adapters execute local pinned tools, bound captured output, emit QUINE-compatible summaries, and bind every observation to a deterministic source receipt.",
   "area": "catalyst",
   "root": "catalyst",

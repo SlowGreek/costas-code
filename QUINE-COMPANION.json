@@ -1,5 +1,5 @@
 {
-  "$schema": "quine-companion/v1",
+  "$schema": "quine-companion/1",
   "watched_roots": [
     "apps/desktop/src",
     "apps/desktop/electron",

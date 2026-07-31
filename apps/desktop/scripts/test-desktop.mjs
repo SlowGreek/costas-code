@@ -329,7 +329,7 @@ function validateBundle() {
   if (!exists(currentPath)) die(`Missing immutable AE CURRENT.json: ${currentPath}`)
   const current = JSON.parse(fs.readFileSync(currentPath, 'utf8'))
   if (
-    current.schema !== 'costas-ae-current/1' ||
+    current.schema !== 'catalyst-ae-current/1' ||
     !/^sha256:[0-9a-f]{64}$/.test(current.generation_id || '') ||
     !/^sha256:[0-9a-f]{64}$/.test(current.manifest_sha256 || '')
   ) die(`Malformed immutable AE CURRENT.json: ${JSON.stringify(current)}`)

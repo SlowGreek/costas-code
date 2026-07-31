@@ -31,9 +31,9 @@ import { discoverAeRepositoryRoot } from './ae-repository-root.mjs'
 import { stageAeShellViewport } from './stage-ae-shell-viewport.mjs'
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const costasRoot = path.resolve(desktopRoot, '..', '..')
-const costasRepositoryRoot = realpathSync(costasRoot)
-const aeRoot = discoverAeRepositoryRoot({ start: costasRepositoryRoot })
+const catalystRoot = path.resolve(desktopRoot, '..', '..')
+const catalystRepositoryRoot = realpathSync(catalystRoot)
+const aeRoot = discoverAeRepositoryRoot({ start: catalystRepositoryRoot })
 const buildRoot = path.join(desktopRoot, 'build')
 const destinationDir = path.join(buildRoot, 'ae')
 const candidateDir = path.join(buildRoot, `.ae-candidate-${process.pid}-${Date.now()}`)
@@ -57,7 +57,7 @@ const AE_SOURCE_PATHS = [
   'store',
   'marketplace'
 ]
-const COSTAS_SOURCE_PATHS = [
+const CATALYST_SOURCE_PATHS = [
   'QUINE-COMPANION.json',
   'package.json',
   'package-lock.json',
@@ -172,7 +172,7 @@ function directoryReceipt(name, root) {
 }
 
 function smokeCandidate(directory) {
-  const tsx = path.join(costasRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx')
+  const tsx = path.join(catalystRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx')
   const script = path.join(desktopRoot, 'scripts', 'smoke-ae-generation.ts')
   const result = run(tsx, [script, directory], {
     cwd: desktopRoot,
@@ -214,7 +214,7 @@ function validateCandidate(directory) {
 function acquireStageLock(lockPath) {
   const create = () => {
     const descriptor = openSync(lockPath, 'wx', 0o600)
-    writeFileSync(descriptor, `${JSON.stringify({ schema: 'costas-ae-stage-lock/1', pid: process.pid })}\n`)
+    writeFileSync(descriptor, `${JSON.stringify({ schema: 'catalyst-ae-stage-lock/1', pid: process.pid })}\n`)
     return descriptor
   }
   try {
@@ -226,7 +226,7 @@ function acquireStageLock(lockPath) {
       throw new Error('[stage-ae-executive] invalid stage lock')
     }
     const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
-    if (lock?.schema !== 'costas-ae-stage-lock/1' || !Number.isSafeInteger(lock.pid) || lock.pid < 1) {
+    if (lock?.schema !== 'catalyst-ae-stage-lock/1' || !Number.isSafeInteger(lock.pid) || lock.pid < 1) {
       throw new Error('[stage-ae-executive] malformed stage lock')
     }
     try {
@@ -260,7 +260,7 @@ try {
 
   const sourceBefore = {
     ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS),
-    costas: repositoryIdentity(costasRepositoryRoot, COSTAS_SOURCE_PATHS)
+    catalyst: repositoryIdentity(catalystRepositoryRoot, CATALYST_SOURCE_PATHS)
   }
 
   for (const artifact of artifacts) {
@@ -289,12 +289,12 @@ try {
   const smoke = smokeCandidate(candidateDir)
   const sourceAfter = {
     ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS),
-    costas: repositoryIdentity(costasRepositoryRoot, COSTAS_SOURCE_PATHS)
+    catalyst: repositoryIdentity(catalystRepositoryRoot, CATALYST_SOURCE_PATHS)
   }
   if (JSON.stringify(sourceAfter) !== JSON.stringify(sourceBefore)) {
     const changed = [
       JSON.stringify(sourceAfter.ae) !== JSON.stringify(sourceBefore.ae) ? 'AgentExperiments' : null,
-      JSON.stringify(sourceAfter.costas) !== JSON.stringify(sourceBefore.costas) ? 'costas-code' : null
+      JSON.stringify(sourceAfter.catalyst) !== JSON.stringify(sourceBefore.catalyst) ? 'catalyst' : null
     ].filter(Boolean)
     throw new Error(`[stage-ae-executive] repository source changed during candidate build: ${changed.join(',')}`)
   }
@@ -308,9 +308,9 @@ try {
     directoryReceipt('skins', path.join(candidateDir, 'skins'))
   ]
   const unsigned = {
-    schema: 'costas-ae-generation/1',
+    schema: 'catalyst-ae-generation/1',
     ae: sourceAfter.ae,
-    costas: sourceAfter.costas,
+    catalyst: sourceAfter.catalyst,
     artifacts: artifactReceipts,
     resources,
     smoke
@@ -319,7 +319,7 @@ try {
     schema: unsigned.schema,
     generation_id: computeAeGenerationId(unsigned),
     ae: unsigned.ae,
-    costas: unsigned.costas,
+    catalyst: unsigned.catalyst,
     artifacts: unsigned.artifacts,
     resources: unsigned.resources,
     smoke: unsigned.smoke

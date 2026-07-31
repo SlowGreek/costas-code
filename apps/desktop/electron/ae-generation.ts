@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
-const CURRENT_SCHEMA = 'costas-ae-current/1'
-const MANIFEST_SCHEMA = 'costas-ae-generation/1'
+const CURRENT_SCHEMA = 'catalyst-ae-current/1'
+const MANIFEST_SCHEMA = 'catalyst-ae-generation/1'
 
 const TOP_LEVEL = new Set([
   'ae-executive-document',
@@ -105,7 +105,7 @@ export function resolveAeGenerationRoot(storeRoot: string): ResolvedAeGeneration
   const manifest = manifestRead.value
 
   if (
-    !exact(manifest, ['schema', 'generation_id', 'ae', 'costas', 'artifacts', 'resources', 'smoke']) ||
+    !exact(manifest, ['schema', 'generation_id', 'ae', 'catalyst', 'artifacts', 'resources', 'smoke']) ||
     manifest.schema !== MANIFEST_SCHEMA ||
     manifest.generation_id !== current.value.generation_id ||
     !Array.isArray(manifest.artifacts) ||
@@ -115,7 +115,7 @@ export function resolveAeGenerationRoot(storeRoot: string): ResolvedAeGeneration
   const generationPayload = {
     schema: manifest.schema,
     ae: manifest.ae,
-    costas: manifest.costas,
+    catalyst: manifest.catalyst,
     artifacts: manifest.artifacts,
     resources: manifest.resources,
     smoke: manifest.smoke

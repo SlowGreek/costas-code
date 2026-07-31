@@ -136,7 +136,7 @@ export function readAeCurrent(desktopRoot) {
   const value = readJson(path.join(desktopRoot, 'build', 'ae', 'CURRENT.json'), 4096)
   if (
     !exact(value, ['schema', 'generation_id', 'manifest_sha256']) ||
-    value.schema !== 'costas-ae-current/1' ||
+    value.schema !== 'catalyst-ae-current/1' ||
     !HASH_RE.test(value.generation_id) ||
     !HASH_RE.test(value.manifest_sha256)
   ) throw new Error('desktop-lifecycle-ae-current')

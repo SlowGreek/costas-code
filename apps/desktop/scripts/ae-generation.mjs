@@ -15,7 +15,7 @@ export function computeAeGenerationId(value) {
   const payload = {
     schema: value.schema,
     ae: value.ae,
-    costas: value.costas,
+    catalyst: value.catalyst,
     artifacts: value.artifacts,
     resources: value.resources,
     smoke: value.smoke
@@ -39,13 +39,13 @@ function validateRepositoryIdentity(name, value) {
 }
 
 export function validateAeGenerationManifest(value) {
-  if (!exact(value, ['schema', 'generation_id', 'ae', 'costas', 'artifacts', 'resources', 'smoke'])) {
+  if (!exact(value, ['schema', 'generation_id', 'ae', 'catalyst', 'artifacts', 'resources', 'smoke'])) {
     throw new Error('generation-fields')
   }
-  if (value.schema !== 'costas-ae-generation/1') throw new Error('generation-schema')
+  if (value.schema !== 'catalyst-ae-generation/1') throw new Error('generation-schema')
   if (!HASH_RE.test(value.generation_id)) throw new Error('generation-hash')
   validateRepositoryIdentity('ae', value.ae)
-  validateRepositoryIdentity('costas', value.costas)
+  validateRepositoryIdentity('catalyst', value.catalyst)
   if (!Array.isArray(value.artifacts) || value.artifacts.length !== REQUIRED_ARTIFACTS.length) {
     throw new Error('generation-artifacts')
   }
@@ -176,7 +176,7 @@ export function publishAeGenerationStore({
   const manifestBytes = fs.readFileSync(`${generationDir}/generation.json`)
   const manifestSha256 = `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`
   const pointer = {
-    schema: 'costas-ae-current/1',
+    schema: 'catalyst-ae-current/1',
     generation_id: manifest.generation_id,
     manifest_sha256: manifestSha256
   }

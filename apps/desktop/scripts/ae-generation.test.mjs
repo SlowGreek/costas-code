@@ -115,7 +115,7 @@ describe('transactional AE generation publication', () => {
 describe('AE generation manifest admission', () => {
   const valid = () => {
     const value = {
-      schema: 'costas-ae-generation/1',
+      schema: 'catalyst-ae-generation/1',
       generation_id: '',
       ae: {
         root_realpath: '/repo/AgentExperiments',
@@ -123,8 +123,8 @@ describe('AE generation manifest admission', () => {
         dirty: true,
         status_sha256: `sha256:${'c'.repeat(64)}`
       },
-      costas: {
-        root_realpath: '/repo/costas-code',
+      catalyst: {
+        root_realpath: '/repo/catalyst',
         commit: '4'.repeat(40),
         dirty: true,
         status_sha256: `sha256:${'5'.repeat(64)}`
@@ -173,7 +173,7 @@ describe('AE generation manifest admission', () => {
     const storeDir = path.join(root, 'ae')
     const candidateDir = path.join(root, 'candidate')
     const manifest = valid()
-    const previous = { schema: 'costas-ae-current/1', generation_id: `sha256:${'9'.repeat(64)}`, manifest_sha256: `sha256:${'8'.repeat(64)}` }
+    const previous = { schema: 'catalyst-ae-current/1', generation_id: `sha256:${'9'.repeat(64)}`, manifest_sha256: `sha256:${'8'.repeat(64)}` }
     file(storeDir, 'CURRENT.json', `${JSON.stringify(previous)}\n`)
     file(candidateDir, 'generation.json', `${JSON.stringify(manifest)}\n`)
     let calls = 0

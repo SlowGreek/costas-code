@@ -52,10 +52,10 @@ function fixture() {
   })
 
   const manifest = {
-    schema: 'costas-ae-generation/1',
+    schema: 'catalyst-ae-generation/1',
     generation_id: '',
     ae: { root_realpath: '/ae', commit: 'b'.repeat(40), dirty: false, status_sha256: `sha256:${'c'.repeat(64)}` },
-    costas: { root_realpath: '/costas', commit: 'e'.repeat(40), dirty: true, status_sha256: `sha256:${'f'.repeat(64)}` },
+    catalyst: { root_realpath: '/catalyst', commit: 'e'.repeat(40), dirty: true, status_sha256: `sha256:${'f'.repeat(64)}` },
     artifacts,
     resources: [
       { name: 'shell-viewport', ...directoryReceipt(path.join(generation, 'shell-viewport')) },
@@ -67,7 +67,7 @@ function fixture() {
   const payload = {
     schema: manifest.schema,
     ae: manifest.ae,
-    costas: manifest.costas,
+    catalyst: manifest.catalyst,
     artifacts: manifest.artifacts,
     resources: manifest.resources,
     smoke: manifest.smoke
@@ -81,7 +81,7 @@ function fixture() {
   fs.writeFileSync(path.join(generation, 'generation.json'), manifestBytes)
   fs.writeFileSync(
     path.join(store, 'CURRENT.json'),
-    `${JSON.stringify({ schema: 'costas-ae-current/1', generation_id: manifest.generation_id, manifest_sha256: sha(manifestBytes) }, null, 2)}\n`
+    `${JSON.stringify({ schema: 'catalyst-ae-current/1', generation_id: manifest.generation_id, manifest_sha256: sha(manifestBytes) }, null, 2)}\n`
   )
 
   return { store, generation, generationId: manifest.generation_id }

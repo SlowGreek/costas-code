@@ -83,7 +83,7 @@ test('OFFICIAL_REPO_HTTPS_URL canonicalizes to OFFICIAL_REPO_CANONICAL', () => {
   assert.equal(canonicalGitHubRemote(OFFICIAL_REPO_HTTPS_URL), OFFICIAL_REPO_CANONICAL)
 })
 
-test('update routing follows the Costas distribution branch', () => {
+test('update routing follows the Catalyst distribution branch', () => {
   assert.equal(DEFAULT_UPDATE_BRANCH, 'costas-code')
   assert.equal(resolveUpdateBranch(undefined), 'costas-code')
   assert.equal(resolveUpdateBranch(''), 'costas-code')

@@ -14,7 +14,7 @@ const roots: string[] = []
 const hash = (value: string) => `sha256:${value.repeat(64)}`
 
 function root() {
-  const value = fs.mkdtempSync(path.join(os.tmpdir(), 'costas-studio-designer-'))
+  const value = fs.mkdtempSync(path.join(os.tmpdir(), 'catalyst-studio-designer-'))
 
   roots.push(value)
 

@@ -303,7 +303,7 @@ class TestCmdUpdateTermuxUvBootstrap:
 
 
 class TestCmdUpdateBranchFallback:
-    """cmd_update targets the Costas distribution branch by default."""
+    """cmd_update targets the Catalyst distribution branch by default."""
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -752,7 +752,7 @@ class TestCmdUpdateBranchFlag:
     def test_branch_flag_defaults_to_costas_code_when_none(
         self, mock_run, _mock_which, capsys
     ):
-        """No --branch follows the Costas distribution branch."""
+        """No --branch follows the Catalyst distribution branch."""
         mock_run.side_effect = self._branch_side_effect(
             current_branch="costas-code",
             target_branch="costas-code",
@@ -1019,7 +1019,7 @@ def test_tracking_refspec_migrates_a_legacy_single_branch_clone(tmp_path):
 class TestCmdUpdateZipBranchRefusal:
     """Non-distribution branches must refuse on the ZIP fallback path.
 
-    The ZIP fallback uses the Costas distribution archive; honoring
+    The ZIP fallback uses the Catalyst distribution archive; honoring
     --branch arbitrarily would require remote-branch existence checks the
     fallback can't easily do. Refusing is the right move — silently lying
     about which branch got installed is the bug --branch was meant to prevent.

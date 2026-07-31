@@ -193,7 +193,7 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
-    """Count commits behind the Costas distribution branch."""
+    """Count commits behind the Catalyst distribution branch."""
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
     if _canonical_github_remote(origin_url) != _OFFICIAL_REPO_CANONICAL:
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
@@ -268,7 +268,7 @@ def check_for_updates() -> Optional[int]:
     """Check whether a Hermes update is available.
 
     Two paths: if ``HERMES_REVISION`` is set (nix builds embed it), compare
-    it to the Costas distribution branch via ``git ls-remote``. Otherwise
+    it to the Catalyst distribution branch via ``git ls-remote``. Otherwise
     look for a local git checkout and count commits behind
     ``origin/costas-code``.
 

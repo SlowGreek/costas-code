@@ -4102,7 +4102,7 @@ async def update_hermes():
 
 
 def _recent_upstream_commits(n: int = 20) -> List[Dict[str, Any]]:
-    """Commits behind the Costas distribution branch, newest first.
+    """Commits behind the Catalyst distribution branch, newest first.
 
     Logs the SAME range the behind-count uses (``HEAD..origin/costas-code`` — see
     ``banner._check_via_local_git``), NOT the branch's ``@{upstream}``. On a

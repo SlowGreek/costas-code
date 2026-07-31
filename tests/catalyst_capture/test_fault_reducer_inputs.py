@@ -435,7 +435,7 @@ def capture_fault_observations() -> dict[str, Any]:
             "provider": False,
             "real_tool_execution": False,
         },
-        "schema": "costas-catalyst-fault-reducer-inputs/1",
+        "schema": "catalyst-fault-reducer-inputs/1",
     }
     # The serialized observation boundary exists before expected refusal data is
     # permitted to enter the artifact-building path.

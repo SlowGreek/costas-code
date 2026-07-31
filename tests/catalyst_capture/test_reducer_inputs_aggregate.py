@@ -176,7 +176,7 @@ def _build_aggregate(observations: dict[str, Any]) -> dict[str, Any]:
         },
         "canonicalization": "utf8-nfc-sort-keys-compact-lf/1",
         "cases": cases,
-        "schema": "costas-catalyst-reducer-inputs/1",
+        "schema": "catalyst-reducer-inputs/1",
     }
 
 
@@ -331,7 +331,7 @@ def test_reducer_input_aggregate_is_canonical_total_and_expected_blind() -> None
 
     assert raw == _canonical_bytes(aggregate)
     assert raw == _canonical_bytes(_load_json(AGGREGATE_PATH))
-    assert aggregate["schema"] == "costas-catalyst-reducer-inputs/1"
+    assert aggregate["schema"] == "catalyst-reducer-inputs/1"
     assert aggregate["bounds"]["max_cases"] == len(aggregate["cases"]) == 11
     ids = [case["id"] for case in aggregate["cases"]]
     assert len(ids) == len(set(ids))
@@ -472,7 +472,7 @@ def test_manifest_binds_family_inputs_sources_mutations_and_new_aggregate() -> N
     manifest = _load_json(FIXTURES / "manifest.json")
     receipt = manifest["reducer_inputs"]
 
-    assert receipt["schema"] == "costas-catalyst-reducer-input-receipt/1"
+    assert receipt["schema"] == "catalyst-reducer-input-receipt/1"
     assert receipt["f0c_aggregate_sha256"] == (
         "e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72"
     )

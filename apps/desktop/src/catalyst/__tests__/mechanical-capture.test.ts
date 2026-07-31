@@ -70,7 +70,7 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-describe('Costas F0c MC4 mechanical UI capture', () => {
+describe('Catalyst F0c MC4 mechanical UI capture', () => {
   it('captures a background terminal transition as passive badge-only state', () => {
     const fixture = expectedCapture()
     const foregroundInput = document.createElement('input')
@@ -268,7 +268,7 @@ describe('Costas F0c MC4 mechanical UI capture', () => {
         mechanism: 'existing-desktop-stores-and-command-reducers',
         screenshots: false
       },
-      schema: 'costas-catalyst-ui-mechanical-capture/1'
+      schema: 'catalyst-ui-mechanical-capture/1'
     })
   })
 })

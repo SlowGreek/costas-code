@@ -395,7 +395,7 @@ def capture_control_reducer_inputs() -> tuple[dict[str, Any], dict[str, list[str
     artifact = {
         "canonicalization": "utf8-nfc-sort-keys-compact-lf/1",
         "cases": [steer, interrupt, stale],
-        "schema": "costas-catalyst-control-reducer-inputs/1",
+        "schema": "catalyst-control-reducer-inputs/1",
     }
     return artifact, {
         "control-interrupt-exact": interrupt_audit,

@@ -560,7 +560,7 @@ def capture_control_runtime() -> dict[str, Any]:
             _capture_replay_unavailable(),
             _capture_close_proof_unavailable(),
         ],
-        "schema": "costas-catalyst-control-runtime-capture/1",
+        "schema": "catalyst-control-runtime-capture/1",
     }
 
 

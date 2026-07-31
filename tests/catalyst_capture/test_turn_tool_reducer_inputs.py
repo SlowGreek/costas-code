@@ -634,7 +634,7 @@ def capture_turn_tool_reducer_inputs() -> dict[str, Any]:
     return {
         "bounds": BOUNDS,
         "cases": cases,
-        "schema": "costas-catalyst-reducer-inputs/1",
+        "schema": "catalyst-reducer-inputs/1",
     }
 
 
@@ -731,7 +731,7 @@ def test_turn_tool_reducer_inputs_are_canonical_and_expected_blind(
 def test_turn_tool_reducer_inputs_bind_source_prior_and_replay_events() -> None:
     captured = json.loads(CAPTURE_PATH.read_text(encoding="utf-8"))
     cases = {case["id"]: case for case in captured["cases"]}
-    assert captured["schema"] == "costas-catalyst-reducer-inputs/1"
+    assert captured["schema"] == "catalyst-reducer-inputs/1"
     assert tuple(cases) == CASE_IDS
     assert len(cases) == BOUNDS["max_cases"]
 

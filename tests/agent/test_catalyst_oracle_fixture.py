@@ -1,4 +1,4 @@
-"""Contract tests for the content-addressed Costas-owned Catalyst F0 oracle."""
+"""Contract tests for the content-addressed Catalyst-owned F0 oracle."""
 
 from __future__ import annotations
 

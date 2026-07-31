@@ -23,8 +23,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-SCHEMA = "costas-execution-host-r0/1"
-RECEIPT_SCHEMA = "costas-execution-host-verification-receipt-r0/1"
+SCHEMA = "catalyst-execution-host-r0/1"
+RECEIPT_SCHEMA = "catalyst-execution-host-verification-receipt-r0/1"
 MAX_WIRE_BYTES = 32_768
 MAX_TTL_SECONDS = 900
 MAX_EVENT_PAGE = 32
@@ -38,7 +38,7 @@ CAPABILITIES = tuple(sorted(OPERATIONS))
 
 _HASH_FIELDS = {
     "butler_process_episode_hash",
-    "costas_process_episode_hash",
+    "catalyst_process_episode_hash",
     "host_instance_hash",
     "executable_hash",
     "bundle_hash",
@@ -84,9 +84,9 @@ _ENROLLMENT_KEYS = frozenset(
         "type",
         "challenge_nonce",
         "butler_key_id",
-        "costas_key_id",
+        "catalyst_key_id",
         "butler_process_episode_hash",
-        "costas_process_episode_hash",
+        "catalyst_process_episode_hash",
         "host_instance_hash",
         "executable_hash",
         "bundle_hash",
@@ -97,7 +97,7 @@ _ENROLLMENT_KEYS = frozenset(
         "expires_at",
         "revocation_generation",
         "butler_signature",
-        "costas_proof",
+        "catalyst_proof",
     }
 )
 _COMMAND_KEYS = frozenset(
@@ -193,7 +193,7 @@ class HostObservations:
     """Facts measured outside the untrusted wire document."""
 
     butler_process_episode_hash: str
-    costas_process_episode_hash: str
+    catalyst_process_episode_hash: str
     host_instance_hash: str
     executable_hash: str
     bundle_hash: str
@@ -204,7 +204,7 @@ class HostObservations:
     def __post_init__(self) -> None:
         for name in (
             "butler_process_episode_hash",
-            "costas_process_episode_hash",
+            "catalyst_process_episode_hash",
             "host_instance_hash",
             "executable_hash",
             "bundle_hash",
@@ -447,13 +447,13 @@ def parse_enrollment(wire: bytes) -> EnrollmentClaim:
     for key in _HASH_FIELDS & _ENROLLMENT_KEYS:
         _require_hash(document[key], key.replace("_", "-"))
     _require_hash(document["butler_key_id"], "butler-key-id")
-    _require_hash(document["costas_key_id"], "costas-key-id")
+    _require_hash(document["catalyst_key_id"], "catalyst-key-id")
     _require_capabilities(document["capabilities"])
     _require_times(document)
     _require_u64(document["revocation_generation"], "revocation-generation")
     _require_signature(document["butler_signature"], "butler-signature")
-    _require_signature(document["costas_proof"], "costas-proof")
-    unsigned = _unsigned(document, "butler_signature", "costas_proof")
+    _require_signature(document["catalyst_proof"], "catalyst-proof")
+    unsigned = _unsigned(document, "butler_signature", "catalyst_proof")
     return EnrollmentClaim(document, unsigned, wire, _sha256(wire))
 
 
@@ -497,7 +497,7 @@ def parse_command(wire: bytes) -> CommandClaim:
 def _compare_observations(document: dict[str, Any], observed: HostObservations) -> None:
     for name in (
         "butler_process_episode_hash",
-        "costas_process_episode_hash",
+        "catalyst_process_episode_hash",
         "host_instance_hash",
         "executable_hash",
         "bundle_hash",
@@ -517,16 +517,16 @@ class ExecutionHostVerifier:
         self,
         *,
         butler_public_key: Ed25519PublicKey,
-        costas_public_key: Ed25519PublicKey,
+        catalyst_public_key: Ed25519PublicKey,
         receipt_signer: ReceiptSigner,
         state: CompareAndSwapState,
     ) -> None:
         self._butler_public_key = butler_public_key
-        self._costas_public_key = costas_public_key
+        self._catalyst_public_key = catalyst_public_key
         self._receipt_signer = receipt_signer
         self._state = state
         self.butler_key_id = _public_key_id(butler_public_key)
-        self.costas_key_id = _public_key_id(costas_public_key)
+        self.catalyst_key_id = _public_key_id(catalyst_public_key)
         self.receipt_key_id = receipt_signer.key_id
 
     def verify_enrollment(
@@ -538,13 +538,13 @@ class ExecutionHostVerifier:
             document = claim.document
             if document["butler_key_id"] != self.butler_key_id:
                 raise ProtocolError("butler-key-not-pinned")
-            if document["costas_key_id"] != self.costas_key_id:
-                raise ProtocolError("costas-key-not-pinned")
+            if document["catalyst_key_id"] != self.catalyst_key_id:
+                raise ProtocolError("catalyst-key-not-pinned")
             issued, expires = _require_times(document)
             if issued > now or expires <= now:
                 raise ProtocolError("enrollment-time-invalid")
             _compare_observations(document, observed)
-            material = _signature_material(b"costas-execution-host-enrollment-r0", claim.unsigned_document)
+            material = _signature_material(b"catalyst-execution-host-enrollment-r0", claim.unsigned_document)
             self._verify_signature(
                 self._butler_public_key,
                 document["butler_signature"],
@@ -552,10 +552,10 @@ class ExecutionHostVerifier:
                 "butler-signature-invalid",
             )
             self._verify_signature(
-                self._costas_public_key,
-                document["costas_proof"],
+                self._catalyst_public_key,
+                document["catalyst_proof"],
                 material,
-                "costas-proof-invalid",
+                "catalyst-proof-invalid",
             )
             decision = self._state.consume_enrollment_nonce(
                 nonce_hash=_sha256(document["challenge_nonce"].encode("ascii")),
@@ -651,7 +651,7 @@ class ExecutionHostVerifier:
                     raise ProtocolError("foreign-project")
                 if payload["profile_hash"] != observed.profile_hash:
                     raise ProtocolError("foreign-profile")
-            material = _signature_material(b"costas-execution-host-command-r0", parsed.unsigned_document)
+            material = _signature_material(b"catalyst-execution-host-command-r0", parsed.unsigned_document)
             self._verify_signature(
                 self._butler_public_key,
                 document["butler_signature"],
@@ -746,7 +746,7 @@ class ExecutionHostVerifier:
             "issued_at": now,
             "receipt_key_id": self.receipt_key_id,
         }
-        material = _signature_material(b"costas-execution-host-receipt-r0", body)
+        material = _signature_material(b"catalyst-execution-host-receipt-r0", body)
         signed = {**body, "signature": _b64url(self._receipt_signer.sign(material))}
         return VerificationReceipt(signed)
 
@@ -763,7 +763,7 @@ def verify_receipt_signature(receipt: VerificationReceipt, key: Ed25519PublicKey
         decoded = _require_signature(signature, "receipt-signature")
         key.verify(
             decoded,
-            _signature_material(b"costas-execution-host-receipt-r0", unsigned),
+            _signature_material(b"catalyst-execution-host-receipt-r0", unsigned),
         )
     except (ProtocolError, InvalidSignature):
         return False

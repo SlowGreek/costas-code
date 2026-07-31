@@ -1,4 +1,4 @@
-"""Aggregate contract for the Costas F0c mechanical Catalyst oracle."""
+"""Aggregate contract for the Catalyst F0c mechanical Catalyst oracle."""
 
 from __future__ import annotations
 
@@ -218,7 +218,7 @@ def test_aggregate_mechanical_oracle_is_closed_and_mutation_resistant(
     mechanical = manifest["mechanical_capture"]
 
     assert set(mechanical) == {"artifacts", "cases", "schema", "sources"}
-    assert mechanical["schema"] == "costas-catalyst-mechanical-capture/1"
+    assert mechanical["schema"] == "catalyst-mechanical-capture/1"
     assert len(mechanical["cases"]) == len(corpus["cases"]) == 19
 
     for path, digest in mechanical["artifacts"].items():

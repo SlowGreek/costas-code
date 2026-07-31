@@ -41,22 +41,22 @@ def _sign_enrollment_document(
     document: dict,
     *,
     butler_private_key: Ed25519PrivateKey,
-    costas_private_key: Ed25519PrivateKey,
+    catalyst_private_key: Ed25519PrivateKey,
 ) -> bytes:
     unsigned = {
         key: value
         for key, value in document.items()
-        if key not in {"butler_signature", "costas_proof"}
+        if key not in {"butler_signature", "catalyst_proof"}
     }
     material = (
-        b"costas-execution-host-enrollment-r0\x00" + canonical_json_bytes(unsigned)
+        b"catalyst-execution-host-enrollment-r0\x00" + canonical_json_bytes(unsigned)
     )
     encode = lambda value: base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
     return canonical_json_bytes(
         {
             **unsigned,
             "butler_signature": encode(butler_private_key.sign(material)),
-            "costas_proof": encode(costas_private_key.sign(material)),
+            "catalyst_proof": encode(catalyst_private_key.sign(material)),
         }
     )
 
@@ -67,7 +67,7 @@ def _sign_command_document(
     unsigned = {
         key: value for key, value in document.items() if key != "butler_signature"
     }
-    material = b"costas-execution-host-command-r0\x00" + canonical_json_bytes(unsigned)
+    material = b"catalyst-execution-host-command-r0\x00" + canonical_json_bytes(unsigned)
     signature = base64.urlsafe_b64encode(butler_private_key.sign(material)).decode(
         "ascii"
     ).rstrip("=")
@@ -159,8 +159,8 @@ def keys():
 def observations() -> HostObservations:
     return HostObservations(
         butler_process_episode_hash=_hash("butler-process-episode"),
-        costas_process_episode_hash=_hash("costas-process-episode"),
-        host_instance_hash=_hash("costas-host-instance"),
+        catalyst_process_episode_hash=_hash("catalyst-process-episode"),
+        host_instance_hash=_hash("catalyst-host-instance"),
         executable_hash=_hash("hermes-executable-bytes"),
         bundle_hash=_hash("hermes-code-bundle"),
         project_hash=_hash("agent-experiments-project"),
@@ -176,10 +176,10 @@ def state() -> FakeCasState:
 
 @pytest.fixture
 def verifier(keys, state) -> ExecutionHostVerifier:
-    butler, costas, receipt = keys
+    butler, catalyst, receipt = keys
     return ExecutionHostVerifier(
         butler_public_key=butler.public_key(),
-        costas_public_key=costas.public_key(),
+        catalyst_public_key=catalyst.public_key(),
         receipt_signer=FakeReceiptSigner(receipt),
         state=state,
     )
@@ -187,13 +187,13 @@ def verifier(keys, state) -> ExecutionHostVerifier:
 
 def _enrollment_document(verifier: ExecutionHostVerifier, observed: HostObservations) -> dict:
     return {
-        "schema": "costas-execution-host-r0/1",
+        "schema": "catalyst-execution-host-r0/1",
         "type": "enrollment",
         "challenge_nonce": "challenge-nonce-00000001",
         "butler_key_id": verifier.butler_key_id,
-        "costas_key_id": verifier.costas_key_id,
+        "catalyst_key_id": verifier.catalyst_key_id,
         "butler_process_episode_hash": observed.butler_process_episode_hash,
-        "costas_process_episode_hash": observed.costas_process_episode_hash,
+        "catalyst_process_episode_hash": observed.catalyst_process_episode_hash,
         "host_instance_hash": observed.host_instance_hash,
         "executable_hash": observed.executable_hash,
         "bundle_hash": observed.bundle_hash,
@@ -209,11 +209,11 @@ def _enrollment_document(verifier: ExecutionHostVerifier, observed: HostObservat
 def _enrollment_wire(verifier, observations, keys, **updates) -> bytes:
     document = _enrollment_document(verifier, observations)
     document.update(updates)
-    butler, costas, _ = keys
+    butler, catalyst, _ = keys
     return _sign_enrollment_document(
         document,
         butler_private_key=butler,
-        costas_private_key=costas,
+        catalyst_private_key=catalyst,
     )
 
 
@@ -261,7 +261,7 @@ def _command_document(
         payload["dispatch_hash"] if operation == "spawn_read_only" else payload["runtime_binding_hash"]
     )
     return {
-        "schema": "costas-execution-host-r0/1",
+        "schema": "catalyst-execution-host-r0/1",
         "type": "command",
         "enrollment_hash": enrollment_hash,
         "operation": operation,
@@ -355,7 +355,7 @@ def test_enrollment_verifies_both_pinned_ed25519_signatures_and_observations(
     ("field", "changed", "code"),
     [
         ("butler_process_episode_hash", "foreign-butler-episode", "foreign-butler-process-episode"),
-        ("costas_process_episode_hash", "foreign-costas-episode", "foreign-costas-process-episode"),
+        ("catalyst_process_episode_hash", "foreign-catalyst-episode", "foreign-catalyst-process-episode"),
         ("host_instance_hash", "foreign-host", "foreign-host-instance"),
         ("executable_hash", "foreign-executable", "foreign-executable"),
         ("bundle_hash", "foreign-bundle", "foreign-bundle"),
@@ -396,16 +396,16 @@ def test_enrollment_rejects_wrong_butler_pin_and_invalid_signatures(
     wrong_key = _private(9)
     document = _enrollment_document(verifier, observations)
     wire = _sign_enrollment_document(
-        document, butler_private_key=wrong_key, costas_private_key=keys[1]
+        document, butler_private_key=wrong_key, catalyst_private_key=keys[1]
     )
     result = verifier.verify_enrollment(wire, observed=observations, now=NOW + 1)
     assert result.receipt.code == "butler-signature-invalid"
 
     wire = _sign_enrollment_document(
-        document, butler_private_key=keys[0], costas_private_key=wrong_key
+        document, butler_private_key=keys[0], catalyst_private_key=wrong_key
     )
     result = verifier.verify_enrollment(wire, observed=observations, now=NOW + 1)
-    assert result.receipt.code == "costas-proof-invalid"
+    assert result.receipt.code == "catalyst-proof-invalid"
 
     wire = _enrollment_wire(
         verifier, observations, keys, butler_key_id=key_id(wrong_key.public_key())
@@ -428,11 +428,11 @@ def test_unkeyed_challenge_hash_and_provisional_host_proof_are_rejected(
     )
 
     signed = json.loads(_enrollment_wire(verifier, observations, keys))
-    signed["costas_proof"] = _hash("unkeyed-deterministic-host-proof")
+    signed["catalyst_proof"] = _hash("unkeyed-deterministic-host-proof")
     wire = canonical_json_bytes(signed)
     assert (
         verifier.verify_enrollment(wire, observed=observations, now=NOW + 1).receipt.code
-        == "costas-proof-invalid"
+        == "catalyst-proof-invalid"
     )
 
 

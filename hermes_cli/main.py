@@ -6875,13 +6875,13 @@ def _update_via_zip(args):
     from urllib.request import urlretrieve
 
     # The ZIP fallback exists for Windows git-file-I/O breakage. It pulls a
-    # static archive from GitHub, which is fine for the default Costas channel
+    # static archive from GitHub, which is fine for the default Catalyst channel
     # but would silently ignore --branch and update from costas-code even
     # if the user asked for something else — exactly the silent-divergence
     # bug --branch was added to prevent. Refuse to proceed in that case
     # rather than lie.
     branch = _resolve_update_branch(args)
-    if branch != COSTAS_UPDATE_BRANCH:
+    if branch != CATALYST_UPDATE_BRANCH:
         print(
             f"✗ --branch={branch} is not supported on the Windows ZIP-fallback "
             "update path."
@@ -6890,7 +6890,7 @@ def _update_via_zip(args):
             "  This path runs when git file I/O is broken on the system. "
             "Either resolve the git-side breakage (typically an antivirus "
             "or NTFS filter holding files open) and rerun `hermes update "
-            f"--branch {branch}`, or update against {COSTAS_UPDATE_BRANCH} "
+            f"--branch {branch}`, or update against {CATALYST_UPDATE_BRANCH} "
             "with `hermes update`."
         )
         sys.exit(1)
@@ -7420,7 +7420,7 @@ OFFICIAL_REPO_URLS = {
     "git@github.com:SlowGreek/costas-code",
 }
 OFFICIAL_REPO_URL = "https://github.com/SlowGreek/costas-code.git"
-COSTAS_UPDATE_BRANCH = "costas-code"
+CATALYST_UPDATE_BRANCH = "costas-code"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
 
@@ -7519,7 +7519,7 @@ def _mark_skip_upstream_prompt():
 
 
 def _sync_fork_with_upstream(
-    git_cmd: list[str], cwd: Path, branch: str = COSTAS_UPDATE_BRANCH
+    git_cmd: list[str], cwd: Path, branch: str = CATALYST_UPDATE_BRANCH
 ) -> bool:
     """Attempt to push the updated distribution branch to origin.
 
@@ -7538,7 +7538,7 @@ def _sync_fork_with_upstream(
 
 
 def _sync_with_upstream_if_needed(
-    git_cmd: list[str], cwd: Path, branch: str = COSTAS_UPDATE_BRANCH
+    git_cmd: list[str], cwd: Path, branch: str = CATALYST_UPDATE_BRANCH
 ) -> None:
     """Check if fork is behind upstream and sync if safe.
 
@@ -9698,15 +9698,15 @@ def _finalize_update_output(state):
 def _resolve_update_branch(args) -> str:
     """Normalize ``args.branch`` into a non-empty branch name.
 
-    Centralizes the Costas distribution default, accepts ``--branch``
+    Centralizes the Catalyst distribution default, accepts ``--branch``
     overrides, and treats empty
     or whitespace-only values as the default" parsing so every consumer of
     ``--branch`` (check path, git-update path, ZIP-fallback path) agrees on
     the same answer.
     """
     return (
-        (getattr(args, "branch", None) or COSTAS_UPDATE_BRANCH).strip()
-        or COSTAS_UPDATE_BRANCH
+        (getattr(args, "branch", None) or CATALYST_UPDATE_BRANCH).strip()
+        or CATALYST_UPDATE_BRANCH
     )
 
 
@@ -9716,7 +9716,7 @@ def _tracking_refspec(remote: str, branch: str) -> str:
 
 
 def _cmd_update_check(
-    branch: str = COSTAS_UPDATE_BRANCH, *, branch_explicit: bool = False
+    branch: str = CATALYST_UPDATE_BRANCH, *, branch_explicit: bool = False
 ):
     """Implement ``hermes update --check``: fetch and report without installing.
 
@@ -9774,7 +9774,7 @@ def _cmd_update_check(
     )
     depth_args = ["--depth", "1"] if is_shallow else []
 
-    if branch == COSTAS_UPDATE_BRANCH:
+    if branch == CATALYST_UPDATE_BRANCH:
         print("→ Fetching from upstream...")
         fetch_result = subprocess.run(
             git_cmd
@@ -10974,7 +10974,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         # If user is on a different branch than the update target, switch
         # to the requested channel before fast-forwarding. This also migrates
-        # legacy main/detached installs onto the Costas distribution branch.
+        # legacy main/detached installs onto the Catalyst distribution branch.
         if current_branch != branch:
             label = (
                 "detached HEAD"
@@ -11039,7 +11039,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _invalidate_update_cache()
 
             # Even if origin is up to date, the fork may be behind upstream
-            if is_fork and branch == COSTAS_UPDATE_BRANCH:
+            if is_fork and branch == CATALYST_UPDATE_BRANCH:
                 _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT, branch)
 
             # Restore stash and switch back to original branch if we moved
@@ -11232,8 +11232,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
             )
 
-        # Fork upstream sync logic (only for the Costas distribution branch).
-        if is_fork and branch == COSTAS_UPDATE_BRANCH:
+        # Fork upstream sync logic (only for the Catalyst distribution branch).
+        if is_fork and branch == CATALYST_UPDATE_BRANCH:
             _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT, branch)
 
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra

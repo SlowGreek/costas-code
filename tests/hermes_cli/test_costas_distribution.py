@@ -17,7 +17,7 @@ def test_update_surfaces_track_the_costas_code_repository():
     assert banner.UPDATE_BRANCH == "costas-code"
     assert main.OFFICIAL_REPO_URL == COSTAS_REPO
     assert COSTAS_REPO in main.OFFICIAL_REPO_URLS
-    assert main.COSTAS_UPDATE_BRANCH == "costas-code"
+    assert main.CATALYST_UPDATE_BRANCH == "costas-code"
     assert main._resolve_update_branch(type("Args", (), {"branch": None})()) == "costas-code"
 
 

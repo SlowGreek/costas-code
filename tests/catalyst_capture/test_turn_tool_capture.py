@@ -460,7 +460,7 @@ def _capture_all() -> dict:
         evidence[case["id"]] = case_evidence
 
     return {
-        "capture_version": "costas-f0c-mc2/1",
+        "capture_version": "catalyst-f0c-mc2/1",
         "cases": captures,
         "evidence": evidence,
     }

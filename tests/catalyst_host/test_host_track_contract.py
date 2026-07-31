@@ -26,14 +26,14 @@ from agent.runtime_sessions import (
 from agent.transports.codex_app_server_session import CodexRuntimeSessionHost
 
 
-COSTAS_ROOT = Path(__file__).resolve().parents[2]
-AE_ROOT = COSTAS_ROOT.parent / "AgentExperiments"
+CATALYST_ROOT = Path(__file__).resolve().parents[2]
+AE_ROOT = CATALYST_ROOT.parent / "AgentExperiments"
 
 # The graph is intentionally data, rather than inferred from prose ordering.
 # An edge (a, b) means a must be closed before b can claim readiness.
 HOST_TRACK = {
     "owners": {
-        "costas-runtime": frozenset(
+        "catalyst-runtime": frozenset(
             {
                 "agent/runtime_sessions.py",
                 "agent/transports/codex_app_server_session.py",
@@ -43,13 +43,13 @@ HOST_TRACK = {
                 "tests/agent/test_runtime_sessions.py",
             }
         ),
-        "costas-r0": frozenset(
+        "catalyst-r0": frozenset(
             {
                 "gateway/execution_host_protocol.py",
                 "tests/gateway/test_execution_host_protocol.py",
             }
         ),
-        "costas-c2": frozenset(
+        "catalyst-c2": frozenset(
             {
                 "hermes_state.py",
                 "tests/hermes_state/test_external_role_session_binding.py",
@@ -177,7 +177,7 @@ def test_owner_paths_are_pairwise_disjoint_and_repository_scoped():
     owners = HOST_TRACK["owners"]
     claimed: dict[str, str] = {}
     for owner, paths in owners.items():
-        expected_repository = "agentexperiments" if owner.startswith("agentexperiments") else "costas"
+        expected_repository = "agentexperiments" if owner.startswith("agentexperiments") else "catalyst"
         for path in paths:
             assert not Path(path).is_absolute()
             assert ".." not in Path(path).parts
@@ -185,13 +185,13 @@ def test_owner_paths_are_pairwise_disjoint_and_repository_scoped():
             assert key not in claimed, f"{path} is claimed by both {claimed[key]} and {owner}"
             claimed[key] = owner
 
-    costas_paths = set().union(
-        *(paths for owner, paths in owners.items() if owner.startswith("costas"))
+    catalyst_paths = set().union(
+        *(paths for owner, paths in owners.items() if owner.startswith("catalyst"))
     )
     ae_paths = set().union(
         *(paths for owner, paths in owners.items() if owner.startswith("agentexperiments"))
     )
-    assert costas_paths.isdisjoint(ae_paths)
+    assert catalyst_paths.isdisjoint(ae_paths)
 
 
 def test_runtime_host_symbols_and_results_are_provider_neutral():
@@ -279,12 +279,12 @@ def test_f5_live_receipt_preserves_semantic_hold_after_deterministic_integration
     assert "provisional" in receipt["status"].casefold()
     assert receipt["authority"] == "none"
     assert receipt["disposition"].casefold().startswith("hold")
-    assert "live-cryptographic-costas-attestation-unavailable" in residuals
+    assert "live-cryptographic-catalyst-attestation-unavailable" in residuals
     assert "below-shell-lease-mediation-unavailable" in residuals
 
 
 def test_r0_claim_has_no_endpoint_or_runtime_imports():
-    path = COSTAS_ROOT / "gateway/execution_host_protocol.py"
+    path = CATALYST_ROOT / "gateway/execution_host_protocol.py"
     source = _pending_unless_claimed(path, "R0 parser/verifier")
     tree = ast.parse(source, filename=str(path))
 
@@ -296,7 +296,7 @@ def test_r0_claim_has_no_endpoint_or_runtime_imports():
 
 
 def test_visible_child_claim_uses_literal_observe_authority():
-    path = COSTAS_ROOT / "hermes_state.py"
+    path = CATALYST_ROOT / "hermes_state.py"
     source = _pending_unless_claimed(path, "C2 visible-child binding")
     tree = ast.parse(source, filename=str(path))
 
@@ -336,7 +336,7 @@ def test_fleet_policy_forbids_launch_and_mutation():
         assert receipt["authority"] == "none"
         assert "provisional" in receipt["status"].casefold()
         assert receipt["disposition"].casefold().startswith("hold")
-        assert "live-cryptographic-costas-attestation-unavailable" in residuals
+        assert "live-cryptographic-catalyst-attestation-unavailable" in residuals
         assert "below-shell-lease-mediation-unavailable" in residuals
 
 

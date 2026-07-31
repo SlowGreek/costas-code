@@ -2276,7 +2276,7 @@ function emitUpdateProgress(payload) {
 }
 
 // Self-heal an explicit custom update branch if origin no longer publishes it:
-// fall back to the Costas distribution branch and persist that choice so every
+// fall back to the Catalyst distribution branch and persist that choice so every
 // later check/apply follows the same channel. Read-only ls-remote probe; it only
 // flips on a definitive
 // "ref absent" (exit 2), never on a transient network error, so a flaky
@@ -2726,7 +2726,7 @@ async function applyUpdates(opts = {}) {
       // hermes-setup.exe into HERMES_HOME). They DO have a working `hermes`
       // on PATH / in the venv, so the correct path is the one-liner in their
       // native medium. We show the EXACT command for the configured update
-      // channel. Bare `hermes update` follows the Costas distribution branch;
+      // channel. Bare `hermes update` follows the Catalyst distribution branch;
       // append --branch only for an explicit custom channel.
       const updateRoot = resolveUpdateRoot()
       const { branch: configuredBranch } = readDesktopUpdateConfig()

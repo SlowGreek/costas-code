@@ -393,7 +393,7 @@ def capture_runtime_reducer_inputs(
             _capture_compaction(recorder),
             _capture_provider_unavailable(recorder),
         ],
-        "schema": "costas-catalyst-reducer-inputs/1",
+        "schema": "catalyst-reducer-inputs/1",
     }
 
 

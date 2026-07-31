@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
+
 const SAFE_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 
 const PLATFORM_BY_SHELL: Record<string, string[]> = {
@@ -83,23 +85,6 @@ export interface ShellViewportModel {
   }
 }
 
-export interface SceneNode {
-  id: string
-  p: string
-  a?: Record<string, unknown>
-  on?: Record<string, string>
-  kids?: string[]
-  layout?: Record<string, unknown>
-}
-
-export interface ShellViewportScene {
-  sceneVersion: '1.0.0'
-  id: string
-  root: string
-  nodes: SceneNode[]
-  receipt: Record<string, unknown>
-}
-
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 const string = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -164,7 +149,7 @@ export function buildShellViewportModel(source: ShellViewportSource, request: Sh
   if (
     builds.schema !== 'ae-shell-build-matrix/1' ||
     capabilities.schema !== 'ae-shell-capability-parity/1.0.0' ||
-    surfaces.schema !== 'ugui-surface-profiles/v1'
+    surfaces.schema !== 'ugui-surface-profiles/1'
   ) {throw new Error('shell-viewport-source-schema')}
 
   const shell = array(builds.shells).find(row => object(row) && row.id === request.shell_id)
@@ -272,95 +257,58 @@ export function buildShellViewportModel(source: ShellViewportSource, request: Sh
   }
 }
 
-const text = (id: string, value: string, size: 'm' | 's' = 's'): SceneNode => ({ id, p: 'text', a: { text: value, size } })
-
-const button = (id: string, label: string, action: string, primary = false): SceneNode => ({
-  id,
-  p: 'button',
-  a: { label, primary },
-  on: { tap: action }
+const action = (id: string, label: string, handler: string, primary = false) => ({
+  id, type: 'button', label, action: handler, primary
 })
 
-export function composeShellViewportScene(model: ShellViewportModel): ShellViewportScene {
-  const nodes: SceneNode[] = []
-  const rootKids = ['warning', 'selectors', 'viewport', 'evidence', 'capabilities']
-  nodes.push({ id: 'shell-root', p: 'column', kids: rootKids })
-  nodes.push(text('warning', model.warning, 'm'))
-
-  const selectorKids: string[] = []
-
-  for (const id of model.selector.shells) {
-    const nodeId = `shell-target-${id}`
-    selectorKids.push(nodeId)
-    nodes.push(button(nodeId, id, `shell.target.${id}`, id === model.shell.id))
-  }
-
-  for (const id of model.selector.surfaces) {
-    const nodeId = `shell-surface-${id}`
-    selectorKids.push(nodeId)
-    nodes.push(button(nodeId, id, `shell.surface.${id}`, id === model.surface.id))
-  }
-
-  for (const id of model.selector.targets) {
-    const nodeId = `shell-build-${id}`
-    selectorKids.push(nodeId)
-    nodes.push(button(nodeId, id, `shell.build.${id}`, id === model.target.id))
-  }
-
-  nodes.push({ id: 'selectors', p: 'row', kids: selectorKids })
-
-  const viewportKids = ['viewport-title', 'viewport-native', 'viewport-demo-title', 'viewport-demo-body', 'viewport-demo-action']
-  nodes.push({ id: 'viewport', p: 'column', kids: viewportKids, layout: { height: '*' } })
-  nodes.push(text('viewport-title', `${model.surface.name} · ${model.target.id}`, 'm'))
-  nodes.push({
-    id: 'viewport-native',
-    p: 'native',
-    a: {
-      catalog: 'shell-structural-viewport',
-      model: {
-        schema: model.schema,
-        shell_id: model.shell.id,
-        surface_profile_id: model.surface.id,
-        form_factor: model.surface.form_factor,
-        geometry: model.surface.geometry,
-        safe_area: model.surface.safe_area,
-        corner_radii: model.surface.corner_radii,
-        chrome: model.surface.chrome,
-        window_policy: model.surface.window_policy,
-        warning: model.warning
-      }
-    },
-    layout: { height: '*' }
-  })
-  nodes.push(text('viewport-demo-title', 'Same semantic GenUI experience', 'm'))
-  nodes.push(text('viewport-demo-body', 'One card identity. Shell geometry and capability posture vary; meaning and action stay fixed.'))
-  nodes.push(button('viewport-demo-action', 'Inspect evidence', 'shell.inspect'))
-
-  const rungKids = Object.entries(model.target.rungs).map(([key, value]) => {
-    const id = `rung-${key.replaceAll('_', '-')}`
-    nodes.push(text(id, `${key.replaceAll('_', ' ')} · ${value}`))
-
-    return id
-  })
-
-  nodes.push({ id: 'evidence', p: 'column', kids: ['target-owner', 'target-reason', ...rungKids] })
-  nodes.push(text('target-owner', `Owner · ${model.target.owner_ref}`))
-  nodes.push(text('target-reason', model.target.reason))
-
-  const capabilityKids = Object.entries(model.capability_summary).map(([key, value]) => {
-    const id = `capability-${key}`
-    nodes.push(text(id, `${key} · ${value}`))
-
-    return id
-  })
-
-  nodes.push({ id: 'capabilities', p: 'column', kids: capabilityKids })
-
-  return {
-    sceneVersion: '1.0.0',
+export function composeShellViewportDocument(model: ShellViewportModel): UguiDocument {
+  const actions = [
+    ...model.selector.shells.map(id => action(`shell-target-${id}`, id, `shell.target.${id}`, id === model.shell.id)),
+    ...model.selector.surfaces.map(id => action(`shell-surface-${id}`, id, `shell.surface.${id}`, id === model.surface.id)),
+    ...model.selector.targets.map(id => action(`shell-build-${id}`, id, `shell.build.${id}`, id === model.target.id)),
+    action('viewport-demo-action', 'Inspect evidence', 'shell.inspect')
+  ]
+  const document = {
     id: 'shell-viewport',
-    root: 'shell-root',
-    nodes,
+    type: 'document',
+    header: [
+      { id: 'warning', type: 'text', body: model.warning, style: 'heading' },
+      { id: 'viewport-title', type: 'text', body: `${model.surface.name} · ${model.target.id}`, style: 'subtitle' }
+    ],
+    sections: [
+      {
+        id: 'viewport-native',
+        type: 'native',
+        catalog: 'shell-structural-viewport',
+        model: {
+          schema: model.schema,
+          shell_id: model.shell.id,
+          surface_profile_id: model.surface.id,
+          form_factor: model.surface.form_factor,
+          geometry: model.surface.geometry,
+          safe_area: model.surface.safe_area,
+          corner_radii: model.surface.corner_radii,
+          chrome: model.surface.chrome,
+          window_policy: model.surface.window_policy,
+          warning: model.warning
+        }
+      },
+      {
+        id: 'target-evidence',
+        type: 'status_grid',
+        items: [
+          { label: 'Owner', value: model.target.owner_ref, status: 'ok' },
+          { label: 'Reason', value: model.target.reason, status: 'ok' },
+          ...Object.entries(model.target.rungs).map(([label, value]) => ({ label, value, status: 'ok' }))
+        ]
+      },
+      {
+        id: 'capability-summary',
+        type: 'status_grid',
+        items: Object.entries(model.capability_summary).map(([label, value]) => ({ label, value, status: 'ok' }))
+      }
+    ],
+    actions,
     receipt: {
       schema: 'ae-shell-viewport-receipt/1',
       authority: 'none',
@@ -368,4 +316,6 @@ export function composeShellViewportScene(model: ShellViewportModel): ShellViewp
       source_hashes: model.source_hashes
     }
   }
+
+  return validateUguiDocument(document)
 }

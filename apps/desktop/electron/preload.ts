@@ -2,12 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
   signalLifecycleRendererReady: () => ipcRenderer.send('hermes:lifecycle:renderer-ready'),
-  getAeExecutiveScenes: () => ipcRenderer.invoke('hermes:ae-executive:scenes'),
+  getAeExecutiveDocuments: () => ipcRenderer.invoke('hermes:ae-executive:documents'),
   submitStudioDesignerEvent: request => ipcRenderer.invoke('hermes:ae-executive:studio-event', request),
   executeLucidExecutiveIntent: request => ipcRenderer.invoke('hermes:ae-executive:lucid', request),
   getUguiSkinCatalog: () => ipcRenderer.invoke('hermes:ugui-skins:catalog'),
-  getUguiSkinSettingsScene: request => ipcRenderer.invoke('hermes:ugui-skins:settings-scene', request),
-  getShellViewportScene: request => ipcRenderer.invoke('hermes:shell-viewport:scene', request),
+  getUguiSkinSettingsDocument: request => ipcRenderer.invoke('hermes:ugui-skins:settings-document', request),
+  getShellViewportDocument: request => ipcRenderer.invoke('hermes:shell-viewport:document', request),
   renderProfilePreference: {
     get: profile => ipcRenderer.invoke('hermes:ugui-skins:preference:get', profile),
     commit: request => ipcRenderer.invoke('hermes:ugui-skins:preference:commit', request)

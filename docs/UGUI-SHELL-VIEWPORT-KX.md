@@ -251,7 +251,7 @@ Butler/native owners     all future real effects
 ```
 
 The first slice still contains a transitional pure model/composer in Electron. The canonical destination is an AE
-`ae-shell-scene` adapter over UGUI-owned workspace/reducer contracts, generated Scene/event bindings, and revision-bound
+`ae-shell-document` adapter over UGUI-owned workspace/reducer contracts, generated Document/event bindings, and revision-bound
 reductions. The renderer must not become a second long-term shell reducer.
 
 ## 8 · Red lines
@@ -271,7 +271,7 @@ reductions. The renderer must not become a second long-term shell reducer.
 
 ## 9 · Next phases
 
-1. Move the model/composer into a UGUI-owned `ae-shell-scene` snapshot/reduce adapter.
+1. Move the model/composer into a UGUI-owned `ae-shell-document` snapshot/reduce adapter.
 2. Add canonical schemas for shell workspace, snapshot, event, reduction, evidence claim, and receipts.
 3. Reuse a generic revisioned `UguiSceneSurface` with pane-local ResizeObserver measurements.
 4. Add the existing Projects UGUI applet as a second instance through the same lifecycle.

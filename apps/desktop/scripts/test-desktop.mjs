@@ -350,16 +350,16 @@ function validateBundle() {
   }
   const producer = path.join(
     generation,
-    PLATFORM === 'win32' ? 'ae-executive-scene.exe' : 'ae-executive-scene'
+    PLATFORM === 'win32' ? 'ae-executive-document.exe' : 'ae-executive-document'
   )
   const producerRun = spawnSync(producer, [], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 15_000 })
   if (producerRun.error || producerRun.status !== 0) die('Packaged AE executive producer smoke failed')
   const producerOutput = JSON.parse(producerRun.stdout)
   if (
-    producerOutput.schema !== 'ae-executive-scene-batch/1' ||
+    producerOutput.schema !== 'ae-executive-document-envelope/1' ||
     producerOutput.authority !== 'none' ||
-    !Array.isArray(producerOutput.scenes) ||
-    producerOutput.scenes.length < 1
+    !Array.isArray(producerOutput.rows) ||
+    producerOutput.rows.length < 1
   ) die('Packaged AE executive producer emitted an invalid envelope')
 
   // Positive assertion: node-pty native deps shipped

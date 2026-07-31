@@ -3,10 +3,9 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { discoverAeRepositoryRoot } from './ae-repository-root'
-import { buildShellViewportModel, composeShellViewportScene } from './shell-viewport'
+import { buildShellViewportModel, composeShellViewportDocument } from './shell-viewport'
 
-const aeRoot = discoverAeRepositoryRoot({ start: import.meta.dirname })
+const aeRoot = path.resolve(import.meta.dirname, '../../../..')
 
 const source = () => ({
   builds: JSON.parse(fs.readFileSync(path.join(aeRoot, 'run/SHELL-BUILDS.json'), 'utf8')),
@@ -83,7 +82,7 @@ describe('UGUI SHELL viewport model', () => {
   it('keeps the semantic demo invariant across compatible shell projections', () => {
     const sources = source()
 
-    const android = composeShellViewportScene(
+    const android = composeShellViewportDocument(
       buildShellViewportModel(sources, {
         shell_id: 'android-shell',
         surface_profile_id: 'google-pixel-9',
@@ -91,7 +90,7 @@ describe('UGUI SHELL viewport model', () => {
       })
     )
 
-    const macos = composeShellViewportScene(
+    const macos = composeShellViewportDocument(
       buildShellViewportModel(sources, {
         shell_id: 'macos-shell',
         surface_profile_id: 'macos-desktop',
@@ -99,31 +98,36 @@ describe('UGUI SHELL viewport model', () => {
       })
     )
 
-    const semantic = (scene: typeof android) =>
-      scene.nodes
-        .filter(node => node.id.startsWith('viewport-demo-'))
-        .map(node => ({ id: node.id, text: node.a?.text, label: node.a?.label, action: node.on?.tap }))
+    const semantic = (document: typeof android) =>
+      document.actions.filter(action =>
+        typeof action === 'object' && !Array.isArray(action) && action.id === 'viewport-demo-action'
+      )
 
     expect(semantic(android)).toEqual(semantic(macos))
-    expect(android.nodes.find(node => node.id === 'viewport-native')?.a?.model).not.toEqual(
-      macos.nodes.find(node => node.id === 'viewport-native')?.a?.model
+    expect((android.sections[0] as Record<string, unknown>).model).not.toEqual(
+      (macos.sections[0] as Record<string, unknown>).model
     )
   })
 
-  it('composes a closed Scene with read-only selection actions and no authority verbs', () => {
+  it('composes a canonical Document with read-only selection actions and no authority verbs', () => {
     const model = buildShellViewportModel(source(), {
       shell_id: 'android-shell',
       surface_profile_id: 'google-pixel-9',
       target_id: 'android-arm64-v8a'
     })
 
-    const scene = composeShellViewportScene(model)
-    const actions = scene.nodes.flatMap(node => Object.values(node.on ?? {}))
+    const document = composeShellViewportDocument(model)
+    const actions = document.actions
+      .map(item => typeof item === 'object' && item && !Array.isArray(item) ? item.action : null)
+      .filter((action): action is string => typeof action === 'string')
 
     expect(actions).toContain('shell.target.android-shell')
     expect(actions).toContain('shell.surface.google-pixel-9')
     expect(actions).toContain('shell.build.android-arm64-v8a')
     expect(actions.some(action => /^(?:host|effect)\.(?:launch|build|install|exec|dispatch)/.test(action))).toBe(false)
-    expect(JSON.stringify(scene)).toContain('STRUCTURAL PROJECTION — NOT A PHYSICAL RUN')
+    expect(document).not.toHaveProperty('sceneVersion')
+    expect(document).not.toHaveProperty('root')
+    expect(document).not.toHaveProperty('nodes')
+    expect(JSON.stringify(document)).toContain('STRUCTURAL PROJECTION — NOT A PHYSICAL RUN')
   })
 })

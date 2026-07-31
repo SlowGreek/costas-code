@@ -12,22 +12,22 @@ import {
   lucidActionForHandler
 } from './lucid-actions'
 import {
-  type AeExecutiveSceneBatch,
-  loadExecutiveScenes,
-  reconcileExecutiveBatch,
+  type AeExecutiveDocumentBatch,
+  loadExecutiveDocuments,
+  reconcileExecutiveDocuments,
   studioDesignerContext
-} from './scene'
-import { AeScenePainter, type UguiSceneEvent } from './scene-painter'
+} from './document'
+import { UguiDocumentPainter, type UguiDocumentEvent } from './document-painter'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
 
 export function AeExecutiveWorkspace() {
   const navigate = useNavigate()
   const params = useParams<{ tab?: string }>()
-  const [batch, setBatch] = useState<AeExecutiveSceneBatch | null>(null)
+  const [batch, setBatch] = useState<AeExecutiveDocumentBatch | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('Loading Rust UGUI projection…')
-  const batchRef = useRef<AeExecutiveSceneBatch | null>(null)
+  const batchRef = useRef<AeExecutiveDocumentBatch | null>(null)
   const lucidContextRef = useRef<LucidActionContext>({ generation: 0, documentHash: '', posture: 'held' })
   const lucidCoordinatorRef = useRef<ReturnType<typeof createLucidActionCoordinator> | null>(null)
 
@@ -51,10 +51,10 @@ export function AeExecutiveWorkspace() {
       inFlight = true
 
       try {
-        const incoming = await loadExecutiveScenes()
+        const incoming = await loadExecutiveDocuments()
 
         if (!active) {return}
-        const result = reconcileExecutiveBatch(batchRef.current, incoming)
+        const result = reconcileExecutiveDocuments(batchRef.current, incoming)
 
         if (result.accepted) {
           batchRef.current = result.batch
@@ -76,7 +76,7 @@ export function AeExecutiveWorkspace() {
 
         if (!batchRef.current) {
           setError(message)
-          setNotice('Scene unavailable · reconciliation will retry')
+          setNotice('Document unavailable · reconciliation will retry')
         } else {
           setNotice(`Reconciliation degraded · ${message} · showing last valid rows`)
         }
@@ -96,23 +96,23 @@ export function AeExecutiveWorkspace() {
   }, [])
 
   const requestedTab = params.tab ?? ''
-  const requestedRow = batch?.scenes.find(row => row.tab === requestedTab)
+  const requestedRow = batch?.rows.find(row => row.tab === requestedTab)
   const tabId = requestedRow ? requestedTab : aeExecutiveTab(requestedTab).id
-  const selectedRow = batch?.scenes.find(row => row.tab === tabId)
-  const sourceScene = selectedRow?.scene ?? null
+  const selectedRow = batch?.rows.find(row => row.tab === tabId)
+  const sourceDocument = selectedRow?.document ?? null
 
-  const lucidContext = batch && sourceScene && tabId === 'lucid'
-    ? lucidActionContext(batch, sourceScene)
+  const lucidContext = batch && selectedRow && sourceDocument && tabId === 'lucid'
+    ? lucidActionContext(batch, selectedRow)
     : { generation: 0, documentHash: '', posture: 'held' as const }
 
-  const scene = sourceScene && tabId === 'lucid'
-    ? applyLucidActionPosture(sourceScene, lucidContext)
-    : sourceScene
+  const document = sourceDocument && tabId === 'lucid'
+    ? applyLucidActionPosture(sourceDocument, lucidContext)
+    : sourceDocument
 
   lucidContextRef.current = lucidContext
 
   const selectedStatus = selectedRow
-    ? `${selectedRow.tab} ${selectedRow.state}${selectedRow.preserved ? ' · last valid Scene preserved' : ''}${selectedRow.reason ? ` · ${selectedRow.reason}` : ''}`
+    ? `${selectedRow.tab} ${selectedRow.state}${selectedRow.preserved ? ' · last valid Document preserved' : ''}${selectedRow.code ? ` · ${selectedRow.code}` : ''}`
     : null
 
   const onAction = useCallback(
@@ -120,7 +120,7 @@ export function AeExecutiveWorkspace() {
       const shellTab = action.match(/^shell\.tab\.([a-z0-9][a-z0-9-]{0,127})$/)?.[1]
 
       const admitted = shellTab && (
-        batch?.scenes.some(row => row.tab === shellTab) ||
+        batch?.rows.some(row => row.tab === shellTab) ||
         (isAeExecutiveTabId(shellTab) && shellTab === 'shell')
       )
 
@@ -153,8 +153,8 @@ export function AeExecutiveWorkspace() {
     [batch, navigate]
   )
 
-  const onSceneEvent = useCallback(
-    async (event: UguiSceneEvent) => {
+  const onDocumentEvent = useCallback(
+    async (event: UguiDocumentEvent) => {
       if (event.action.startsWith('shell.tab.')) {
         await onAction(event.action)
 
@@ -163,19 +163,19 @@ export function AeExecutiveWorkspace() {
 
       if (tabId === 'shell' && event.action.startsWith('shell.')) {
         setNotice(
-          `SHELL intent routed · ${event.action} · revision ${event.revision} · awaiting canonical RUN reduction; host state unchanged`
+          `SHELL intent routed · ${event.action} · item ${event.item_id} · awaiting canonical RUN reduction; host state unchanged`
         )
 
         return
       }
 
-      if (tabId !== 'studio' || !scene) {
+      if (tabId !== 'studio' || !selectedRow || !document) {
         await onAction(event.action)
 
         return
       }
 
-      const context = studioDesignerContext(scene)
+      const context = studioDesignerContext(selectedRow)
 
       if (!context) {
         setNotice('STUDIO intent refused · exact editor revision/hash unavailable')
@@ -197,7 +197,7 @@ export function AeExecutiveWorkspace() {
         setNotice(`STUDIO outcome unknown/refused · ${code} · not retried`)
       }
     },
-    [onAction, scene, tabId]
+    [document, onAction, selectedRow, tabId]
   )
 
   const trust = batch
@@ -208,30 +208,30 @@ export function AeExecutiveWorkspace() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>
       <main className="min-h-0 flex-1 overflow-hidden p-3">
         <div className="mx-auto h-full min-h-0 w-full max-w-7xl">
-          {scene ? (
+          {document ? (
             <div className="flex h-full min-h-0 flex-col gap-2">
               {selectedRow && selectedRow.state !== 'fresh' ? (
                 <div
                   aria-live="polite"
                   className="shrink-0 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 font-mono text-xs text-amber-700"
-                  data-ae-scene-posture={selectedRow.state}
+                  data-ae-document-posture={selectedRow.state}
                   role="status"
                 >
-                  UGUI Scene {selectedRow.state} · {selectedRow.reason ?? 'producer posture'}
-                  {selectedRow.preserved ? ' · last valid Scene preserved' : ''}
+                  UGUI Document {selectedRow.state} · {selectedRow.code ?? 'producer posture'}
+                  {selectedRow.preserved ? ' · last valid Document preserved' : ''}
                 </div>
               ) : null}
               <div className="min-h-0 flex-1">
-                <AeScenePainter onAction={onAction} onEvent={onSceneEvent} scene={scene} />
+                <UguiDocumentPainter document={document} onAction={onAction} onEvent={onDocumentEvent} />
               </div>
             </div>
           ) : error ? (
             <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-5 font-mono text-sm text-destructive">
-              UGUI Scene unavailable · {error}
+              UGUI Document unavailable · {error}
             </section>
           ) : selectedRow ? (
             <section className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-5 font-mono text-sm text-amber-700">
-              UGUI Scene unavailable · {selectedRow.reason ?? selectedRow.state}
+              UGUI Document unavailable · {selectedRow.code ?? selectedRow.state}
             </section>
           ) : (
             <section className="rounded-xl border border-(--ui-stroke-tertiary) p-5 font-mono text-sm text-(--ui-text-tertiary)">
@@ -244,7 +244,7 @@ export function AeExecutiveWorkspace() {
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-(--ui-stroke-tertiary) px-4 text-[0.65rem] text-(--ui-text-quaternary)">
         <span
           aria-hidden="true"
-          className={cn('size-1.5 rounded-full', scene ? 'bg-sky-500' : 'bg-amber-500')}
+          className={cn('size-1.5 rounded-full', document ? 'bg-sky-500' : 'bg-amber-500')}
           data-ugui-structural-status
         />
         <span aria-live="polite" data-ae-trust-footer>{trust}</span>
@@ -258,6 +258,6 @@ export function AeExecutiveWorkspace() {
   )
 }
 
-function displayGeneration(batch: AeExecutiveSceneBatch): string {
-  return batch.generation === null ? 'legacy/unverified' : String(batch.generation)
+function displayGeneration(batch: AeExecutiveDocumentBatch): string {
+  return batch.generation === null ? 'unavailable' : String(batch.generation)
 }

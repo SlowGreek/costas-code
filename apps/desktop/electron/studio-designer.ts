@@ -6,7 +6,7 @@ const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const ATTRIBUTE_RE = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/
 const REQUEST_SCHEMA = 'ae-studio-designer-action/1'
-const RECEIPT_SCHEMA = 'ae-studio-designer-action-receipt/1'
+const RECEIPT_SCHEMA = 'ae-studio-designer-action-receipt/2'
 const MAX_BYTES = 16 * 1024
 const TIMEOUT_MS = 3_000
 const POLL_MS = 25
@@ -37,48 +37,34 @@ export interface StudioDesignerContext {
 }
 
 export interface StudioDesignerRequest {
-  schema: 'ugui-scene-event/1'
-  scene_id: string
-  revision: number
-  node_id: string
+  schema: 'ugui-document-event/1'
+  document_id: string
+  item_id: string
   gesture: 'change' | 'focus' | 'key' | 'submit' | 'tap'
   action: string
   payload: null | Record<string, unknown>
 }
 
 export interface StudioDesignerReceipt {
-  schema: 'ae-studio-designer-action-receipt/1'
+  schema: 'ae-studio-designer-action-receipt/2'
   operation_id: string
   status: 'accepted' | 'refused'
   code: string
   revision: number
   document_hash: string
   runtime_hash: string
-  selected_node_id: string | null
-}
-
-export function studioDesignerContext(scene: unknown): StudioDesignerContext | null {
-  if (!object(scene) || !object(scene.receipt) || !object(scene.receipt.editor)) {return null}
-  const editor = scene.receipt.editor
-
-  if (
-    !Number.isSafeInteger(editor.revision) || Number(editor.revision) < 0 ||
-    typeof editor.document_hash !== 'string' || !HASH_RE.test(editor.document_hash)
-  ) {return null}
-
-  return { revision: Number(editor.revision), documentHash: editor.document_hash }
+  selected_item_id: string | null
 }
 
 export function validateStudioDesignerEvent(value: unknown): StudioDesignerRequest {
-  if (!object(value) || !exact(value, ['schema', 'scene_id', 'revision', 'node_id', 'gesture', 'action', 'payload'])) {
+  if (!object(value) || !exact(value, ['schema', 'document_id', 'item_id', 'gesture', 'action', 'payload'])) {
     throw new Error('studio-event-shape')
   }
 
   if (
-    value.schema !== 'ugui-scene-event/1' ||
-    typeof value.scene_id !== 'string' || !TOKEN_RE.test(value.scene_id) ||
-    !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 ||
-    typeof value.node_id !== 'string' || !TOKEN_RE.test(value.node_id) ||
+    value.schema !== 'ugui-document-event/1' ||
+    typeof value.document_id !== 'string' || !TOKEN_RE.test(value.document_id) ||
+    typeof value.item_id !== 'string' || !TOKEN_RE.test(value.item_id) ||
     !['change', 'focus', 'key', 'submit', 'tap'].includes(String(value.gesture)) ||
     typeof value.action !== 'string' || !validAction(value.action) ||
     !(value.payload === null || object(value.payload))
@@ -89,7 +75,7 @@ export function validateStudioDesignerEvent(value: unknown): StudioDesignerReque
 
 export function validateStudioDesignerReceipt(value: unknown, operationId: string): StudioDesignerReceipt {
   if (!object(value) || !exact(value, [
-    'schema', 'operation_id', 'status', 'code', 'revision', 'document_hash', 'runtime_hash', 'selected_node_id'
+    'schema', 'operation_id', 'status', 'code', 'revision', 'document_hash', 'runtime_hash', 'selected_item_id'
   ])) {throw new Error('studio-receipt-shape')}
 
   if (
@@ -99,7 +85,7 @@ export function validateStudioDesignerReceipt(value: unknown, operationId: strin
     !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 ||
     typeof value.document_hash !== 'string' || !HASH_RE.test(value.document_hash) ||
     typeof value.runtime_hash !== 'string' || !HASH_RE.test(value.runtime_hash) ||
-    !(value.selected_node_id === null || typeof value.selected_node_id === 'string' && TOKEN_RE.test(value.selected_node_id))
+    !(value.selected_item_id === null || typeof value.selected_item_id === 'string' && TOKEN_RE.test(value.selected_item_id))
   ) {throw new Error('studio-receipt-admission')}
 
   return value as unknown as StudioDesignerReceipt
@@ -168,7 +154,7 @@ export async function submitStudioDesignerEvent(
     expected_document_hash: context.documentHash,
     action: event.action,
     value: event.action === 'studio.element.select'
-      ? event.node_id
+      ? event.item_id
       : typeof event.payload?.value === 'string' ? event.payload.value : null
   }
 

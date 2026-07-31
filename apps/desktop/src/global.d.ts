@@ -1,10 +1,11 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
+import type { UguiDocument } from '@hermes/shared/ugui-document'
 
 import type {
   LucidActionIntent,
   LucidActionResult
 } from './app/ae-executive/lucid-actions'
-import type { UguiSceneEvent } from './app/ae-executive/scene-painter'
+import type { UguiDocumentEvent } from './app/ae-executive/document-painter'
 import type {
   HermesClipboardLensSnapshot,
   HermesClipboardLensTextResult
@@ -22,68 +23,48 @@ declare global {
   interface Window {
     hermesDesktop: {
       signalLifecycleRendererReady: () => void
-      getAeExecutiveScenes: () => Promise<
-        | {
-            schema: 'ae-executive-scene-batch/1'
-            authority: 'none'
-            projector: string
-            artifact_generation: string
-            scenes: Array<{ tab: string; scene: Record<string, unknown> }>
-          }
-        | {
-            schema: 'ae-executive-scene-batch/2'
-            authority: 'none'
-            projector: string
-            generation: number
-            document_hash: string
-            source_set_hash: string
-            observed_ms: number
-            freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
-            artifact_generation: string
-            scenes: Array<{
-              tab: string
-              state: 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
-              scene?: Record<string, unknown>
-              reason?: string
-            }>
-          }
-        | {
-            schema: 'ae-executive-scene-envelope/1'
-            authority: 'none' | 'RUN_EXECUTIVE_COMPOSER'
-            executive_generation: number
-            document_hash: string | null
-            source_set_hash: string | null
-            observed_ms: number | null
-            freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
-            artifact_posture: 'observed' | 'missing' | 'fixture' | 'held' | 'structural' | 'unavailable'
-            admission_code: string
-            blocker: { code: string; boundary: string; closed: true } | null
-            artifact_generation: string
-            scenes: Array<{
-              tab: string
-              state: 'fresh' | 'stale' | 'unavailable' | 'fixture' | 'structural'
-              scene?: Record<string, unknown>
-              reason?: string
-            }>
-          }
-      >
+      getAeExecutiveDocuments: () => Promise<{
+        schema: 'ae-executive-document-envelope/1'
+        authority: 'none' | 'RUN_EXECUTIVE_COMPOSER'
+        executive_generation: number
+        document_hash: string | null
+        source_set_hash: string | null
+        observed_ms: number | null
+        freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
+        artifact_posture: 'observed' | 'missing' | 'fixture' | 'held' | 'structural' | 'unavailable'
+        admission_code: string
+        blocker: { code: string; boundary: string; closed: true } | null
+        artifact_generation: string
+        rows: Array<{
+          schema: 'ae-executive-document-row/1'
+          tab: string
+          source_hash: string | null
+          source_generation: number
+          observed_ms: number | null
+          freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable'
+          posture: 'observed' | 'missing' | 'fixture' | 'held' | 'structural' | 'unavailable'
+          artifact_posture: 'observed' | 'missing' | 'fixture' | 'held' | 'structural' | 'unavailable'
+          document: UguiDocument | null
+          code: string | null
+        }>
+      }>
       submitStudioDesignerEvent: (request: {
-        event: UguiSceneEvent
+        event: UguiDocumentEvent
         context: { revision: number; documentHash: string }
       }) => Promise<{
-        schema: 'ae-studio-designer-action-receipt/1'
+        schema: 'ae-studio-designer-action-receipt/2'
         operation_id: string
         status: 'accepted' | 'refused'
         code: string
         revision: number
         document_hash: string
         runtime_hash: string
-        selected_node_id: string | null
+        selected_item_id: string | null
       }>
       executeLucidExecutiveIntent: (request: LucidActionIntent) => Promise<LucidActionResult>
       getUguiSkinCatalog: () => Promise<unknown>
-      getUguiSkinSettingsScene: (request: { committed_id: string; preview_id: string }) => Promise<unknown>
-      getShellViewportScene: (request: {
+      getUguiSkinSettingsDocument: (request: { committed_id: string; preview_id: string }) => Promise<unknown>
+      getShellViewportDocument: (request: {
         shell_id: string
         surface_profile_id: string
         target_id: string

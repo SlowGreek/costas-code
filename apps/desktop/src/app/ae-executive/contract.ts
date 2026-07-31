@@ -10,7 +10,8 @@ export const AE_EXECUTIVE_TAB_IDS = [
   'studio',
   'settings',
   'marketplace',
-  'shell'
+  'shell',
+  'mermaid'
 ] as const
 
 export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
@@ -122,6 +123,14 @@ export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
     route: '/ae/shell',
     icon: 'device-desktop',
     summary: 'Enter the canonical recursive UGUI system shell with independent OS and surface projection axes.'
+  },
+  {
+    id: 'mermaid',
+    label: 'MERM[A]ID',
+    mnemonic: 'A',
+    route: '/ae/mermaid',
+    icon: 'graph-line',
+    summary: 'Inspect the admitted Mermaid document families and their exact source artifacts.'
   }
 ] as const
 

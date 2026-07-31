@@ -1,8 +1,8 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
-import { type AeExecutiveScene, validateExecutiveScene } from '@/app/ae-executive/scene'
-import { AeScenePainter, type UguiSceneEvent } from '@/app/ae-executive/scene-painter'
+import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
+import { UguiDocumentPainter, type UguiDocumentEvent } from '@/app/ae-executive/document-painter'
 import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCw } from '@/lib/icons'
 import {
@@ -18,32 +18,31 @@ import {
   revertRenderProfilePreview
 } from '@/store/render-profile'
 
-interface SkinSettingsResponse {
-  schema: 'ae-skin-settings-scene/1'
+interface SkinSettingsDocumentResponse {
+  schema: 'ae-skin-settings-document/1'
   authority: 'none'
   projector: string
-  scene: AeExecutiveScene
+  document: UguiDocument
 }
 
-function parseSkinSettingsResponse(value: unknown): SkinSettingsResponse {
+function parseSkinSettingsResponse(value: unknown): SkinSettingsDocumentResponse {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {throw new Error('skin-settings-response')}
   const row = value as Record<string, unknown>
 
   if (
     Object.keys(row).length !== 4 ||
-    row.schema !== 'ae-skin-settings-scene/1' ||
+    row.schema !== 'ae-skin-settings-document/1' ||
     row.authority !== 'none' ||
     typeof row.projector !== 'string' ||
     !row.projector ||
-    !row.scene ||
-    typeof row.scene !== 'object' ||
-    Array.isArray(row.scene)
+    !row.document ||
+    typeof row.document !== 'object' ||
+    Array.isArray(row.document)
   ) {throw new Error('skin-settings-schema')}
 
-  const scene = row.scene as AeExecutiveScene
-  validateExecutiveScene(scene)
+  const document = validateUguiDocument(row.document)
 
-  return row as unknown as SkinSettingsResponse
+  return { ...row, document } as unknown as SkinSettingsDocumentResponse
 }
 
 export function UguiSkinSettings() {
@@ -53,9 +52,9 @@ export function UguiSkinSettings() {
   const pending = useStore($renderProfilePending)
   const committedId = useStore($renderProfileCommittedId)
   const previewId = useStore($renderProfilePreviewId) ?? committedId
-  const [scene, setScene] = useState<AeExecutiveScene | null>(null)
-  const [sceneError, setSceneError] = useState<string | null>(null)
-  const [sceneLoading, setSceneLoading] = useState(false)
+  const [document, setDocument] = useState<UguiDocument | null>(null)
+  const [documentError, setDocumentError] = useState<string | null>(null)
+  const [documentLoading, setDocumentLoading] = useState(false)
 
   useEffect(() => {
     if (!catalog) {void loadRenderProfileCatalog().catch(() => undefined)}
@@ -64,22 +63,22 @@ export function UguiSkinSettings() {
   useEffect(() => {
     if (!catalog || !catalog.profiles.some(profile => profile.id === committedId) || !catalog.profiles.some(profile => profile.id === previewId)) {return}
     let live = true
-    setSceneLoading(true)
-    setSceneError(null)
+    setDocumentLoading(true)
+    setDocumentError(null)
     void window.hermesDesktop
-      .getUguiSkinSettingsScene({ committed_id: committedId, preview_id: previewId })
+      .getUguiSkinSettingsDocument({ committed_id: committedId, preview_id: previewId })
       .then(parseSkinSettingsResponse)
       .then(response => {
-        if (live) {setScene(response.scene)}
+        if (live) {setDocument(response.document)}
       })
       .catch(error => {
         if (live) {
-          setScene(null)
-          setSceneError(error instanceof Error ? error.message : String(error))
+          setDocument(null)
+          setDocumentError(error instanceof Error ? error.message : String(error))
         }
       })
       .finally(() => {
-        if (live) {setSceneLoading(false)}
+        if (live) {setDocumentLoading(false)}
       })
 
     return () => {
@@ -87,9 +86,9 @@ export function UguiSkinSettings() {
     }
   }, [catalog, committedId, previewId])
 
-  const onEvent = (event: UguiSceneEvent) => {
-    if (event.scene_id !== (scene?.id ?? scene?.root) || event.revision !== 0 || event.payload !== null) {
-      setSceneError('skin-event-refused')
+  const onEvent = (event: UguiDocumentEvent) => {
+    if (event.document_id !== document?.id || event.payload !== null) {
+      setDocumentError('skin-event-refused')
 
       return
     }
@@ -98,14 +97,14 @@ export function UguiSkinSettings() {
 
     if (action === 'skin.apply') {
       void applyRenderProfilePreview().then(ok => {
-        if (!ok) {setSceneError('skin-apply-refused')}
+        if (!ok) {setDocumentError('skin-apply-refused')}
       })
 
       return
     }
 
     if (action === 'skin.revert') {
-      if (!revertRenderProfilePreview()) {setSceneError('skin-revert-refused')}
+      if (!revertRenderProfilePreview()) {setDocumentError('skin-revert-refused')}
 
       return
     }
@@ -114,17 +113,17 @@ export function UguiSkinSettings() {
       const id = action.slice('skin.preview.'.length)
 
       if (!/^[a-z0-9][a-z0-9-]{0,95}$/.test(id) || !previewRenderProfile(id)) {
-        setSceneError('skin-preview-refused')
+        setDocumentError('skin-preview-refused')
       }
 
       return
     }
 
-    setSceneError('skin-action-refused')
+    setDocumentError('skin-action-refused')
   }
 
-  const busy = loadingCatalog || sceneLoading || pending
-  const error = catalogError || sceneError
+  const busy = loadingCatalog || documentLoading || pending
+  const error = catalogError || documentError
 
   return (
     <div className="grid min-h-[28rem] gap-3" data-testid="ugui-skin-settings">
@@ -145,9 +144,9 @@ export function UguiSkinSettings() {
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 font-mono text-xs text-destructive" role="alert">
           UGUI skin settings refused · {error}
         </div>
-      ) : scene ? (
-        <div className="min-h-0" data-skin-settings-scene>
-          <AeScenePainter onEvent={onEvent} scene={scene} />
+      ) : document ? (
+        <div className="min-h-0" data-skin-settings-document>
+          <UguiDocumentPainter document={document} onEvent={onEvent} />
         </div>
       ) : (
         <div className="grid min-h-64 place-items-center text-sm text-muted-foreground" role="status">

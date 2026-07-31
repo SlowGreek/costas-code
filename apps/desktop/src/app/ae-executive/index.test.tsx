@@ -3,113 +3,59 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AE_EXECUTIVE_BATCH_TAB_IDS, AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
-import { parseExecutiveBatch, resetExecutiveScenesForTests, validateExecutiveScene } from './scene'
+import { AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
+import { resetExecutiveDocumentsForTests } from './document'
 
 import { AeExecutiveWorkspace } from '.'
 
-const getAeExecutiveScenes = vi.fn()
-
-const EXPECTED_LABELS = [
-  '[H]OME',
-  '[D]ASHBOARD',
-  '[L]UCID',
-  '[Q]UINE',
-  'S[C]ORES',
-  '[M]ETRICS',
-  'L[O]GS',
-  '[G]ITHUB',
-  'S[T]UDIO',
-  '[S]ETTINGS'
-]
-
-const dynamicLabel = (tab: string) =>
-  AE_EXECUTIVE_TABS.find(item => item.id === tab)?.label ??
-  ({ calc: 'C[A]LCULATOR', marketplace: 'MA[R]KETPLACE', snake: 'S[N]AKE' }[tab] ?? tab.toUpperCase())
-
+const getAeExecutiveDocuments = vi.fn()
 const ARTIFACT_GENERATION = `sha256:${'a'.repeat(64)}`
-
 const generationHash = (generation: number, salt = 0) =>
   `sha256:${((generation + salt) % 16).toString(16).repeat(64)}`
 
-function batch(
-  tabs: readonly string[] = AE_EXECUTIVE_BATCH_TAB_IDS,
-  textByTab: Readonly<Record<string, string>> = {},
-  generation = 1,
-  freshness: 'fresh' | 'degraded' | 'stale' | 'unavailable' = 'fresh'
-) {
+const uguiDocument = (tab: string, body = `RUN ${tab.toUpperCase()}`) => ({
+  id: `run-${tab}`,
+  type: 'document',
+  header: [{ id: `${tab}-heading`, type: 'text', body, style: 'heading' }],
+  sections: [
+    { id: `${tab}-status`, type: 'status_grid', items: [{ label: 'State', value: 'Ready', status: 'ok' }] }
+  ],
+  actions: AE_EXECUTIVE_TAB_IDS.map(item => ({
+    id: `${tab}-tab-${item}`,
+    type: 'button',
+    label: AE_EXECUTIVE_TABS.find(candidate => candidate.id === item)!.label,
+    action: `shell.tab.${item}`,
+    role: 'tab',
+    primary: item === tab
+  }))
+})
+
+function envelope(generation = 1, textByTab: Readonly<Record<string, string>> = {}) {
   return {
-    schema: 'ae-executive-scene-batch/2' as const,
-    authority: 'none' as const,
-    projector: 'run::tui->ugui::project;quine->ugui::project_quine_applet_route',
-    generation,
+    schema: 'ae-executive-document-envelope/1' as const,
+    authority: 'RUN_EXECUTIVE_COMPOSER' as const,
+    executive_generation: generation,
     document_hash: generationHash(generation),
     source_set_hash: generationHash(generation, 7),
     observed_ms: 1_000 + generation,
-    freshness,
+    freshness: 'fresh' as const,
+    artifact_posture: 'observed' as const,
+    admission_code: 'admitted',
+    blocker: null,
     artifact_generation: ARTIFACT_GENERATION,
-    scenes: tabs.map(tab => ({
+    rows: AE_EXECUTIVE_TAB_IDS.map((tab, index) => ({
+      schema: 'ae-executive-document-row/1' as const,
       tab,
-      state: 'fresh' as const,
-      scene: {
-        sceneVersion: '1.0.0' as const,
-        id: `run-${tab}`,
-        root: `${tab}-root`,
-        nodes: [
-          {
-            id: `${tab}-root`,
-            p: 'column' as const,
-            kids: [`${tab}-text`, `${tab}-elastic`, `${tab}-fixed`, `${tab}-tabs`]
-          },
-          {
-            id: `${tab}-text`,
-            p: 'text' as const,
-            a: { text: textByTab[tab] ?? `RUN ${tab.toUpperCase()}`, size: 'l' }
-          },
-          {
-            id: `${tab}-elastic`,
-            p: 'image' as const,
-            a: { src: `asset://run/home/${tab}.svg`, alt: `${tab} semantic image` },
-            layout: { height: '*' as const, width: '*' as const }
-          },
-          {
-            id: `${tab}-fixed`,
-            p: 'text' as const,
-            a: { text: 'Fixed semantic status', size: 's' },
-            layout: { height: 1 }
-          },
-          {
-            id: `${tab}-tabs`,
-            p: 'row' as const,
-            kids: tabs.map(item => `${tab}-tab-${item}`)
-          },
-          ...tabs.map(item => ({
-            id: `${tab}-tab-${item}`,
-            p: 'button' as const,
-            a: { label: dynamicLabel(item), primary: item === tab, role: 'tab' },
-            on: { tap: `shell.tab.${item}` },
-            layout: { height: 1 }
-          }))
-        ]
-      }
+      source_hash: generationHash(generation, index + 1),
+      source_generation: generation,
+      observed_ms: 1_000 + generation,
+      freshness: 'fresh' as const,
+      posture: 'observed' as const,
+      artifact_posture: 'observed' as const,
+      document: uguiDocument(tab, textByTab[tab]),
+      code: null
     }))
   }
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void
-
-  const promise = new Promise<T>(resolvePromise => {
-    resolve = resolvePromise
-  })
-
-  return { promise, resolve }
-}
-
-async function flushPromises() {
-  await act(async () => {
-    await Promise.resolve()
-  })
 }
 
 function renderTab(tab: string) {
@@ -123,11 +69,15 @@ function renderTab(tab: string) {
 }
 
 beforeEach(() => {
-  resetExecutiveScenesForTests()
-  getAeExecutiveScenes.mockResolvedValue(batch())
+  resetExecutiveDocumentsForTests()
+  getAeExecutiveDocuments.mockResolvedValue(envelope())
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
-    value: { getAeExecutiveScenes }
+    value: {
+      getAeExecutiveDocuments,
+      executeLucidExecutiveIntent: vi.fn(),
+      submitStudioDesignerEvent: vi.fn()
+    }
   })
 })
 
@@ -137,12 +87,12 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('AE executive registry', () => {
-  it('preserves the current WITNESS seed plus GitHub, Marketplace, and SHELL recovery anchors', () => {
-    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(12)
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.label)).toEqual([...EXPECTED_LABELS, 'MA[R]KETPLACE', 'SH[E]LL'])
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOGTSRE')
+describe('AE executive Document registry', () => {
+  it('matches the producer-owned 13-tab order and mnemonics', () => {
+    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(13)
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOGTSREA')
     expect(AE_EXECUTIVE_TABS.map(tab => tab.route)).toEqual(AE_EXECUTIVE_TAB_IDS.map(tab => `/ae/${tab}`))
+    expect(AE_EXECUTIVE_TABS.at(-1)?.label).toBe('MERM[A]ID')
   })
 
   it('falls back to HOME for an unknown tab', () => {
@@ -150,246 +100,67 @@ describe('AE executive registry', () => {
   })
 })
 
-describe('Rust UGUI Scene batch', () => {
-  it('admits the exact ordered batch and validates every closed Scene', () => {
-    const value = parseExecutiveBatch(batch())
-    expect(value.scenes).toHaveLength(AE_EXECUTIVE_BATCH_TAB_IDS.length)
+describe('AE executive Document workspace', () => {
+  it.each(AE_EXECUTIVE_TABS)('paints $label from its corresponding Document', async tab => {
+    renderTab(tab.id)
 
-    for (const row of value.scenes) {expect(validateExecutiveScene(row.scene!)).toEqual([])}
+    await waitFor(() => expect(screen.getByText(`RUN ${tab.id.toUpperCase()}`)).not.toBeNull())
+    expect(window.document.querySelector(`[data-ugui-document-id="run-${tab.id}"]`)).not.toBeNull()
   })
 
-  it('requires semantic card identity and one shared shell action row without prescribing block extent', () => {
-    const value = parseExecutiveBatch(batch())
+  it('routes producer-owned shell tab actions without a Scene adapter', async () => {
+    renderTab('home')
+    await waitFor(() => expect(screen.getByText('RUN HOME')).not.toBeNull())
 
-    for (const { scene, tab } of value.scenes) {
-      expect(scene!.id).toBe(`run-${tab}`)
-      expect(
-        scene!.nodes.flatMap(node => Object.values(node.on ?? {})).filter(handler => handler.startsWith('shell.tab.'))
-      ).toEqual(AE_EXECUTIVE_BATCH_TAB_IDS.map(id => `shell.tab.${id}`))
+    fireEvent.click(screen.getByRole('button', { name: '[D]ASHBOARD' }))
+    await waitFor(() => expect(screen.getByText('RUN DASHBOARD')).not.toBeNull())
+  })
+
+  it('reconciles a newer generation and rejects an older one', async () => {
+    vi.useFakeTimers()
+    getAeExecutiveDocuments
+      .mockResolvedValueOnce(envelope(2, { home: 'Generation two' }))
+      .mockResolvedValueOnce(envelope(3, { home: 'Generation three' }))
+      .mockResolvedValueOnce(envelope(1, { home: 'Generation one' }))
+    renderTab('home')
+    await act(async () => {await Promise.resolve()})
+    expect(screen.getByText('Generation two')).not.toBeNull()
+
+    await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
+    expect(screen.getByText('Generation three')).not.toBeNull()
+    await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
+    expect(screen.queryByText('Generation one')).toBeNull()
+    expect(screen.getByText(/out-of-order-generation/)).not.toBeNull()
+  })
+
+  it('preserves the last valid Document when a newer row becomes unavailable', async () => {
+    vi.useFakeTimers()
+    const next = envelope(2)
+    const home = next.rows[0] as Omit<typeof next.rows[number], 'freshness' | 'posture' | 'artifact_posture' | 'code'> & {
+      freshness: string
+      posture: string
+      artifact_posture: string
+      code: string | null
     }
-  })
-
-  it('admits and paints intrinsic nested Dashboard structure without remaining-height layout', async () => {
-    const value = batch()
-    const dashboard = value.scenes.find(row => row.tab === 'dashboard')!.scene
-    const nodes = dashboard.nodes as Array<Record<string, any>>
-    dashboard.nodes = nodes.filter(node => node.id !== 'dashboard-elastic') as typeof dashboard.nodes
-    const root = dashboard.nodes.find(node => node.id === 'dashboard-root') as { kids: string[] }
-    root.kids = root.kids.filter((id: string) => id !== 'dashboard-elastic')
-    ;(dashboard.nodes as Array<Record<string, unknown>>).push(
-      { id: 'dashboard-nested', p: 'column' as const, kids: ['dashboard-nested-text'] },
-      { id: 'dashboard-nested-text', p: 'text' as const, a: { text: 'Nested intrinsic evidence', size: 's' } }
-    )
-    root.kids.splice(1, 0, 'dashboard-nested')
-    getAeExecutiveScenes.mockResolvedValue(value)
-    resetExecutiveScenesForTests()
-
-    const view = renderTab('dashboard')
-    expect(await screen.findByText('Nested intrinsic evidence')).toBeTruthy()
-    expect(view.container.querySelector('[data-ugui-height="*"]')).toBeNull()
-  })
-})
-
-describe('AE executive workspace', () => {
-  it.each(AE_EXECUTIVE_TABS.filter(tab => tab.id !== 'shell'))('redraws $label from its corresponding Rust Scene', async tab => {
-    const view = renderTab(tab.id)
-    expect(await screen.findByText(`RUN ${tab.id.toUpperCase()}`)).toBeTruthy()
-    expect(view.container.querySelector(`[data-ae-executive-tab="${tab.id}"]`)).toBeTruthy()
-    expect(screen.getByRole('tab', { name: tab.label }).getAttribute('aria-current')).toBe('page')
-  })
-
-  it('navigates across tabs and redraws from the cached batch', async () => {
+    home.document = null as never
+    home.freshness = 'unavailable'
+    home.posture = 'unavailable'
+    home.artifact_posture = 'unavailable'
+    home.code = 'home-unavailable'
+    getAeExecutiveDocuments.mockResolvedValueOnce(envelope(1)).mockResolvedValueOnce(next)
     renderTab('home')
-    expect(await screen.findByText('RUN HOME')).toBeTruthy()
+    await act(async () => {await Promise.resolve()})
+    await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
 
-    await act(async () => fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' })))
-
-    expect(await screen.findByText('RUN QUINE')).toBeTruthy()
-    expect(screen.queryByText('RUN HOME')).toBeNull()
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('RUN HOME')).not.toBeNull()
+    expect(screen.getAllByText(/last valid Document preserved/).length).toBeGreaterThan(0)
   })
 
-  it('polls the whole workspace every second regardless of the selected tab', async () => {
-    vi.useFakeTimers()
+  it('shows a bounded Document refusal when no generation is available', async () => {
+    getAeExecutiveDocuments.mockRejectedValueOnce(new Error('projector-unavailable'))
     renderTab('home')
-    await flushPromises()
 
-    expect(screen.getByText('RUN HOME')).toBeTruthy()
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1)
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(2)
-  })
-
-  it('reconciles a newer generation while retaining the selected tab', async () => {
-    vi.useFakeTimers()
-    getAeExecutiveScenes
-      .mockResolvedValueOnce(batch())
-      .mockResolvedValueOnce(batch(AE_EXECUTIVE_BATCH_TAB_IDS, { quine: 'RUN QUINE REFRESHED' }, 2))
-
-    renderTab('home')
-    await flushPromises()
-    fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' }))
-    expect(screen.getByText('RUN QUINE')).toBeTruthy()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-
-    expect(screen.getByText('RUN QUINE REFRESHED')).toBeTruthy()
-    expect(screen.queryByText('RUN HOME')).toBeNull()
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(2)
-  })
-
-  it('does not overlap workspace reconciliation requests', async () => {
-    vi.useFakeTimers()
-    const pendingRefresh = deferred<ReturnType<typeof batch>>()
-
-    getAeExecutiveScenes.mockResolvedValueOnce(batch()).mockReturnValueOnce(pendingRefresh.promise)
-    renderTab('home')
-    await flushPromises()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(2)
-
-    await act(async () => {
-      vi.advanceTimersByTime(5_000)
-      await Promise.resolve()
-    })
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(2)
-
-    await act(async () => {
-      pendingRefresh.resolve(batch(AE_EXECUTIVE_BATCH_TAB_IDS, {}, 2))
-      await pendingRefresh.promise
-    })
-  })
-
-  it('isolates a malformed unrelated tab and updates the selected valid tab', async () => {
-    vi.useFakeTimers()
-    const next = batch(AE_EXECUTIVE_BATCH_TAB_IDS, { home: 'RUN HOME GENERATION 2' }, 2)
-
-    const logs = next.scenes.find(row => row.tab === 'logs')!
-
-    ;(logs.scene.nodes[0] as { kids: string[] }).kids = ['missing-node']
-    getAeExecutiveScenes.mockResolvedValueOnce(batch()).mockResolvedValueOnce(next)
-    renderTab('home')
-    await flushPromises()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-
-    expect(screen.getByText('RUN HOME GENERATION 2')).toBeTruthy()
-    expect(screen.getByText(/Generation 2 · authority none · observed 1002 · freshness fresh · posture live/)).toBeTruthy()
-  })
-
-  it('recovers after an initial projector failure without remounting', async () => {
-    vi.useFakeTimers()
-    getAeExecutiveScenes
-      .mockRejectedValueOnce(new Error('projector-temporarily-unavailable'))
-      .mockResolvedValueOnce(batch())
-    renderTab('home')
-    await flushPromises()
-
-    expect(screen.getByText('UGUI Scene unavailable · projector-temporarily-unavailable')).toBeTruthy()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-
-    expect(screen.getByText('RUN HOME')).toBeTruthy()
-    expect(screen.queryByText(/UGUI Scene unavailable/)).toBeNull()
-  })
-
-  it('rejects an older generation and preserves the last valid selected Scene', async () => {
-    vi.useFakeTimers()
-    getAeExecutiveScenes
-      .mockResolvedValueOnce(batch(AE_EXECUTIVE_BATCH_TAB_IDS, { home: 'GENERATION 2 HOME' }, 2))
-      .mockResolvedValueOnce(batch(AE_EXECUTIVE_BATCH_TAB_IDS, { home: 'STALE GENERATION 1 HOME' }, 1))
-    renderTab('home')
-    await flushPromises()
-
-    await act(async () => {
-      vi.advanceTimersByTime(1_000)
-      await Promise.resolve()
-    })
-
-    expect(screen.getByText('GENERATION 2 HOME')).toBeTruthy()
-    expect(screen.queryByText('STALE GENERATION 1 HOME')).toBeNull()
-  })
-
-  it('clears the workspace polling timer on unmount', async () => {
-    vi.useFakeTimers()
-    const view = renderTab('logs')
-    await flushPromises()
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1)
-
-    view.unmount()
-    await act(async () => {
-      vi.advanceTimersByTime(5_000)
-      await Promise.resolve()
-    })
-
-    expect(getAeExecutiveScenes).toHaveBeenCalledTimes(1)
-  })
-
-  it('uses the UGUI shell actions as the only executive tab navigation', async () => {
-    const view = renderTab('home')
-    await screen.findByText('RUN HOME')
-
-    expect(view.container.querySelector('nav[aria-label="AgentExperiments executive tabs"]')).toBeNull()
-    expect(screen.getAllByRole('tab', { name: '[Q]UINE' })).toHaveLength(1)
-    await act(async () => fireEvent.click(screen.getByRole('tab', { name: '[Q]UINE' })))
-    expect(await screen.findByText('RUN QUINE')).toBeTruthy()
-  })
-
-  it('routes Marketplace-pinned applets from dynamic UGUI shell actions', async () => {
-    getAeExecutiveScenes.mockResolvedValueOnce(batch(['home', 'marketplace', 'calc', 'snake']))
-    const view = renderTab('marketplace')
-
-    expect(await screen.findByText('RUN MARKETPLACE')).toBeTruthy()
-    expect(view.container.querySelector('[data-ae-executive-tab="marketplace"]')).toBeTruthy()
-    await act(async () => fireEvent.click(screen.getByRole('tab', { name: 'C[A]LCULATOR' })))
-    expect(await screen.findByText('RUN CALC')).toBeTruthy()
-    expect(view.container.querySelector('[data-ae-executive-tab="calc"]')).toBeTruthy()
-  })
-
-  it('realizes elastic and fixed Scene layout without tab-specific branches', async () => {
-    const view = renderTab('home')
-    await screen.findByText('RUN HOME')
-
-    expect(view.container.querySelector('[data-ugui-height="*"]')?.className).toContain('flex-1')
-    expect(view.container.querySelector('[data-ugui-width="*"]')?.className).toContain('flex-1')
-    expect(view.container.querySelector('[data-ugui-height="1"]')?.className).toContain('shrink-0')
-    expect(screen.getByText('UGUI refusal · asset-catalog-unavailable · home semantic image')).toBeTruthy()
-  })
-
-  it('shows exact generation, observation, freshness, posture, and artifact trust metadata', async () => {
-    const view = renderTab('home')
-
-    expect(
-      await screen.findByText(
-        `Generation 1 · authority none · observed 1001 · freshness fresh · posture live · artifact ${ARTIFACT_GENERATION}`
-      )
-    ).toBeTruthy()
-    expect(view.container.querySelector('[data-ae-trust-footer]')).toBeTruthy()
-    expect(view.container.querySelector('[data-ugui-structural-status]')?.className).not.toContain('bg-emerald-500')
-  })
-
-  it('shows an explicit unavailable state instead of synthesizing content', async () => {
-    getAeExecutiveScenes.mockRejectedValueOnce(new Error('projector-unavailable'))
-    renderTab('home')
-    await waitFor(() => expect(screen.getByText('UGUI Scene unavailable · projector-unavailable')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('UGUI Document unavailable · projector-unavailable')).not.toBeNull())
     expect(screen.queryByText('RUN HOME')).toBeNull()
   })
 })

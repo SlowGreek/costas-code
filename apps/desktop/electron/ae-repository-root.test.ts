@@ -24,7 +24,7 @@ function writeJson(root: string, relative: string, value: object) {
 function canonicalAe(root: string) {
   writeJson(root, 'SPEC.json', { schema: 'ae-root-bootstrap-policy/1' })
   writeJson(root, 'run/SHELL-BUILDS.json', { schema: 'ae-shell-build-matrix/1' })
-  writeJson(root, 'ugui/json/surface-profiles.json', { schema: 'ugui-surface-profiles/v1' })
+  writeJson(root, 'ugui/json/surface-profiles.json', { schema: 'ugui-surface-profiles/1' })
 
   return fs.realpathSync(root)
 }

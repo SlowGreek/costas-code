@@ -89,6 +89,25 @@ describe('desktop lifecycle source hashing', () => {
     assert.equal(second.source_revision, first.source_revision)
     assert.equal(second.files, first.files)
   })
+
+  test('treats a tracked deletion as a source change without reading the missing file', () => {
+    const catalystRoot = gitFixture('catalyst-deletion', {
+      'package.json': '{}',
+      'apps/desktop/retired-scene.ts': 'retired',
+      'hermes_cli/main.py': 'cli'
+    })
+    const aeRoot = gitFixture('ae-deletion', {
+      'Cargo.toml': '[workspace]',
+      'run/input.json': '{}',
+      'ugui/skin.json': '{}'
+    })
+    const first = computeSourceSnapshot({ catalystRoot, aeRoot })
+    fs.rmSync(path.join(catalystRoot, 'apps/desktop/retired-scene.ts'))
+    const second = computeSourceSnapshot({ catalystRoot, aeRoot })
+
+    assert.notEqual(second.source_revision, first.source_revision)
+    assert.equal(second.files, first.files - 1)
+  })
 })
 
 describe('desktop lifecycle build and promotion', () => {

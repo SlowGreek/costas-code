@@ -71,7 +71,11 @@ function runGit(root, args) {
 
 function repositoryFiles(root, pathspecs) {
   const raw = runGit(root, ['ls-files', '-co', '--exclude-standard', '-z', '--', ...pathspecs])
-  const files = [...new Set(raw.toString('utf8').split('\0').filter(Boolean))].sort()
+  const deletedRaw = runGit(root, ['ls-files', '--deleted', '-z', '--', ...pathspecs])
+  const deleted = new Set(deletedRaw.toString('utf8').split('\0').filter(Boolean))
+  const files = [...new Set(raw.toString('utf8').split('\0').filter(Boolean))]
+    .filter(relative => !deleted.has(relative))
+    .sort()
   if (files.length > MAX_INPUT_FILES) throw new Error('desktop-lifecycle-input-file-limit')
   return files
 }

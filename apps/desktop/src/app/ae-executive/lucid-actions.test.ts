@@ -9,7 +9,7 @@ import {
   type LucidActionReceipt,
   parseLucidActionResult
 } from './lucid-actions'
-import type { AeExecutiveScene } from './scene'
+import type { UguiDocument } from '@hermes/shared/ugui-document'
 
 const HASH = `sha256:${'a'.repeat(64)}`
 const OPERATION = `op:${'b'.repeat(64)}`
@@ -39,7 +39,7 @@ function receipt(verb: LucidActionReceipt['verb']): LucidActionReceipt {
   }
 }
 
-describe('closed LUCID Scene handler registry', () => {
+describe('closed LUCID Document action registry', () => {
   it.each(handlers)('maps %s to typed %s intent without authority material', (handler, verb) => {
     const intent = buildLucidActionIntent(handler, context, OPERATION)
 
@@ -55,34 +55,33 @@ describe('closed LUCID Scene handler registry', () => {
     expect(intent).not.toHaveProperty('executable')
   })
 
-  it('refuses arbitrary or path-shaped Scene handlers', () => {
+  it('refuses arbitrary or path-shaped Document actions', () => {
     expect(lucidActionForHandler('lucid.run./tmp/payload')).toBeNull()
     expect(lucidActionForHandler('lucid.dispatch.plan:../../secret')).toBeNull()
     expect(lucidActionForHandler('shell.exec')).toBeNull()
     expect(buildLucidActionIntent('lucid.get.evidence', { ...context, generation: 0 }, OPERATION)).toBeNull()
   })
 
-  it('removes on handlers and disables controls while authority is held', () => {
-    const scene: AeExecutiveScene = {
-      sceneVersion: '1.0.0',
-      root: 'root',
-      nodes: [
-        { id: 'root', p: 'column', kids: ['read', 'write'] },
-        { id: 'read', p: 'button', a: { label: 'Read' }, on: { tap: 'lucid.get.evidence' } },
-        { id: 'write', p: 'button', a: { label: 'Write' }, on: { tap: 'lucid.set.view-policy' } }
+  it('disables semantic action items while authority is held', () => {
+    const document: UguiDocument = {
+      id: 'lucid.document',
+      type: 'document',
+      header: [],
+      sections: [],
+      actions: [
+        { id: 'read', type: 'button', label: 'Read', action: 'lucid.get.evidence' },
+        { id: 'write', type: 'button', label: 'Write', action: 'lucid.set.view-policy' }
       ]
     }
 
-    const held = applyLucidActionPosture(scene, { ...context, posture: 'held' })
+    const held = applyLucidActionPosture(document, { ...context, posture: 'held' })
 
-    expect(held.nodes[1].on).toBeUndefined()
-    expect(held.nodes[1].a?.disabled).toBe(true)
-    expect(held.nodes[2].on).toBeUndefined()
+    expect((held.actions[0] as Record<string, unknown>).disabled).toBe(true)
+    expect((held.actions[1] as Record<string, unknown>).disabled).toBe(true)
 
-    const read = applyLucidActionPosture(scene, { ...context, posture: 'read' })
-    expect(read.nodes[1].on?.tap).toBe('lucid.get.evidence')
-    expect(read.nodes[2].on).toBeUndefined()
-    expect(read.nodes[2].a?.disabled_reason).toBe('owner-capability-required')
+    const read = applyLucidActionPosture(document, { ...context, posture: 'read' })
+    expect((read.actions[0] as Record<string, unknown>).disabled).toBeUndefined()
+    expect((read.actions[1] as Record<string, unknown>).disabled_reason).toBe('owner-capability-required')
   })
 })
 

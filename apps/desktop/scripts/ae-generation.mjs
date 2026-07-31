@@ -3,7 +3,7 @@ import fs from 'node:fs'
 
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const COMMIT_RE = /^[0-9a-f]{40}$/
-const REQUIRED_ARTIFACTS = ['ae-executive-scene', 'ae-skin-settings-scene', 'butler']
+const REQUIRED_ARTIFACTS = ['ae-executive-document', 'ae-skin-settings-document', 'butler']
 
 const object = value => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const exact = (value, keys) =>
@@ -83,17 +83,17 @@ export function validateAeGenerationManifest(value) {
     resourceNames.push(resource.name)
   }
   if (new Set(resourceNames).size !== 2) throw new Error('generation-resources')
-  if (!exact(value.smoke, ['executive_scenes', 'executive_contract_sha256', 'skin_settings_nodes'])) {
+  if (!exact(value.smoke, ['executive_documents', 'executive_contract_sha256', 'skin_settings_items'])) {
     throw new Error('generation-smoke-fields')
   }
   if (
-    !Number.isSafeInteger(value.smoke.executive_scenes) ||
-    value.smoke.executive_scenes < 1 ||
-    value.smoke.executive_scenes > 36 ||
+    !Number.isSafeInteger(value.smoke.executive_documents) ||
+    value.smoke.executive_documents < 1 ||
+    value.smoke.executive_documents > 36 ||
     !HASH_RE.test(value.smoke.executive_contract_sha256) ||
-    !Number.isSafeInteger(value.smoke.skin_settings_nodes) ||
-    value.smoke.skin_settings_nodes < 1 ||
-    value.smoke.skin_settings_nodes > 4096
+    !Number.isSafeInteger(value.smoke.skin_settings_items) ||
+    value.smoke.skin_settings_items < 1 ||
+    value.smoke.skin_settings_items > 4096
   ) {
     throw new Error('generation-smoke')
   }

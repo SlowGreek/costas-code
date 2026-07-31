@@ -44,30 +44,23 @@ export interface LucidExecutiveState {
 
 export function lucidExecutiveStateFromBatch(value: unknown, sessionId: string | null): LucidExecutiveState {
   const batch = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-  const scenes = Array.isArray(batch.scenes) ? batch.scenes : []
+  const rows = Array.isArray(batch.rows) ? batch.rows : []
 
-  const lucidRow = scenes.find(row =>
+  const lucidRow = rows.find(row =>
     Boolean(row) && typeof row === 'object' && (row as Record<string, unknown>).tab === 'lucid'
   ) as Record<string, unknown> | undefined
 
-  const scene = lucidRow?.scene && typeof lucidRow.scene === 'object' && !Array.isArray(lucidRow.scene)
-    ? lucidRow.scene as Record<string, unknown>
-    : {}
-
-  const receipt = scene.receipt && typeof scene.receipt === 'object' && !Array.isArray(scene.receipt)
-    ? scene.receipt as Record<string, unknown>
-    : {}
-
-  const generation = Number(batch.generation ?? receipt.generation ?? receipt.revision)
-  const documentHash = String(batch.document_hash ?? receipt.document_hash ?? '')
-  const candidatePosture = batch.lucid_posture ?? receipt.lucid_posture ?? receipt.posture
+  const generation = Number(batch.executive_generation)
+  const documentHash = String(batch.document_hash ?? '')
+  const candidatePosture = batch.lucid_posture
 
   const explicitPosture = ['held', 'read', 'ready'].includes(String(candidatePosture))
     ? candidatePosture as LucidExecutivePosture
     : null
 
   const admittedRead = Number.isSafeInteger(generation) && generation > 0 && HASH_RE.test(documentHash) &&
-    Boolean(lucidRow?.scene) && lucidRow?.state === 'fresh'
+    Boolean(lucidRow?.document) && lucidRow?.freshness === 'fresh' &&
+    ['observed', 'structural'].includes(String(lucidRow?.posture))
 
   const posture = admittedRead ? explicitPosture ?? 'read' : 'held'
 

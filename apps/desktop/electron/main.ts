@@ -30,7 +30,10 @@ import {
 } from 'electron'
 import nodePty from 'node-pty'
 
-import { resolveAeExecutiveBinary, runAeExecutiveProjector } from './ae-executive'
+import {
+  resolveAeExecutiveDocumentBinary,
+  runAeExecutiveDocumentProjector
+} from './ae-executive-document'
 import { resolveAeGenerationRoot } from './ae-generation'
 import { stopBackendChild as stopBackendChildImpl } from './backend-child'
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
@@ -161,8 +164,11 @@ import {
   SESSION_WINDOW_MIN_HEIGHT,
   SESSION_WINDOW_MIN_WIDTH
 } from './session-windows'
-import { buildShellViewportModel, composeShellViewportScene, loadShellViewportSource } from './shell-viewport'
-import { resolveSkinSettingsBinary, runSkinSettingsProjector } from './skin-settings'
+import { buildShellViewportModel, composeShellViewportDocument, loadShellViewportSource } from './shell-viewport'
+import {
+  resolveSkinSettingsDocumentBinary,
+  runSkinSettingsDocumentProjector
+} from './skin-settings'
 import { ensureSpawnHelperExecutable } from './spawn-helper-perms'
 import { createBootstrapCoordinator, sshConfigFingerprint } from './ssh-bootstrap-coordinator'
 import { collectSshConfigHosts, parseSshGOutput } from './ssh-config'
@@ -8742,14 +8748,14 @@ function createWindow() {
   })
 }
 
-ipcMain.handle('hermes:ae-executive:scenes', async () => {
-  const binary = resolveAeExecutiveBinary({ generationRoot: AE_RUNTIME_BIN })
+ipcMain.handle('hermes:ae-executive:documents', async () => {
+  const binary = resolveAeExecutiveDocumentBinary({ generationRoot: AE_RUNTIME_BIN })
 
   if (!binary) {
     throw new Error('ae-executive-projector-unavailable')
   }
 
-  return runAeExecutiveProjector(binary, AE_GENERATION.generationId)
+  return runAeExecutiveDocumentProjector(binary, AE_GENERATION.generationId)
 })
 
 ipcMain.handle('hermes:ae-executive:studio-event', async (_event, request) => {
@@ -8764,12 +8770,12 @@ ipcMain.handle(LUCID_EXECUTIVE_CHANNEL, async (event, request) => {
   const sessionId = `desktop:${desktopInstallationId}:${event.sender.id}`.replace(/[^A-Za-z0-9._:-]/g, '-')
 
   const currentState = async () => {
-    const binary = resolveAeExecutiveBinary({ generationRoot: AE_RUNTIME_BIN })
+    const binary = resolveAeExecutiveDocumentBinary({ generationRoot: AE_RUNTIME_BIN })
 
     if (!binary) {return lucidExecutiveStateFromBatch(null, sessionId)}
 
     return lucidExecutiveStateFromBatch(
-      await runAeExecutiveProjector(binary, AE_GENERATION.generationId),
+      await runAeExecutiveDocumentProjector(binary, AE_GENERATION.generationId),
       sessionId
     )
   }
@@ -8813,12 +8819,12 @@ ipcMain.handle('hermes:ugui-skins:catalog', () => {
   }
 })
 
-ipcMain.handle('hermes:ugui-skins:settings-scene', (_event, request) => {
-  const binary = resolveSkinSettingsBinary(AE_RUNTIME_BIN)
+ipcMain.handle('hermes:ugui-skins:settings-document', (_event, request) => {
+  const binary = resolveSkinSettingsDocumentBinary(AE_RUNTIME_BIN)
 
   if (!binary) {throw new Error('skin-settings-projector-unavailable')}
 
-  return runSkinSettingsProjector(binary, {
+  return runSkinSettingsDocumentProjector(binary, {
     committed_id: String(request?.committed_id || ''),
     preview_id: String(request?.preview_id || '')
   })
@@ -8837,7 +8843,7 @@ ipcMain.handle('hermes:ugui-skins:preference:commit', (_event, request) =>
   })
 )
 
-ipcMain.handle('hermes:shell-viewport:scene', (_event, request) => {
+ipcMain.handle('hermes:shell-viewport:document', (_event, request) => {
   const source = loadShellViewportSource(path.join(AE_RUNTIME_BIN, 'shell-viewport'))
 
   const model = buildShellViewportModel(source, {
@@ -8847,10 +8853,10 @@ ipcMain.handle('hermes:shell-viewport:scene', (_event, request) => {
   })
 
   return {
-    schema: 'ae-shell-viewport-scene/1',
+    schema: 'ae-shell-viewport-document/1',
     authority: 'none',
     model,
-    scene: composeShellViewportScene(model)
+    document: composeShellViewportDocument(model)
   }
 })
 

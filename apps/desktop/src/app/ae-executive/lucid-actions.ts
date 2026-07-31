@@ -1,4 +1,6 @@
-import type { AeExecutiveScene } from './scene'
+import type { UguiDocument, UguiDocumentValue } from '@hermes/shared/ugui-document'
+
+import type { AeExecutiveDocumentBatch, AeExecutiveDocumentRow } from './document'
 
 export const LUCID_ACTION_VERBS = ['show', 'get', 'set', 'morph', 'dispatch', 'steer', 'cancel'] as const
 export type LucidActionVerb = (typeof LUCID_ACTION_VERBS)[number]
@@ -52,28 +54,14 @@ const exactObject = (value: unknown, keys: readonly string[]): value is Record<s
   Boolean(value) && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value as object).length === keys.length && keys.every(key => Object.hasOwn(value as object, key))
 
-export function lucidActionContext(batch: unknown, scene: AeExecutiveScene): LucidActionContext {
-  const row = batch && typeof batch === 'object' && !Array.isArray(batch) ? batch as Record<string, unknown> : {}
-  const receipt = scene.receipt ?? {}
-  const scenes = Array.isArray(row.scenes) ? row.scenes : []
-
-  const lucidRow = scenes.find(candidate =>
-    Boolean(candidate) && typeof candidate === 'object' &&
-    (candidate as Record<string, unknown>).tab === 'lucid'
-  ) as Record<string, unknown> | undefined
-
-  const generation = Number(row.generation ?? receipt.generation ?? receipt.revision)
-  const documentHash = String(row.document_hash ?? receipt.document_hash ?? '')
-  const postureValue = row.lucid_posture ?? receipt.lucid_posture ?? receipt.posture
-
-  const explicitPosture = ['held', 'read', 'ready'].includes(String(postureValue))
-    ? postureValue as LucidActionPosture
-    : null
-
-  const admittedRead = Number.isSafeInteger(generation) && generation > 0 && HASH_RE.test(documentHash) &&
-    lucidRow?.state === 'fresh'
-
-  const posture = admittedRead ? explicitPosture ?? 'read' : 'held'
+export function lucidActionContext(
+  batch: AeExecutiveDocumentBatch,
+  row: AeExecutiveDocumentRow
+): LucidActionContext {
+  const generation = batch.generation ?? 0
+  const documentHash = batch.document_hash ?? ''
+  const admittedRead = generation > 0 && HASH_RE.test(documentHash) && row.state === 'fresh' && Boolean(row.document)
+  const posture: LucidActionPosture = admittedRead ? 'read' : 'held'
 
   return {
     generation: Number.isSafeInteger(generation) && generation > 0 ? generation : 0,
@@ -132,37 +120,34 @@ export function buildLucidActionIntent(
   }
 }
 
-export function applyLucidActionPosture(scene: AeExecutiveScene, context: LucidActionContext): AeExecutiveScene {
-  let changed = false
+export function applyLucidActionPosture(
+  document: UguiDocument,
+  context: LucidActionContext
+): UguiDocument {
+  const mapValue = (value: UguiDocumentValue): UguiDocumentValue => {
+    if (Array.isArray(value)) {return value.map(mapValue)}
+    if (!value || typeof value !== 'object') {return value}
 
-  const nodes = scene.nodes.map(node => {
-    const handlers = Object.values(node.on ?? {})
-    const lucidHandlers = handlers.filter(handler => handler.startsWith('lucid.'))
+    const mapped = Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, Array.isArray(child) ? child.map(mapValue) : child])
+    )
+    const action = typeof mapped.action === 'string' ? mapped.action : ''
 
-    if (!lucidHandlers.length) {return node}
+    if (!action.startsWith('lucid.')) {return mapped}
+    const selected = lucidActionForHandler(action)
+    const enabled = Boolean(selected) && context.generation > 0 && HASH_RE.test(context.documentHash) &&
+      context.posture !== 'held' && (context.posture === 'ready' || READ_VERBS.has(selected!.verb))
 
-    const enabled = lucidHandlers.every(handler => {
-      const selected = lucidActionForHandler(handler)
+    return enabled
+      ? mapped
+      : {
+          ...mapped,
+          disabled: true,
+          disabled_reason: context.posture === 'read' ? 'owner-capability-required' : 'authority-held'
+        }
+  }
 
-      return Boolean(selected) && context.generation > 0 && HASH_RE.test(context.documentHash) &&
-        context.posture !== 'held' && (context.posture === 'ready' || READ_VERBS.has(selected!.verb))
-    })
-
-    if (enabled) {return node}
-    changed = true
-
-    return {
-      ...node,
-      a: {
-        ...(node.a ?? {}),
-        disabled: true,
-        disabled_reason: context.posture === 'read' ? 'owner-capability-required' : 'authority-held'
-      },
-      on: undefined
-    }
-  })
-
-  return changed ? { ...scene, nodes } : scene
+  return mapValue(document) as UguiDocument
 }
 
 export function parseLucidActionReceipt(value: unknown, expectedVerb: LucidActionVerb): LucidActionReceipt | null {

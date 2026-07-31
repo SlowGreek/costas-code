@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { validateAeExecutiveBatch } from '../electron/ae-executive'
+import { validateAeExecutiveDocumentEnvelope } from '../electron/ae-executive-document'
 import { resolveAeGenerationRoot } from '../electron/ae-generation'
+import { validateSkinSettingsDocument } from '../electron/skin-settings'
 
 const MAX_EXECUTIVE_BYTES = 2 * 1024 * 1024
 const MAX_SKIN_SETTINGS_BYTES = 1024 * 1024
@@ -26,57 +27,51 @@ export function smokeAeGeneration(generationOrStoreDir: string) {
     return candidate
   }
 
-  const executiveBytes = execFileSync(binary('ae-executive-scene'), [], {
+  const executiveBytes = execFileSync(binary('ae-executive-document'), [], {
     encoding: 'utf8',
     maxBuffer: MAX_EXECUTIVE_BYTES,
     timeout: 15_000,
     windowsHide: true
   })
 
-  const executive = validateAeExecutiveBatch(JSON.parse(executiveBytes))
+  const executive = validateAeExecutiveDocumentEnvelope(JSON.parse(executiveBytes))
+  const unavailableDocuments = executive.rows.filter(row => !row.document)
 
-  const executiveGeneration = 'executive_generation' in executive
-    ? executive.executive_generation
-    : 'generation' in executive
-      ? executive.generation
-      : 0
-
-  const unavailableScenes = executive.scenes.filter(row => !row.scene)
-
-  if (executiveGeneration > 0 && unavailableScenes.length > 0) {
+  if (executive.executive_generation > 0 && unavailableDocuments.length > 0) {
     throw new Error(
-      `ae-generation-executive-scenes-unavailable:${unavailableScenes.map(row => row.tab).join(',')}`
+      `ae-generation-executive-documents-unavailable:${unavailableDocuments.map(row => row.tab).join(',')}`
     )
   }
 
   const executiveContract = {
     schema: executive.schema,
     authority: executive.authority,
-    ...('projector' in executive ? { projector: executive.projector } : {}),
-    scenes: executive.scenes.map(row => {
-      if (!row.scene) {
-        return { tab: row.tab, state: 'state' in row ? row.state : 'unavailable', reason: 'reason' in row ? row.reason : undefined }
+    rows: executive.rows.map(row => {
+      if (!row.document) {
+        return { tab: row.tab, freshness: row.freshness, posture: row.posture, code: row.code }
       }
 
-      const nodes = row.scene.nodes as Array<Record<string, unknown>>
-
-      const tabButtons = nodes.filter(node => {
-        const tap = (node.on as Record<string, unknown> | undefined)?.tap
-
-        return node.p === 'button' && typeof tap === 'string' && tap.startsWith('shell.tab.')
-      })
+      const shellActions = row.document.actions
+        .filter(action => action && typeof action === 'object' && !Array.isArray(action))
+        .map(action => action as Record<string, unknown>)
+        .filter(action => typeof action.action === 'string' && action.action.startsWith('shell.tab.'))
 
       return {
         tab: row.tab,
-        scene_version: row.scene.sceneVersion,
-        primitives: [...new Set(nodes.map(node => String(node.p)))].sort(),
-        shell_actions: tabButtons.map(node => (node.on as Record<string, string>).tap),
-        shell_labels: tabButtons.map(node => String((node.a as Record<string, unknown> | undefined)?.label || ''))
+        document_type: row.document.type,
+        regions: ['header', 'sections', 'actions'],
+        item_types: [...new Set(
+          [...row.document.header, ...row.document.sections, ...row.document.actions]
+            .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+            .map(item => String((item as Record<string, unknown>).type || 'value'))
+        )].sort(),
+        shell_actions: shellActions.map(action => action.action),
+        shell_labels: shellActions.map(action => String(action.label || ''))
       }
     })
   }
 
-  const skinBytes = execFileSync(binary('ae-skin-settings-scene'), [], {
+  const skinBytes = execFileSync(binary('ae-skin-settings-document'), [], {
     encoding: 'utf8',
     input: JSON.stringify({
       schema: 'ae-skin-settings-request/1',
@@ -88,24 +83,19 @@ export function smokeAeGeneration(generationOrStoreDir: string) {
     windowsHide: true
   })
 
-  const skin: unknown = JSON.parse(skinBytes)
+  const skin = validateSkinSettingsDocument(JSON.parse(skinBytes))
+  const countItems = (value: unknown): number => Array.isArray(value)
+    ? value.length + value.reduce((total, item) => total + countItems(item), 0)
+    : value && typeof value === 'object'
+      ? Object.values(value).reduce((total, item) => total + countItems(item), 0)
+      : 0
+  const skinSettingsItems = countItems([
+    ...skin.document.header,
+    ...skin.document.sections,
+    ...skin.document.actions
+  ])
 
-  if (!skin || typeof skin !== 'object' || Array.isArray(skin)) {throw new Error('ae-generation-skin-response')}
-  const response = skin as Record<string, unknown>
-
-  if (
-    response.schema !== 'ae-skin-settings-scene/1' ||
-    response.authority !== 'none' ||
-    !response.scene ||
-    typeof response.scene !== 'object' ||
-    !Array.isArray((response.scene as Record<string, unknown>).nodes)
-  ) {
-    throw new Error('ae-generation-skin-response')
-  }
-
-  const skinSettingsNodes = ((response.scene as Record<string, unknown>).nodes as unknown[]).length
-
-  if (skinSettingsNodes < 1 || skinSettingsNodes > 4096) {throw new Error('ae-generation-skin-nodes')}
+  if (skinSettingsItems < 1 || skinSettingsItems > 4096) {throw new Error('ae-generation-skin-items')}
 
   execFileSync(binary('butler'), ['--version'], {
     encoding: 'utf8',
@@ -115,9 +105,9 @@ export function smokeAeGeneration(generationOrStoreDir: string) {
   })
 
   return {
-    executive_scenes: executive.scenes.length,
+    executive_documents: executive.rows.length,
     executive_contract_sha256: sha256(JSON.stringify(executiveContract)),
-    skin_settings_nodes: skinSettingsNodes
+    skin_settings_items: skinSettingsItems
   }
 }
 

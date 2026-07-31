@@ -7,10 +7,10 @@ const CURRENT_SCHEMA = 'costas-ae-current/1'
 const MANIFEST_SCHEMA = 'costas-ae-generation/1'
 
 const TOP_LEVEL = new Set([
-  'ae-executive-scene',
-  'ae-executive-scene.exe',
-  'ae-skin-settings-scene',
-  'ae-skin-settings-scene.exe',
+  'ae-executive-document',
+  'ae-executive-document.exe',
+  'ae-skin-settings-document',
+  'ae-skin-settings-document.exe',
   'butler',
   'butler.exe',
   'generation.json',

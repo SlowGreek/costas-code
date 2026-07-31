@@ -5,7 +5,6 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  studioDesignerContext,
   submitStudioDesignerEvent,
   validateStudioDesignerEvent,
   validateStudioDesignerReceipt
@@ -24,13 +23,12 @@ function root() {
 
 function event(action = 'studio.element.select') {
   return {
-    schema: 'ugui-scene-event/1',
-    scene_id: 'studio-scene',
-    revision: 7,
-    node_id: 'calculator-equals',
+    schema: 'ugui-document-event/1',
+    document_id: 'studio-document',
+    item_id: 'calculator-equals',
     gesture: 'tap',
     action,
-    payload: { node_id: 'calculator-equals' }
+    payload: null
   }
 }
 
@@ -64,44 +62,40 @@ describe('Studio designer resident-owner mailbox', () => {
     fs.writeFileSync(
       path.join(stateRoot, 'studio-actions/receipts', `${operationId}.json`),
       JSON.stringify({
-        schema: 'ae-studio-designer-action-receipt/1',
+        schema: 'ae-studio-designer-action-receipt/2',
         operation_id: operationId,
         status: 'accepted',
         code: 'studio-action-accepted',
         revision: 4,
         document_hash: hash('a'),
         runtime_hash: hash('b'),
-        selected_node_id: 'calculator-equals'
+        selected_item_id: 'calculator-equals'
       })
     )
     const receipt = await result
 
     expect(receipt.status).toBe('accepted')
-    expect(receipt.selected_node_id).toBe('calculator-equals')
+    expect(receipt.selected_item_id).toBe('calculator-equals')
     expect(fs.existsSync(path.join(stateRoot, 'studio-actions/receipts', `${operationId}.json`))).toBe(false)
   })
 
   it('refuses unknown actions, malformed contexts, and mismatched receipts', () => {
     expect(() => validateStudioDesignerEvent(event('shell.exec'))).toThrow('studio-event-admission')
     expect(() => validateStudioDesignerReceipt({
-      schema: 'ae-studio-designer-action-receipt/1',
+      schema: 'ae-studio-designer-action-receipt/2',
       operation_id: 'wrong',
       status: 'accepted',
       code: 'ok',
       revision: 1,
       document_hash: hash('a'),
       runtime_hash: hash('b'),
-      selected_node_id: null
+      selected_item_id: null
     }, 'expected')).toThrow('studio-receipt-admission')
   })
 
-  it('reads exact revision/hash only from Studio editor receipt', () => {
-    expect(studioDesignerContext({
-      receipt: { editor: { revision: 3, document_hash: hash('c') } }
-    })).toEqual({ revision: 3, documentHash: hash('c') })
-    expect(studioDesignerContext({
-      receipt: { editor: { revision: -1, document_hash: hash('c') } }
-    })).toBeNull()
-    expect(studioDesignerContext({ receipt: {} })).toBeNull()
+  it('rejects the retired Scene event protocol', () => {
+    expect(() => validateStudioDesignerEvent({
+      ...event(), schema: 'ugui-scene-event/1'
+    })).toThrow('studio-event-admission')
   })
 })

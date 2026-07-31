@@ -130,8 +130,8 @@ describe('AE generation manifest admission', () => {
         status_sha256: `sha256:${'5'.repeat(64)}`
       },
       artifacts: [
-        { name: 'ae-executive-scene', sha256: `sha256:${'d'.repeat(64)}`, bytes: 1 },
-        { name: 'ae-skin-settings-scene', sha256: `sha256:${'e'.repeat(64)}`, bytes: 1 },
+        { name: 'ae-executive-document', sha256: `sha256:${'d'.repeat(64)}`, bytes: 1 },
+        { name: 'ae-skin-settings-document', sha256: `sha256:${'e'.repeat(64)}`, bytes: 1 },
         { name: 'butler', sha256: `sha256:${'f'.repeat(64)}`, bytes: 1 }
       ],
       resources: [
@@ -139,9 +139,9 @@ describe('AE generation manifest admission', () => {
         { name: 'skins', sha256: `sha256:${'3'.repeat(64)}`, files: 25, bytes: 25 }
       ],
       smoke: {
-        executive_scenes: 10,
+        executive_documents: 13,
         executive_contract_sha256: `sha256:${'1'.repeat(64)}`,
-        skin_settings_nodes: 78
+        skin_settings_items: 78
       }
     }
     value.generation_id = computeAeGenerationId(value)

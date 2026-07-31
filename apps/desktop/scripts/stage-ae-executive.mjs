@@ -44,12 +44,16 @@ const AE_SOURCE_PATHS = [
   'Cargo.toml',
   'Cargo.lock',
   'run',
+  ':(exclude)run/BUTLER-PACKAGE-LOCK.json',
   'ugui',
   'butler',
+  'envelope/LUCID.json',
+  'envelope/MCP.json',
   'quine/src',
   'quine/Cargo.toml',
   'quine/Cargo.lock',
   'quine/canon',
+  'quine/mcp/onboarding/index.json',
   'store',
   'marketplace'
 ]
@@ -63,12 +67,12 @@ const COSTAS_SOURCE_PATHS = [
 const artifacts = [
   {
     manifest: path.join(aeRoot, 'run', 'Cargo.toml'),
-    bin: 'ae-skin-settings-scene',
+    bin: 'ae-skin-settings-document',
     target: 'run'
   },
   {
     manifest: path.join(aeRoot, 'run', 'Cargo.toml'),
-    bin: 'ae-executive-scene',
+    bin: 'ae-executive-document',
     target: 'run'
   },
   {
@@ -200,8 +204,8 @@ function validateCandidate(directory) {
   }
   const smoke = smokeCandidate(directory)
   if (
-    smoke.executive_scenes !== manifest.smoke.executive_scenes ||
-    smoke.skin_settings_nodes !== manifest.smoke.skin_settings_nodes
+    smoke.executive_documents !== manifest.smoke.executive_documents ||
+    smoke.skin_settings_items !== manifest.smoke.skin_settings_items
   ) {
     throw new Error('[stage-ae-executive] smoke read-back mismatch')
   }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createLucidExecutiveHandler,
+  lucidExecutiveStateFromBatch,
   type LucidExecutiveIntent,
   type LucidExecutiveState,
   type LucidVerb,
@@ -62,6 +63,30 @@ function bridgeResult(verb: LucidVerb, options: { refusal?: string; ran?: boolea
     }
   }
 }
+
+describe('LUCID executive Document state', () => {
+  it('admits only a fresh observed lucid Document row', () => {
+    const envelope = {
+      executive_generation: 7,
+      document_hash: HASH,
+      rows: [{
+        tab: 'lucid',
+        freshness: 'fresh',
+        posture: 'observed',
+        document: { id: 'lucid', type: 'document', header: [], sections: [], actions: [] }
+      }]
+    }
+
+    expect(lucidExecutiveStateFromBatch(envelope, 'desktop:window-1')).toEqual({
+      generation: 7,
+      documentHash: HASH,
+      posture: 'read',
+      sessionId: 'desktop:window-1'
+    })
+    envelope.rows[0].document = null as never
+    expect(lucidExecutiveStateFromBatch(envelope, null).posture).toBe('held')
+  })
+})
 
 describe('LUCID executive closed intent ingress', () => {
   it.each(Object.keys(payloads) as LucidVerb[])('admits and calls only the canonical %s tool', async verb => {

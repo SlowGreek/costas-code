@@ -32,27 +32,26 @@ const catalog = parseRenderProfileCatalog({
   profiles
 }) as RenderProfileCatalog
 
-const scene = (committed: string, preview: string) => ({
-  schema: 'ae-skin-settings-scene/1',
+const document = (committed: string, preview: string) => ({
+  schema: 'ae-skin-settings-document/1',
   authority: 'none',
   projector: 'ugui::theme::CATALOG->nested-card->ugui::project_checked',
-  scene: {
-    sceneVersion: '1.0.0',
+  document: {
     id: 'skin-settings',
-    root: 'root',
-    nodes: [
-      { id: 'root', p: 'column', kids: ['status', 'windows', 'apply', 'revert'] },
-      { id: 'status', p: 'text', a: { text: `Committed ${committed} · Preview ${preview}` } },
-      { id: 'windows', p: 'button', a: { label: 'Windows 95' }, on: { tap: 'skin.preview.windows-95' } },
-      { id: 'apply', p: 'button', a: { label: 'Apply' }, on: { tap: 'skin.apply' } },
-      { id: 'revert', p: 'button', a: { label: 'Revert' }, on: { tap: 'skin.revert' } }
+    type: 'document',
+    header: [{ id: 'status', type: 'text', body: `Committed ${committed} · Preview ${preview}` }],
+    sections: [],
+    actions: [
+      { id: 'windows', type: 'button', label: 'Windows 95', action: 'skin.preview.windows-95' },
+      { id: 'apply', type: 'button', label: 'Apply', action: 'skin.apply' },
+      { id: 'revert', type: 'button', label: 'Revert', action: 'skin.revert' }
     ]
   }
 })
 
 const get = vi.fn()
 const commit = vi.fn()
-const getScene = vi.fn()
+const getDocument = vi.fn()
 
 beforeEach(() => {
   get.mockReset().mockResolvedValue({
@@ -69,26 +68,26 @@ beforeEach(() => {
     receipt_sha256: `sha256:${'c'.repeat(64)}`,
     idempotent: false
   })
-  getScene.mockReset().mockImplementation(async ({ committed_id, preview_id }) => scene(committed_id, preview_id))
+  getDocument.mockReset().mockImplementation(async ({ committed_id, preview_id }) => document(committed_id, preview_id))
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
     value: {
       getUguiSkinCatalog: vi.fn(async () => catalog),
-      getUguiSkinSettingsScene: getScene,
+      getUguiSkinSettingsDocument: getDocument,
       renderProfilePreference: { get, commit }
     }
   })
 })
 
 describe('UGUI cog skin settings', () => {
-  it('previews and commits only through projected Scene actions', async () => {
+  it('previews and commits only through semantic Document actions', async () => {
     render(<UguiSkinSettings />)
     const windows = await screen.findByRole('button', { name: 'Windows 95' })
     fireEvent.click(windows)
 
     await waitFor(() => expect(globalThis.document.documentElement.dataset.uguiSkin).toBe('windows-95'))
     expect(commit).not.toHaveBeenCalled()
-    expect(getScene).toHaveBeenLastCalledWith({ committed_id: 'glassmorphism', preview_id: 'windows-95' })
+    expect(getDocument).toHaveBeenLastCalledWith({ committed_id: 'glassmorphism', preview_id: 'windows-95' })
 
     get.mockResolvedValueOnce({
       schema: 'hermes-render-profile-preference/1',

@@ -44,7 +44,7 @@ function fixture() {
   fs.writeFileSync(path.join(generation, 'skins', 'one.json'), '{}')
   fs.writeFileSync(path.join(generation, 'shell-viewport', 'one.json'), '{}')
 
-  const artifacts = ['ae-executive-scene', 'ae-skin-settings-scene', 'butler'].map((name, index) => {
+  const artifacts = ['ae-executive-document', 'ae-skin-settings-document', 'butler'].map((name, index) => {
     const content = `binary-${index}`
     fs.writeFileSync(path.join(generation, name), content)
 
@@ -61,7 +61,7 @@ function fixture() {
       { name: 'shell-viewport', ...directoryReceipt(path.join(generation, 'shell-viewport')) },
       { name: 'skins', ...directoryReceipt(path.join(generation, 'skins')) }
     ],
-    smoke: { executive_scenes: 10, executive_contract_sha256: `sha256:${'d'.repeat(64)}`, skin_settings_nodes: 78 }
+    smoke: { executive_documents: 13, executive_contract_sha256: `sha256:${'d'.repeat(64)}`, skin_settings_items: 78 }
   }
 
   const payload = {

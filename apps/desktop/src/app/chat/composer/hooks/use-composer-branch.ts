@@ -18,7 +18,7 @@ interface UseComposerBranchOptions {
  * projects store) is the only dependency; nothing about ChatBar's render.
  */
 export function useComposerBranch({ clearDraft, cwd, draftRef }: UseComposerBranchOptions) {
-  const scope = useComposerScope()
+  const { attachments } = useComposerScope()
 
   // Hand a worktree off to the controller: open a fresh session anchored there,
   // carrying the composer draft as its first turn. Clearing here means the draft
@@ -27,10 +27,10 @@ export function useComposerBranch({ clearDraft, cwd, draftRef }: UseComposerBran
     (path: string) => {
       const text = draftRef.current
       clearDraft()
-      scope.attachments.clear()
+      attachments.clear()
       requestStartWorkSession(path, text)
     },
-    [clearDraft, draftRef]
+    [attachments, clearDraft, draftRef]
   )
 
   // Branch off into a NEW worktree (base = branch name, or current HEAD). A

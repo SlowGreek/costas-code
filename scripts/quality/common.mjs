@@ -171,3 +171,13 @@ export function normalizeDiagnostic(value) {
     .replace(/\r\n?/g, '\n')
     .trim()
 }
+
+export function boundedDiagnostic(value, maximumBytes = 512) {
+  let normalized = normalizeDiagnostic(value)
+
+  while (Buffer.byteLength(normalized, 'utf8') > maximumBytes) {
+    normalized = normalized.slice(0, -1)
+  }
+
+  return normalized
+}

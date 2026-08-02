@@ -126,15 +126,18 @@ export function applyLucidActionPosture(
 ): UguiDocument {
   const mapValue = (value: UguiDocumentValue): UguiDocumentValue => {
     if (Array.isArray(value)) {return value.map(mapValue)}
+
     if (!value || typeof value !== 'object') {return value}
 
     const mapped = Object.fromEntries(
       Object.entries(value).map(([key, child]) => [key, Array.isArray(child) ? child.map(mapValue) : child])
     )
+
     const action = typeof mapped.action === 'string' ? mapped.action : ''
 
     if (!action.startsWith('lucid.')) {return mapped}
     const selected = lucidActionForHandler(action)
+
     const enabled = Boolean(selected) && context.generation > 0 && HASH_RE.test(context.documentHash) &&
       context.posture !== 'held' && (context.posture === 'ready' || READ_VERBS.has(selected!.verb))
 

@@ -1,11 +1,11 @@
-import { type CSSProperties, type ReactNode, useMemo, useState } from 'react'
-
 import {
   type UguiDocument,
   type UguiDocumentItem,
   type UguiDocumentValue,
   validateUguiDocument
 } from '@hermes/shared/ugui-document'
+import { type CSSProperties, type ReactNode, useMemo, useState } from 'react'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
@@ -52,6 +52,7 @@ const itemStyle = (item: UguiDocumentItem): CSSProperties | undefined => {
 
 const displayValue = (value: unknown): string => {
   if (value === null || value === undefined) {return 'UNAVAILABLE'}
+
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value)
   }
@@ -154,6 +155,7 @@ export function UguiDocumentPainter({ document, onAction, onEvent }: UguiDocumen
             onChange={event => {
               const next = event.target.value
               setInputs(state => ({ ...state, [id]: next }))
+
               if (action) {emit(value, path, 'change', action, { value: next })}
             }}
             onKeyDown={event => {
@@ -178,6 +180,7 @@ export function UguiDocumentPainter({ document, onAction, onEvent }: UguiDocumen
             onChange={event => {
               const next = event.target.value
               setInputs(state => ({ ...state, [id]: next }))
+
               if (action) {emit(value, path, 'change', action, { value: next })}
             }}
             value={current}
@@ -208,6 +211,7 @@ export function UguiDocumentPainter({ document, onAction, onEvent }: UguiDocumen
             onChange={event => {
               const next = event.target.value
               setInputs(state => ({ ...state, [id]: next }))
+
               if (action) {emit(value, path, 'change', action, { value: next })}
             }}
             step={number(value, 'step', 1)}
@@ -298,6 +302,7 @@ export function UguiDocumentPainter({ document, onAction, onEvent }: UguiDocumen
     }
 
     const childFields = Object.entries(value).filter(([, child]) => Array.isArray(child))
+
     const scalarFields = Object.entries(value).filter(([field, child]) =>
       !['id', 'type', 'width', 'action'].includes(field) && !Array.isArray(child) && child !== null && typeof child !== 'object'
     )

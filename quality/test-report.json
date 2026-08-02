@@ -3,23 +3,23 @@
   "status": "GREEN",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2993,
+    "passed": 2981,
     "failed": 0,
     "skipped": 3,
     "todo": 0,
     "filtered_out": 3,
-    "total": 2996
+    "total": 2984
   },
   "suites": [
     {
-      "id": "apps/desktop/electron/ae-executive.test.ts",
-      "name": "apps/desktop/electron/ae-executive.test.ts",
-      "passed": 15,
+      "id": "apps/desktop/electron/ae-executive-document.test.ts",
+      "name": "apps/desktop/electron/ae-executive-document.test.ts",
+      "passed": 3,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 15,
+      "total": 3,
       "failures": []
     },
     {
@@ -331,6 +331,17 @@
       "failures": []
     },
     {
+      "id": "apps/desktop/electron/lifecycle-readiness.test.ts",
+      "name": "apps/desktop/electron/lifecycle-readiness.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 2,
+      "failures": []
+    },
+    {
       "id": "apps/desktop/electron/link-title-window.test.ts",
       "name": "apps/desktop/electron/link-title-window.test.ts",
       "passed": 9,
@@ -344,12 +355,12 @@
     {
       "id": "apps/desktop/electron/lucid-executive.test.ts",
       "name": "apps/desktop/electron/lucid-executive.test.ts",
-      "passed": 15,
+      "passed": 16,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 15,
+      "total": 16,
       "failures": []
     },
     {
@@ -507,6 +518,17 @@
       "failures": []
     },
     {
+      "id": "apps/desktop/electron/source-update.test.ts",
+      "name": "apps/desktop/electron/source-update.test.ts",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 3,
+      "failures": []
+    },
+    {
       "id": "apps/desktop/electron/spawn-helper-perms.test.ts",
       "name": "apps/desktop/electron/spawn-helper-perms.test.ts",
       "passed": 6,
@@ -581,6 +603,17 @@
       "todo": 0,
       "filtered_out": 0,
       "total": 8,
+      "failures": []
+    },
+    {
+      "id": "apps/desktop/electron/ugui-document.test.ts",
+      "name": "apps/desktop/electron/ugui-document.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 2,
       "failures": []
     },
     {
@@ -837,6 +870,17 @@
       "failures": []
     },
     {
+      "id": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
+      "name": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 7,
+      "failures": []
+    },
+    {
       "id": "apps/desktop/scripts/stage-native-deps.test.mjs",
       "name": "apps/desktop/scripts/stage-native-deps.test.mjs",
       "passed": 16,
@@ -859,14 +903,36 @@
       "failures": []
     },
     {
-      "id": "apps/desktop/src/app/ae-executive/index.test.tsx",
-      "name": "apps/desktop/src/app/ae-executive/index.test.tsx",
-      "passed": 29,
+      "id": "apps/desktop/src/app/ae-executive/document-painter.test.tsx",
+      "name": "apps/desktop/src/app/ae-executive/document-painter.test.tsx",
+      "passed": 2,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 29,
+      "total": 2,
+      "failures": []
+    },
+    {
+      "id": "apps/desktop/src/app/ae-executive/document.test.ts",
+      "name": "apps/desktop/src/app/ae-executive/document.test.ts",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 4,
+      "failures": []
+    },
+    {
+      "id": "apps/desktop/src/app/ae-executive/index.test.tsx",
+      "name": "apps/desktop/src/app/ae-executive/index.test.tsx",
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 19,
       "failures": []
     },
     {
@@ -878,39 +944,6 @@
       "todo": 0,
       "filtered_out": 0,
       "total": 12,
-      "failures": []
-    },
-    {
-      "id": "apps/desktop/src/app/ae-executive/scene-painter.test.tsx",
-      "name": "apps/desktop/src/app/ae-executive/scene-painter.test.tsx",
-      "passed": 4,
-      "failed": 0,
-      "skipped": 0,
-      "todo": 0,
-      "filtered_out": 0,
-      "total": 4,
-      "failures": []
-    },
-    {
-      "id": "apps/desktop/src/app/ae-executive/scene.test.ts",
-      "name": "apps/desktop/src/app/ae-executive/scene.test.ts",
-      "passed": 13,
-      "failed": 0,
-      "skipped": 0,
-      "todo": 0,
-      "filtered_out": 0,
-      "total": 13,
-      "failures": []
-    },
-    {
-      "id": "apps/desktop/src/app/ae-executive/shell-viewport.test.tsx",
-      "name": "apps/desktop/src/app/ae-executive/shell-viewport.test.tsx",
-      "passed": 1,
-      "failed": 0,
-      "skipped": 0,
-      "todo": 0,
-      "filtered_out": 0,
-      "total": 1,
       "failures": []
     },
     {
@@ -1466,12 +1499,12 @@
     {
       "id": "apps/desktop/src/app/routes-ae-executive.test.ts",
       "name": "apps/desktop/src/app/routes-ae-executive.test.ts",
-      "passed": 12,
+      "passed": 13,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 12,
+      "total": 13,
       "failures": []
     },
     {
@@ -2088,6 +2121,17 @@
       "todo": 0,
       "filtered_out": 0,
       "total": 1,
+      "failures": []
+    },
+    {
+      "id": "apps/desktop/src/app/updates-overlay.test.tsx",
+      "name": "apps/desktop/src/app/updates-overlay.test.tsx",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 2,
       "failures": []
     },
     {
@@ -3160,12 +3204,12 @@
     {
       "id": "apps/desktop/src/lib/voice/dev-control.test.ts",
       "name": "apps/desktop/src/lib/voice/dev-control.test.ts",
-      "passed": 20,
+      "passed": 21,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 20,
+      "total": 21,
       "failures": []
     },
     {
@@ -3589,12 +3633,12 @@
     {
       "id": "apps/desktop/src/store/updates.test.ts",
       "name": "apps/desktop/src/store/updates.test.ts",
-      "passed": 25,
+      "passed": 28,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 25,
+      "total": 28,
       "failures": []
     },
     {
@@ -3710,9 +3754,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:16cd9af945a1fc1239577249c6c2953beb18e5fc51e2211d76473ec5220d6381",
-      "files": 1183,
-      "bytes": 9530030
+      "sha256": "sha256:5c34ccf52df821fb85eba7ff46c57155a50ecf4e2675431537e3e376904394a1",
+      "files": 1191,
+      "bytes": 9519733
     },
     "tools": {
       "node": "26.5.0",

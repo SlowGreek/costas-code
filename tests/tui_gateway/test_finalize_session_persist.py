@@ -300,8 +300,8 @@ class TestFinalizeSessionPersistE2E:
         session_id = "sess-resume-run"
         db.create_session(session_id=session_id, source="tui")
         loaded = [
-            {"role": "user", "content": "remember: my cat is Mochi"},
-            {"role": "assistant", "content": "Noted — Mochi."},
+            {"role": "user", "content": "remember: my cat is Nova"},
+            {"role": "assistant", "content": "Noted — Nova."},
         ]
         for m in loaded:
             db.append_message(session_id=session_id, role=m["role"], content=m["content"])
@@ -311,7 +311,7 @@ class TestFinalizeSessionPersistE2E:
         # conversation_history) + the new turn.
         new_turn = [
             {"role": "user", "content": "what's the cat's name?"},
-            {"role": "assistant", "content": "Mochi."},
+            {"role": "assistant", "content": "Nova."},
         ]
         messages = list(loaded) + new_turn
         agent = self._real_agent(db, session_id, messages)

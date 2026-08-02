@@ -1,11 +1,11 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 import type { UguiDocument } from '@hermes/shared/ugui-document'
 
+import type { UguiDocumentEvent } from './app/ae-executive/document-painter'
 import type {
   LucidActionIntent,
   LucidActionResult
 } from './app/ae-executive/lucid-actions'
-import type { UguiDocumentEvent } from './app/ae-executive/document-painter'
 import type {
   HermesClipboardLensSnapshot,
   HermesClipboardLensTextResult
@@ -309,6 +309,8 @@ declare global {
         getBranch: () => Promise<{ branch: string }>
         setBranch: (name: string) => Promise<{ branch: string }>
         onProgress: (callback: (payload: DesktopUpdateProgress) => void) => () => void
+        onSourceReady?: (callback: (payload: DesktopSourceUpdateReady) => void) => () => void
+        restartSource?: () => Promise<{ ok: boolean; error?: string }>
       }
       uninstall: {
         summary: () => Promise<DesktopUninstallSummary>
@@ -476,6 +478,13 @@ export interface DesktopUpdateProgress {
   percent: number | null
   error: string | null
   at: number
+}
+
+export interface DesktopSourceUpdateReady {
+  schema: 'catalyst-source-update-ready/1'
+  sourceRevision: string
+  aeGeneration: string
+  requiresRestart: true
 }
 
 export interface HermesConnection {

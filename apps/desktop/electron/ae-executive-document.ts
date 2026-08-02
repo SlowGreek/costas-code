@@ -26,6 +26,7 @@ const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const ARTIFACT_GENERATION_RE = /^sha256:[0-9a-f]{64}$/
 const FRESHNESS = new Set(['fresh', 'degraded', 'stale', 'unavailable'])
 const POSTURES = new Set(['observed', 'missing', 'fixture', 'held', 'structural', 'unavailable'])
+
 const ENVELOPE_FIELDS = [
   'schema',
   'authority',
@@ -39,6 +40,7 @@ const ENVELOPE_FIELDS = [
   'blocker',
   'rows'
 ]
+
 const ROW_FIELDS = [
   'schema',
   'tab',

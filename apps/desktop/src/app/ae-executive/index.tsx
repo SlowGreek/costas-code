@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 
 import { aeExecutiveTab, isAeExecutiveTabId } from './contract'
+import {
+  type AeExecutiveDocumentBatch,
+  loadExecutiveDocuments,
+  reconcileExecutiveDocuments,
+  studioDesignerContext
+} from './document'
+import { type UguiDocumentEvent, UguiDocumentPainter } from './document-painter'
 import {
   applyLucidActionPosture,
   createLucidActionCoordinator,
@@ -11,15 +19,35 @@ import {
   type LucidActionContext,
   lucidActionForHandler
 } from './lucid-actions'
-import {
-  type AeExecutiveDocumentBatch,
-  loadExecutiveDocuments,
-  reconcileExecutiveDocuments,
-  studioDesignerContext
-} from './document'
-import { UguiDocumentPainter, type UguiDocumentEvent } from './document-painter'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
+
+function DocumentUnavailable({ reason, tone }: { reason: string; tone: 'destructive' | 'warning' }) {
+  const diagnostic = `UGUI Document unavailable · ${reason}`
+
+  return (
+    <section
+      className={cn(
+        'relative rounded-xl border p-5 pr-14 font-mono text-sm',
+        tone === 'destructive'
+          ? 'border-destructive/50 bg-destructive/5 text-destructive'
+          : 'border-amber-500/50 bg-amber-500/5 text-amber-700'
+      )}
+      data-selectable-text="true"
+    >
+      <span className="break-words">{diagnostic}</span>
+      <CopyButton
+        appearance="icon"
+        buttonSize="icon-sm"
+        className="absolute right-3 top-3 text-current hover:bg-current/10 hover:text-current"
+        iconClassName="size-4"
+        label="Copy error"
+        side="left"
+        text={diagnostic}
+      />
+    </section>
+  )
+}
 
 export function AeExecutiveWorkspace() {
   const navigate = useNavigate()
@@ -226,13 +254,9 @@ export function AeExecutiveWorkspace() {
               </div>
             </div>
           ) : error ? (
-            <section className="rounded-xl border border-destructive/50 bg-destructive/5 p-5 font-mono text-sm text-destructive">
-              UGUI Document unavailable · {error}
-            </section>
+            <DocumentUnavailable reason={error} tone="destructive" />
           ) : selectedRow ? (
-            <section className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-5 font-mono text-sm text-amber-700">
-              UGUI Document unavailable · {selectedRow.code ?? selectedRow.state}
-            </section>
+            <DocumentUnavailable reason={selectedRow.code ?? selectedRow.state} tone="warning" />
           ) : (
             <section className="rounded-xl border border-(--ui-stroke-tertiary) p-5 font-mono text-sm text-(--ui-text-tertiary)">
               Projecting through RUN + Rust UGUI…

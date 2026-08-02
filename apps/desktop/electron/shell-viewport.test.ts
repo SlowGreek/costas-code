@@ -117,6 +117,7 @@ describe('UGUI SHELL viewport model', () => {
     })
 
     const document = composeShellViewportDocument(model)
+
     const actions = document.actions
       .map(item => typeof item === 'object' && item && !Array.isArray(item) ? item.action : null)
       .filter((action): action is string => typeof action === 'string')

@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createLucidExecutiveHandler,
-  lucidExecutiveStateFromBatch,
   type LucidExecutiveIntent,
   type LucidExecutiveState,
+  lucidExecutiveStateFromBatch,
   type LucidVerb,
   parseLucidExecutiveIntent,
   parseLucidReceipt

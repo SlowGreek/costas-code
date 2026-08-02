@@ -200,7 +200,7 @@ def _wire_notifications(text: str = "synthetic final") -> list[dict[str, Any]]:
 
 
 def _normalize_notifications(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize only facts observed through Costas filters/projectors."""
+    """Normalize only facts observed through Catalyst filters/projectors."""
     projector = CodexEventProjector()
     events: list[dict[str, Any]] = []
     for note in notes:

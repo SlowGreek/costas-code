@@ -21,7 +21,10 @@ const electronNative: TestProjectConfiguration = {
   test: {
     name: 'electron',
     environment: 'node',
-    include: ['electron/**/*.test.ts', 'scripts/**.test.{ts,mjs}']
+    include: ['electron/**/*.test.ts', 'scripts/**.test.{ts,mjs}'],
+    // Git, SSH, and child-process fixtures can exceed the 5s default when the
+    // full UI and Electron projects run concurrently under load.
+    testTimeout: 15_000
   }
 }
 

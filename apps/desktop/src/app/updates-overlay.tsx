@@ -24,6 +24,7 @@ import {
   $backendUpdateApply,
   $backendUpdateChecking,
   $backendUpdateStatus,
+  $sourceUpdate,
   $updateApply,
   $updateChecking,
   $updateOverlayOpen,
@@ -33,7 +34,9 @@ import {
   applyUpdates,
   checkBackendUpdates,
   checkUpdates,
+  dismissSourceUpdate,
   resetUpdateApplyState,
+  restartSourceUpdate,
   setUpdateOverlayOpen,
   type UpdateApplyState
 } from '@/store/updates'
@@ -52,6 +55,7 @@ export function UpdatesOverlay() {
   const backendStatus = useStore($backendUpdateStatus)
   const backendChecking = useStore($backendUpdateChecking)
   const backendApply = useStore($backendUpdateApply)
+  const sourceUpdate = useStore($sourceUpdate)
 
   const isBackend = target === 'backend'
   const status = isBackend ? backendStatus : clientStatus
@@ -61,27 +65,35 @@ export function UpdatesOverlay() {
   const install = isBackend ? applyBackendUpdate : applyUpdates
 
   useEffect(() => {
-    if (open && !status && !checking) {
+    if (open && !sourceUpdate && !status && !checking) {
       void check()
     }
-  }, [check, checking, open, status])
+  }, [check, checking, open, sourceUpdate, status])
 
   const behind = status?.behind ?? 0
   const updateAvailable = status?.updateAvailable || behind > 0
 
-  const phase: 'idle' | 'applying' | 'manual' | 'guiSkew' | 'error' =
-    apply.stage === 'manual'
+  const phase: 'idle' | 'applying' | 'manual' | 'guiSkew' | 'sourceReady' | 'error' =
+    apply.applying || apply.stage === 'restart'
+      ? 'applying'
+      : sourceUpdate
+        ? 'sourceReady'
+        : apply.stage === 'manual'
       ? 'manual'
       : apply.stage === 'guiSkew'
         ? 'guiSkew'
-        : apply.applying || apply.stage === 'restart'
-          ? 'applying'
-          : apply.stage === 'error'
-            ? 'error'
-            : 'idle'
+        : apply.stage === 'error'
+          ? 'error'
+          : 'idle'
 
   const handleClose = (next: boolean) => {
     if (phase === 'applying') {
+      return
+    }
+
+    if (!next && phase === 'sourceReady') {
+      dismissSourceUpdate()
+
       return
     }
 
@@ -115,6 +127,15 @@ export function UpdatesOverlay() {
         )}
 
         {phase === 'guiSkew' && <GuiSkewView message={apply.message} onDone={() => handleClose(false)} />}
+
+        {phase === 'sourceReady' && sourceUpdate && (
+          <SourceUpdateView
+            error={sourceUpdate.error}
+            onLater={dismissSourceUpdate}
+            onRestart={() => void restartSourceUpdate()}
+            restarting={sourceUpdate.restarting}
+          />
+        )}
 
         {phase === 'error' && (
           <ErrorView message={apply.message} onDismiss={() => handleClose(false)} onRetry={handleInstall} />
@@ -341,6 +362,43 @@ function ManualView({ command, message, onDone }: { command: string | null; mess
       <Button className="font-semibold" onClick={onDone} size="lg" variant="secondary">
         {u.done}
       </Button>
+    </div>
+  )
+}
+
+function SourceUpdateView({
+  error,
+  onLater,
+  onRestart,
+  restarting
+}: {
+  error: string | null
+  onLater: () => void
+  onRestart: () => void
+  restarting: boolean
+}) {
+  return (
+    <div className="grid gap-5 px-6 pb-6 pt-7 pr-8">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <AlertCircle className="size-8 text-amber-500" />
+
+        <DialogTitle className="text-center text-xl">
+          {restarting ? 'Restarting Catalyst…' : 'Changes ready'}
+        </DialogTitle>
+        <DialogDescription className="max-w-prose text-center text-sm leading-5 text-muted-foreground">
+          A newer Catalyst build is ready. Restart to apply it; this window stays active until you choose.
+        </DialogDescription>
+        {error ? <p className="font-mono text-xs text-destructive">{error}</p> : null}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Button disabled={restarting} onClick={onLater} size="lg" variant="secondary">
+          Later
+        </Button>
+        <Button className="font-semibold" disabled={restarting} onClick={onRestart} size="lg">
+          {restarting ? 'Restart requested' : 'Restart Catalyst'}
+        </Button>
+      </div>
     </div>
   )
 }

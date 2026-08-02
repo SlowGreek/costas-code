@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest'
-
 import { validateUguiDocument } from '@hermes/shared/ugui-document'
+import { describe, expect, it } from 'vitest'
 
 const document = () => ({
   id: 'example.document',

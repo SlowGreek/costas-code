@@ -16,6 +16,7 @@ function fixture() {
   fs.writeFileSync(executable, 'binary')
   const source = { schema: 'catalyst-desktop-source/1' as const, source_revision: hash('1'), ae_generation: hash('2') }
   fs.writeFileSync(path.join(root, 'lifecycle-source.json'), `${JSON.stringify(source)}\n`)
+
   const environment = {
     HERMES_DESKTOP_LIFECYCLE_READY_PATH: path.join(root, 'READY.json'),
     HERMES_DESKTOP_LIFECYCLE_LAUNCH_ID: 'a'.repeat(32),
@@ -25,6 +26,7 @@ function fixture() {
     HERMES_DESKTOP_LIFECYCLE_AE_GENERATION: source.ae_generation,
     HERMES_DESKTOP_LIFECYCLE_EXECUTABLE: fs.realpathSync(executable)
   }
+
   return { root, executable, source, environment }
 }
 
@@ -33,6 +35,7 @@ afterEach(() => roots.splice(0).forEach(root => fs.rmSync(root, { recursive: tru
 describe('Electron lifecycle readiness', () => {
   it('writes one source/package/generation-bound receipt only after renderer acknowledgement', () => {
     const value = fixture()
+
     const reporter = createLifecycleReadinessReporter({
       environment: value.environment,
       execPath: value.executable,
@@ -40,6 +43,7 @@ describe('Electron lifecycle readiness', () => {
       source: readLifecycleSourceReceipt(value.root),
       aeGeneration: value.source.ae_generation
     })
+
     expect(fs.existsSync(path.join(value.root, 'READY.json'))).toBe(false)
     expect(reporter?.rendererReady()).toBe(true)
     expect(reporter?.rendererReady()).toBe(false)

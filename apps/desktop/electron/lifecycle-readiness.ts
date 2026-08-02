@@ -69,6 +69,7 @@ export function createLifecycleReadinessReporter({
     'HERMES_DESKTOP_LIFECYCLE_AE_GENERATION',
     'HERMES_DESKTOP_LIFECYCLE_EXECUTABLE'
   ] as const
+
   const present = names.filter(name => environment[name] !== undefined)
 
   if (present.length === 0) {
@@ -127,6 +128,7 @@ export function createLifecycleReadinessReporter({
         source_revision: sourceRevision,
         ae_generation: expectedGeneration
       }
+
       const temporary = path.join(parent, `.READY.${pid}.${launchId}.tmp`)
 
       fs.writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 })

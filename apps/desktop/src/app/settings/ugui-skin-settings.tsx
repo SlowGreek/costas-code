@@ -1,8 +1,8 @@
+import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
-import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
-import { UguiDocumentPainter, type UguiDocumentEvent } from '@/app/ae-executive/document-painter'
+import { type UguiDocumentEvent, UguiDocumentPainter } from '@/app/ae-executive/document-painter'
 import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCw } from '@/lib/icons'
 import {

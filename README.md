@@ -1,4 +1,4 @@
-<!-- GENERATED/DO-NOT-EDIT: rust-quine-project-readmes/v1 -->
+<!-- GENERATED/DO-NOT-EDIT: rust-quine-project-readmes/1 -->
 # Catalyst
 
 Catalyst is the Electron and React desktop product shell that composes, inspects, and authors against one staged AgentExperiments generation.
@@ -105,7 +105,7 @@ Catalyst is the Electron and React desktop product shell that composes, inspects
 | Source SHA-256 | `sha256:5dd9028e7d4410d28cd45470986447f8a0450af0bf444bc8496c5847ddc50d4d` |
 | Generator | `quine/src/project_readmes.rs` |
 | Registry | `quine/canon/repo_map.json#/19` |
-| Projection schema | `rust-quine-project-readmes/v1` |
+| Projection schema | `rust-quine-project-readmes/1` |
 | Tool version | `0.1.0` |
 
 </details>

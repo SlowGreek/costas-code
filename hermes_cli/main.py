@@ -7544,7 +7544,7 @@ def _sync_with_upstream_if_needed(
 
     This implements the fork upstream sync logic:
     - If upstream remote doesn't exist, ask user if they want to add it
-    - Compare the selected branch on origin with the official Costas remote
+    - Compare the selected branch on origin with the official Catalyst remote
     - If origin is strictly behind, fast-forward from the official remote
     - Try to sync fork back to origin if possible
     """

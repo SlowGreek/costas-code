@@ -49,9 +49,11 @@ const {
   $backendUpdateApply,
   reportBackendContract,
   applyUpdates,
+  $sourceUpdate,
   $updateApply,
   $updateOverlayOpen,
   resetUpdateApplyState,
+  restartSourceUpdate,
   startUpdatePoller,
   stopUpdatePoller,
   $updateStatus
@@ -462,12 +464,18 @@ describe('applyBackendUpdate recovery', () => {
 describe('startUpdatePoller', () => {
   const checkMock = vi.fn()
   const onProgressMock = vi.fn()
+  const onSourceReadyMock = vi.fn()
+  const restartSourceMock = vi.fn()
   const listeners: Record<string, Function> = {}
+  let sourceReady: ((payload: unknown) => void) | null = null
 
   beforeEach(() => {
     storage.clear()
     checkMock.mockReset()
     onProgressMock.mockReset()
+    onSourceReadyMock.mockReset()
+    restartSourceMock.mockReset()
+    sourceReady = null
     Object.keys(listeners).forEach(k => delete listeners[k])
     checkMock.mockResolvedValue({
       supported: true,
@@ -476,8 +484,22 @@ describe('startUpdatePoller', () => {
       fetchedAt: 0
     })
     $updateStatus.set(null)
+    $sourceUpdate.set(null)
+    onSourceReadyMock.mockImplementation((callback: (payload: unknown) => void) => {
+      sourceReady = callback
+
+      return vi.fn()
+    })
+    restartSourceMock.mockResolvedValue({ ok: true })
     ;(globalThis as unknown as { window: unknown }).window = {
-      hermesDesktop: { updates: { check: checkMock, onProgress: onProgressMock } },
+      hermesDesktop: {
+        updates: {
+          check: checkMock,
+          onProgress: onProgressMock,
+          onSourceReady: onSourceReadyMock,
+          restartSource: restartSourceMock
+        }
+      },
       addEventListener: vi.fn((event: string, handler: Function) => {
         listeners[event] = handler
       }),
@@ -503,6 +525,19 @@ describe('startUpdatePoller', () => {
     expect($updateStatus.get()?.behind).toBe(5)
   })
 
+  it('tolerates an older preload without source-update methods', async () => {
+    const desktop = (globalThis as unknown as {
+      window: { hermesDesktop: { updates: { onSourceReady?: unknown; restartSource?: unknown } } }
+    }).window.hermesDesktop
+
+    delete desktop.updates.onSourceReady
+    delete desktop.updates.restartSource
+
+    expect(() => startUpdatePoller()).not.toThrow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(checkMock).toHaveBeenCalled()
+  })
+
   it('calls checkUpdates() on each interval tick', async () => {
     startUpdatePoller()
     await vi.advanceTimersByTimeAsync(0)
@@ -525,5 +560,35 @@ describe('startUpdatePoller', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(checkMock).toHaveBeenCalled()
+  })
+
+  it('opens the overlay for one admitted source update and requests restart', async () => {
+    startUpdatePoller()
+    sourceReady?.({
+      schema: 'catalyst-source-update-ready/1',
+      sourceRevision: `sha256:${'a'.repeat(64)}`,
+      aeGeneration: `sha256:${'b'.repeat(64)}`,
+      requiresRestart: true
+    })
+
+    expect($updateOverlayOpen.get()).toBe(true)
+    expect($sourceUpdate.get()?.sourceRevision).toBe(`sha256:${'a'.repeat(64)}`)
+
+    await restartSourceUpdate()
+
+    expect(restartSourceMock).toHaveBeenCalledTimes(1)
+    expect($sourceUpdate.get()?.restarting).toBe(true)
+  })
+
+  it('ignores malformed source update events', () => {
+    startUpdatePoller()
+    sourceReady?.({
+      schema: 'catalyst-source-update-ready/1',
+      sourceRevision: 'not-a-hash',
+      aeGeneration: `sha256:${'b'.repeat(64)}`,
+      requiresRestart: true
+    })
+
+    expect($sourceUpdate.get()).toBeNull()
   })
 })

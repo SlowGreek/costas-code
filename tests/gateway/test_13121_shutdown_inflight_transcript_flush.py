@@ -161,15 +161,15 @@ class TestShutdownTranscriptSurvivesResumeE2E:
 
         # Simulate a session whose FIRST turn completed and was persisted...
         db.append_message(session_id=session_id, role="user",
-                          content="hello, remember my cat is Mochi")
+                          content="hello, remember my cat is Nova")
         db.append_message(session_id=session_id, role="assistant",
-                          content="Noted — Mochi the cat.")
+                          content="Noted — Nova the cat.")
 
         # ...and a SECOND turn that was interrupted mid tool-loop. These rows
         # were NEVER flushed to the DB (only live in _session_messages).
         prior_history = [
-            {"role": "user", "content": "hello, remember my cat is Mochi"},
-            {"role": "assistant", "content": "Noted — Mochi the cat."},
+            {"role": "user", "content": "hello, remember my cat is Nova"},
+            {"role": "assistant", "content": "Noted — Nova the cat."},
         ]
         inflight_tail = [
             {"role": "user", "content": "now scan the whole repo for TODOs"},

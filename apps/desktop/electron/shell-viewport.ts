@@ -268,6 +268,7 @@ export function composeShellViewportDocument(model: ShellViewportModel): UguiDoc
     ...model.selector.targets.map(id => action(`shell-build-${id}`, id, `shell.build.${id}`, id === model.target.id)),
     action('viewport-demo-action', 'Inspect evidence', 'shell.inspect')
   ]
+
   const document = {
     id: 'shell-viewport',
     type: 'document',

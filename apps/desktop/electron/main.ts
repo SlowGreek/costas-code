@@ -131,7 +131,10 @@ import {
   resolveTimeoutMs,
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
-import { createLifecycleReadinessReporter, readLifecycleSourceReceipt } from './lifecycle-readiness'
+import {
+  createLifecycleReadinessReporter,
+  readLifecycleSourceReceipt
+} from './lifecycle-readiness'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import {
   callInstalledButler,
@@ -169,6 +172,12 @@ import {
   resolveSkinSettingsDocumentBinary,
   runSkinSettingsDocumentProjector
 } from './skin-settings'
+import {
+  type DesktopSourceUpdateReady,
+  nextSourceUpdate,
+  requestRunSourceRestart,
+  sourceUpdateKey
+} from './source-update'
 import { ensureSpawnHelperExecutable } from './spawn-helper-perms'
 import { createBootstrapCoordinator, sshConfigFingerprint } from './ssh-bootstrap-coordinator'
 import { collectSshConfigHosts, parseSshGOutput } from './ssh-config'
@@ -422,6 +431,9 @@ const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
 const AE_STORE_ROOT = IS_PACKAGED ? path.join(process.resourcesPath, 'ae') : path.join(APP_ROOT, 'build', 'ae')
 const AE_GENERATION = resolveAeGenerationRoot(AE_STORE_ROOT)
 const AE_RUNTIME_BIN = AE_GENERATION.root
+const LIFECYCLE_SOURCE_ROOT = IS_PACKAGED ? process.resourcesPath : path.join(APP_ROOT, 'build')
+const ACTIVE_LIFECYCLE_SOURCE = readLifecycleSourceReceipt(LIFECYCLE_SOURCE_ROOT)
+
 const LIFECYCLE_READINESS = createLifecycleReadinessReporter({
   environment: process.env,
   execPath: process.execPath,
@@ -429,6 +441,7 @@ const LIFECYCLE_READINESS = createLifecycleReadinessReporter({
   source: readLifecycleSourceReceipt(process.resourcesPath),
   aeGeneration: AE_GENERATION.generationId
 })
+
 const LUCID_BUTLER_PATH = path.join(AE_RUNTIME_BIN, process.platform === 'win32' ? 'butler.exe' : 'butler')
 const renderProfilePreferences = new RenderProfilePreferenceStore(path.join(RESOLVED_USER_DATA, 'render-profiles.json'))
 
@@ -1025,11 +1038,52 @@ function registerMediaProtocol() {
 }
 
 let mainWindow = null
+let sourceUpdateTimer: NodeJS.Timeout | null = null
+let announcedSourceUpdate: string | null = null
+let pendingSourceUpdate: DesktopSourceUpdateReady | null = null
+
+function sendPendingSourceUpdate() {
+  if (!pendingSourceUpdate || !mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+
+  const { webContents } = mainWindow
+
+  if (!webContents || webContents.isDestroyed() || webContents.isLoadingMainFrame()) {
+    return
+  }
+
+  webContents.send('hermes:source-update:ready', pendingSourceUpdate)
+}
+
+function pollSourceUpdate() {
+  const next = readLifecycleSourceReceipt(LIFECYCLE_SOURCE_ROOT)
+  const update = nextSourceUpdate(ACTIVE_LIFECYCLE_SOURCE, next, announcedSourceUpdate)
+
+  if (!update || !next) {
+    return
+  }
+
+  announcedSourceUpdate = sourceUpdateKey(next)
+  pendingSourceUpdate = update
+  sendPendingSourceUpdate()
+}
+
+function startSourceUpdateWatcher() {
+  if (sourceUpdateTimer || !ACTIVE_LIFECYCLE_SOURCE) {
+    return
+  }
+
+  sourceUpdateTimer = setInterval(pollSourceUpdate, 1_000)
+  sourceUpdateTimer.unref?.()
+}
+
 ipcMain.on('hermes:lifecycle:renderer-ready', event => {
   if (LIFECYCLE_READINESS && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
     LIFECYCLE_READINESS.rendererReady()
   }
 })
+ipcMain.handle('hermes:source-update:restart', () => requestRunSourceRestart())
 const backendConnectionState = createBackendConnectionState<ReturnType<typeof spawn>, any>()
 const remoteLiveness = new RemoteLivenessTracker()
 const remoteRevalidation = new RemoteRevalidationCoordinator()
@@ -3025,7 +3079,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   // Always pass the configured distribution channel explicitly. Existing
   // managed installs can be detached at a packaged commit and may still run an
   // older CLI whose bare `hermes update` default is `main`; omitting --branch
-  // there would bypass the Costas update channel on the very first migration.
+  // there would bypass the Catalyst update channel on the very first migration.
   const { branch: configuredBranch } = readDesktopUpdateConfig()
 
   const branch = await resolveHealedBranch(
@@ -3543,6 +3597,7 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
   const venvRoot = path.join(root, 'venv')
   const venvPython = getVenvPython(venvRoot)
   const command = IS_WINDOWS && fileExists(venvPython) ? venvPython : python
+
   const env = buildDesktopBackendEnv({
     hermesHome: HERMES_HOME,
     pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
@@ -3552,6 +3607,7 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
 
   if (!canImportHermesCli(command, { env })) {
     rememberLog(`Ignoring ${label}: Python runtime dependencies are incomplete; trying next backend.`)
+
     return null
   }
 
@@ -8739,12 +8795,14 @@ function createWindow() {
   // this in-flight boot instead of duplicating it; early boot-progress events
   // the renderer misses are recovered by its getBootProgress() pull on mount.
   startHermes().catch(error => rememberLog(error.stack || error.message))
+  startSourceUpdateWatcher()
 
   mainWindow.webContents.once('did-finish-load', () => {
     // Zoom restore is handled by wireCommonWindowHandlers (shared with session
     // windows); no need to reapply it here.
     broadcastBootProgress()
     sendWindowStateChanged()
+    sendPendingSourceUpdate()
   })
 }
 

@@ -1,3 +1,4 @@
+import type { UguiDocument } from '@hermes/shared/ugui-document'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -9,7 +10,6 @@ import {
   type LucidActionReceipt,
   parseLucidActionResult
 } from './lucid-actions'
-import type { UguiDocument } from '@hermes/shared/ugui-document'
 
 const HASH = `sha256:${'a'.repeat(64)}`
 const OPERATION = `op:${'b'.repeat(64)}`

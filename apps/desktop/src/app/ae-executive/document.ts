@@ -75,8 +75,11 @@ function parseBlocker(value: unknown): AeExecutiveBlocker | null {
 
 function documentState(row: Record<string, unknown>, document: UguiDocument | null): AeExecutiveDocumentState {
   if (!document || ['missing', 'held', 'unavailable'].includes(String(row.posture))) {return 'unavailable'}
+
   if (row.posture === 'fixture') {return 'fixture'}
+
   if (row.posture === 'structural') {return 'structural'}
+
   if (row.freshness === 'stale') {return 'stale'}
 
   return 'fresh'
@@ -163,6 +166,7 @@ export function parseExecutiveDocumentEnvelope(value: unknown): AeExecutiveDocum
 
   const rows = value.rows.map((row, index) => parseRow(row, AE_EXECUTIVE_TAB_IDS[index]))
   const freshness = value.freshness as AeExecutiveFreshness
+
   const posture: AeExecutivePosture = !live || freshness === 'unavailable'
     ? 'unavailable'
     : blocker || freshness === 'degraded'
@@ -262,6 +266,7 @@ export function reconcileExecutiveDocuments(
   }
 
   const previousRows = new Map(previous.rows.map(row => [row.tab, row]))
+
   const rows = incoming.rows.map(row => {
     if (row.document && !['stale', 'unavailable'].includes(row.state)) {return row}
     const prior = previousRows.get(row.tab)

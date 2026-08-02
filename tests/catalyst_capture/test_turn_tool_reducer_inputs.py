@@ -1,6 +1,6 @@
 """Source-observed reducer inputs for the Catalyst turn/tool cases.
 
-The capture uses deterministic local fakes around existing Costas owner seams.
+The capture uses deterministic local fakes around existing Catalyst owner seams.
 Expected/corpus data and the earlier future-only capture are not inputs. No
 provider, network, subprocess, or production tool is reachable.
 """
@@ -118,7 +118,7 @@ class _CaseRecorder:
             "privacy": "synthetic-bounded",
             "source_receipt": {
                 "fixture_hash": _digest(payload),
-                "owner": "Costas turn/tool owner seam",
+                "owner": "Catalyst turn/tool owner seam",
                 "prior_serialized_before_events": True,
             },
         }

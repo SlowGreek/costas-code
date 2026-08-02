@@ -9,7 +9,9 @@ import { resetExecutiveDocumentsForTests } from './document'
 import { AeExecutiveWorkspace } from '.'
 
 const getAeExecutiveDocuments = vi.fn()
+const writeClipboard = vi.fn()
 const ARTIFACT_GENERATION = `sha256:${'a'.repeat(64)}`
+
 const generationHash = (generation: number, salt = 0) =>
   `sha256:${((generation + salt) % 16).toString(16).repeat(64)}`
 
@@ -71,12 +73,14 @@ function renderTab(tab: string) {
 beforeEach(() => {
   resetExecutiveDocumentsForTests()
   getAeExecutiveDocuments.mockResolvedValue(envelope())
+  writeClipboard.mockResolvedValue(undefined)
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
     value: {
       getAeExecutiveDocuments,
       executeLucidExecutiveIntent: vi.fn(),
-      submitStudioDesignerEvent: vi.fn()
+      submitStudioDesignerEvent: vi.fn(),
+      writeClipboard
     }
   })
 })
@@ -136,12 +140,14 @@ describe('AE executive Document workspace', () => {
   it('preserves the last valid Document when a newer row becomes unavailable', async () => {
     vi.useFakeTimers()
     const next = envelope(2)
+
     const home = next.rows[0] as Omit<typeof next.rows[number], 'freshness' | 'posture' | 'artifact_posture' | 'code'> & {
       freshness: string
       posture: string
       artifact_posture: string
       code: string | null
     }
+
     home.document = null as never
     home.freshness = 'unavailable'
     home.posture = 'unavailable'
@@ -162,5 +168,11 @@ describe('AE executive Document workspace', () => {
 
     await waitFor(() => expect(screen.getByText('UGUI Document unavailable · projector-unavailable')).not.toBeNull())
     expect(screen.queryByText('RUN HOME')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy error' }))
+    await waitFor(() =>
+      expect(writeClipboard).toHaveBeenCalledWith('UGUI Document unavailable · projector-unavailable')
+    )
+    expect(screen.getByRole('button', { name: 'Copied' })).not.toBeNull()
   })
 })

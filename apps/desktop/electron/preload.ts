@@ -279,7 +279,14 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
       ipcRenderer.on('hermes:updates:progress', listener)
 
       return () => ipcRenderer.removeListener('hermes:updates:progress', listener)
-    }
+    },
+    onSourceReady: callback => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on('hermes:source-update:ready', listener)
+
+      return () => ipcRenderer.removeListener('hermes:source-update:ready', listener)
+    },
+    restartSource: () => ipcRenderer.invoke('hermes:source-update:restart')
   },
   themes: {
     fetchMarketplace: id => ipcRenderer.invoke('hermes:vscode-theme:fetch', id),

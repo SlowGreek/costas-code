@@ -6,6 +6,7 @@
 import { atom } from 'nanostores'
 
 import type {
+  DesktopSourceUpdateReady,
   DesktopUpdateApplyOptions,
   DesktopUpdateApplyResult,
   DesktopUpdateProgress,
@@ -47,6 +48,9 @@ export const $updateApply = atom<UpdateApplyState>(IDLE)
 export const $updateChecking = atom<boolean>(false)
 export const $updateOverlayOpen = atom<boolean>(false)
 export const $updateStatus = atom<DesktopUpdateStatus | null>(null)
+export const $sourceUpdate = atom<
+  (DesktopSourceUpdateReady & { error: string | null; restarting: boolean }) | null
+>(null)
 
 // Client and backend are independently updatable; each keeps its own state.
 export const $backendUpdateStatus = atom<DesktopUpdateStatus | null>(null)
@@ -67,6 +71,54 @@ export const openUpdateOverlayFor = (target: UpdateTarget) => {
 export const resetUpdateApplyState = () => {
   $updateApply.set(IDLE)
   $backendUpdateApply.set(IDLE)
+}
+
+export const dismissSourceUpdate = () => {
+  $sourceUpdate.set(null)
+  $updateOverlayOpen.set(false)
+}
+
+export async function restartSourceUpdate(): Promise<void> {
+  const current = $sourceUpdate.get()
+
+  if (!current || current.restarting) {
+    return
+  }
+
+  $sourceUpdate.set({ ...current, error: null, restarting: true })
+
+  try {
+    const result = await window.hermesDesktop?.updates?.restartSource?.()
+
+    if (!result?.ok) {
+      $sourceUpdate.set({
+        ...current,
+        error: result?.error ?? 'run-restart-control-unavailable',
+        restarting: false
+      })
+    }
+  } catch (error) {
+    $sourceUpdate.set({
+      ...current,
+      error: error instanceof Error ? error.message : String(error),
+      restarting: false
+    })
+  }
+}
+
+function ingestSourceUpdate(payload: DesktopSourceUpdateReady): void {
+  if (
+    payload?.schema !== 'catalyst-source-update-ready/1' ||
+    payload.requiresRestart !== true ||
+    !/^sha256:[0-9a-f]{64}$/.test(payload.sourceRevision) ||
+    !/^sha256:[0-9a-f]{64}$/.test(payload.aeGeneration)
+  ) {
+    return
+  }
+
+  $sourceUpdate.set({ ...payload, error: null, restarting: false })
+  $updateOverlayTarget.set('client')
+  $updateOverlayOpen.set(true)
 }
 
 const UPDATE_TOAST_ID = 'desktop-update-available'
@@ -642,6 +694,7 @@ let pollerStarted = false
 let backgroundTimer: ReturnType<typeof setInterval> | null = null
 let lastFocusAt = 0
 let connectionUnsub: (() => void) | null = null
+let sourceUpdateUnsub: (() => void) | null = null
 let lastConnectionMode: string | undefined
 
 /** Wire up background polling + progress streaming. Idempotent. */
@@ -661,6 +714,7 @@ export function startUpdatePoller(): void {
   void checkBackendUpdates()
   void refreshDesktopVersion()
   bridge.onProgress(ingestProgress)
+  sourceUpdateUnsub = bridge.onSourceReady?.(ingestSourceUpdate) ?? null
 
   // The poller starts at mount, before the gateway connects — so the first
   // backend check above sees mode≠remote and no-ops. Re-check once the
@@ -695,6 +749,8 @@ export function stopUpdatePoller(): void {
 
   connectionUnsub?.()
   connectionUnsub = null
+  sourceUpdateUnsub?.()
+  sourceUpdateUnsub = null
   lastConnectionMode = undefined
   window.removeEventListener('focus', onFocus)
   pollerStarted = false

@@ -5,6 +5,7 @@ import path from 'node:path'
 
 import {
   assertCheckFlag,
+  boundedDiagnostic,
   DESKTOP,
   localPackage,
   normalizeDiagnostic,
@@ -53,7 +54,7 @@ try {
       .filter(assertion => assertion.status === 'failed')
       .map((assertion, index) => ({
         id: assertion.fullName || assertion.title || `failure-${index + 1}`,
-        message: normalizeDiagnostic((assertion.failureMessages ?? []).join('\n') || 'test failed')
+        message: boundedDiagnostic((assertion.failureMessages ?? []).join('\n') || 'test failed')
       }))
       .sort((left, right) => left.id.localeCompare(right.id) || left.message.localeCompare(right.message))
     return {

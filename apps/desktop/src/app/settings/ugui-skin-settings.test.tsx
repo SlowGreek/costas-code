@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
 
 import { parseRenderProfileCatalog, type RenderProfileCatalog } from '@/themes/render-profile'
 
@@ -52,6 +56,11 @@ const document = (committed: string, preview: string) => ({
 const get = vi.fn()
 const commit = vi.fn()
 const getDocument = vi.fn()
+
+beforeAll(() => {
+  // The engine paints this panel too; nothing about UGUI is mocked.
+  setWasmInputForTests(readFileSync(resolve(process.cwd(), 'public/wasm/catalyst_wasm_bg.wasm')))
+})
 
 beforeEach(() => {
   get.mockReset().mockResolvedValue({

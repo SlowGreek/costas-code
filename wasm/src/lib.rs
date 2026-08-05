@@ -5,8 +5,17 @@
 //! so the desktop shell reinvents no concept-space and inherits every primitive
 //! UGUI adds.
 
+pub mod controller;
+pub mod executive;
+pub mod intent;
+
+use std::cell::RefCell;
 use ugui_render::json::{self, Json};
 use wasm_bindgen::prelude::*;
+
+thread_local! {
+    static CONTROLLER: RefCell<Option<controller::Controller>> = const { RefCell::new(None) };
+}
 
 fn refusal(code: &str, detail: &str) -> String {
     json::canonical_string(&json::obj(vec![
@@ -14,6 +23,76 @@ fn refusal(code: &str, detail: &str) -> String {
         ("error", json::s(code)),
         ("detail", json::s(detail)),
     ]))
+}
+
+fn with_controller<R>(act: impl FnOnce(&mut controller::Controller) -> R) -> Option<R> {
+    CONTROLLER.with(|cell| cell.borrow_mut().as_mut().map(act))
+}
+
+fn not_ready() -> String {
+    refusal("E_CATALYST_CONTROLLER_NOT_READY", "call catalyst_controller_init first")
+}
+
+/// Seat the controller with the tab set this shell projects.
+#[wasm_bindgen]
+pub fn catalyst_controller_init(tabs_json: &str) -> String {
+    let tabs = json::parse(tabs_json)
+        .and_then(|value| value.as_array().map(<[Json]>::to_vec))
+        .map(|tabs| {
+            tabs.iter().filter_map(Json::as_str).map(str::to_owned).collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    if tabs.is_empty() {
+        return refusal("E_CATALYST_EXECUTIVE_TAB", "tab set is empty");
+    }
+    let selected = tabs[0].clone();
+    CONTROLLER.with(|cell| *cell.borrow_mut() = Some(controller::Controller::new(tabs)));
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s("catalyst-controller-init/1")),
+        ("tab", json::s(&selected)),
+    ]))
+}
+
+/// Admit and reconcile one executive envelope; returns typed effects.
+#[wasm_bindgen]
+pub fn catalyst_controller_observe(envelope_json: &str) -> String {
+    with_controller(|controller| json::canonical_string(&controller.observe(envelope_json)))
+        .unwrap_or_else(not_ready)
+}
+
+#[wasm_bindgen]
+pub fn catalyst_controller_select_tab(tab: &str) -> String {
+    with_controller(|controller| json::canonical_string(&controller.select(tab)))
+        .unwrap_or_else(not_ready)
+}
+
+/// Turn one gesture into typed effects. The host enacts; it does not decide.
+#[wasm_bindgen]
+pub fn catalyst_controller_dispatch_action(action: &str, operation_id: &str) -> String {
+    with_controller(|controller| {
+        json::canonical_string(&controller.dispatch_action(action, operation_id))
+    })
+    .unwrap_or_else(not_ready)
+}
+
+/// Route one painted-document event into typed effects.
+#[wasm_bindgen]
+pub fn catalyst_controller_dispatch_event(event_json: &str, operation_id: &str) -> String {
+    with_controller(|controller| {
+        json::canonical_string(&controller.dispatch_event(event_json, operation_id))
+    })
+    .unwrap_or_else(not_ready)
+}
+
+/// Paint the selected tab with the shared engine.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn catalyst_controller_paint(root: web_sys::Element) -> String {
+    let document = CONTROLLER.with(|cell| cell.borrow().as_ref().and_then(|c| c.painted_document()));
+    match document {
+        Some(document) => catalyst_mount_document(root, &json::canonical_string(&document)),
+        None => refusal("E_CATALYST_EXECUTIVE_DOCUMENT", "selected tab has no admitted document"),
+    }
 }
 
 /// Admit one canonical Document against the engine's own contract.
@@ -52,6 +131,42 @@ pub fn catalyst_document_item_types() -> String {
         ("schema", json::s("catalyst-ugui-item-types/1")),
         ("types", types),
     ]))
+}
+
+/// Every app UGUI publishes, across every source. Catalyst learns that
+/// `run/apps` is one source among several rather than a host it depends on.
+#[wasm_bindgen]
+pub fn catalyst_app_catalog() -> String {
+    let apps = ugui_render::app_catalog::all()
+        .into_iter()
+        .map(|app| {
+            json::obj(vec![
+                ("source", json::s(app.source)),
+                ("id", json::s(&app.id)),
+                ("title", json::s(&app.title)),
+                ("executive", Json::Bool(app.executive)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s("catalyst-ugui-app-catalog/1")),
+        (
+            "sources",
+            Json::Arr(
+                ugui_render::app_catalog::sources().iter().map(|id| json::s(id)).collect::<Vec<_>>(),
+            ),
+        ),
+        ("apps", Json::Arr(apps)),
+    ]))
+}
+
+/// Resolve one catalogued app document, whichever source publishes it.
+#[wasm_bindgen]
+pub fn catalyst_app_document(source: &str, id: &str) -> String {
+    match ugui_render::app_catalog::document_json(source, id) {
+        Some(document) => document.to_string(),
+        None => refusal("E_CATALYST_UGUI_APP", "app is not catalogued"),
+    }
 }
 
 /// Resolve one shared surface plan so Catalyst selects geometry from UGUI.
@@ -126,6 +241,30 @@ fn receipt_counts(receipt: &ugui_render::native_webview::WebviewRenderReceipt) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_catalog_publishes_run_as_one_source_among_several() {
+        let catalog = json::parse(&catalyst_app_catalog()).expect("catalog");
+        let sources = catalog
+            .get("sources")
+            .and_then(Json::as_array)
+            .expect("sources")
+            .iter()
+            .filter_map(Json::as_str)
+            .collect::<Vec<_>>();
+        assert!(sources.contains(&"run") && sources.contains(&"quine"), "{sources:?}");
+
+        let apps = catalog.get("apps").and_then(Json::as_array).expect("apps");
+        assert!(apps.iter().any(|app| app.get("source").and_then(Json::as_str) == Some("quine")));
+        for app in apps {
+            let source = app.get("source").and_then(Json::as_str).expect("source");
+            let id = app.get("id").and_then(Json::as_str).expect("id");
+            assert!(!catalyst_app_document(source, id).contains("catalyst-ugui-refusal"));
+        }
+
+        let refused = catalyst_app_document("run", "nonesuch");
+        assert!(refused.contains("E_CATALYST_UGUI_APP"), "{refused}");
+    }
 
     #[test]
     fn the_client_reads_its_vocabulary_from_the_engine() {

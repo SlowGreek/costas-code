@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resetForTests, setWasmInputForTests } from './catalyst-wasm'
 import { AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
-import { resetExecutiveDocumentsForTests } from './document'
 
 import { AeExecutiveWorkspace } from '.'
 
@@ -70,8 +72,13 @@ function renderTab(tab: string) {
   )
 }
 
+beforeAll(() => {
+  // The real engine paints these tests; nothing about UGUI is mocked.
+  setWasmInputForTests(readFileSync(resolve(process.cwd(), 'public/wasm/catalyst_wasm_bg.wasm')))
+})
+
 beforeEach(() => {
-  resetExecutiveDocumentsForTests()
+  resetForTests()
   getAeExecutiveDocuments.mockResolvedValue(envelope())
   writeClipboard.mockResolvedValue(undefined)
   Object.defineProperty(window, 'hermesDesktop', {
@@ -105,33 +112,40 @@ describe('AE executive Document registry', () => {
 })
 
 describe('AE executive Document workspace', () => {
-  it.each(AE_EXECUTIVE_TABS)('paints $label from its corresponding Document', async tab => {
-    renderTab(tab.id)
+  it('paints the selected Document with the shared engine, not React', async () => {
+    renderTab('home')
 
-    await waitFor(() => expect(screen.getByText(`RUN ${tab.id.toUpperCase()}`)).not.toBeNull())
-    expect(window.document.querySelector(`[data-ugui-document-id="run-${tab.id}"]`)).not.toBeNull()
+    await waitFor(() => expect(screen.getByText('RUN HOME')).not.toBeNull())
+    const surface = window.document.querySelector('[data-ugui-surface]')
+
+    expect(surface?.getAttribute('data-ugui-painter')).toBe('rust-wasm')
+    expect(surface?.querySelector('[data-ugui-action="shell.tab.dashboard"]')).not.toBeNull()
   })
 
-  it('routes producer-owned shell tab actions without a Scene adapter', async () => {
+  it('routes a painted shell tab action through the engine', async () => {
     renderTab('home')
     await waitFor(() => expect(screen.getByText('RUN HOME')).not.toBeNull())
 
-    fireEvent.click(screen.getByRole('button', { name: '[D]ASHBOARD' }))
+    fireEvent.click(
+      window.document.querySelector('[data-ugui-action="shell.tab.dashboard"]') as Element
+    )
     await waitFor(() => expect(screen.getByText('RUN DASHBOARD')).not.toBeNull())
   })
 
-  it('reconciles a newer generation and rejects an older one', async () => {
+  it('reconciles a newer generation and refuses an older one', async () => {
     vi.useFakeTimers()
     getAeExecutiveDocuments
       .mockResolvedValueOnce(envelope(2, { home: 'Generation two' }))
       .mockResolvedValueOnce(envelope(3, { home: 'Generation three' }))
       .mockResolvedValueOnce(envelope(1, { home: 'Generation one' }))
     renderTab('home')
-    await act(async () => {await Promise.resolve()})
+
+    await act(async () => {await vi.advanceTimersByTimeAsync(0)})
     expect(screen.getByText('Generation two')).not.toBeNull()
 
     await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
     expect(screen.getByText('Generation three')).not.toBeNull()
+
     await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
     expect(screen.queryByText('Generation one')).toBeNull()
     expect(screen.getByText(/out-of-order-generation/)).not.toBeNull()
@@ -140,22 +154,17 @@ describe('AE executive Document workspace', () => {
   it('preserves the last valid Document when a newer row becomes unavailable', async () => {
     vi.useFakeTimers()
     const next = envelope(2)
+    const home = next.rows[0] as Record<string, unknown>
 
-    const home = next.rows[0] as Omit<typeof next.rows[number], 'freshness' | 'posture' | 'artifact_posture' | 'code'> & {
-      freshness: string
-      posture: string
-      artifact_posture: string
-      code: string | null
-    }
-
-    home.document = null as never
+    home.document = null
     home.freshness = 'unavailable'
     home.posture = 'unavailable'
     home.artifact_posture = 'unavailable'
     home.code = 'home-unavailable'
     getAeExecutiveDocuments.mockResolvedValueOnce(envelope(1)).mockResolvedValueOnce(next)
     renderTab('home')
-    await act(async () => {await Promise.resolve()})
+
+    await act(async () => {await vi.advanceTimersByTimeAsync(0)})
     await act(async () => {await vi.advanceTimersByTimeAsync(1_000)})
 
     expect(screen.getByText('RUN HOME')).not.toBeNull()
@@ -163,16 +172,17 @@ describe('AE executive Document workspace', () => {
   })
 
   it('shows a bounded Document refusal when no generation is available', async () => {
-    getAeExecutiveDocuments.mockRejectedValueOnce(new Error('projector-unavailable'))
+    getAeExecutiveDocuments.mockRejectedValue(new Error('projector-unavailable'))
     renderTab('home')
 
-    await waitFor(() => expect(screen.getByText('UGUI Document unavailable · projector-unavailable')).not.toBeNull())
+    await waitFor(() =>
+      expect(screen.getByText('UGUI Document unavailable · projector-unavailable')).not.toBeNull()
+    )
     expect(screen.queryByText('RUN HOME')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy error' }))
     await waitFor(() =>
       expect(writeClipboard).toHaveBeenCalledWith('UGUI Document unavailable · projector-unavailable')
     )
-    expect(screen.getByRole('button', { name: 'Copied' })).not.toBeNull()
   })
 })

@@ -1,8 +1,12 @@
 import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
 import { useStore } from '@nanostores/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { type UguiDocumentEvent, UguiDocumentPainter } from '@/app/ae-executive/document-painter'
+import {
+  mountDocument,
+  type UguiDocumentEvent,
+  uguiActionFromClick
+} from '@/app/ae-executive/catalyst-wasm'
 import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCw } from '@/lib/icons'
 import {
@@ -86,13 +90,20 @@ export function UguiSkinSettings() {
     }
   }, [catalog, committedId, previewId])
 
+  const surface = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (document && surface.current) {
+      void mountDocument(surface.current, document).catch(() => setDocumentError('skin-paint-refused'))
+    }
+  }, [document])
+
   const onEvent = (event: UguiDocumentEvent) => {
     if (event.document_id !== document?.id || event.payload !== null) {
       setDocumentError('skin-event-refused')
 
       return
     }
-
     const action = event.action
 
     if (action === 'skin.apply') {
@@ -146,7 +157,24 @@ export function UguiSkinSettings() {
         </div>
       ) : document ? (
         <div className="min-h-0" data-skin-settings-document>
-          <UguiDocumentPainter document={document} onEvent={onEvent} />
+          {/* The engine paints; this component only routes the gesture back. */}
+          <div
+            onClick={clicked => {
+              const hit = uguiActionFromClick(clicked.target)
+
+              if (hit) {
+                onEvent({
+                  schema: 'ugui-document-event/1',
+                  document_id: document.id,
+                  item_id: hit.itemId,
+                  gesture: 'tap',
+                  action: hit.action,
+                  payload: null
+                })
+              }
+            }}
+            ref={surface}
+          />
         </div>
       ) : (
         <div className="grid min-h-64 place-items-center text-sm text-muted-foreground" role="status">

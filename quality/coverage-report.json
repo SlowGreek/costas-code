@@ -1,1 +1,30 @@
-{"schema":"coverage/1","command":"node scripts/quality/coverage.mjs","data":[{"totals":{"branches":{"count":26198,"covered":13724},"lines":{"count":31928,"covered":18660}}}],"provenance":{"source":{"sha256":"sha256:6356068937759fb5312c2c68750eed0103b391c9f13e9cbe236999c1b6f71bb1","files":1194,"bytes":9359232},"tools":{"@vitest/coverage-v8":"4.1.9","node":"26.5.0","vitest":"4.1.9"}}}
+{
+  "schema": "coverage/1",
+  "command": "node scripts/quality/coverage.mjs",
+  "data": [
+    {
+      "totals": {
+        "branches": {
+          "count": 26198,
+          "covered": 13724
+        },
+        "lines": {
+          "count": 31928,
+          "covered": 18660
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "source": {
+      "sha256": "sha256:4e5aa62dcaa9dc67a6b0c917d133e48465c14f546d063f8ac4eb453c268abedd",
+      "files": 1194,
+      "bytes": 9357316
+    },
+    "tools": {
+      "@vitest/coverage-v8": "4.1.9",
+      "node": "26.5.0",
+      "vitest": "4.1.9"
+    }
+  }
+}

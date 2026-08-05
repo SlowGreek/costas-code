@@ -1,11 +1,11 @@
 import type { GatewayWsUrlResult } from '@hermes/shared'
 import type { UguiDocument } from '@hermes/shared/ugui-document'
 
-import type { UguiDocumentEvent } from './app/ae-executive/document-painter'
 import type {
   LucidActionIntent,
-  LucidActionResult
-} from './app/ae-executive/lucid-actions'
+  LucidActionResult,
+  UguiDocumentEvent
+} from './app/ae-executive/catalyst-wasm'
 import type {
   HermesClipboardLensSnapshot,
   HermesClipboardLensTextResult

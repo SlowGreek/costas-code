@@ -8,6 +8,7 @@
 pub mod controller;
 pub mod executive;
 pub mod intent;
+pub mod shell_viewport;
 
 use std::cell::RefCell;
 use ugui_render::json::{self, Json};
@@ -82,6 +83,18 @@ pub fn catalyst_controller_dispatch_event(event_json: &str, operation_id: &str) 
         json::canonical_string(&controller.dispatch_event(event_json, operation_id))
     })
     .unwrap_or_else(not_ready)
+}
+
+/// Compose the SHELL tab's Document from host-observed shell facts.
+#[wasm_bindgen]
+pub fn catalyst_shell_viewport_document(model_json: &str) -> String {
+    let Some(model) = json::parse(model_json) else {
+        return refusal("E_CATALYST_SHELL_VIEWPORT", "model is not valid JSON");
+    };
+    match shell_viewport::compose_document(&model) {
+        Ok(document) => json::canonical_string(&document),
+        Err(fault) => refusal("E_CATALYST_SHELL_VIEWPORT", &fault.0),
+    }
 }
 
 /// Paint the selected tab with the shared engine.

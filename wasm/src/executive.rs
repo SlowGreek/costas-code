@@ -17,6 +17,48 @@ const AUTHORITIES: [&str; 2] = ["none", "RUN_EXECUTIVE_COMPOSER"];
 const RUN_COMPOSER: &str = "RUN_EXECUTIVE_COMPOSER";
 const MAX_TEXT: usize = 256;
 
+/// The envelope as it reaches a client, after the host stamps the artifact
+/// generation onto what the producer emitted.
+const ENVELOPE_FIELDS: [&str; 12] = [
+    "schema",
+    "authority",
+    "executive_generation",
+    "document_hash",
+    "source_set_hash",
+    "observed_ms",
+    "freshness",
+    "artifact_posture",
+    "admission_code",
+    "artifact_generation",
+    "blocker",
+    "rows",
+];
+
+const ROW_FIELDS: [&str; 10] = [
+    "schema",
+    "tab",
+    "source_hash",
+    "source_generation",
+    "observed_ms",
+    "freshness",
+    "posture",
+    "artifact_posture",
+    "document",
+    "code",
+];
+
+/// Exactly these keys: an unknown field is unadmitted vocabulary, and a missing
+/// one is an unstated fact. Neither may pass as a default.
+fn exact(value: &Json, fields: &[&str]) -> bool {
+    match value {
+        Json::Obj(entries) => {
+            entries.len() == fields.len()
+                && fields.iter().all(|field| entries.iter().any(|(key, _)| key == field))
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Fault(pub String);
 
@@ -186,6 +228,9 @@ fn row_state(posture: &str, freshness: &str, document: Option<&Json>) -> RowStat
 
 fn parse_row(value: &Json, expected_tab: &str) -> Result<Row, Fault> {
     let fault = || Fault::new(format!("ae-executive-document-row:{expected_tab}"));
+    if !exact(value, &ROW_FIELDS) {
+        return Err(fault());
+    }
     if field(value, "schema").as_str() != Some(ROW_SCHEMA)
         || field(value, "tab").as_str() != Some(expected_tab)
     {
@@ -237,6 +282,9 @@ fn parse_row(value: &Json, expected_tab: &str) -> Result<Row, Fault> {
 
 pub fn parse_envelope(value: &Json, tabs: &[&str]) -> Result<Batch, Fault> {
     let fault = || Fault::new("ae-executive-document-envelope");
+    if !exact(value, &ENVELOPE_FIELDS) {
+        return Err(fault());
+    }
     if field(value, "schema").as_str() != Some(ENVELOPE_SCHEMA) {
         return Err(fault());
     }

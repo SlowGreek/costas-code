@@ -284,3 +284,25 @@ fn set(fields: &mut Vec<(String, Json)>, key: &str, value: Json) {
         None => fields.push((key.to_string(), value)),
     }
 }
+
+#[test]
+fn an_envelope_or_row_with_unknown_or_missing_fields_is_refused() {
+    let Json::Obj(mut fields) = live_envelope(2, HASH_B) else { unreachable!() };
+
+    set(&mut fields, "smuggled", json::s("extra"));
+    assert!(parse_envelope(&Json::Obj(fields.clone()), &TABS).is_err(), "unknown envelope field");
+
+    fields.retain(|(name, _)| name != "smuggled" && name != "admission_code");
+    assert!(parse_envelope(&Json::Obj(fields), &TABS).is_err(), "missing envelope field");
+
+    let Json::Obj(mut row_fields) = row("home", "observed", "fresh", document("home")) else {
+        unreachable!()
+    };
+
+    set(&mut row_fields, "smuggled", json::s("extra"));
+    let rows = vec![Json::Obj(row_fields), row("dashboard", "observed", "fresh", document("dashboard"))];
+    assert_eq!(
+        parse_envelope(&envelope(2, HASH_B, rows), &TABS).expect_err("refusal").0,
+        "ae-executive-document-row:home"
+    );
+}

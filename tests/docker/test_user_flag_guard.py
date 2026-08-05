@@ -45,7 +45,7 @@ def test_root_start_works(
         capture_output=True, text=True, timeout=60,
     )
     assert r.returncode == 0, f"root start failed: {r.stderr[-500:]}"
-    assert "OK" in r.stdout
+    assert "🟢" in r.stdout
 
 
 def test_user_pinned_to_hermes_uid_works(
@@ -63,4 +63,4 @@ def test_user_pinned_to_hermes_uid_works(
     assert r.returncode == 0, (
         f"--user 10000:10000 (hermes UID) was rejected: {r.stderr[-500:]}"
     )
-    assert "OK" in r.stdout
+    assert "🟢" in r.stdout

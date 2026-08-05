@@ -79,7 +79,7 @@ function fakeSsh(rules: any[] = []) {
 }
 
 test('locateHermes prefers the explicit profile path when executable', async () => {
-  const ssh = fakeSsh([[/\[ -x .*\/opt\/hermes/, 'OK']])
+  const ssh = fakeSsh([[/\[ -x .*\/opt\/hermes/, '🟢']])
   assert.equal(await locateHermes(ssh, '/opt/hermes'), '/opt/hermes')
 })
 
@@ -88,7 +88,7 @@ test('locateHermes throws (no silent fallback) when an EXPLICIT path is not exec
   // silently fall back to it — that is the "connected to the wrong hermes" bug.
   const ssh = fakeSsh([
     [/command -v hermes/, '/home/u/.local/bin/hermes\n'],
-    [/\[ -x .*\.local\/bin\/hermes/, 'OK']
+    [/\[ -x .*\.local\/bin\/hermes/, '🟢']
   ])
 
   await assert.rejects(
@@ -105,7 +105,7 @@ test('locateHermes throws (no silent fallback) when an EXPLICIT path is not exec
 test('locateHermes falls back to the login-shell command -v probe', async () => {
   const ssh = fakeSsh([
     [/command -v hermes/, '/home/u/.local/bin/hermes\n'],
-    [/\[ -x .*\.local\/bin\/hermes/, 'OK']
+    [/\[ -x .*\.local\/bin\/hermes/, '🟢']
   ])
 
   assert.equal(await locateHermes(ssh, ''), '/home/u/.local/bin/hermes')
@@ -114,7 +114,7 @@ test('locateHermes falls back to the login-shell command -v probe', async () => 
 test('locateHermes canonicalizes an installer wrapper to its executable target', async () => {
   const ssh = fakeSsh([
     [/command -v hermes/, '/home/u/.local/bin/hermes\n'],
-    [/\[ -x .*\.local\/bin\/hermes/, 'OK'],
+    [/\[ -x .*\.local\/bin\/hermes/, '🟢'],
     [/python3 -c/, '/home/u/.hermes/hermes-agent/venv/bin/hermes\n']
   ])
 
@@ -125,14 +125,14 @@ test('locateHermes falls back to ~/.local/bin/hermes when the login-shell probe 
   // ~/.local/bin is the non-root installer's command location (scripts/install.sh).
   const ssh = fakeSsh([
     [/command -v hermes/, ''],
-    [/\[ -x .*\.local\/bin\/hermes/, 'OK']
+    [/\[ -x .*\.local\/bin\/hermes/, '🟢']
   ])
 
   assert.equal(await locateHermes(ssh, ''), '~/.local/bin/hermes')
 })
 
 test('locateHermes tries the conventional venv path last', async () => {
-  const ssh = fakeSsh([[/\[ -x .*venv\/bin\/hermes/, 'OK']])
+  const ssh = fakeSsh([[/\[ -x .*venv\/bin\/hermes/, '🟢']])
   assert.equal(await locateHermes(ssh, ''), '~/.hermes/hermes-agent/venv/bin/hermes')
 })
 
@@ -152,7 +152,7 @@ test('locateHermes throws a hermes-not-found error with an install hint', async 
 test('locateHermes uses a login shell for the command -v probe', async () => {
   const ssh = fakeSsh([
     [/command -v hermes/, '/x/hermes'],
-    [/\[ -x/, 'OK']
+    [/\[ -x/, '🟢']
   ])
 
   await locateHermes(ssh, '')
@@ -400,7 +400,7 @@ function connectDeps(ssh, over: any = {}) {
 test('connect() spawns fresh when there is no lockfile, adopts the served token', async () => {
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, ''], // no lockfile
     [/grep -q ssh-session-token-file/, 'YES\n'],
     [/python3 -c/, ''], // token file write
@@ -426,7 +426,7 @@ test('connect() reuses a healthy dashboard when fingerprint + probe pass', async
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'OWNED\n']
@@ -446,7 +446,7 @@ test('connect() respawns when the lockfile hermesPath differs from the resolved 
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'FOREIGN\n'],
@@ -481,7 +481,7 @@ test('connect() respawns when the lockfile protocolVersion is incompatible', asy
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0 333/, 'ALIVE'],
     [/print\("OWNED"/, 'FOREIGN\n'],
@@ -502,7 +502,7 @@ test('connect() fresh spawn writes hermesHome + protocolVersion into the lockfil
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, ''], // no lockfile
     [/HERMES_HOME/, '/home/alice/.hermes\n'],
     [/grep -q ssh-session-token-file/, 'YES\n'],
@@ -532,7 +532,7 @@ test('connect() respawns when the lockfile pid is dead (killed dashboard)', asyn
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0 333/, 'DEAD'],
     [/print\("OWNED"/, 'FOREIGN\n'],
@@ -566,7 +566,7 @@ test('connect() respawns when the dashboard is wedged (alive pid, probe fails)',
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'FOREIGN\n'],
@@ -632,7 +632,7 @@ test('connect() preserves an owned backend when a reuse transport throws', async
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'OWNED\n']
@@ -873,7 +873,7 @@ test('connect() reuse path does not write a token file', async () => {
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'OWNED\n']
@@ -920,7 +920,7 @@ test('pidIsOurDashboard requires an exact nonce option value', async () => {
 test('connect removes the token file when a fresh backend fails after returning a pid', async () => {
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, ''],
     [/grep -q ssh-session-token-file/, 'YES\n'],
     [/python3 -c/, ''],
@@ -938,7 +938,7 @@ test('connect preserves an exact-owned backend when reuse proof transport fails'
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0/, 'ALIVE'],
     [/print\("OWNED"/, 'OWNED\n']
@@ -966,7 +966,7 @@ test('connect replaces an exact-owned backend only after authenticated stale pro
 
   const ssh = fakeSsh([
     [/uname/, 'Linux\nx86_64'],
-    [/\[ -x/, 'OK'],
+    [/\[ -x/, '🟢'],
     [/cat .*lock\.json/, JSON.stringify(lock)],
     [/kill -0 333/, 'ALIVE'],
     [/print\("OWNED"/, 'OWNED\n'],

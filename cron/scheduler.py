@@ -1699,7 +1699,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         # NOT enough here: ``mirror_to_session`` only APPENDS to an existing
         # session and a flat ``(platform, chat_id, None)`` row is otherwise
         # absent for a ``chat_postMessage`` delivery, so the seed must create
-        # the row first (F5).
+        # the row first.
         thread_seeded = False
         opened_thread_id: Optional[str] = None
         if (
@@ -2669,7 +2669,7 @@ def _scan_assembled_cron_prompt(
 
 def _guard_job_credential_exfil(job: dict) -> None:
     """Fail closed if a job's stored provider/base_url pair would exfiltrate a
-    credential (F8 runtime backstop; CWE-200/CWE-522).
+    credential (runtime exfiltration backstop; CWE-200/CWE-522).
 
     The model-callable cron tool validates this on create/update, but a job
     persisted before that guard — or written directly to the jobs store —
@@ -3208,7 +3208,7 @@ def run_job(
         )
         from hermes_cli.auth import AuthError
 
-        # F8 runtime backstop: never resolve a stored provider/base_url pair that
+        # Runtime backstop: never resolve a stored provider/base_url pair that
         # would ship a named provider's stored credential to an off-host endpoint
         # (CWE-200/CWE-522). The cron tool validates this on create/update, but a
         # job persisted before that guard — or written directly to the jobs store

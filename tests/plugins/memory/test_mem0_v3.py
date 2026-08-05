@@ -30,7 +30,7 @@ class FakeBackend:
             messages,
             {"user_id": user_id, "agent_id": agent_id, "infer": infer, "metadata": metadata},
         ))
-        return {"status": "PENDING", "event_id": "evt-test-123"}
+        return {"status": "⏳", "event_id": "evt-test-123"}
 
     def update(self, memory_id, text):
         self.captured.append(("update", memory_id, text))

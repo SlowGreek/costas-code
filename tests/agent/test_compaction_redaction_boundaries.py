@@ -131,7 +131,7 @@ def test_manual_focus_topic_redacted_before_summary_prompt():
     c = _compressor()
     turns = [
         {"role": "user", "content": "Summarize safely"},
-        {"role": "assistant", "content": "OK"},
+        {"role": "assistant", "content": "🟢"},
     ]
 
     with patch(

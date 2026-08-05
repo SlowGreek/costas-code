@@ -27,7 +27,7 @@ class FakePlatformClient:
 
     def add(self, messages, **kwargs):
         self.calls.append(("add", messages, kwargs))
-        return {"status": "PENDING", "event_id": "evt-1"}
+        return {"status": "⏳", "event_id": "evt-1"}
 
     def update(self, **kwargs):
         self.calls.append(("update", kwargs))

@@ -796,7 +796,7 @@ class TestEnableVoiceModeReal:
     @patch("cli._cprint")
     @patch("hermes_cli.config.load_config", return_value={"voice": {}})
     @patch("tools.voice_mode.check_voice_requirements",
-           return_value={"available": True, "details": "OK"})
+           return_value={"available": True, "details": "🟢"})
     @patch("tools.voice_mode.detect_audio_environment",
            return_value={"available": True, "warnings": []})
     def test_success_sets_voice_mode(self, _env, _req, _cfg, _cp):
@@ -832,7 +832,7 @@ class TestEnableVoiceModeReal:
     @patch("cli._cprint")
     @patch("hermes_cli.config.load_config", return_value={"voice": {"auto_tts": True}})
     @patch("tools.voice_mode.check_voice_requirements",
-           return_value={"available": True, "details": "OK"})
+           return_value={"available": True, "details": "🟢"})
     @patch("tools.voice_mode.detect_audio_environment",
            return_value={"available": True, "warnings": []})
     def test_auto_tts_from_config(self, _env, _req, _cfg, _cp):
@@ -843,7 +843,7 @@ class TestEnableVoiceModeReal:
     @patch("cli._cprint")
     @patch("hermes_cli.config.load_config", return_value={"voice": {}})
     @patch("tools.voice_mode.check_voice_requirements",
-           return_value={"available": True, "details": "OK"})
+           return_value={"available": True, "details": "🟢"})
     @patch("tools.voice_mode.detect_audio_environment",
            return_value={"available": True, "warnings": []})
     def test_no_auto_tts_default(self, _env, _req, _cfg, _cp):
@@ -854,7 +854,7 @@ class TestEnableVoiceModeReal:
     @patch("cli._cprint")
     @patch("hermes_cli.config.load_config", side_effect=Exception("broken config"))
     @patch("tools.voice_mode.check_voice_requirements",
-           return_value={"available": True, "details": "OK"})
+           return_value={"available": True, "details": "🟢"})
     @patch("tools.voice_mode.detect_audio_environment",
            return_value={"available": True, "warnings": []})
     def test_config_exception_still_enables(self, _env, _req, _cfg, _cp):
@@ -886,7 +886,7 @@ class TestVoiceBeepConfigReal:
             "available": True,
             "audio_available": True,
             "stt_available": True,
-            "details": "OK",
+            "details": "🟢",
             "missing_packages": [],
         },
     )

@@ -225,7 +225,7 @@ class TestWindowsSocketSmokeTest:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.close()
-                print("OK")
+                print("🟢")
                 sys.exit(0)
             except OSError as exc:
                 print(f"FAIL: {exc}")
@@ -245,7 +245,7 @@ class TestWindowsSocketSmokeTest:
             f"  stderr={result.stderr!r}\n"
             f"  scrubbed keys={sorted(scrubbed.keys())}"
         )
-        assert "OK" in result.stdout
+        assert "🟢" in result.stdout
 
 
 # ---------------------------------------------------------------------------

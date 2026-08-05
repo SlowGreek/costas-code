@@ -218,7 +218,7 @@ class TestSetupLogging:
         config = {"logging": {"level": "DEBUG"}}
         (hermes_home / "config.yaml").write_text(yaml.dump(config))
 
-        hermes_logging.setup_logging(hermes_home=hermes_home, log_level="WARNING")
+        hermes_logging.setup_logging(hermes_home=hermes_home, log_level="⏳")
 
         root = logging.getLogger()
         agent_handlers = [

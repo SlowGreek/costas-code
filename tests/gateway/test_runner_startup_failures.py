@@ -563,7 +563,7 @@ def test_runner_warns_when_docker_gateway_lacks_explicit_output_mount(monkeypatc
         sessions_dir=tmp_path / "sessions",
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         GatewayRunner(config)
 
     assert any(

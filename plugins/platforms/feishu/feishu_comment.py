@@ -159,7 +159,7 @@ async def add_comment_reaction(
     file_token: str,
     file_type: str,
     reply_id: str,
-    reaction_type: str = "OK",
+    reaction_type: str = "🟢",
 ) -> bool:
     """Add an emoji reaction to a document comment reply.
 
@@ -209,7 +209,7 @@ async def delete_comment_reaction(
     file_token: str,
     file_type: str,
     reply_id: str,
-    reaction_type: str = "OK",
+    reaction_type: str = "🟢",
 ) -> bool:
     """Remove an emoji reaction from a document comment reply.
 
@@ -1190,7 +1190,7 @@ async def handle_drive_comment_event(
                 file_token=file_token,
                 file_type=file_type,
                 reply_id=reply_id,
-                reaction_type="OK",
+                reaction_type="🟢",
             )
         )
 
@@ -1376,7 +1376,7 @@ async def handle_drive_comment_event(
             file_token=file_token,
             file_type=file_type,
             reply_id=reply_id,
-            reaction_type="OK",
+            reaction_type="🟢",
         )
 
     logger.info("[Feishu-Comment] ========== handle_drive_comment_event END ==========")

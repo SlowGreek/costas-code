@@ -71,7 +71,7 @@ try {
   }).sort((left, right) => left.name.localeCompare(right.name))
   const shaped = {
     schema: 'test/1',
-    status: failed === 0 && result.ok ? 'GREEN' : 'RED',
+    signal: failed === 0 && result.ok ? '🟢' : '🔴',
     command: 'node scripts/quality/test.mjs',
     summary: { passed, failed, skipped, todo, filtered_out: skipped + todo, total },
     suites,
@@ -79,7 +79,7 @@ try {
   }
   publishReport('test-report.json', shaped)
   process.stdout.write(
-    `test result: ${failed === 0 && result.ok ? 'ok' : 'FAILED'}. ${passed} passed; ${failed} failed; 0 ignored; 0 measured; ${skipped + todo} filtered out\n`
+    `test result: ${failed === 0 && result.ok ? 'ok' : '🔴'}. ${passed} passed; ${failed} failed; 0 ignored; 0 measured; ${skipped + todo} filtered out\n`
   )
   process.stdout.write(`${receiptLine(source)}\n`)
   if (!result.ok || failed !== 0) {

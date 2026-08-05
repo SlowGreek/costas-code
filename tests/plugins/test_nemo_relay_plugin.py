@@ -623,7 +623,7 @@ mode = "test"
     )
     monkeypatch.setenv("HERMES_NEMO_RELAY_PLUGINS_TOML", str(plugins_toml))
 
-    with caplog.at_level("ERROR"):
+    with caplog.at_level("🔴"):
         plugin.on_session_start(session_id="s1")
 
     assert not any(event[0] == "plugin.activate_dynamic" for event in fake.events)
@@ -824,7 +824,7 @@ def test_nemo_relay_plugin_degrades_to_static_config_on_relay_0_5(
     plugin = _fresh_plugin(monkeypatch, fake)
     _enable_dynamic_plugin(tmp_path, monkeypatch)
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         plugin.on_session_start(session_id="s1")
 
     initialize = next(event for event in fake.events if event[0] == "plugin.initialize")
@@ -846,7 +846,7 @@ dynamic_plugins = [{ kind = "rust_dynamic", manifest_ref = "missing-id" }]
     )
     monkeypatch.setenv("HERMES_NEMO_RELAY_PLUGINS_TOML", str(plugins_toml))
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         plugin.on_session_start(session_id="s1")
 
     assert not any(event[0] == "plugin.activate_dynamic" for event in fake.events)
@@ -876,7 +876,7 @@ manifest_ref = "{(tmp_path / "invalid" / "relay-plugin.toml").as_posix()}"
     )
     monkeypatch.setenv("HERMES_NEMO_RELAY_PLUGINS_TOML", str(plugins_toml))
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         plugin.on_session_start(session_id="s1")
 
     assert not any(event[0] == "plugin.activate_dynamic" for event in fake.events)
@@ -932,7 +932,7 @@ def test_nemo_relay_plugin_attempts_activation_close_after_subscriber_flush_fail
     runtime = plugin._get_runtime()
     assert runtime is not None
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         runtime.shutdown()
 
     event_names = [event[0] for event in fake.events]
@@ -966,7 +966,7 @@ def test_nemo_relay_plugin_continues_shutdown_after_atif_export_failure(
     runtime = plugin._get_runtime()
     assert runtime is not None
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         runtime.shutdown()
 
     event_names = [event[0] for event in fake.events]

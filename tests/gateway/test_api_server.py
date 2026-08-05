@@ -1160,7 +1160,7 @@ class TestToolsetsEndpoint:
         """If one toolset fails to resolve, others still appear with empty tools."""
         fake_toolsets = [
             ("broken", "Broken", "fails"),
-            ("ok", "OK", "works"),
+            ("ok", "🟢", "works"),
         ]
 
         def _resolve(name):
@@ -2508,7 +2508,7 @@ class TestResponsesEndpoint:
     @pytest.mark.asyncio
     async def test_store_false_does_not_store(self, adapter):
         """When store=false, the response is NOT stored."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         app = _create_app(adapter)
         async with TestClient(TestServer(app)) as cli:
@@ -2531,7 +2531,7 @@ class TestResponsesEndpoint:
     @pytest.mark.asyncio
     async def test_store_string_false_does_not_store(self, adapter):
         """Quoted false must preserve ephemeral store=false semantics."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         app = _create_app(adapter)
         async with TestClient(TestServer(app)) as cli:
@@ -3170,7 +3170,7 @@ class TestConfigIntegration:
 class TestMultipleSystemMessages:
     @pytest.mark.asyncio
     async def test_multiple_system_messages_concatenated(self, adapter):
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         app = _create_app(adapter)
         async with TestClient(TestServer(app)) as cli:
@@ -3527,7 +3527,7 @@ class TestTruncation:
     @pytest.mark.asyncio
     async def test_truncation_auto_limits_history(self, adapter):
         """With truncation=auto, history over 100 messages is trimmed."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         # Pre-seed a stored response with a long history
         long_history = [{"role": "user", "content": f"msg {i}"} for i in range(150)]
@@ -3560,7 +3560,7 @@ class TestTruncation:
     @pytest.mark.asyncio
     async def test_truncation_auto_preserves_leading_compaction_summary(self, adapter):
         """truncation=auto must not discard the compacted-history handoff."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         summary = {
             "role": "user",
@@ -3606,7 +3606,7 @@ class TestTruncation:
         leaves the compaction summary after a kept system message, so the
         preservation predicate must not assume the summary is at index 0.
         """
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         system_head = {"role": "system", "content": "You are a helpful agent."}
         summary = {
@@ -3648,7 +3648,7 @@ class TestTruncation:
     @pytest.mark.asyncio
     async def test_no_truncation_keeps_full_history(self, adapter):
         """Without truncation=auto, long history is passed as-is."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
 
         long_history = [{"role": "user", "content": f"msg {i}"} for i in range(150)]
         adapter._response_store.put("resp_prev2", {
@@ -4168,7 +4168,7 @@ class TestSessionIdHeader:
     @pytest.mark.asyncio
     async def test_provided_session_id_loads_history_from_db(self, auth_adapter):
         """When X-Hermes-Session-Id is provided, history comes from SessionDB not request body."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
         db_history = [
             {"role": "user", "content": "stored message 1"},
             {"role": "assistant", "content": "stored reply 1"},
@@ -4204,7 +4204,7 @@ class TestSessionIdHeader:
     @pytest.mark.asyncio
     async def test_db_failure_falls_back_to_empty_history(self, auth_adapter):
         """If SessionDB raises, history falls back to empty and request still succeeds."""
-        mock_result = {"final_response": "OK", "messages": [], "api_calls": 1}
+        mock_result = {"final_response": "🟢", "messages": [], "api_calls": 1}
         # Simulate DB failure: _session_db is None and SessionDB() constructor raises
         auth_adapter._session_db = None
         app = _create_app(auth_adapter)

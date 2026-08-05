@@ -18,7 +18,7 @@ from tools import browser_tool
 
 def _make_browser_result(url="https://example.com"):
     """Return a mock successful browser command result."""
-    return {"success": True, "data": {"title": "OK", "url": url}}
+    return {"success": True, "data": {"title": "🟢", "url": url}}
 
 
 # ---------------------------------------------------------------------------

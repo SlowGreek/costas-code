@@ -18,10 +18,10 @@ describe('LUCID receipt parser', () => {
   it('admits an exact LUCID tool and closed success receipt', () => {
     expect(
       parseLucidToolResult('mcp__lucid_quine__lucid_get', {
-        result: { status: 'GREEN' },
+        result: { status: '🟢' },
         lucid_receipt: receipt
       })
-    ).toEqual({ result: { status: 'GREEN' }, error: null, receipt })
+    ).toEqual({ result: { status: '🟢' }, error: null, receipt })
   })
 
   it('admits JSON-string tool results and typed refusals', () => {
@@ -70,7 +70,7 @@ describe('LUCID receipt parser', () => {
     for (const candidate of cases) {
       expect(
         parseLucidToolResult('mcp__lucid_quine__lucid_get', {
-          result: { status: 'GREEN' },
+          result: { status: '🟢' },
           lucid_receipt: candidate
         })
       ).toBeNull()

@@ -1218,7 +1218,7 @@ class TestSpawnWarningDedup:
         # Fresh dedupe state — clear any keys left by other tests.
         _tirith_mod._reset_spawn_warning_state()
 
-        with caplog.at_level("WARNING", logger="tools.tirith_security"):
+        with caplog.at_level("⏳", logger="tools.tirith_security"):
             for i in range(15):
                 result = check_command_security("echo hi")
                 # Behavior must remain the same on every call —
@@ -1256,7 +1256,7 @@ class TestSpawnWarningDedup:
         }
         _tirith_mod._reset_spawn_warning_state()
 
-        with caplog.at_level("WARNING", logger="tools.tirith_security"):
+        with caplog.at_level("⏳", logger="tools.tirith_security"):
             mock_run.side_effect = FileNotFoundError("[WinError 2]")
             for _ in range(3):
                 check_command_security("a")
@@ -1286,7 +1286,7 @@ class TestSpawnWarningDedup:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="tirith", timeout=5)
         _tirith_mod._reset_spawn_warning_state()
 
-        with caplog.at_level("WARNING", logger="tools.tirith_security"):
+        with caplog.at_level("⏳", logger="tools.tirith_security"):
             for _ in range(10):
                 result = check_command_security("slow")
                 assert result["action"] == "allow"
@@ -1311,7 +1311,7 @@ class TestSpawnWarningDedup:
         with patch(
             "tools.tirith_security._resolve_tirith_path", return_value=None
         ):
-            with caplog.at_level("WARNING", logger="tools.tirith_security"):
+            with caplog.at_level("⏳", logger="tools.tirith_security"):
                 for _ in range(10):
                     result = check_command_security("echo")
                     assert result["action"] == "allow"

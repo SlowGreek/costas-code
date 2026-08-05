@@ -11,8 +11,8 @@
 mod bootstrap;
 mod events;
 mod install_script;
-mod powershell;
 mod paths;
+mod powershell;
 mod update;
 
 use std::sync::Arc;
@@ -60,8 +60,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    args.into_iter()
-        .any(|a| a.as_ref() == "--reinstall" || a.as_ref() == "--repair")
+    args.into_iter().any(|a| a.as_ref() == "--reinstall" || a.as_ref() == "--repair")
 }
 
 /// Process-wide install state, shared across Tauri commands.
@@ -78,10 +77,7 @@ pub struct AppState {
 
 impl AppState {
     fn new(mode: AppMode) -> Self {
-        Self {
-            bootstrap: Mutex::new(None),
-            mode,
-        }
+        Self { bootstrap: Mutex::new(None), mode }
     }
 }
 
@@ -160,7 +156,9 @@ pub fn run() {
                     }
                 }
                 None => {
-                    tracing::error!("main installer window not found; installer UI will not appear");
+                    tracing::error!(
+                        "main installer window not found; installer UI will not appear"
+                    );
                 }
             }
             Ok(())

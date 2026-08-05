@@ -5,7 +5,7 @@ const document = () => ({
   id: 'example.document',
   type: 'document',
   header: [{ id: 'title', type: 'text', body: 'Example' }],
-  sections: [{ type: 'status', signal: 'GREEN', body: 'Ready' }],
+  sections: [{ type: 'status', signal: '🟢', body: 'Ready' }],
   actions: [{ id: 'continue', type: 'button', label: 'Continue', action: 'example.continue' }]
 })
 

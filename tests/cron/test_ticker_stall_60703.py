@@ -84,7 +84,7 @@ class TestBoundedJobsLock:
         try:
             start = time.monotonic()
             entered = False
-            with caplog.at_level("ERROR", logger="cron.jobs"):
+            with caplog.at_level("🔴", logger="cron.jobs"):
                 with _jobs_lock():
                     entered = True
             elapsed = time.monotonic() - start
@@ -101,7 +101,7 @@ class TestBoundedJobsLock:
     def test_uncontended_lock_is_fast_and_silent(self, caplog):
         jobs_mod.ensure_dirs()
         start = time.monotonic()
-        with caplog.at_level("ERROR", logger="cron.jobs"):
+        with caplog.at_level("🔴", logger="cron.jobs"):
             with _jobs_lock():
                 pass
         assert time.monotonic() - start < 5

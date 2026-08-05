@@ -946,7 +946,7 @@ def cmd_setup(args) -> None:
         reset_honcho_client()
         hcfg = HonchoClientConfig.from_global_config(host=_host_key())
         get_honcho_client(hcfg)
-        print("OK")
+        print("🟢")
     except Exception as e:
         print(f"FAILED\n  Error: {e}")
         return
@@ -1112,7 +1112,7 @@ def cmd_status(args) -> None:
         try:
             client = get_honcho_client(hcfg)
             _show_peer_cards(hcfg, client)
-            print("OK")
+            print("🟢")
         except Exception as e:
             print(f"FAILED ({e})\n")
     else:

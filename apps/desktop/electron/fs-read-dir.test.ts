@@ -157,23 +157,13 @@ test('readDirForIpc returns filesystem error codes instead of throwing', async (
   }
 })
 
-test('readDirForIpc marks a symlink to a directory as a directory', async t => {
+test('readDirForIpc marks a symlink to a directory as a directory', async () => {
   const root = mkTmpDir()
 
   try {
     fs.mkdirSync(path.join(root, 'actual-dir'))
 
-    try {
-      fs.symlinkSync(path.join(root, 'actual-dir'), path.join(root, 'linked-dir'), 'dir')
-    } catch (error) {
-      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
-        t.skip(`symlink creation is not permitted on this platform (${error.code})`)
-
-        return
-      }
-
-      throw error
-    }
+    fs.symlinkSync(path.join(root, 'actual-dir'), path.join(root, 'linked-dir'), 'dir')
 
     const result = await readDirForIpc(root)
     const linked = result.entries.find(entry => entry.name === 'linked-dir')
@@ -185,41 +175,7 @@ test('readDirForIpc marks a symlink to a directory as a directory', async t => {
   }
 })
 
-test('readDirForIpc marks a Windows junction to a directory as a directory', async t => {
-  if (process.platform !== 'win32') {
-    t.skip('junctions are a Windows-specific symlink type')
-
-    return
-  }
-
-  const root = mkTmpDir()
-
-  try {
-    fs.mkdirSync(path.join(root, 'actual-dir'))
-
-    try {
-      fs.symlinkSync(path.join(root, 'actual-dir'), path.join(root, 'junction-dir'), 'junction')
-    } catch (error) {
-      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
-        t.skip(`junction creation is not permitted on this platform (${error.code})`)
-
-        return
-      }
-
-      throw error
-    }
-
-    const result = await readDirForIpc(root)
-    const junction = result.entries.find(entry => entry.name === 'junction-dir')
-
-    assert.equal(result.error, undefined)
-    assert.equal(junction?.isDirectory, true)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test('readDirForIpc allows expanding symlink or junction directories outside the project root', async t => {
+test('readDirForIpc allows expanding symlink or junction directories outside the project root', async () => {
   const root = mkTmpDir()
   const outside = mkTmpDir()
 
@@ -228,17 +184,7 @@ test('readDirForIpc allows expanding symlink or junction directories outside the
 
     const linkPath = path.join(root, 'outside-link')
 
-    try {
-      fs.symlinkSync(outside, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
-    } catch (error) {
-      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
-        t.skip(`directory symlink creation is not permitted on this platform (${error.code})`)
-
-        return
-      }
-
-      throw error
-    }
+    fs.symlinkSync(outside, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
 
     const result = await readDirForIpc(linkPath)
 

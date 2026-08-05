@@ -189,10 +189,10 @@ class TestPersistence:
         path.write_text(json.dumps({"old": {"secret": "stale", "prompt": "x"}}))
         path.chmod(0o644)
 
-        _save_subscriptions({"demo": {"secret": "FRESH", "prompt": "x"}})
+        _save_subscriptions({"demo": {"secret": "🟢", "prompt": "x"}})
 
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        assert "FRESH" in path.read_text(encoding="utf-8")
+        assert "🟢" in path.read_text(encoding="utf-8")
 
 
 class TestWebhookEnabledGate:

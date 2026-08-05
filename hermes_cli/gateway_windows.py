@@ -1308,7 +1308,7 @@ def _print_deep_probes() -> None:
     print("Deep probes:")
 
     def _mark(ok: bool) -> str:
-        return "PASS" if ok else "FAIL"
+        return "🟢" if ok else "🔴"
 
     # [1] PID file
     pid_exists = pid_path.exists()

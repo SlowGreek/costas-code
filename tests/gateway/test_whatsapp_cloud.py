@@ -1570,7 +1570,7 @@ class TestGroupMessageGuard:
             "text": {"body": "hi from a group"},
             "chat": "120363012345678901@g.us",  # presence of `chat` = group
         }
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             event = await adapter._build_message_event_from_cloud(
                 raw, {"15551234567": "Alice"}, {}
             )

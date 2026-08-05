@@ -50,7 +50,7 @@ def _cmd_status(args) -> int:
     status_line = (
         "ENABLED" if enabled and not paused else
         "PAUSED" if paused else
-        "DISABLED"
+        "🔴"
     )
     print(f"curator: {status_line}")
     print(f"  runs:           {runs}")

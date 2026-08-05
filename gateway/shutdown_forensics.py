@@ -37,7 +37,7 @@ for _name in ("SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"):
 def _signal_name(sig: Any) -> str:
     """Return a human-readable signal name (or ``str(sig)`` as fallback)."""
     if sig is None:
-        return "UNKNOWN"
+        return "⏳"
     try:
         sig_int = int(sig)
     except (TypeError, ValueError):

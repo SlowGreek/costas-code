@@ -384,5 +384,5 @@ class TestSkillsGuidanceSafetyRule:
         # literal backslash-n escape text rendering into the system prompt.
         assert "\\n" not in SKILLS_GUIDANCE
         assert SKILLS_GUIDANCE.count("\n") >= 6
-        for rule in ("UNAVAILABLE", "RELOAD", "WAIT", "DEDUP"):
+        for rule in ("🔴", "RELOAD", "WAIT", "DEDUP"):
             assert rule in SKILLS_GUIDANCE

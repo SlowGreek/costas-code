@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stage definition as reported by `install.ps1 -Manifest`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StageInfo {
+pub(crate) struct StageInfo {
     pub name: String,
     pub title: String,
     pub category: String,
@@ -22,14 +22,14 @@ pub struct StageInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Manifest {
+pub(crate) struct Manifest {
     pub stages: Vec<StageInfo>,
     #[serde(rename = "protocol_version", alias = "protocolVersion", default)]
     pub protocol_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StageResultPayload {
+pub(crate) struct StageResultPayload {
     pub stage: String,
     pub ok: bool,
     #[serde(default)]
@@ -44,7 +44,7 @@ pub struct StageResultPayload {
 /// Run-state for a single stage as we transition through it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum StageState {
+pub(crate) enum StageState {
     Running,
     Succeeded,
     Skipped,
@@ -56,7 +56,7 @@ pub enum StageState {
 /// uv/pip/git/npm write normal progress to stderr by design.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum LogStream {
+pub(crate) enum LogStream {
     Stdout,
     Stderr,
 }
@@ -64,7 +64,7 @@ pub enum LogStream {
 /// The single event channel `bootstrap` emits these. `type` discriminates.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum BootstrapEvent {
+pub(crate) enum BootstrapEvent {
     /// Sent once at the start with the full stage list.
     Manifest {
         stages: Vec<StageInfo>,
@@ -108,5 +108,5 @@ pub enum BootstrapEvent {
 impl BootstrapEvent {
     /// Tauri event name. Single channel for all bootstrap events; the
     /// `type` tag tells the renderer how to interpret the payload.
-    pub const CHANNEL: &'static str = "bootstrap";
+    pub(crate) const CHANNEL: &'static str = "bootstrap";
 }

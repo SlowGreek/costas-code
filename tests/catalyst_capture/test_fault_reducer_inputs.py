@@ -1,4 +1,4 @@
-"""Mechanical F0c.1 reducer inputs for the Catalyst fault family.
+"""Mechanical captured prior input reducer inputs for the Catalyst fault family.
 
 These captures use the production Codex JSONL parser, notification scope filter,
 event projector, and turn terminal loop.  Corpus expectations are read only

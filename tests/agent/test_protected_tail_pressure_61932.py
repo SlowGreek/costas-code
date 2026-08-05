@@ -62,7 +62,7 @@ def _already_compacted_session(
     msgs: list[dict] = [
         {"role": "system", "content": "You are Hermes."},
         {"role": "user", "content": "Investigate thoroughly"},
-        {"role": "assistant", "content": "OK"},
+        {"role": "assistant", "content": "🟢"},
         {
             "role": "user",
             "content": (
@@ -229,7 +229,7 @@ class TestProtectedTailPressure61932:
         msgs: list[dict] = [
             {"role": "system", "content": "You are Hermes."},
             {"role": "user", "content": "Investigate thoroughly"},
-            {"role": "assistant", "content": "OK"},
+            {"role": "assistant", "content": "🟢"},
         ]
         for i in range(4):
             msgs.extend(_unique_tool_pair(i, 200_000))

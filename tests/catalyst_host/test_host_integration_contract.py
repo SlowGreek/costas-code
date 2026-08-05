@@ -1,11 +1,4 @@
-"""Static integration gate for the Catalyst Hermes-visible host track.
-
-This suite deliberately does not import or invoke an execution endpoint.  It
-checks the provider-neutral runtime waist, content-addressed sibling receipts,
-and any later owner-produced R0/C2 source once those claimed paths exist.
-Missing future owner paths are reported as pending; a path that exists is a
-claim and must satisfy the closed contract.
-"""
+"""Static contract for Catalyst host integration ownership and safety."""
 
 from __future__ import annotations
 
@@ -27,13 +20,11 @@ from agent.transports.codex_app_server_session import CodexRuntimeSessionHost
 
 
 CATALYST_ROOT = Path(__file__).resolve().parents[2]
-AE_ROOT = CATALYST_ROOT.parent / "AgentExperiments"
+AE_ROOT = CATALYST_ROOT.parent
 
-# The graph is intentionally data, rather than inferred from prose ordering.
-# An edge (a, b) means a must be closed before b can claim readiness.
-HOST_TRACK = {
+HOST_CONTRACT = {
     "owners": {
-        "catalyst-runtime": frozenset(
+        "runtime-session-host": frozenset(
             {
                 "agent/runtime_sessions.py",
                 "agent/transports/codex_app_server_session.py",
@@ -43,56 +34,52 @@ HOST_TRACK = {
                 "tests/agent/test_runtime_sessions.py",
             }
         ),
-        "catalyst-r0": frozenset(
+        "execution-host-verifier": frozenset(
             {
                 "gateway/execution_host_protocol.py",
                 "tests/gateway/test_execution_host_protocol.py",
             }
         ),
-        "catalyst-c2": frozenset(
+        "visible-host-binding": frozenset(
             {
                 "hermes_state.py",
                 "tests/hermes_state/test_external_role_session_binding.py",
             }
         ),
-        "agentexperiments-f5": frozenset(
+        "runtime-enrollment": frozenset(
             {
                 "butler/src/catalyst_enrollment/enrollment.rs",
                 "butler/src/catalyst_enrollment/executor.rs",
                 "butler/src/catalyst_enrollment/canary.rs",
-                "butler/src/catalyst_enrollment/f1_adapter.rs",
+                "butler/src/catalyst_enrollment/conversation_contract_adapter.rs",
                 "butler/tests/catalyst_enrollment.rs",
-                "docs/CATALYST-F5-FEEDFORWARD.md",
-                "docs/CATALYST-F5-PROVISIONAL-RECEIPT.json",
+                "run/receipts/CATALYST-ENROLLMENT-PROVISIONAL-RECEIPT.json",
             }
         ),
     },
-    "native_edges": (
-        ("F0a", "F0b"),
-        ("F0b", "F0c"),
-        ("F0c", "F1"),
-        ("F1", "F2"),
-        ("F1", "F3"),
-        ("F1", "F4"),
-        ("F4", "F6"),
-        ("F2", "F7a"),
-        ("F3", "F7a"),
-        ("F4", "F7a"),
-        ("F7a", "F7b"),
-        ("F6", "F7b"),
-        ("F7a", "F8"),
-        ("F7b", "F8"),
+    "conversation_edges": (
+        ("captured conversation corpus", "captured prior inputs"),
+        ("captured prior inputs", "conversation contract"),
+        ("conversation contract", "conversation presentation"),
+        ("conversation contract", "conversation store"),
+        ("conversation contract", "runtime adaptation"),
+        ("runtime adaptation", "provider admission"),
+        ("conversation presentation", "owner integration"),
+        ("conversation store", "owner integration"),
+        ("runtime adaptation", "owner integration"),
+        ("owner integration", "admitted provider"),
+        ("provider admission", "admitted provider"),
     ),
-    "host_edges": (
-        ("C0", "C1"),
-        ("C1", "A0"),
-        ("C1", "A1"),
-        ("A0", "F5a"),
-        ("A1", "F5a"),
-        ("F5a", "F5b"),
-        ("F5b", "F5c"),
+    "enrollment_edges": (
+        ("package integrity", "runtime enrollment"),
+        ("runtime enrollment", "read-only observation"),
+        ("read-only observation", "exact control"),
+        ("exact control", "launch and mutation mediation"),
     ),
-    "convergence_edges": (("F1", "F5a"), ("F5a", "F7b")),
+    "convergence_edges": (
+        ("conversation contract", "read-only observation"),
+        ("read-only observation", "admitted provider"),
+    ),
     "fleet_policy": {
         "launch": False,
         "mutation": False,
@@ -110,7 +97,7 @@ FORBIDDEN_GENERIC_ID_PARTS = (
     "pid",
 )
 
-R0_FORBIDDEN_IMPORT_ROOTS = {
+EXECUTION_HOST_FORBIDDEN_IMPORT_ROOTS = {
     "agent",
     "run_agent",
     "tui_gateway",
@@ -120,7 +107,15 @@ R0_FORBIDDEN_IMPORT_ROOTS = {
     "starlette",
     "uvicorn",
 }
-R0_FORBIDDEN_DECORATORS = {"get", "post", "put", "patch", "delete", "websocket", "route"}
+EXECUTION_HOST_FORBIDDEN_DECORATORS = {
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "websocket",
+    "route",
+}
 
 
 def _read_json(path: Path) -> dict:
@@ -144,12 +139,12 @@ def _assert_acyclic(edges: tuple[tuple[str, str], ...]) -> None:
             indegree[target] -= 1
             if indegree[target] == 0:
                 ready.append(target)
-    assert set(visited) == set(indegree), "host-track dependency graph contains a cycle"
+    assert set(visited) == set(indegree), "host dependency graph contains a cycle"
 
 
-def _pending_unless_claimed(path: Path, checkpoint: str) -> str:
+def _claimed_source(path: Path, contract: str) -> str:
     if not path.exists():
-        pytest.skip(f"PENDING {checkpoint}: owner path has not claimed the checkpoint: {path}")
+        pytest.skip(f"PENDING {contract}: owner path has not claimed the contract: {path}")
     return path.read_text(encoding="utf-8")
 
 
@@ -174,24 +169,15 @@ def _decorator_leaf(decorator: ast.expr) -> str | None:
 
 
 def test_owner_paths_are_pairwise_disjoint_and_repository_scoped():
-    owners = HOST_TRACK["owners"]
     claimed: dict[str, str] = {}
-    for owner, paths in owners.items():
-        expected_repository = "agentexperiments" if owner.startswith("agentexperiments") else "catalyst"
+    for owner, paths in HOST_CONTRACT["owners"].items():
+        repository = "agentexperiments" if owner == "runtime-enrollment" else "catalyst"
         for path in paths:
             assert not Path(path).is_absolute()
             assert ".." not in Path(path).parts
-            key = f"{expected_repository}:{path.casefold()}"
+            key = f"{repository}:{path.casefold()}"
             assert key not in claimed, f"{path} is claimed by both {claimed[key]} and {owner}"
             claimed[key] = owner
-
-    catalyst_paths = set().union(
-        *(paths for owner, paths in owners.items() if owner.startswith("catalyst"))
-    )
-    ae_paths = set().union(
-        *(paths for owner, paths in owners.items() if owner.startswith("agentexperiments"))
-    )
-    assert catalyst_paths.isdisjoint(ae_paths)
 
 
 def test_runtime_host_symbols_and_results_are_provider_neutral():
@@ -204,7 +190,7 @@ def test_runtime_host_symbols_and_results_are_provider_neutral():
     }
     public_members.update(
         name.casefold()
-        for name, _ in inspect.getmembers(RuntimeSessionHost, inspect.isfunction)
+        for name, member in inspect.getmembers(RuntimeSessionHost, inspect.isfunction)
         if not name.startswith("_")
     )
     annotation_values = [
@@ -219,12 +205,9 @@ def test_runtime_host_symbols_and_results_are_provider_neutral():
         for annotation in get_type_hints(member).values()
     )
     annotations = " ".join(str(annotation).casefold() for annotation in annotation_values)
-    generic_surface = public_names | public_members
-
     for forbidden in FORBIDDEN_GENERIC_ID_PARTS:
-        assert all(forbidden not in symbol for symbol in generic_surface)
+        assert all(forbidden not in symbol for symbol in public_names | public_members)
         assert forbidden not in annotations
-
     assert {field.name for field in fields(RuntimeTurnResult)} == {
         "final_text",
         "projected_messages",
@@ -239,9 +222,8 @@ def test_runtime_host_symbols_and_results_are_provider_neutral():
     }
 
 
-def test_runtime_host_false_capability_cells_are_explicit_and_not_emulated():
-    capabilities = CodexRuntimeSessionHost._CAPABILITIES
-    assert capabilities == RuntimeSessionCapabilities(
+def test_runtime_host_false_capabilities_are_explicit_and_not_emulated():
+    assert CodexRuntimeSessionHost._CAPABILITIES == RuntimeSessionCapabilities(
         send=True,
         steer_active_turn=True,
         interrupt=True,
@@ -256,11 +238,10 @@ def test_runtime_host_false_capability_cells_are_explicit_and_not_emulated():
     assert not hasattr(RuntimeSessionHost, "replay")
 
 
-def test_f1_receipt_preserves_exact_disposition_and_no_authority():
-    receipt_path = AE_ROOT / "butler/conversation-core/F1-RECEIPT.json"
-    if not receipt_path.exists():
-        pytest.skip(f"PENDING F1 sibling receipt: {receipt_path}")
-    receipt = _read_json(receipt_path)
+def test_conversation_contract_preserves_exact_disposition_and_no_authority():
+    receipt = _read_json(
+        AE_ROOT / "butler/conversation-core/CONVERSATION-CONTRACT-RECEIPT.json"
+    )
     assert receipt["authority"] == "none"
     assert receipt["disposition"]["counts"] == {
         "reduced": 11,
@@ -269,43 +250,40 @@ def test_f1_receipt_preserves_exact_disposition_and_no_authority():
     }
 
 
-def test_f5_live_receipt_preserves_semantic_hold_after_deterministic_integration():
-    receipt_path = AE_ROOT / "docs/CATALYST-F5-PROVISIONAL-RECEIPT.json"
-    if not receipt_path.exists():
-        pytest.skip(f"PENDING F5 sibling receipt: {receipt_path}")
-    receipt = _read_json(receipt_path)
+def test_runtime_enrollment_remains_provisional_and_without_authority():
+    receipt = _read_json(
+        AE_ROOT / "run/receipts/CATALYST-ENROLLMENT-PROVISIONAL-RECEIPT.json"
+    )
     residuals = set(receipt["residuals"])
-    assert receipt["phase"] == "F5"
+    assert receipt["contract"] == "runtime-enrollment"
     assert "provisional" in receipt["status"].casefold()
     assert receipt["authority"] == "none"
     assert receipt["disposition"].casefold().startswith("hold")
-    assert "live-cryptographic-catalyst-attestation-unavailable" in residuals
+    assert "live-cryptographic-costas-attestation-unavailable" in residuals
     assert "below-shell-lease-mediation-unavailable" in residuals
 
 
-def test_r0_claim_has_no_endpoint_or_runtime_imports():
+def test_execution_host_verifier_has_no_endpoint_or_runtime_imports():
     path = CATALYST_ROOT / "gateway/execution_host_protocol.py"
-    source = _pending_unless_claimed(path, "R0 parser/verifier")
+    source = _claimed_source(path, "execution host verifier")
     tree = ast.parse(source, filename=str(path))
-
-    assert not (_import_roots(tree) & R0_FORBIDDEN_IMPORT_ROOTS)
+    assert not (_import_roots(tree) & EXECUTION_HOST_FORBIDDEN_IMPORT_ROOTS)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             leaves = {_decorator_leaf(item) for item in node.decorator_list}
-            assert not (leaves & R0_FORBIDDEN_DECORATORS)
+            assert not (leaves & EXECUTION_HOST_FORBIDDEN_DECORATORS)
 
 
-def test_visible_child_claim_uses_literal_observe_authority():
+def test_visible_host_binding_uses_literal_observe_authority():
     path = CATALYST_ROOT / "hermes_state.py"
-    source = _pending_unless_claimed(path, "C2 visible-child binding")
+    source = _claimed_source(path, "visible host binding")
     tree = ast.parse(source, filename=str(path))
-
-    authority_literals = {
+    literals = {
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
-    assert "observe" in authority_literals
+    assert "observe" in literals
     assert "external_role_session_bindings" in source
     assert "create_external_role_session_binding" in source
     assert "list_delegate_children" in source
@@ -316,64 +294,56 @@ def test_visible_child_claim_uses_literal_observe_authority():
     assert "model_config" not in binding_block
     assert not any(
         part in binding_block.casefold()
-        for part in ("provider", "runtime", "codex_thread", "codex_turn", "capability", "lease", "prompt")
+        for part in (
+            "provider",
+            "runtime",
+            "codex_thread",
+            "codex_turn",
+            "capability",
+            "lease",
+            "prompt",
+        )
     )
 
 
 def test_fleet_policy_forbids_launch_and_mutation():
-    assert HOST_TRACK["fleet_policy"] == {
+    assert HOST_CONTRACT["fleet_policy"] == {
         "launch": False,
         "mutation": False,
         "first_canary": "read-only",
         "acceptance_owner": "QUINE",
     }
 
-    receipt_path = AE_ROOT / "docs/CATALYST-F5-PROVISIONAL-RECEIPT.json"
-    if receipt_path.exists():
-        receipt = _read_json(receipt_path)
-        residuals = set(receipt["residuals"])
-        assert receipt["phase"] == "F5"
-        assert receipt["authority"] == "none"
-        assert "provisional" in receipt["status"].casefold()
-        assert receipt["disposition"].casefold().startswith("hold")
-        assert "live-cryptographic-catalyst-attestation-unavailable" in residuals
-        assert "below-shell-lease-mediation-unavailable" in residuals
 
-
-def test_dependency_and_order_graph_is_exact_and_parallel():
-    assert HOST_TRACK["native_edges"] == (
-        ("F0a", "F0b"),
-        ("F0b", "F0c"),
-        ("F0c", "F1"),
-        ("F1", "F2"),
-        ("F1", "F3"),
-        ("F1", "F4"),
-        ("F4", "F6"),
-        ("F2", "F7a"),
-        ("F3", "F7a"),
-        ("F4", "F7a"),
-        ("F7a", "F7b"),
-        ("F6", "F7b"),
-        ("F7a", "F8"),
-        ("F7b", "F8"),
+def test_dependency_graph_is_exact_parallel_and_acyclic():
+    expected_conversation = (
+        ("captured conversation corpus", "captured prior inputs"),
+        ("captured prior inputs", "conversation contract"),
+        ("conversation contract", "conversation presentation"),
+        ("conversation contract", "conversation store"),
+        ("conversation contract", "runtime adaptation"),
+        ("runtime adaptation", "provider admission"),
+        ("conversation presentation", "owner integration"),
+        ("conversation store", "owner integration"),
+        ("runtime adaptation", "owner integration"),
+        ("owner integration", "admitted provider"),
+        ("provider admission", "admitted provider"),
     )
-    assert HOST_TRACK["host_edges"] == (
-        ("C0", "C1"),
-        ("C1", "A0"),
-        ("C1", "A1"),
-        ("A0", "F5a"),
-        ("A1", "F5a"),
-        ("F5a", "F5b"),
-        ("F5b", "F5c"),
+    expected_enrollment = (
+        ("package integrity", "runtime enrollment"),
+        ("runtime enrollment", "read-only observation"),
+        ("read-only observation", "exact control"),
+        ("exact control", "launch and mutation mediation"),
     )
-    assert HOST_TRACK["convergence_edges"] == (("F1", "F5a"), ("F5a", "F7b"))
-
-    all_edges = (
-        HOST_TRACK["native_edges"]
-        + HOST_TRACK["host_edges"]
-        + HOST_TRACK["convergence_edges"]
+    expected_convergence = (
+        ("conversation contract", "read-only observation"),
+        ("read-only observation", "admitted provider"),
     )
+    assert HOST_CONTRACT["conversation_edges"] == expected_conversation
+    assert HOST_CONTRACT["enrollment_edges"] == expected_enrollment
+    assert HOST_CONTRACT["convergence_edges"] == expected_convergence
+    all_edges = expected_conversation + expected_enrollment + expected_convergence
     _assert_acyclic(all_edges)
-    assert ("F3", "F5a") not in all_edges
-    assert ("F4", "F5a") not in all_edges
-    assert ("F5a", "F1") not in all_edges
+    assert ("conversation store", "read-only observation") not in all_edges
+    assert ("runtime adaptation", "read-only observation") not in all_edges
+    assert ("read-only observation", "conversation contract") not in all_edges

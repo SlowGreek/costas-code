@@ -76,7 +76,7 @@ async def test_disconnect_failure_redacts_token_in_log(monkeypatch, caplog):
     adapter._release_platform_lock = lambda: None
     adapter._cancel_pending_delivery_tasks = AsyncMock()
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         await adapter.disconnect()
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
@@ -100,7 +100,7 @@ async def test_send_document_failure_redacts_token_in_log(monkeypatch, caplog, t
     fallback = AsyncMock(return_value=SimpleNamespace(success=False, error="fallback"))
     monkeypatch.setattr(BasePlatformAdapter, "send_document", fallback)
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         await adapter.send_document("123", str(file_path))
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
@@ -124,7 +124,7 @@ async def test_send_video_failure_redacts_token_in_log(monkeypatch, caplog, tmp_
     fallback = AsyncMock(return_value=SimpleNamespace(success=False, error="fallback"))
     monkeypatch.setattr(BasePlatformAdapter, "send_video", fallback)
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         await adapter.send_video("123", str(video_path))
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
@@ -144,7 +144,7 @@ async def test_send_update_prompt_failure_redacts_token_in_result_and_log(caplog
         side_effect=RuntimeError(f"Timed out requesting {_SECRET_SEND_URL}")
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         result = await adapter.send_update_prompt("123", "restart?")
 
     assert result.success is False
@@ -163,7 +163,7 @@ async def test_send_clarify_failure_redacts_token_in_result_and_log(caplog):
         side_effect=RuntimeError(f"Timed out requesting {_SECRET_SEND_URL}")
     )
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         result = await adapter.send_clarify("123", "q?", ["a", "b"], "cid", "sess")
 
     assert result.success is False

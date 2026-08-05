@@ -233,7 +233,7 @@ class TestSend:
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = "OK"
+        mock_response.text = "🟢"
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -304,7 +304,7 @@ class TestSend:
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = "OK"
+        mock_response.text = "🟢"
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_response)

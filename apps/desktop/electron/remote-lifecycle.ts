@@ -153,7 +153,7 @@ async function locateHermes(ssh, remoteHermesPath) {
       validateRemotePath(candidate)
       const ok = (await ssh.exec(`[ -x ${expandRemotePath(candidate)} ] && echo OK || true`)).trim()
 
-      return ok === 'OK'
+      return ok === '🟢'
     } catch {
       return false
     }

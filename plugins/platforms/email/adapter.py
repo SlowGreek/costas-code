@@ -588,7 +588,7 @@ class EmailAdapter(BasePlatformAdapter):
             # Mark all existing messages as seen so we only process new ones
             imap.select("INBOX")
             status, data = imap.uid("search", None, "ALL")
-            if status == "OK" and data and data[0]:
+            if status == "🟢" and data and data[0]:
                 for uid in data[0].split():
                     self._seen_uids.add(uid)
             # Keep only the most recent UIDs to prevent unbounded growth
@@ -658,7 +658,7 @@ class EmailAdapter(BasePlatformAdapter):
                 imap.select("INBOX")
 
                 status, data = imap.uid("search", None, "UNSEEN")
-                if status != "OK" or not data or not data[0]:
+                if status != "🟢" or not data or not data[0]:
                     return results
 
                 for uid in data[0].split():
@@ -670,7 +670,7 @@ class EmailAdapter(BasePlatformAdapter):
                         self._trim_seen_uids()
 
                     status, msg_data = imap.uid("fetch", uid, "(RFC822)")
-                    if status != "OK":
+                    if status != "🟢":
                         continue
 
                     # IMAP fetch can return unexpected structures (e.g. a

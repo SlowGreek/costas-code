@@ -138,7 +138,7 @@ class TestMissingProfileWarning:
                             
                             # Should have logged a warning
                             assert len(caplog.records) == 1
-                            assert caplog.records[0].levelname == "WARNING"
+                            assert caplog.records[0].levelname == "⏳"
                             assert "nonexistent" in caplog.records[0].message
                             assert "does not exist" in caplog.records[0].message
                             assert "discord" in caplog.records[0].message
@@ -183,7 +183,7 @@ class TestMissingProfileWarning:
                         assert result == Path("/hermes/profiles/active")
                         
                         # No warnings (active profile exists)
-                        assert not any(r.levelname == "WARNING" for r in caplog.records)
+                        assert not any(r.levelname == "⏳" for r in caplog.records)
     
     def test_existing_profile_no_warning(self, mock_runner, discord_source, caplog):
         """When the profile exists, no warning should be logged."""
@@ -199,7 +199,7 @@ class TestMissingProfileWarning:
                         assert result == Path("/hermes/profiles/existing")
                         
                         # No warnings
-                        assert not any(r.levelname == "WARNING" for r in caplog.records)
+                        assert not any(r.levelname == "⏳" for r in caplog.records)
 
 
 class TestExceptionHandling:
@@ -220,7 +220,7 @@ class TestExceptionHandling:
                         
                         # Should have logged a warning with exception info
                         assert len(caplog.records) == 1
-                        assert caplog.records[0].levelname == "WARNING"
+                        assert caplog.records[0].levelname == "⏳"
                         assert "bad-profile" in caplog.records[0].message
                         assert "Failed to resolve profile directory" in caplog.records[0].message
     

@@ -1,4 +1,4 @@
-"""Aggregate contract for the Catalyst F0c mechanical Catalyst oracle."""
+"""Aggregate contract for the Catalyst captured input mechanical Catalyst oracle."""
 
 from __future__ import annotations
 

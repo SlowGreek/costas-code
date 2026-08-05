@@ -58,14 +58,11 @@ static UPDATE_RUNNING: AtomicBool = AtomicBool::new(false);
 /// Frontend → Rust: kick off the update flow. Mirrors `start_bootstrap`'s
 /// fire-and-forget shape; progress arrives on the `bootstrap` event channel.
 #[tauri::command]
-pub async fn start_update(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn start_update(app: AppHandle) -> Result<(), String> {
     // Re-entrancy guard (see UPDATE_RUNNING). compare_exchange lets exactly one
     // caller flip false→true; any concurrent caller no-ops instead of spawning
     // a second racing update.
-    if UPDATE_RUNNING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+    if UPDATE_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         // Already running: re-emit the manifest so a duplicate startUpdate()
         // call (which resets the frontend store) can recover its stage list.
         let target_app = if cfg!(target_os = "macos") {
@@ -86,13 +83,7 @@ pub async fn start_update(app: AppHandle) -> Result<(), String> {
         if let Err(err) = run_update(app.clone()).await {
             // run_update already emits a Failed event on the paths that matter;
             // this catches anything that escaped. Emit defensively.
-            emit(
-                &app,
-                BootstrapEvent::Failed {
-                    stage: None,
-                    error: format!("{err:#}"),
-                },
-            );
+            emit(&app, BootstrapEvent::Failed { stage: None, error: format!("{err:#}") });
         }
         UPDATE_RUNNING.store(false, Ordering::SeqCst);
     });
@@ -169,13 +160,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
              Re-run the installer to repair the install.",
             install_root.display()
         );
-        emit(
-            &app,
-            BootstrapEvent::Failed {
-                stage: None,
-                error: msg.clone(),
-            },
-        );
+        emit(&app, BootstrapEvent::Failed { stage: None, error: msg.clone() });
         anyhow!(msg)
     })?;
 
@@ -223,8 +208,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
         &format!("[update] updating against branch {update_branch}"),
     );
     let child_env = update_child_env(&install_root);
-    let mut update_args: Vec<String> =
-        vec!["update".into(), "--yes".into(), "--gateway".into()];
+    let mut update_args: Vec<String> = vec!["update".into(), "--yes".into(), "--gateway".into()];
     // --force skips `hermes update`'s Windows running-exe guard (which would
     // `sys.exit(2)` and dead-end the handoff). By contract the desktop has
     // already exited and waited for the install locks to clear before launching
@@ -245,15 +229,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     emit_stage(&app, "update", StageState::Running, None, None);
     let started = Instant::now();
-    let mut update = run_streamed(
-        &app,
-        &hermes,
-        &update_args,
-        &install_root,
-        &child_env,
-        Some("update"),
-    )
-    .await?;
+    let mut update =
+        run_streamed(&app, &hermes, &update_args, &install_root, &child_env, Some("update"))
+            .await?;
 
     // Retry-once for the update-boundary crash. `hermes update` lazily imports
     // the FRESHLY PULLED modules, but the dependency-install step still runs the
@@ -276,15 +254,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
             "[update] first update attempt failed; retrying once (the fix it just \
              pulled loads on the second run)…",
         );
-        update = run_streamed(
-            &app,
-            &hermes,
-            &update_args,
-            &install_root,
-            &child_env,
-            Some("update"),
-        )
-        .await?;
+        update =
+            run_streamed(&app, &hermes, &update_args, &install_root, &child_env, Some("update"))
+                .await?;
     }
     let update_ms = started.elapsed().as_millis() as u64;
 
@@ -296,45 +268,18 @@ async fn run_update(app: AppHandle) -> Result<()> {
             let msg = "Catalyst or Hermes is still running. Close all Catalyst windows and Hermes terminals, then try \
                        the update again."
                 .to_string();
-            emit_stage(
-                &app,
-                "update",
-                StageState::Failed,
-                Some(update_ms),
-                Some(msg.clone()),
-            );
-            emit(
-                &app,
-                BootstrapEvent::Failed {
-                    stage: Some("update".into()),
-                    error: msg.clone(),
-                },
-            );
+            emit_stage(&app, "update", StageState::Failed, Some(update_ms), Some(msg.clone()));
+            emit(&app, BootstrapEvent::Failed { stage: Some("update".into()), error: msg.clone() });
             return Err(anyhow!(msg));
         }
         other => {
             let msg = format!(
                 "hermes update failed (exit {:?}). See {} for details.",
                 other,
-                crate::paths::hermes_home()
-                    .join("logs")
-                    .join("update.log")
-                    .display()
+                crate::paths::hermes_home().join("logs").join("update.log").display()
             );
-            emit_stage(
-                &app,
-                "update",
-                StageState::Failed,
-                Some(update_ms),
-                Some(msg.clone()),
-            );
-            emit(
-                &app,
-                BootstrapEvent::Failed {
-                    stage: Some("update".into()),
-                    error: msg.clone(),
-                },
-            );
+            emit_stage(&app, "update", StageState::Failed, Some(update_ms), Some(msg.clone()));
+            emit(&app, BootstrapEvent::Failed { stage: Some("update".into()), error: msg.clone() });
             return Err(anyhow!(msg));
         }
     }
@@ -345,15 +290,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
     emit_stage(&app, "rebuild", StageState::Running, None, None);
     let started = Instant::now();
     let rebuild_args: Vec<String> = vec!["desktop".into(), "--build-only".into()];
-    let mut rebuild = run_streamed(
-        &app,
-        &hermes,
-        &rebuild_args,
-        &install_root,
-        &child_env,
-        Some("rebuild"),
-    )
-    .await?;
+    let mut rebuild =
+        run_streamed(&app, &hermes, &rebuild_args, &install_root, &child_env, Some("rebuild"))
+            .await?;
 
     // Retry-once: the first `--build-only` can return nonzero on a still-settling
     // post-update tree or a network-blocked Electron fetch that our self-heal
@@ -371,15 +310,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
             "[rebuild] first desktop rebuild failed; retrying once (a self-healed \
              Electron download builds clean on the second run)…",
         );
-        rebuild = run_streamed(
-            &app,
-            &hermes,
-            &rebuild_args,
-            &install_root,
-            &child_env,
-            Some("rebuild"),
-        )
-        .await?;
+        rebuild =
+            run_streamed(&app, &hermes, &rebuild_args, &install_root, &child_env, Some("rebuild"))
+                .await?;
     }
     let rebuild_ms = started.elapsed().as_millis() as u64;
 
@@ -390,20 +323,8 @@ async fn run_update(app: AppHandle) -> Result<()> {
              from a terminal to see the error.",
             rebuild.exit_code
         );
-        emit_stage(
-            &app,
-            "rebuild",
-            StageState::Failed,
-            Some(rebuild_ms),
-            Some(msg.clone()),
-        );
-        emit(
-            &app,
-            BootstrapEvent::Failed {
-                stage: Some("rebuild".into()),
-                error: msg.clone(),
-            },
-        );
+        emit_stage(&app, "rebuild", StageState::Failed, Some(rebuild_ms), Some(msg.clone()));
+        emit(&app, BootstrapEvent::Failed { stage: Some("rebuild".into()), error: msg.clone() });
         return Err(anyhow!(msg));
     }
     emit_stage(&app, "rebuild", StageState::Succeeded, Some(rebuild_ms), None);
@@ -433,10 +354,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 );
                 emit(
                     &app,
-                    BootstrapEvent::Failed {
-                        stage: Some("install".into()),
-                        error: msg.clone(),
-                    },
+                    BootstrapEvent::Failed { stage: Some("install".into()), error: msg.clone() },
                 );
                 return Err(anyhow!(msg));
             }
@@ -460,11 +378,16 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 &app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Catalyst manually."),
+                &format!(
+                    "[update] could not auto-launch desktop: {err}. Launch Catalyst manually."
+                ),
             );
         }
-    } else if let Err(err) =
-        crate::bootstrap::launch_hermes_desktop(app.clone(), install_root.to_string_lossy().into_owned()).await
+    } else if let Err(err) = crate::bootstrap::launch_hermes_desktop(
+        app.clone(),
+        install_root.to_string_lossy().into_owned(),
+    )
+    .await
     {
         // Launch failed: don't hard-fail the update (it succeeded); surface a
         // log line so the success screen can still tell the user to launch
@@ -554,12 +477,42 @@ fn desktop_app_payload_paths(install_root: &Path) -> Vec<PathBuf> {
         ]
     } else if cfg!(target_os = "macos") {
         vec![
-            release.join("mac").join("Catalyst.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac-arm64").join("Catalyst.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac").join("Costas Code.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac-arm64").join("Costas Code.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac-arm64").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
+            release
+                .join("mac")
+                .join("Catalyst.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
+            release
+                .join("mac-arm64")
+                .join("Catalyst.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
+            release
+                .join("mac")
+                .join("Costas Code.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
+            release
+                .join("mac-arm64")
+                .join("Costas Code.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
+            release
+                .join("mac")
+                .join("Hermes.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
+            release
+                .join("mac-arm64")
+                .join("Hermes.app")
+                .join("Contents")
+                .join("Resources")
+                .join("app.asar"),
         ]
     } else {
         vec![release.join("linux-unpacked").join("resources").join("app.asar")]
@@ -589,22 +542,13 @@ fn format_locked_paths(paths: &[PathBuf]) -> String {
 /// we want gone. (`/FI PID ne <self>` also spares this Tauri process, though it
 /// isn't named hermes.exe.)
 fn force_kill_other_hermes() {
-    if !cfg!(target_os = "windows") {
-        return;
-    }
+    if !cfg!(target_os = "windows") {}
     #[cfg(target_os = "windows")]
     {
         let my_pid = std::process::id();
         // /FI excludes our own PID; /T kills the tree; /F forces.
         let _ = std::process::Command::new("taskkill")
-            .args([
-                "/F",
-                "/T",
-                "/IM",
-                "hermes.exe",
-                "/FI",
-                &format!("PID ne {my_pid}"),
-            ])
+            .args(["/F", "/T", "/IM", "hermes.exe", "/FI", &format!("PID ne {my_pid}")])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -619,10 +563,7 @@ fn is_locked(path: &Path) -> bool {
     if !path.exists() {
         return false;
     }
-    match std::fs::OpenOptions::new().read(true).write(true).open(path) {
-        Ok(_) => false,
-        Err(_) => true,
-    }
+    std::fs::OpenOptions::new().read(true).write(true).open(path).is_err()
 }
 
 /// Whether the `desktop --build-only` rebuild should be retried once. Any
@@ -661,9 +602,8 @@ async fn run_streamed(
         cmd.creation_flags(0x0800_0000);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| anyhow!("spawning {} {:?}: {e}", program.display(), args))?;
+    let mut child =
+        cmd.spawn().map_err(|e| anyhow!("spawning {} {:?}: {e}", program.display(), args))?;
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
@@ -696,9 +636,7 @@ async fn run_streamed(
     }
 
     let status = child.wait().await.map_err(|e| anyhow!("waiting for child: {e}"))?;
-    Ok(CmdResult {
-        exit_code: status.code(),
-    })
+    Ok(CmdResult { exit_code: status.code() })
 }
 
 struct CmdResult {
@@ -737,10 +675,7 @@ fn resolve_hermes(install_root: &Path) -> Option<PathBuf> {
 
 fn update_child_env(install_root: &Path) -> Vec<(String, OsString)> {
     let hermes_home = crate::paths::hermes_home();
-    let mut envs = vec![(
-        "HERMES_HOME".to_string(),
-        hermes_home.as_os_str().to_os_string(),
-    )];
+    let mut envs = vec![("HERMES_HOME".to_string(), hermes_home.as_os_str().to_os_string())];
     // `hermes update` is a Python CLI writing to a pipe here, so CPython
     // block-buffers its stdout: nothing reaches run_streamed (and the live
     // log UI) until 8 KB accumulate or the process exits. Long quiet steps —
@@ -778,9 +713,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    arg_value_from_args(args, "--branch")
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    arg_value_from_args(args, "--branch").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn target_app_from_args<I, S>(args: I) -> Option<PathBuf>
@@ -823,12 +756,13 @@ async fn install_macos_app_update(
         ));
     }
 
-    let rebuilt_app = crate::bootstrap::resolve_hermes_desktop_app(install_root).ok_or_else(|| {
-        anyhow!(
-            "desktop rebuild succeeded but no Catalyst app was found under {}",
-            install_root.join("apps").join("desktop").join("release").display()
-        )
-    })?;
+    let rebuilt_app =
+        crate::bootstrap::resolve_hermes_desktop_app(install_root).ok_or_else(|| {
+            anyhow!(
+                "desktop rebuild succeeded but no Catalyst app was found under {}",
+                install_root.join("apps").join("desktop").join("release").display()
+            )
+        })?;
 
     // The product was renamed (Hermes / Costas Code -> Catalyst), so the
     // rebuilt bundle's name can differ from the installed one. Installing the
@@ -850,10 +784,7 @@ async fn install_macos_app_update(
             app,
             Some("install"),
             LogStream::Stdout,
-            &format!(
-                "[update] rebuilt app is already the launch target: {}",
-                target_app.display()
-            ),
+            &format!("[update] rebuilt app is already the launch target: {}", target_app.display()),
         );
         return Ok(target_app.to_path_buf());
     }
@@ -885,10 +816,7 @@ async fn install_macos_app_update(
         .await
         .map_err(|e| anyhow!("running ditto: {e}"))?;
     if !ditto.success() {
-        return Err(anyhow!(
-            "ditto failed while copying updated app into {}",
-            tmp.display()
-        ));
+        return Err(anyhow!("ditto failed while copying updated app into {}", tmp.display()));
     }
 
     // Atomic-as-possible swap with rollback. Extracted so the invariant
@@ -901,10 +829,7 @@ async fn install_macos_app_update(
             app,
             Some("install"),
             LogStream::Stdout,
-            &format!(
-                "[update] retiring previous app bundle {}",
-                old_bundle.display()
-            ),
+            &format!("[update] retiring previous app bundle {}", old_bundle.display()),
         );
         remove_dir_if_exists(&old_bundle).await;
     }
@@ -1057,13 +982,7 @@ fn emit_stage(
     tracing::info!(stage = %name, ?state, ?duration_ms, ?error, "update stage");
     emit(
         app,
-        BootstrapEvent::Stage {
-            name: name.to_string(),
-            state,
-            duration_ms,
-            result: None,
-            error,
-        },
+        BootstrapEvent::Stage { name: name.to_string(), state, duration_ms, result: None, error },
     );
 }
 
@@ -1074,11 +993,7 @@ fn emit_log(app: &AppHandle, stage: Option<&str>, stream: LogStream, line: &str)
     }
     emit(
         app,
-        BootstrapEvent::Log {
-            stage: stage.map(|s| s.to_string()),
-            line: line.to_string(),
-            stream,
-        },
+        BootstrapEvent::Log { stage: stage.map(|s| s.to_string()), line: line.to_string(), stream },
     );
 }
 

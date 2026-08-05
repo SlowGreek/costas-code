@@ -1,8 +1,1 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "paths": {
-      "@hermes/ink": ["src/types/hermes-ink.d.ts"]
-    }
-  }
-}
+{"extends":"./tsconfig.json","compilerOptions":{"paths":{"@hermes/ink":["src/types/hermes-ink.d.ts"]}}}

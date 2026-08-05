@@ -104,7 +104,7 @@ checks.push({ id: 'eslint', name: 'desktop ESLint', level: 'error', findings: es
 const violations = checks.reduce((total, check) => total + check.findings.length, 0)
 const report = {
   schema: 'lint/1',
-  status: violations === 0 ? 'GREEN' : 'RED',
+  signal: violations === 0 ? '🟢' : '🔴',
   command: 'node scripts/quality/lint.mjs',
   checks,
   provenance: {
@@ -113,7 +113,7 @@ const report = {
   }
 }
 publishReport('lint-report.json', report)
-process.stdout.write(`lint result: ${violations === 0 ? 'ok' : 'FAILED'}. ${checks.length} checks; ${violations} violations\n`)
+process.stdout.write(`lint result: ${violations === 0 ? 'ok' : '🔴'}. ${checks.length} checks; ${violations} violations\n`)
 process.stdout.write(`${receiptLine(source)}\n`)
 process.stdout.write(`tool receipt: typescript@${typescript.version}; eslint@${eslint.version}; node@${process.versions.node}\n`)
 if (violations > 0 || !eslintResult.ok) process.exitCode = 1

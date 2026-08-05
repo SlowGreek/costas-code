@@ -14,7 +14,7 @@ const document = (tab: string) => ({
   id: `${tab}.document`,
   type: 'document',
   header: [{ type: 'text', body: tab, style: 'heading' }],
-  sections: [{ type: 'status', signal: 'GREEN', body: `${tab} ready` }],
+  sections: [{ type: 'status', signal: '🟢', body: `${tab} ready` }],
   actions: [{ id: `tab-${tab}`, type: 'button', label: tab, action: `shell.tab.${tab}` }]
 })
 

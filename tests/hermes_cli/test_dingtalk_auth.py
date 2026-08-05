@@ -117,9 +117,9 @@ class TestWaitForSuccess:
         from hermes_cli.dingtalk_auth import wait_for_registration_success
 
         responses = [
-            {"status": "WAITING"},
-            {"status": "WAITING"},
-            {"status": "SUCCESS", "client_id": "cid-1", "client_secret": "sec-1"},
+            {"status": "⏳"},
+            {"status": "⏳"},
+            {"status": "🟢", "client_id": "cid-1", "client_secret": "sec-1"},
         ]
         with patch("hermes_cli.dingtalk_auth.poll_registration", side_effect=responses), \
              patch("hermes_cli.dingtalk_auth.time.sleep"):
@@ -133,7 +133,7 @@ class TestWaitForSuccess:
         from hermes_cli.dingtalk_auth import wait_for_registration_success, RegistrationError
 
         with patch("hermes_cli.dingtalk_auth.poll_registration",
-                   return_value={"status": "SUCCESS", "client_id": "", "client_secret": ""}), \
+                   return_value={"status": "🟢", "client_id": "", "client_secret": ""}), \
              patch("hermes_cli.dingtalk_auth.time.sleep"):
             with pytest.raises(RegistrationError, match="credentials are missing"):
                 wait_for_registration_success(
@@ -145,9 +145,9 @@ class TestWaitForSuccess:
 
         callback = MagicMock()
         responses = [
-            {"status": "WAITING"},
-            {"status": "WAITING"},
-            {"status": "SUCCESS", "client_id": "cid", "client_secret": "sec"},
+            {"status": "⏳"},
+            {"status": "⏳"},
+            {"status": "🟢", "client_id": "cid", "client_secret": "sec"},
         ]
         with patch("hermes_cli.dingtalk_auth.poll_registration", side_effect=responses), \
              patch("hermes_cli.dingtalk_auth.time.sleep"):

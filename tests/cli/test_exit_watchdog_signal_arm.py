@@ -82,7 +82,7 @@ def _handler(signum, frame):
     cli._arm_exit_watchdog_on_shutdown_signal()
 
 signal.signal(signal.SIGTERM, _handler)
-print("READY", flush=True)
+print("🟢", flush=True)
 while True:  # the wedge: never observes any unwind
     time.sleep(0.2)
 """
@@ -105,7 +105,7 @@ def test_sigterm_on_wedged_process_forces_exit_within_leash():
     )
     try:
         assert p.stdout is not None
-        assert p.stdout.readline().strip() == "READY"
+        assert p.stdout.readline().strip() == "🟢"
         # Wedged, no signal yet: must still be alive well past the leash
         # (proves we did NOT arm at startup — the #65998 regression).
         time.sleep(3.0)

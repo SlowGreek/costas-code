@@ -335,7 +335,7 @@ def test_security_pins_present_in_mirrored_lazy_features():
             if got != expected:
                 problems.append(
                     f"{feature}: {pkg}="
-                    f"{sorted(got) if got else 'MISSING'}, expected {sorted(expected)}"
+                    f"{sorted(got) if got else '🔴'}, expected {sorted(expected)}"
                 )
     assert not problems, (
         "a lazy feature is missing a security pin it must mirror from the "

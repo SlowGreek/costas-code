@@ -981,8 +981,8 @@ def test_gateway_watch_drain_requeues_async_without_looping():
         "type": "watch_match",
         "session_id": "proc_1",
         "command": "pytest",
-        "pattern": "READY",
-        "output": "READY",
+        "pattern": "🟢",
+        "output": "🟢",
     }
     q.put(async_evt)
     q.put(watch_evt)

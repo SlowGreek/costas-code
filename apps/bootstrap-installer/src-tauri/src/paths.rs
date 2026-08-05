@@ -22,7 +22,7 @@ use std::process::Command;
 use tracing_appender::non_blocking::WorkerGuard;
 
 /// Returns the canonical Hermes home directory, respecting $HERMES_HOME if set.
-pub fn hermes_home() -> PathBuf {
+pub(crate) fn hermes_home() -> PathBuf {
     if let Ok(override_path) = std::env::var("HERMES_HOME") {
         if !override_path.trim().is_empty() {
             return PathBuf::from(override_path);
@@ -48,15 +48,15 @@ pub fn hermes_home() -> PathBuf {
     PathBuf::from(".hermes")
 }
 
-pub fn log_dir() -> PathBuf {
+pub(crate) fn log_dir() -> PathBuf {
     hermes_home().join("logs")
 }
 
-pub fn log_path() -> PathBuf {
+pub(crate) fn log_path() -> PathBuf {
     log_dir().join("bootstrap-installer.log")
 }
 
-pub fn bootstrap_cache_dir() -> PathBuf {
+pub(crate) fn bootstrap_cache_dir() -> PathBuf {
     hermes_home().join("bootstrap-cache")
 }
 
@@ -68,12 +68,8 @@ pub fn bootstrap_cache_dir() -> PathBuf {
 ///
 /// On Windows this is `%LOCALAPPDATA%\hermes\hermes-setup.exe`; on other
 /// platforms the extension differs but the directory is the same.
-pub fn installer_dest() -> PathBuf {
-    let name = if cfg!(target_os = "windows") {
-        "hermes-setup.exe"
-    } else {
-        "hermes-setup"
-    };
+pub(crate) fn installer_dest() -> PathBuf {
+    let name = if cfg!(target_os = "windows") { "hermes-setup.exe" } else { "hermes-setup" };
     hermes_home().join(name)
 }
 
@@ -86,7 +82,7 @@ pub fn installer_dest() -> PathBuf {
 /// Lives directly under HERMES_HOME (same rationale as `installer_dest`) so the
 /// Electron desktop — which resolves HERMES_HOME identically and pins it into
 /// the updater's env — agrees on the exact path.
-pub fn update_in_progress_marker() -> PathBuf {
+pub(crate) fn update_in_progress_marker() -> PathBuf {
     hermes_home().join(".hermes-update-in-progress")
 }
 
@@ -98,7 +94,7 @@ pub fn update_in_progress_marker() -> PathBuf {
 /// that path), where copying onto ourselves would be a Windows sharing
 /// violation. Best-effort: a failure here must not fail the install, so the
 /// caller logs and continues.
-pub fn copy_self_to_hermes_home() -> std::io::Result<()> {
+pub(crate) fn copy_self_to_hermes_home() -> std::io::Result<()> {
     let src = std::env::current_exe()?;
     let dest = installer_dest();
 
@@ -128,21 +124,13 @@ fn repair_macos_installer_helper(path: &Path) {
     // The staged helper may inherit quarantine from the downloaded installer.
     // Desktop later launches this exact file for in-app updates, so make it
     // executable before the update handoff reaches LaunchServices/Gatekeeper.
-    let _ = Command::new("/usr/bin/xattr")
-        .args(["-cr"])
-        .arg(path)
-        .status();
+    let _ = Command::new("/usr/bin/xattr").args(["-cr"]).arg(path).status();
 
-    let verify = Command::new("/usr/bin/codesign")
-        .arg("--verify")
-        .arg(path)
-        .status();
+    let verify = Command::new("/usr/bin/codesign").arg("--verify").arg(path).status();
 
     if !matches!(verify, Ok(status) if status.success()) {
-        let _ = Command::new("/usr/bin/codesign")
-            .args(["--force", "--sign", "-"])
-            .arg(path)
-            .status();
+        let _ =
+            Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(path).status();
     }
 }
 
@@ -154,14 +142,14 @@ fn repair_macos_installer_helper(_path: &Path) {}
 ///   const BOOTSTRAP_COMPLETE_MARKER = path.join(ACTIVE_HERMES_ROOT, '.hermes-bootstrap-complete')
 /// We don't always know ACTIVE_HERMES_ROOT until install.ps1 reports it, so
 /// this is a probe helper, not a definitive path.
-pub fn likely_bootstrap_marker(install_root: &Path) -> PathBuf {
+pub(crate) fn likely_bootstrap_marker(install_root: &Path) -> PathBuf {
     install_root.join(".hermes-bootstrap-complete")
 }
 
 /// Initializes tracing to bootstrap-installer.log under HERMES_HOME/logs/.
 /// Returns a guard that flushes the appender on drop — keep it alive for
 /// the lifetime of the process.
-pub fn init_logging() -> Option<WorkerGuard> {
+pub(crate) fn init_logging() -> Option<WorkerGuard> {
     let dir = log_dir();
     if let Err(err) = std::fs::create_dir_all(&dir) {
         // No log dir → log to stderr only. Don't panic; the installer
@@ -191,20 +179,18 @@ pub fn init_logging() -> Option<WorkerGuard> {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn get_log_path() -> String {
+pub(crate) fn get_log_path() -> String {
     log_path().to_string_lossy().into_owned()
 }
 
 #[tauri::command]
-pub fn get_hermes_home() -> String {
+pub(crate) fn get_hermes_home() -> String {
     hermes_home().to_string_lossy().into_owned()
 }
 
 #[tauri::command]
-pub fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let path = log_dir();
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }

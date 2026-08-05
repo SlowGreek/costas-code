@@ -11,10 +11,10 @@ Design constraints (decisions.md):
   - Per-instance enable is gated SOLELY by the NAS "Labs" toggle, carried to the
     gateway as the ``HERMES_SCALE_TO_ZERO`` env stamp (D11/Q8=A). NOT a user
     config key; ``scale_to_zero.idle_timeout_minutes`` IS config.yaml (D2).
-  - Arm only when messaging is relay-only or absent (D1/F6) AND a wakeUrl is
+    - Arm only when messaging is relay-only or absent AND a wakeUrl is
     registered (§3.4(1)) AND the flag is set.
   - Idle = no in-flight agent turn AND no inbound for N min AND no live
-    background work (D2/D3/F7).
+    background work.
   - The quiesce uses ``go_dormant()`` (socket closed + supervisor preserved),
     NEVER the stop/restart drain or ``disconnect()`` (F12/F14). The process stays
     alive; Fly freezes+resumes it.
@@ -71,7 +71,7 @@ def parse_idle_timeout_seconds(
 
 def messaging_is_relay_only_or_absent(platforms: Iterable[Any]) -> bool:
     """True iff the only connected messaging platform is RELAY, or there is none
-    (a Chronos-only / no-platform agent) — the F6/D1 structural precondition.
+    (a Chronos-only / no-platform agent), the relay-only structural precondition.
 
     A directly-connected platform (Discord/Telegram/Slack/...) holds a live
     socket and cannot scale to zero, so its presence disarms the feature. We
@@ -111,7 +111,7 @@ def is_idle(
     idle_timeout_seconds: float,
     has_live_background_work: bool,
 ) -> bool:
-    """The idle predicate (D2/D3/F7). Pure — composes the three conjuncts.
+    """The idle predicate. Pure; composes the three conjuncts.
 
     Idle iff: no in-flight agent turn, no inbound within the timeout window, and
     no live background work (backgrounded delegate_task / kanban / bg terminal).

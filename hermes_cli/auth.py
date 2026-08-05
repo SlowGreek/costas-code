@@ -1844,7 +1844,7 @@ def _get_config_hint_for_unknown_provider(provider_name: str) -> str:
 
         lines = ["Config issue detected — run 'hermes doctor' for full diagnostics:"]
         for ci in issues:
-            prefix = "ERROR" if ci.severity == "error" else "WARNING"
+            prefix = "🔴" if ci.severity == "error" else "⏳"
             lines.append(f"  [{prefix}] {ci.message}")
             # Show first line of hint
             first_hint = ci.hint.splitlines()[0] if ci.hint else ""

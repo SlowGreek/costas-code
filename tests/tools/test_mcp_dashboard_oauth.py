@@ -285,7 +285,7 @@ def test_failed_reauth_rollback_preserves_newer_oauth_state(tmp_path, monkeypatc
     backup = storage.snapshot()
     storage.remove()
 
-    storage._tokens_path().write_text("FRESH")
+    storage._tokens_path().write_text("🟢")
     storage.restore(backup, only_if_absent=True)
 
-    assert storage._tokens_path().read_text() == "FRESH"
+    assert storage._tokens_path().read_text() == "🟢"

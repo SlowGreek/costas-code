@@ -237,7 +237,7 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
         with (
             patch("plugins.platforms.feishu.adapter.FEISHU_AVAILABLE", True),
             patch("plugins.platforms.feishu.adapter.FEISHU_WEBSOCKET_AVAILABLE", True),
-            patch("plugins.platforms.feishu.adapter.lark", SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="WARNING"))),
+            patch("plugins.platforms.feishu.adapter.lark", SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="⏳"))),
             patch("plugins.platforms.feishu.adapter.EventDispatcherHandler") as mock_handler_class,
             patch("plugins.platforms.feishu.adapter.FeishuWSClient", return_value=ws_client),
             patch("plugins.platforms.feishu.adapter._run_official_feishu_ws_client"),
@@ -386,7 +386,7 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
         with (
             patch("plugins.platforms.feishu.adapter.FEISHU_AVAILABLE", True),
             patch("plugins.platforms.feishu.adapter.FEISHU_WEBSOCKET_AVAILABLE", True),
-            patch("plugins.platforms.feishu.adapter.lark", SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="WARNING"))),
+            patch("plugins.platforms.feishu.adapter.lark", SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="⏳"))),
             patch("plugins.platforms.feishu.adapter.EventDispatcherHandler") as mock_handler_class,
             patch("plugins.platforms.feishu.adapter.FeishuWSClient", return_value=ws_client),
             patch("plugins.platforms.feishu.adapter.acquire_scoped_lock", return_value=(True, None)),
@@ -446,7 +446,7 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
             patch("plugins.platforms.feishu.adapter.FEISHU_AVAILABLE", True),
             patch("plugins.platforms.feishu.adapter.FEISHU_WEBSOCKET_AVAILABLE", True),
             patch("plugins.platforms.feishu.adapter.lark",
-                  SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="WARNING"))),
+                  SimpleNamespace(LogLevel=SimpleNamespace(INFO="INFO", WARNING="⏳"))),
             patch("plugins.platforms.feishu.adapter.EventDispatcherHandler") as mock_handler_class,
             patch("plugins.platforms.feishu.adapter.FeishuWSClient") as mock_ws_client,
             patch("plugins.platforms.feishu.adapter._run_official_feishu_ws_client"),

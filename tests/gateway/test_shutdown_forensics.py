@@ -28,7 +28,7 @@ class TestSignalName:
         assert sf._signal_name(9999) == "signal#9999"
 
     def test_none_returns_unknown(self):
-        assert sf._signal_name(None) == "UNKNOWN"
+        assert sf._signal_name(None) == "⏳"
 
     def test_non_integer_falls_back_to_str(self):
         assert sf._signal_name("SIGTERM") == "SIGTERM"
@@ -47,7 +47,7 @@ class TestSnapshotShutdownContext:
 
     def test_handles_none_signal(self):
         ctx = sf.snapshot_shutdown_context(None)
-        assert ctx["signal"] == "UNKNOWN"
+        assert ctx["signal"] == "⏳"
         assert ctx["signal_num"] is None
 
     def test_includes_timestamps(self):

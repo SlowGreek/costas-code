@@ -29,7 +29,7 @@ def _fake_anthropic_call(**kwargs):
             "Messages.stream() got an unexpected keyword argument "
             f"{sorted(bad)[0]!r}"
         )
-    return "OK"
+    return "🟢"
 
 
 def test_bare_leaked_payload_reproduces_the_typeerror():
@@ -49,7 +49,7 @@ def test_strips_all_responses_only_keys():
     out = sanitize_anthropic_kwargs(payload)
     assert out is payload  # mutates in place and returns same dict
     assert payload == {"model": "claude-sonnet-4-6"}
-    assert _fake_anthropic_call(**payload) == "OK"
+    assert _fake_anthropic_call(**payload) == "🟢"
 
 
 def test_clean_anthropic_payload_is_untouched():
@@ -63,7 +63,7 @@ def test_clean_anthropic_payload_is_untouched():
     snapshot = dict(payload)
     sanitize_anthropic_kwargs(payload)
     assert payload == snapshot
-    assert _fake_anthropic_call(**payload) == "OK"
+    assert _fake_anthropic_call(**payload) == "🟢"
 
 
 def test_warns_when_keys_are_stripped(caplog):

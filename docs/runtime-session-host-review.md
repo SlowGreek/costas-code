@@ -1,7 +1,7 @@
-# Catalyst RuntimeSessionHost F1 adversarial review receipt
+# Catalyst RuntimeSessionHost conversation contract adversarial review receipt
 
-> **Receipt ID:** `F1-RUNTIME-SESSION-HOST-ADVERSARIAL-69ecfb0b7fcb`  
-> **Disposition:** **REQUEST ATTEST F1-RUNTIME-SESSION-HOST-EXTRACTION**  
+> **Receipt ID:** `conversation contract-RUNTIME-SESSION-HOST-ADVERSARIAL-69ecfb0b7fcb`  
+> **Disposition:** **REQUEST ATTEST conversation contract-RUNTIME-SESSION-HOST-EXTRACTION**  
 > **Reviewer:** GPT-5.6 Sol adversarial lane  
 > **Authority:** none; this receipt does not authorize an endpoint, persistence, external control, AgentExperiments settlement, or Fleet mutation  
 > **Costas HEAD:** `77599046d358ca49703b9c76906f9cc3153fb684` (`users/brianhu/ideation`)
@@ -10,7 +10,7 @@
 
 Reviewed the committed provider-neutral extraction at Costas HEAD through its contract, Codex facade/session, turn adapter, compaction path, hard close, soft release, retirement, existing focused tests, and sibling handoff. Production was not edited. The only executable addition is `tests/agent/test_runtime_session_host_adversarial.py`.
 
-**Verdict: GREEN for the bounded process-local extraction.** The adversarial suite falsifies the named F1 risks: generic identity leakage, eager process start, post-close reuse/respawn, duplicate close across ownership exits, compatibility-alias retention, loss of legacy IDs during retirement, stale control retargeting, aspirational capability claims, and accidental registry/persistence/endpoint surface. The expanded focused gate is 161/161 GREEN and Ruff is GREEN.
+**Verdict: GREEN for the bounded process-local extraction.** The adversarial suite falsifies the named conversation contract risks: generic identity leakage, eager process start, post-close reuse/respawn, duplicate close across ownership exits, compatibility-alias retention, loss of legacy IDs during retirement, stale control retargeting, aspirational capability claims, and accidental registry/persistence/endpoint surface. The expanded focused gate is 161/161 GREEN and Ruff is GREEN.
 
 This is not a verdict on enrolled execution hosting, durable resume/replay, externally authenticated control, durable terminal close proof, exact Fleet write mediation, UI projection, or AgentExperiments acceptance.
 
@@ -75,7 +75,7 @@ Observed: `All checks passed!`.
 Canonicalization: UTF-8 JSON, sorted keys, compact separators, one trailing LF. The manifest hashes reviewed production, the adversarial test, live sibling handoff, and observed gates; it intentionally excludes this self-referential receipt file.
 
 ```json
-{"disposition":"REQUEST ATTEST F1-RUNTIME-SESSION-HOST-EXTRACTION","focused_gate":"161 passed in 43.45s","handoff":{"../AgentExperiments/docs/CATALYST-EM-HANDOFF-KX.md":"9fc0e6b069fa6fef5a1f4d11fcc61004ba89186973209cadb8d9a0fc95909ac1"},"head":"77599046d358ca49703b9c76906f9cc3153fb684","production":{"agent/codex_runtime.py":"cfde8f61675cd3a89f61dab986d9e683ac3ca5deb6f09351ad1cefded50a88cf","agent/conversation_compression.py":"fc6ec18c299c065ca79d4eab840f2abcb96c43a49d4062fed298e34b57c069f7","agent/runtime_sessions.py":"422f967d50408b1077c885ce2ca64ee253ea8db3d42877819477b2f4d3b24f8a","agent/transports/codex_app_server_session.py":"ddf133db43fd555d17a185900d2b4faeb1b98fb91c00553a3d6c93c72344c56e","run_agent.py":"48ba0ef73bce43dfe40a5bc7259ca50165b594fdc2def91385d6e0f4b37d0db8"},"ruff":"All checks passed!","test":{"tests/agent/test_runtime_session_host_adversarial.py":"a07fe9aa0bed8c2ed4b9554348adf67c9f85f768079d9e62d0a0f10b5ac7d0d0"}}
+{"disposition":"REQUEST ATTEST conversation contract-RUNTIME-SESSION-HOST-EXTRACTION","focused_gate":"161 passed in 43.45s","handoff":{"../AgentExperiments/docs/CATALYST-EM-HANDOFF-KX.md":"9fc0e6b069fa6fef5a1f4d11fcc61004ba89186973209cadb8d9a0fc95909ac1"},"head":"77599046d358ca49703b9c76906f9cc3153fb684","production":{"agent/codex_runtime.py":"cfde8f61675cd3a89f61dab986d9e683ac3ca5deb6f09351ad1cefded50a88cf","agent/conversation_compression.py":"fc6ec18c299c065ca79d4eab840f2abcb96c43a49d4062fed298e34b57c069f7","agent/runtime_sessions.py":"422f967d50408b1077c885ce2ca64ee253ea8db3d42877819477b2f4d3b24f8a","agent/transports/codex_app_server_session.py":"ddf133db43fd555d17a185900d2b4faeb1b98fb91c00553a3d6c93c72344c56e","run_agent.py":"48ba0ef73bce43dfe40a5bc7259ca50165b594fdc2def91385d6e0f4b37d0db8"},"ruff":"All checks passed!","test":{"tests/agent/test_runtime_session_host_adversarial.py":"a07fe9aa0bed8c2ed4b9554348adf67c9f85f768079d9e62d0a0f10b5ac7d0d0"}}
 ```
 
 Manifest SHA-256: `69ecfb0b7fcb5ffa96c3802180e915ca65b87332ea5fdf218beec3e8c6c8fbd3`.
@@ -96,13 +96,13 @@ This lane made no production change. Roll back only the two owned artifacts:
 
 ```text
 git rm tests/agent/test_runtime_session_host_adversarial.py \
-       docs/catalyst-runtime-session-host-f1.md
+       docs/runtime-session-host-review.md
 ```
 
 If the already-committed extraction itself must be rolled back, use normal Git history to revert the owning commits after preserving intervening work; do not manually delete shared production files and do not reset the branch. Re-run the prior 149-test gate after any such owner-directed revert.
 
 ## Disposition request
 
-**REQUEST ATTEST `F1-RUNTIME-SESSION-HOST-EXTRACTION`** at Costas HEAD `77599046d358ca49703b9c76906f9cc3153fb684`, bounded strictly to the provider-neutral process-local abstraction and migrated existing consumers proven by this receipt.
+**REQUEST ATTEST `conversation contract-RUNTIME-SESSION-HOST-EXTRACTION`** at Costas HEAD `77599046d358ca49703b9c76906f9cc3153fb684`, bounded strictly to the provider-neutral process-local abstraction and migrated existing consumers proven by this receipt.
 
 Continue to **HOLD** enrollment, external control, endpoint/persistence/registry work, durable resume/replay/close claims, visible AgentExperiments role projection, and Fleet mutation until separately dispatched and independently evidenced.

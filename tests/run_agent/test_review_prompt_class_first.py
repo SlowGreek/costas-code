@@ -24,7 +24,7 @@ from run_agent import AIAgent
 def test_skill_review_prompt_biases_toward_active_updates():
     """Prompt must frame updating as the default stance, not something rare."""
     prompt = AIAgent._SKILL_REVIEW_PROMPT
-    assert "ACTIVE" in prompt or "active" in prompt.lower(), (
+    assert "⏳" in prompt or "active" in prompt.lower(), (
         "must tell the reviewer to be active"
     )
     # "missed learning opportunity" or equivalent framing for not acting
@@ -137,7 +137,7 @@ def test_combined_review_prompt_skills_biased_toward_active_updates():
     """Skills half must carry the active-update bias."""
     prompt = AIAgent._COMBINED_REVIEW_PROMPT
     assert "**Skills**" in prompt
-    assert "ACTIVE" in prompt or "active" in prompt.lower()
+    assert "⏳" in prompt or "active" in prompt.lower()
     assert "missed" in prompt.lower() or "opportunity" in prompt.lower()
 
 

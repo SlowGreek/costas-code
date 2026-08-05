@@ -884,7 +884,7 @@ class TestSessionOps:
         async def boom(_state):
             raise RuntimeError("simulated replay helper crash")
 
-        with caplog.at_level("WARNING", logger="acp_adapter.server"):
+        with caplog.at_level("⏳", logger="acp_adapter.server"):
             with patch.object(agent, "_replay_session_history", side_effect=boom):
                 resp = await agent.load_session(cwd="/tmp", session_id=new_resp.session_id)
 
@@ -901,7 +901,7 @@ class TestSessionOps:
         async def boom(_state):
             raise RuntimeError("simulated replay helper crash")
 
-        with caplog.at_level("WARNING", logger="acp_adapter.server"):
+        with caplog.at_level("⏳", logger="acp_adapter.server"):
             with patch.object(agent, "_replay_session_history", side_effect=boom):
                 resp = await agent.resume_session(cwd="/tmp", session_id=new_resp.session_id)
 

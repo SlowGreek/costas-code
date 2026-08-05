@@ -488,7 +488,7 @@ def auto_jailbreak(model=None, base_url=None, api_key=None,
     })
 
     if verbose:
-        status = "REFUSED" if baseline_score["is_refusal"] else f"COMPLIED (score={baseline_score['score']})"
+        status = "🔴" if baseline_score["is_refusal"] else f"COMPLIED (score={baseline_score['score']})"
         print(f"[BASELINE] {status}")
         if baseline_content:
             print(f"[BASELINE] Preview: {baseline_content[:150]}...")
@@ -567,7 +567,7 @@ def auto_jailbreak(model=None, base_url=None, api_key=None,
                         print(f"  [PARSELTONGUE] SUCCESS! Score: {result['score']}")
                     break
                 elif verbose:
-                    status = "REFUSED" if result["is_refusal"] else f"score={result['score']}"
+                    status = "🔴" if result["is_refusal"] else f"score={result['score']}"
                     print(f"  [PARSELTONGUE] {status}")
 
             if winning_strategy and winning_strategy.startswith("parseltongue"):
@@ -605,7 +605,7 @@ def auto_jailbreak(model=None, base_url=None, api_key=None,
             break
 
         if verbose:
-            status = "REFUSED" if result["is_refusal"] else f"score={result['score']}, hedges={result['hedge_count']}"
+            status = "🔴" if result["is_refusal"] else f"score={result['score']}, hedges={result['hedge_count']}"
             print(f"  [{status}]")
 
         # Try with system prompt + prefill combined
@@ -638,7 +638,7 @@ def auto_jailbreak(model=None, base_url=None, api_key=None,
             break
 
         if verbose:
-            status = "REFUSED" if result["is_refusal"] else f"score={result['score']}"
+            status = "🔴" if result["is_refusal"] else f"score={result['score']}"
             print(f"  [{status}]")
 
     print()

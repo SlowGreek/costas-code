@@ -70,7 +70,7 @@ def test_assert_protocol_compliance_rejects_partial_impl():
 
 class _CompliantProvider(DashboardAuthProvider):
     name = "ok"
-    display_name = "OK"
+    display_name = "🟢"
 
     def start_login(self, *, redirect_uri: str) -> LoginStart:
         return LoginStart(redirect_url="x", cookie_payload={})

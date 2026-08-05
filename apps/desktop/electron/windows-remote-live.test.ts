@@ -25,9 +25,13 @@ function fetchJson(url, token, path) {
   })
 }
 
-test.skipIf(!liveHost || !liveUser || !configuredHermes)(
+test(
   'live Windows remote lifecycle spawns, authenticates, reuses, and cleans exact ownership',
   async () => {
+    assert.ok(liveHost, 'HERMES_WIN_SSH_HOST is required')
+    assert.ok(liveUser, 'HERMES_WIN_SSH_USER is required')
+    assert.ok(configuredHermes, 'HERMES_WIN_SSH_HERMES is required')
+
     const ssh = new SshConnection({ host: liveHost, user: liveUser, port: 22, keyPath: '' }, { mux: true })
     await ssh.open()
 

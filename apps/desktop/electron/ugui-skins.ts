@@ -18,6 +18,7 @@ const SLOT_ORDER = [
 const TOP_LEVEL_KEYS = new Set([
   '_banner',
   '_generator',
+  '_source_paths',
   '_source_hashes',
   'artifact_role',
   'id',
@@ -30,6 +31,10 @@ const TOP_LEVEL_KEYS = new Set([
 
 const SAFE_ID_RE = /^[a-z0-9][a-z0-9-]{0,95}$/
 const SHA_RE = /^[0-9a-f]{64}$/
+// The generator emits wallpapers as bare same-origin asset references. Anything
+// else carrying url() stays refused, so no skin can name a remote or data URI.
+const SAFE_ASSET_URL_RE = /^url\("\/[a-z0-9][a-z0-9/-]{0,127}\.(?:png|webp|svg|jpg|jpeg)"\)$/
+const UNSAFE_TOKEN_RE = /(?:url\s*\(|javascript:|<script|@import|expression\s*\()/i
 const MAX_PROFILES = 64
 const MAX_SOURCE_BYTES = 128 * 1024
 
@@ -39,6 +44,7 @@ type Binding = Record<SlotName, Record<string, string>>
 export interface UguiSkinBinding {
   _banner: string
   _generator: typeof GENERATOR
+  _source_paths: Record<string, string>
   _source_hashes: Record<string, string>
   artifact_role?: string
   id: string
@@ -131,6 +137,14 @@ function finiteNonnegative(value: unknown, error: string): number {
   return value
 }
 
+function safeTokenValue(value: string): boolean {
+  if (SAFE_ASSET_URL_RE.test(value)) {
+    return !value.includes('..')
+  }
+
+  return !UNSAFE_TOKEN_RE.test(value)
+}
+
 function validateBinding(value: unknown): Binding {
   if (!object(value) || Object.keys(value).length !== SLOT_ORDER.length) {
     throw new Error('ugui-skin-binding')
@@ -152,7 +166,7 @@ function validateBinding(value: unknown): Binding {
         !/^[a-z][a-z0-9-]{0,63}$/.test(token) ||
         typeof tokenValue !== 'string' ||
         tokenValue.length > 512 ||
-        /(?:url\s*\(|javascript:|<script|@import|expression\s*\()/i.test(tokenValue)
+        !safeTokenValue(tokenValue)
       ) {
         throw new Error('ugui-skin-token')
       }
@@ -185,6 +199,7 @@ function parseBindingDocument(value: unknown, sourceSha256: `sha256:${string}`):
     !value.name ||
     value.name.length > 128 ||
     !object(value._source_hashes) ||
+    !object(value._source_paths) ||
     !object(value.provenance) ||
     !object(value.coverage)
   ) {
@@ -193,6 +208,7 @@ function parseBindingDocument(value: unknown, sourceSha256: `sha256:${string}`):
 
   if (
     Object.values(value._source_hashes).some(hash => typeof hash !== 'string' || !SHA_RE.test(hash)) ||
+    Object.values(value._source_paths).some(source => typeof source !== 'string' || !source || source.length > 1024) ||
     value.provenance.visual_attestation !== 'pending' ||
     !Array.isArray(value.provenance.known_losses) ||
     value.provenance.known_losses.length > 32 ||

@@ -14,6 +14,21 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use anyhow as _;
+use dirs as _;
+use reqwest as _;
+use serde as _;
+use serde_json as _;
+use tauri as _;
+use tauri_plugin_dialog as _;
+use tauri_plugin_opener as _;
+use tauri_plugin_process as _;
+use tauri_plugin_shell as _;
+use tokio as _;
+use tracing as _;
+use tracing_appender as _;
+use tracing_subscriber as _;
+
 fn main() {
     hermes_bootstrap_lib::run()
 }

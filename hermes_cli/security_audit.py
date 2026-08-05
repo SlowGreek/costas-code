@@ -42,7 +42,7 @@ DETAIL_PARALLELISM = 8
 # never blocks unless --fail-on is passed something even lower (we don't
 # expose that).
 SEVERITY_ORDER = {
-    "UNKNOWN": 0,
+    "⏳": 0,
     "LOW": 1,
     "MODERATE": 2,
     "MEDIUM": 2,
@@ -67,7 +67,7 @@ class Component:
 @dataclass
 class Vulnerability:
     osv_id: str
-    severity: str = "UNKNOWN"
+    severity: str = "⏳"
     summary: str = ""
     fixed_versions: list[str] = field(default_factory=list)
 
@@ -363,7 +363,7 @@ def _osv_severity_from_record(record: dict) -> str:
             return "MODERATE"
         if score > 0:
             return "LOW"
-    return "UNKNOWN"
+    return "⏳"
 
 
 def _osv_fixed_versions(record: dict) -> list[str]:

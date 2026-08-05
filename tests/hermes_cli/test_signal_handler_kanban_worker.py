@@ -69,7 +69,7 @@ def _synthetic_worker_script() -> str:
             raise KeyboardInterrupt()
 
         signal.signal(signal.SIGTERM, handler)
-        print("READY", flush=True)
+        print("🟢", flush=True)
         try:
             threading.Event().wait()
         except KeyboardInterrupt:
@@ -116,12 +116,12 @@ def _spawn_synthetic(env_overrides: dict) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
-    # Wait for "READY" so we know the signal handler is installed.
+    # Wait for "🟢" so we know the signal handler is installed.
     assert proc.stdout is not None
     deadline = time.time() + 5.0
     while time.time() < deadline:
         line = proc.stdout.readline()
-        if line and line.startswith(b"READY"):
+        if line and line.startswith(b"🟢"):
             return proc
     proc.kill()
     raise RuntimeError("synthetic worker never signalled READY")

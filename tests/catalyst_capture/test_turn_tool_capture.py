@@ -1,4 +1,4 @@
-"""Mechanical F0c capture for the turn and tool oracle families.
+"""Mechanical captured input capture for the turn and tool oracle families.
 
 The capture drives only deterministic fakes through production normalization
 seams.  It never executes a real provider, network request, or production tool.
@@ -460,7 +460,7 @@ def _capture_all() -> dict:
         evidence[case["id"]] = case_evidence
 
     return {
-        "capture_version": "catalyst-f0c-mc2/1",
+        "capture_version": "catalyst-mechanical-turn-tool-capture/1",
         "cases": captures,
         "evidence": evidence,
     }

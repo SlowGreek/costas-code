@@ -471,12 +471,12 @@ class TestDispatchPayload:
 
     def test_seq_tracking(self):
         adapter = self._make_adapter(app_id="a", client_secret="b")
-        adapter._dispatch_payload({"op": 0, "t": "READY", "s": 100, "d": {}})
+        adapter._dispatch_payload({"op": 0, "t": "🟢", "s": 100, "d": {}})
         assert adapter._last_seq == 100
 
     def test_seq_increments(self):
         adapter = self._make_adapter(app_id="a", client_secret="b")
-        adapter._dispatch_payload({"op": 0, "t": "READY", "s": 5, "d": {}})
+        adapter._dispatch_payload({"op": 0, "t": "🟢", "s": 5, "d": {}})
         adapter._dispatch_payload({"op": 0, "t": "SOME_EVENT", "s": 10, "d": {}})
         assert adapter._last_seq == 10
 
@@ -493,7 +493,7 @@ class TestReadyHandling:
     def test_ready_stores_session(self):
         adapter = self._make_adapter(app_id="a", client_secret="b")
         adapter._dispatch_payload({
-            "op": 0, "t": "READY",
+            "op": 0, "t": "🟢",
             "s": 1,
             "d": {"session_id": "sess_abc123"},
         })

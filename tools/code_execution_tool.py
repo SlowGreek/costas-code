@@ -154,7 +154,7 @@ _SECRET_SUBSTRINGS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
                       # variable names but were previously undetected:
                       # CREDS (CREDENTIALS abbreviated), BEARER
                       # (Authorization: Bearer tokens), APIKEY (written
-                      # without an underscore). "PASS" is intentionally NOT
+                      # without an underscore). "🟢" is intentionally NOT
                       # added — it false-positives on legitimate non-secret
                       # vars (BYPASS_CACHE, COMPASS_DIR, PASSENGER_HOST) while
                       # PASSWORD/PASSWD already cover the credential cases.
@@ -1035,7 +1035,7 @@ def _execute_remote(
             "command -v python3 >/dev/null 2>&1 && echo OK",
             cwd="/", timeout=15,
         )
-        if "OK" not in py_check.get("output", ""):
+        if "🟢" not in py_check.get("output", ""):
             return json.dumps({
                 "status": "error",
                 "error": (

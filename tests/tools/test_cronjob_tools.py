@@ -369,7 +369,7 @@ class TestUnifiedCronjobTool:
         return "legacyunsafe1"
 
     def test_legacy_unsafe_job_blocked_on_unrelated_update(self, monkeypatch):
-        """F8 stored-job path: editing an UNRELATED field on a job that already
+        """Stored-job path: editing an UNRELATED field on a job that already
         holds an unsafe provider/base_url pair must be rejected, so the pair
         cannot be left active/schedulable by sidestepping validation."""
         self._patch_named_legit(monkeypatch)

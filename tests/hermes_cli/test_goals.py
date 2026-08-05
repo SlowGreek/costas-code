@@ -1112,11 +1112,11 @@ class TestSessionTriggerBarrier:
         return s, process_registry
 
     def test_registry_is_session_waiting_running_unmatched(self, hermes_home):
-        s, reg = self._inject("proc_t1", watch_patterns=["READY"])
+        s, reg = self._inject("proc_t1", watch_patterns=["🟢"])
         assert reg.is_session_waiting("proc_t1") is True
 
     def test_registry_releases_on_watch_match_while_alive(self, hermes_home):
-        s, reg = self._inject("proc_t2", watch_patterns=["READY"])
+        s, reg = self._inject("proc_t2", watch_patterns=["🟢"])
         assert reg.is_session_waiting("proc_t2") is True
         s._watch_hits = 1  # what _check_watch_patterns sets on a match
         # Released even though the process is STILL running (never exited).

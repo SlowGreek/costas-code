@@ -6,7 +6,7 @@ import { LucidReceiptCard } from './lucid-receipt-card'
 import { LucidSafetyStateCard } from './lucid-safety-state-card'
 
 const success = {
-  result: { status: 'GREEN', rows: 2 },
+  result: { status: '🟢', rows: 2 },
   error: null,
   receipt: {
     schema: 'hermes-lucid-receipt/1' as const,
@@ -29,7 +29,7 @@ describe('LUCID receipt card', () => {
     expect(screen.getByText('LUCID · GET')).toBeTruthy()
     expect(screen.getByText('Executed')).toBeTruthy()
     expect(screen.getByText('verified')).toBeTruthy()
-    expect(screen.getByText(/GREEN/)).toBeTruthy()
+    expect(screen.getByText(/🟢/)).toBeTruthy()
     expect(screen.queryByText(/capability/)).toBeNull()
   })
 

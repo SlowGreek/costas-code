@@ -402,7 +402,7 @@ def test_fire_due_missing_job_does_not_run(monkeypatch):
     assert ran == []
 
 
-# ── F2a: ticker liveness — survival, heartbeat, honest status (#32612, #32895) ──
+# ── ticker liveness — survival, heartbeat, honest status (#32612, #32895) ──
 
 
 def test_ticker_survives_baseexception_from_tick():
@@ -598,14 +598,14 @@ def test_cron_status_reports_stalled_when_no_heartbeat(tmp_path, monkeypatch, ca
     assert "will fire automatically" not in out
 
 
-# ── F8: runtime backstop — never resolve a stored pair that exfiltrates a key ──
+# ── runtime backstop — never resolve a stored pair that exfiltrates a key ──
 
 
 class TestGuardJobCredentialExfil:
     """run_job() must fail closed before provider resolution when a job's stored
     provider/base_url pair would ship a named provider's stored credential to an
     off-host endpoint — covering jobs persisted before the create/update guard
-    or written directly to the store (F8 stored-job path; CWE-200/CWE-522)."""
+    or written directly to the store (stored-job path; CWE-200/CWE-522)."""
 
     def test_named_registry_provider_offhost_is_blocked(self):
         import pytest

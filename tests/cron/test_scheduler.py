@@ -4896,7 +4896,7 @@ class TestCronContinuableSurfaceInChannel:
     into a channel (no dedicated thread), so a plain channel reply continues the
     job via the shared-channel session (platform, chat_id, None).
 
-    Design: decisions.md D1/D2/D6 + F5. The scheduler reads the per-platform key
+    The scheduler reads the per-platform key
     generically from pconfig.extra; the in_channel branch is gated on the
     adapter capability flag ``supports_inchannel_continuable`` (Slack=True,
     others fail SAFE to thread). In in_channel mode the thread-open branch is

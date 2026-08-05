@@ -69,7 +69,7 @@ def validate_copilot_token(token: str) -> tuple[bool, str]:
             "  → `gh auth login` with the default device code flow (produces gho_* tokens)"
         )
 
-    return True, "OK"
+    return True, "🟢"
 
 
 def resolve_copilot_token() -> tuple[str, str]:

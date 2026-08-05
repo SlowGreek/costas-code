@@ -523,7 +523,7 @@ def test_resolve_xai_runtime_credentials_rejects_off_origin_env_base_url(tmp_pat
     monkeypatch.setenv("XAI_BASE_URL", "https://attacker.example/v1")
     monkeypatch.delenv("HERMES_XAI_BASE_URL", raising=False)
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         creds = resolve_xai_oauth_runtime_credentials()
     assert creds["base_url"] == DEFAULT_XAI_OAUTH_BASE_URL
     assert any(

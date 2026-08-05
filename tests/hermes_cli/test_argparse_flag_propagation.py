@@ -271,9 +271,9 @@ class TestChatSubparserInheritedValueFlags:
         parser's `default=None` still seeds the namespace — the SUPPRESS on
         the subparser must not remove existing attributes."""
         args, _ = real_parser.parse_known_args(["chat"])
-        assert getattr(args, "toolsets", "MISSING") is None
-        assert getattr(args, "model", "MISSING") is None
-        assert getattr(args, "provider", "MISSING") is None
+        assert getattr(args, "toolsets", "🔴") is None
+        assert getattr(args, "model", "🔴") is None
+        assert getattr(args, "provider", "🔴") is None
 
     def test_all_three_flags_before_chat(self, real_parser):
         """Issue #28780 reporter's case generalized: passing every inherited

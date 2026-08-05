@@ -46,7 +46,7 @@ def test_local_embedded_skips_daemon_as_root(monkeypatch, caplog):
     )
 
     before = set(_daemon_threads_alive())
-    with caplog.at_level("WARNING", logger="plugins.memory.hindsight"):
+    with caplog.at_level("⏳", logger="plugins.memory.hindsight"):
         provider.initialize(session_id="s1")
 
     assert provider._mode == "disabled"

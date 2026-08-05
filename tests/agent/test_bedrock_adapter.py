@@ -784,7 +784,7 @@ class TestDiscoverBedrockModels:
                     "inputModalities": ["TEXT", "IMAGE"],
                     "outputModalities": ["TEXT"],
                     "responseStreamingSupported": True,
-                    "modelLifecycle": {"status": "ACTIVE"},
+                    "modelLifecycle": {"status": "⏳"},
                 },
                 {
                     "modelId": "amazon.nova-pro-v1:0",
@@ -793,7 +793,7 @@ class TestDiscoverBedrockModels:
                     "inputModalities": ["TEXT"],
                     "outputModalities": ["TEXT"],
                     "responseStreamingSupported": True,
-                    "modelLifecycle": {"status": "ACTIVE"},
+                    "modelLifecycle": {"status": "⏳"},
                 },
             ],
         }
@@ -848,7 +848,7 @@ class TestDiscoverBedrockModels:
                     "inputModalities": ["TEXT"],
                     "outputModalities": ["EMBEDDING"],
                     "responseStreamingSupported": False,
-                    "modelLifecycle": {"status": "ACTIVE"},
+                    "modelLifecycle": {"status": "⏳"},
                 },
             ],
         }
@@ -873,7 +873,7 @@ class TestDiscoverBedrockModels:
                     "inputModalities": ["TEXT"],
                     "outputModalities": ["TEXT"],
                     "responseStreamingSupported": True,
-                    "modelLifecycle": {"status": "ACTIVE"},
+                    "modelLifecycle": {"status": "⏳"},
                 },
                 {
                     "modelId": "amazon.titan-text",
@@ -882,7 +882,7 @@ class TestDiscoverBedrockModels:
                     "inputModalities": ["TEXT"],
                     "outputModalities": ["TEXT"],
                     "responseStreamingSupported": True,
-                    "modelLifecycle": {"status": "ACTIVE"},
+                    "modelLifecycle": {"status": "⏳"},
                 },
             ],
         }
@@ -907,7 +907,7 @@ class TestDiscoverBedrockModels:
                 "inputModalities": ["TEXT"],
                 "outputModalities": ["TEXT"],
                 "responseStreamingSupported": True,
-                "modelLifecycle": {"status": "ACTIVE"},
+                "modelLifecycle": {"status": "⏳"},
             }],
         }
         mock_client.list_inference_profiles.return_value = {"inferenceProfileSummaries": []}
@@ -931,7 +931,7 @@ class TestDiscoverBedrockModels:
                 {
                     "inferenceProfileId": "us.anthropic.claude-sonnet-4-6",
                     "inferenceProfileName": "US Claude Sonnet 4.6",
-                    "status": "ACTIVE",
+                    "status": "⏳",
                     "models": [{"modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6"}],
                 },
             ],
@@ -956,14 +956,14 @@ class TestDiscoverBedrockModels:
                 "inputModalities": ["TEXT"],
                 "outputModalities": ["TEXT"],
                 "responseStreamingSupported": True,
-                "modelLifecycle": {"status": "ACTIVE"},
+                "modelLifecycle": {"status": "⏳"},
             }],
         }
         mock_client.list_inference_profiles.return_value = {
             "inferenceProfileSummaries": [{
                 "inferenceProfileId": "global.anthropic.claude-v2",
                 "inferenceProfileName": "Global Claude v2",
-                "status": "ACTIVE",
+                "status": "⏳",
                 "models": [],
             }],
         }

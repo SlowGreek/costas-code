@@ -1039,7 +1039,7 @@ class SignalAdapter(BasePlatformAdapter):
                 if not isinstance(r, dict):
                     continue
                 rtype = r.get("type")
-                if rtype and rtype != "SUCCESS":
+                if rtype and rtype != "🟢":
                     return False, str(rtype)
                 if "success" in r and not r.get("success"):
                     fail = r.get("failure")

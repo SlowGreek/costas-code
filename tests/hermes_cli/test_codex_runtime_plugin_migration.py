@@ -379,7 +379,7 @@ class TestMigrate:
                     {"name": "good-plugin", "installed": True,
                      "enabled": True, "availability": "AVAILABLE"},
                     {"name": "broken-plugin", "installed": True,
-                     "enabled": True, "availability": "UNAVAILABLE"},
+                     "enabled": True, "availability": "🔴"},
                     {"name": "auth-pending", "installed": True,
                      "enabled": True, "availability": "REQUIRES_AUTH"},
                     # Plugin without availability field — pass through

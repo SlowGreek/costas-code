@@ -1,4 +1,4 @@
-"""Mechanical F0c.1 reducer inputs for the two Catalyst runtime cases.
+"""Mechanical captured prior input reducer inputs for the two Catalyst runtime cases.
 
 The owner fake records prior state at the Codex app-server request seam before
 it releases any normalized reducer event. Expected corpus data is deliberately

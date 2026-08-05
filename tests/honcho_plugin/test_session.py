@@ -1529,7 +1529,7 @@ class TestTrivialPromptHeuristic:
         return provider
 
     def test_classifier_catches_common_trivial_forms(self):
-        for t in ("ok", "OK", " ok ", "y", "yes", "sure", "thanks", "lgtm", "/help", "", "   "):
+        for t in ("ok", "🟢", " ok ", "y", "yes", "sure", "thanks", "lgtm", "/help", "", "   "):
             assert HonchoMemoryProvider._is_trivial_prompt(t), f"expected trivial: {t!r}"
 
     def test_classifier_lets_substantive_prompts_through(self):

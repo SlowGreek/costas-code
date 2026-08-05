@@ -32,7 +32,7 @@ use crate::AppState;
 
 /// Frontend → Rust: kick off the install.
 #[derive(Debug, Deserialize)]
-pub struct StartBootstrapArgs {
+pub(crate) struct StartBootstrapArgs {
     /// Optional override for the commit pin. Defaults to the build-time
     /// pin baked in via `BUILD_PIN_COMMIT`.
     pub commit: Option<String>,
@@ -70,7 +70,7 @@ pub struct BootstrapHandle {
 }
 
 #[tauri::command]
-pub async fn start_bootstrap(
+pub(crate) async fn start_bootstrap(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     args: StartBootstrapArgs,
@@ -127,7 +127,7 @@ pub async fn start_bootstrap(
 }
 
 #[tauri::command]
-pub async fn cancel_bootstrap(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub(crate) async fn cancel_bootstrap(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let guard = state.bootstrap.lock().await;
     if let Some(h) = guard.as_ref() {
         let _ = h.cancel_tx.try_send(());
@@ -136,7 +136,7 @@ pub async fn cancel_bootstrap(state: State<'_, Arc<AppState>>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn get_bootstrap_status(
+pub(crate) async fn get_bootstrap_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<BootstrapStatus, String> {
     let guard = state.bootstrap.lock().await;
@@ -163,7 +163,7 @@ pub async fn get_bootstrap_status(
 /// (e.g. when Stage-Desktop was skipped) so the frontend can present
 /// actionable failure UI rather than silently doing nothing.
 #[tauri::command]
-pub async fn launch_hermes_desktop(
+pub(crate) async fn launch_hermes_desktop(
     app: AppHandle,
     install_root: String,
 ) -> Result<(), String> {
@@ -191,12 +191,7 @@ pub async fn launch_hermes_desktop(
         cmd.creation_flags(0x0000_0008);
     }
 
-    cmd.spawn().map_err(|e| {
-        format!(
-            "failed to launch {}: {e}",
-            exe_path.display()
-        )
-    })?;
+    cmd.spawn().map_err(|e| format!("failed to launch {}: {e}", exe_path.display()))?;
 
     // Give Windows ~150ms to actually start the new process before we exit.
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -376,11 +371,7 @@ async fn run_bootstrap(
     let emit_log = move |line: &str| {
         emit_event(
             &app_for_log,
-            BootstrapEvent::Log {
-                stage: None,
-                line: line.to_string(),
-                stream: LogStream::Stdout,
-            },
+            BootstrapEvent::Log { stage: None, line: line.to_string(), stream: LogStream::Stdout },
         );
         // Bump to info-level so the line shows in bootstrap-installer.log
         // under the default INFO filter. Previously this was debug! which
@@ -390,19 +381,11 @@ async fn run_bootstrap(
     };
 
     // 1. Resolve install.ps1
-    let script = install_script::resolve(kind, &pin, &emit_log)
-        .await
-        .map_err(|e| {
-            let msg = format!("resolve install script failed: {e:#}");
-            emit_event(
-                &app,
-                BootstrapEvent::Failed {
-                    stage: None,
-                    error: msg.clone(),
-                },
-            );
-            anyhow!(msg)
-        })?;
+    let script = install_script::resolve(kind, &pin, &emit_log).await.map_err(|e| {
+        let msg = format!("resolve install script failed: {e:#}");
+        emit_event(&app, BootstrapEvent::Failed { stage: None, error: msg.clone() });
+        anyhow!(msg)
+    })?;
 
     let source_note = match &script.source {
         ScriptSource::DevCheckout => "dev checkout",
@@ -410,11 +393,7 @@ async fn run_bootstrap(
         ScriptSource::Cached => "cached",
         ScriptSource::Downloaded => "downloaded",
     };
-    emit_log(&format!(
-        "[bootstrap] script {} via {}",
-        script.path.display(),
-        source_note
-    ));
+    emit_log(&format!("[bootstrap] script {} via {}", script.path.display(), source_note));
 
     // 2. Fetch manifest
     //
@@ -446,30 +425,19 @@ async fn run_bootstrap(
             manifest_result.exit_code,
             manifest_result.stderr.trim()
         );
-        emit_event(
-            &app,
-            BootstrapEvent::Failed {
-                stage: None,
-                error: err.clone(),
-            },
-        );
+        emit_event(&app, BootstrapEvent::Failed { stage: None, error: err.clone() });
         return Err(anyhow!(err));
     }
 
-    let manifest: Manifest = powershell::parse_manifest(&manifest_result.stdout).ok_or_else(|| {
-        let err = format!(
-            "install.ps1 -Manifest produced no parseable JSON payload\n{}",
-            truncate(&manifest_result.stdout, 4000)
-        );
-        emit_event(
-            &app,
-            BootstrapEvent::Failed {
-                stage: None,
-                error: err.clone(),
-            },
-        );
-        anyhow!(err)
-    })?;
+    let manifest: Manifest =
+        powershell::parse_manifest(&manifest_result.stdout).ok_or_else(|| {
+            let err = format!(
+                "install.ps1 -Manifest produced no parseable JSON payload\n{}",
+                truncate(&manifest_result.stdout, 4000)
+            );
+            emit_event(&app, BootstrapEvent::Failed { stage: None, error: err.clone() });
+            anyhow!(err)
+        })?;
 
     emit_event(
         &app,
@@ -502,10 +470,7 @@ async fn run_bootstrap(
             let err = "bootstrap cancelled by user".to_string();
             emit_event(
                 &app,
-                BootstrapEvent::Failed {
-                    stage: Some(stage.name.clone()),
-                    error: err.clone(),
-                },
+                BootstrapEvent::Failed { stage: Some(stage.name.clone()), error: err.clone() },
             );
             return Err(anyhow!(err));
         }
@@ -590,10 +555,7 @@ async fn run_bootstrap(
                 );
                 emit_event(
                     &app,
-                    BootstrapEvent::Failed {
-                        stage: Some(stage.name.clone()),
-                        error: err.clone(),
-                    },
+                    BootstrapEvent::Failed { stage: Some(stage.name.clone()), error: err.clone() },
                 );
                 return Err(anyhow!(err));
             }
@@ -638,10 +600,7 @@ async fn run_bootstrap(
                 );
                 emit_event(
                     &app,
-                    BootstrapEvent::Failed {
-                        stage: Some(stage.name.clone()),
-                        error: err.clone(),
-                    },
+                    BootstrapEvent::Failed { stage: Some(stage.name.clone()), error: err.clone() },
                 );
                 return Err(anyhow!(err));
             }
@@ -664,9 +623,7 @@ async fn run_bootstrap(
     // not fail an otherwise-successful install.
     if let Err(err) = crate::paths::copy_self_to_hermes_home() {
         tracing::warn!(?err, "failed to copy installer into HERMES_HOME (non-fatal)");
-        emit_log(&format!(
-            "[bootstrap] warning: could not stage updater binary: {err}"
-        ));
+        emit_log(&format!("[bootstrap] warning: could not stage updater binary: {err}"));
     }
 
     emit_event(
@@ -748,12 +705,12 @@ async fn run_install_script(
         }),
     };
 
-    powershell::run_script(script_path, args, sink, hermes_home_override, cancel_rx)
-        .await
-        .map_err(|e| {
+    powershell::run_script(script_path, args, sink, hermes_home_override, cancel_rx).await.map_err(
+        |e| {
             tracing::error!(?e, "install script invocation failed");
             anyhow!("install script invocation failed: {e:#}")
-        })
+        },
+    )
 }
 
 fn build_pin_args(script: &install_script::ResolvedScript) -> Vec<String> {
@@ -782,13 +739,7 @@ fn emit_event(app: &AppHandle, event: BootstrapEvent) {
                 "manifest received"
             );
         }
-        BootstrapEvent::Stage {
-            name,
-            state,
-            duration_ms,
-            error,
-            ..
-        } => {
+        BootstrapEvent::Stage { name, state, duration_ms, error, .. } => {
             tracing::info!(
                 stage = %name,
                 ?state,

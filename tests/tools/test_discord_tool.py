@@ -955,7 +955,7 @@ class TestConfigAllowlist:
             "hermes_cli.config.load_config",
             lambda: {"discord": {"server_actions": "list_guilds,bogus_action,fetch_messages"}},
         )
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             result = _load_allowed_actions_config()
         assert result == ["list_guilds", "fetch_messages"]
         assert "bogus_action" in caplog.text
@@ -972,7 +972,7 @@ class TestConfigAllowlist:
             "hermes_cli.config.load_config",
             lambda: {"discord": {"server_actions": {"unexpected": "dict"}}},
         )
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             result = _load_allowed_actions_config()
         assert result is None
         assert "unexpected type" in caplog.text

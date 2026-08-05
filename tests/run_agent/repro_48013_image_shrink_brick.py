@@ -123,7 +123,7 @@ def run_proof(verbose: bool = False) -> list[dict]:
         }
         results.append(result)
         if verbose:
-            status = "OK" if result["under_cap_after"] else "BRICK"
+            status = "🟢" if result["under_cap_after"] else "BRICK"
             print(
                 f"  {width}x{height} ({len(raw)//1024:>3} KB)"
                 f" -> changed={changed!s:>5}"

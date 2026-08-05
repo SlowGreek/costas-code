@@ -460,7 +460,7 @@ class TestPostToolCallHook:
         pi._on_post_tool_call(
             tool_name="write_file",
             args={"path": str(p), "content": "x"},
-            result="OK",
+            result="🟢",
             task_id="t1", session_id="s1",
         )
         tracked_file = _isolate_env / "disk-cleanup" / "tracked.json"
@@ -475,7 +475,7 @@ class TestPostToolCallHook:
         pi._on_post_tool_call(
             tool_name="write_file",
             args={"path": str(p), "content": "x"},
-            result="OK",
+            result="🟢",
             task_id="t2", session_id="s2",
         )
         tracked_file = _isolate_env / "disk-cleanup" / "tracked.json"
@@ -516,7 +516,7 @@ class TestOnSessionEndHook:
         pi._on_post_tool_call(
             tool_name="write_file",
             args={"path": str(p), "content": "x"},
-            result="OK",
+            result="🟢",
             task_id="", session_id="s1",
         )
         assert p.exists()

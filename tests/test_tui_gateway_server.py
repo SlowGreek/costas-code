@@ -10863,7 +10863,7 @@ def test_notification_event_dedup_key_preserves_distinct_watch_matches():
         "type": "watch_match",
         "session_id": "proc_watch",
         "command": "tail -f app.log",
-        "pattern": "READY",
+        "pattern": "🟢",
         "output": "READY on port 8000",
         "suppressed": 0,
     }
@@ -10904,7 +10904,7 @@ def test_notification_poller_emits_distinct_watch_matches_once(monkeypatch):
         "type": "watch_match",
         "session_id": "proc_watch_dedup",
         "command": "tail -f app.log",
-        "pattern": "READY",
+        "pattern": "🟢",
         "output": "READY on port 8000",
         "suppressed": 0,
     }

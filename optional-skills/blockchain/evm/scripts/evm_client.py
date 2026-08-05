@@ -139,7 +139,7 @@ KNOWN_TOKENS: Dict[str, Dict[str, str]] = {
     "base": {
         # Stables + wrapped
         "USDC":   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "DAI":    "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+        "DAI":    "0x50c5725949A6captured input72E6C4a641F24049A917DB0Cb",
         "WETH":   "0x4200000000000000000000000000000000000006",
         # Liquid-staked ETH variants
         "cbETH":  "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cF0DEc22",

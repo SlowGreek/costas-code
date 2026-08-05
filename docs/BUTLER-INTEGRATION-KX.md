@@ -897,7 +897,7 @@ new AE-owned feedforward.
 <!-- Cross-refs: optional-mcps/lucid-quine/manifest.yaml; tools/lucid_mcp_bridge.py;
      tools/mcp_tool.py; hermes_cli/web_server.py; apps/desktop/src/app/skills/hub.tsx;
      apps/desktop/src/app/skills/mcp-tab.tsx; apps/desktop/src/app/skills/lucid-bridge-status.tsx;
-     docs/catalyst-host-track-c1.md; sibling ../AgentExperiments/envelope/MCP.json;
+     docs/host-integration-contract.md; sibling ../AgentExperiments/envelope/MCP.json;
      sibling ../AgentExperiments/envelope/LUCID.json; sibling ../AgentExperiments/docs/LUCID-MCP.md;
      sibling ../AgentExperiments/butler/src/server/host_context.rs;
      sibling ../AgentExperiments/butler/src/capability_broker.rs;

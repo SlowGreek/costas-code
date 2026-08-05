@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,6 +11,7 @@ import {
 } from './clipboard-lens'
 
 const capture = (text = 'hello clipboard'): ClipboardLensCapture => ({ text })
+const sha256 = (text: string) => `sha256:${createHash('sha256').update(text).digest('hex')}`
 
 describe('explicit text-only clipboard lens snapshot', () => {
   it('compiles admitted text into a bounded ephemeral identity', () => {
@@ -22,7 +25,7 @@ describe('explicit text-only clipboard lens snapshot', () => {
       state: 'ready',
       media: 'text',
       byte_length: 15,
-      content_hash: 'sha256:65b2b576750477c2424fc19794e6c3c5ac6821e29e8464294aed6aa8485304c2',
+      content_hash: sha256('hello clipboard'),
       sensitivity: 'admitted',
       text_preview: 'hello clipboard'
     })

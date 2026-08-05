@@ -59,7 +59,7 @@ def test_timeout_rejects_nonpositive(nonpos):
     assert parse_idle_timeout_seconds(nonpos) == DEFAULT_IDLE_TIMEOUT_MINUTES * 60.0
 
 
-# ── messaging_is_relay_only_or_absent (F6/D1) ────────────────────────────────
+# ── messaging_is_relay_only_or_absent ────────────────────────────────────────
 
 
 class _P:
@@ -109,7 +109,7 @@ def test_arm_blocked_without_wake_url():
     assert should_arm(enabled=True, relay_only_or_absent=True, wake_url="") is False
 
 
-# ── is_idle (D2/D3/F7) — each conjunct flips the result ──────────────────────
+# ── is_idle — each conjunct flips the result ─────────────────────────────────
 
 
 def _idle_kwargs(**over):

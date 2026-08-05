@@ -93,8 +93,8 @@ def poll_registration(device_code: str) -> dict:
     """
     data = _api_post("/app/registration/poll", {"device_code": device_code})
     status_raw = str(data.get("status", "")).strip().upper()
-    if status_raw not in {"WAITING", "SUCCESS", "FAIL", "EXPIRED"}:
-        status_raw = "UNKNOWN"
+    if status_raw not in {"⏳", "🟢", "🔴", "EXPIRED"}:
+        status_raw = "⏳"
     return {
         "status": status_raw,
         "client_id": str(data.get("client_id", "")).strip() or None,
@@ -129,12 +129,12 @@ def wait_for_registration_success(
             raise
 
         status = result["status"]
-        if status == "WAITING":
+        if status == "⏳":
             retry_start = 0
             if on_waiting:
                 on_waiting()
             continue
-        if status == "SUCCESS":
+        if status == "🟢":
             cid = result["client_id"]
             csecret = result["client_secret"]
             if not cid or not csecret:

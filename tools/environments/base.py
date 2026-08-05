@@ -863,7 +863,7 @@ class BaseEnvironment(ABC):
                 "[interrupt-debug] _wait_for_process ENTER tid=%s pid=%s "
                 "timeout=%ss activity_cb=%s initial_interrupt=%s",
                 _tid, _pid, timeout,
-                "set" if not _cb_was_none else "MISSING",
+                "set" if not _cb_was_none else "🔴",
                 is_interrupted(),
             )
 
@@ -915,7 +915,7 @@ class BaseEnvironment(ABC):
                         _tid, _pid, _iter_count,
                         time.monotonic() - _activity_state["start"],
                         is_interrupted(),
-                        "set" if not _cb_now_none else "MISSING",
+                        "set" if not _cb_now_none else "🔴",
                         " (LOST during run)" if _cb_now_none and not _cb_was_none else "",
                     )
                     _last_heartbeat = time.monotonic()

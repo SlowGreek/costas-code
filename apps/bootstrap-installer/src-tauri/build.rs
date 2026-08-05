@@ -36,10 +36,7 @@ fn main() {
 
     if let Some(c) = &commit {
         println!("cargo:rustc-env=BUILD_PIN_COMMIT={c}");
-        println!(
-            "cargo:warning=hermes-bootstrap: pinning to commit {}",
-            short(c)
-        );
+        println!("cargo:warning=hermes-bootstrap: pinning to commit {}", short(c));
     }
     if let Some(b) = &branch {
         println!("cargo:rustc-env=BUILD_PIN_BRANCH={b}");
@@ -149,10 +146,7 @@ fn resolve_branch_pin() -> Option<String> {
             return Some(v.trim().to_string());
         }
     }
-    let out = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
+    let out = Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -167,10 +161,7 @@ fn resolve_branch_pin() -> Option<String> {
 }
 
 fn locate_git_dir() -> Option<std::path::PathBuf> {
-    let out = Command::new("git")
-        .args(["rev-parse", "--git-dir"])
-        .output()
-        .ok()?;
+    let out = Command::new("git").args(["rev-parse", "--git-dir"]).output().ok()?;
     if !out.status.success() {
         return None;
     }

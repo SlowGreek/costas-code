@@ -51,7 +51,7 @@ const itemStyle = (item: UguiDocumentItem): CSSProperties | undefined => {
 }
 
 const displayValue = (value: unknown): string => {
-  if (value === null || value === undefined) {return 'UNAVAILABLE'}
+  if (value === null || value === undefined) {return '🔴'}
 
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value)
@@ -59,6 +59,32 @@ const displayValue = (value: unknown): string => {
 
   return JSON.stringify(value)
 }
+
+/// Canonical UGUI item types this painter renders with fidelity.
+export const PAINTED_ITEM_TYPES = [
+  'button',
+  'image',
+  'input',
+  'select',
+  'text'
+] as const
+
+/// Canonical UGUI item types this painter degrades to generic value rendering.
+/// UGUI owns the vocabulary; every entry here is an admitted, named loss until
+/// Catalyst mounts the shared native_webview painter.
+export const DECLARED_ITEM_LOSSES = [
+  'canvas',
+  'column',
+  'divider',
+  'native',
+  'progress',
+  'row',
+  'spacer',
+  'stack'
+] as const
+
+/// Item types this painter renders that UGUI does not declare.
+export const HOST_ITEM_EXTENSIONS = ['list', 'milli-percent', 'slider', 'stepper', 'tool'] as const
 
 export function UguiDocumentPainter({ document, onAction, onEvent }: UguiDocumentPainterProps) {
   const admitted = useMemo(() => validateUguiDocument(document), [document])

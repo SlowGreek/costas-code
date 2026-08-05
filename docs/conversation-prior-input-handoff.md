@@ -1,26 +1,26 @@
-# Catalyst distillation F0c.1 — prior/input mechanical oracle handoff
+# Catalyst distillation captured prior input — prior/input mechanical oracle handoff
 
 > **Branch:** `users/brianhu/ideation`  
-> **F0a source revision:** `89081c13037c2ffc87592f01df634d7ba944b4be`  
-> **Prior F0c aggregate:** `e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72`  
-> **F0c.1 aggregate:** `3dd6ab7e6cf9f9414d43d3ef1e341c6615ff44d1a717a17ae107c6fa7a058274`  
-> **Requested disposition:** `ATTEST F0c.1-PRIOR-INPUT`, `REVISE`, or `HOLD`  
+> **conversation corpus source revision:** `89081c13037c2ffc87592f01df634d7ba944b4be`  
+> **Prior captured input aggregate:** `e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72`  
+> **captured prior input aggregate:** `3dd6ab7e6cf9f9414d43d3ef1e341c6615ff44d1a717a17ae107c6fa7a058274`  
+> **Requested disposition:** `ATTEST CAPTURED PRIOR INPUT`, `REVISE`, or `HOLD`  
 > **Authority:** none. This handoff grants no reducer/runtime/provider, mutation, product-acceptance, deployment, or cutover authority.
 
 ## Outcome
 
-Costas now supplies one canonical reducer-input artifact containing exactly the eleven reduced cases requested by the AgentExperiments F1 revision. Each record carries a source-observed prior, replay input or fault mutation stream, its family source artifact, and a canonical per-record receipt. The five externally observed cases and three unavailable cases are explicitly dispositioned in the manifest and absent from the reducer artifact.
+Costas now supplies one canonical reducer-input artifact containing exactly the eleven reduced cases requested by the AgentExperiments conversation contract revision. Each record carries a source-observed prior, replay input or fault mutation stream, its family source artifact, and a canonical per-record receipt. The five externally observed cases and three unavailable cases are explicitly dispositioned in the manifest and absent from the reducer artifact.
 
-The aggregate generator executes all four family capture functions with corpus, expected, committed-future, and output paths replaced by fail-closed objects. Priors are serialized before events. Corpus expectations are loaded only after observation serialization. No production code, F0a schema/corpus bytes, family capture/test bytes, prior F0c family evidence, package lock, or AgentExperiments file changed in MC5.1.
+The aggregate generator executes all four family capture functions with corpus, expected, committed-future, and output paths replaced by fail-closed objects. Priors are serialized before events. Corpus expectations are loaded only after observation serialization. No production code, conversation corpus schema/corpus bytes, family capture/test bytes, prior captured input family evidence, package lock, or AgentExperiments file changed in MC5.1.
 
-## Owned F0c.1 changes
+## Owned captured prior input changes
 
 ```text
 tests/fixtures/catalyst_oracle/captured/reducer_inputs.json
 tests/fixtures/catalyst_oracle/manifest.json
 tests/agent/test_catalyst_oracle_fixture.py
 tests/catalyst_capture/test_reducer_inputs_aggregate.py
-docs/catalyst-distillation-f0c1.md
+docs/conversation-prior-input-handoff.md
 ```
 
 ## Identity and canonicalization
@@ -39,18 +39,18 @@ The digest is:
 3dd6ab7e6cf9f9414d43d3ef1e341c6615ff44d1a717a17ae107c6fa7a058274
 ```
 
-### Preserved F0a and F0c identities
+### Preserved conversation corpus and captured input identities
 
 | Evidence | SHA-256 |
 |---|---|
 | `schema.json` | `c036a5b440e9887f380ee7e4460a405c1f122670cf8185c05892c3f1f9ff2ac5` |
 | `corpus.json` | `f435a5143ea5b74d56f0cc92d9f00d06fb189a661d3430d5cfe632c68084eaa9` |
-| F0c mechanical aggregate | `e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72` |
-| F1 revision feedforward | `caa550fbe02e795a6c6bc2c3604bc6f2e73217a14be9d0f10cd136c20aa04183` |
+| captured input mechanical aggregate | `e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72` |
+| conversation contract revision feedforward | `caa550fbe02e795a6c6bc2c3604bc6f2e73217a14be9d0f10cd136c20aa04183` |
 
-The existing `mechanical_capture` manifest object is preserved byte-for-value, including its four artifacts, five sources, nineteen-case map, statuses, and residuals. The prior F0c aggregate is also retained as `reducer_inputs.f0c_aggregate_sha256`.
+The existing `mechanical_capture` manifest object is preserved byte-for-value, including its four artifacts, five sources, nineteen-case map, statuses, and residuals. The prior captured input aggregate is also retained as `reducer_inputs.captured_input_aggregate_sha256`.
 
-### F0c.1 reducer artifacts
+### captured prior input reducer artifacts
 
 | Artifact | SHA-256 |
 |---|---|
@@ -99,7 +99,7 @@ The existing `mechanical_capture` manifest object is preserved byte-for-value, i
 
 ## Aggregate falsifiers
 
-The F0c.1 aggregate gate proves:
+The captured prior input aggregate gate proves:
 
 1. exactly one record exists for every reduced case;
 2. no external or unavailable case enters the reducer artifact;
@@ -112,13 +112,13 @@ The F0c.1 aggregate gate proves:
 9. control-partition records contain no `text`;
 10. `expected` and `final_state` do not enter reducer records;
 11. raw provider IDs, credentials, bearer material, capability/authorization material, and provider authority do not enter reducer records;
-12. all family artifacts, all four family sources, the aggregate mutation source, the aggregate reducer artifact, prior F0c receipt, and new aggregate are content-addressed in the manifest.
+12. all family artifacts, all four family sources, the aggregate mutation source, the aggregate reducer artifact, prior captured input receipt, and new aggregate are content-addressed in the manifest.
 
 The fault family contains actual malformed, reordered, duplicate, stale, gapped, oversized, and contradictory terminal streams. Its fold-refusal references remain separate from injected input and observed runtime residuals; no `fault.*` event announces an expected result.
 
 ## Fresh verification
 
-### F0c.1 focused family and aggregate gate
+### captured prior input focused family and aggregate gate
 
 ```text
 HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
@@ -135,7 +135,7 @@ HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
 
 The four family files contribute the externally green 21 tests; the aggregate contributes 5 and the immutable-oracle contract contributes 4.
 
-### Preserved F0c regression gate
+### Preserved captured input regression gate
 
 ```text
 HERMES_PYTHON=/Users/mutilar/.hermes/venvs/costas-code/bin/python \
@@ -178,27 +178,27 @@ All checks passed!
 - The captures use deterministic bounded local fakes and production normalization seams; they make no live model, real network, credential, production-tool, subprocess, deployment, physical-device, performance, accessibility, energy, or product-acceptance claim.
 - Provider-unavailable capture includes only owner-seam pseudonymous request/binding observations; no generation is synthesized.
 - UI and SessionDB cases remain external comparison evidence and do not enter reduce.
-- F0c.1 proves source-owned prior/input availability, not AgentExperiments reducer correctness. F1 semantic projection parity, effect-free dependency closure, immutable import, runtime authority, Store/UGUI/native-shell work, product acceptance, and cutover remain HOLD.
+- captured prior input proves source-owned prior/input availability, not AgentExperiments reducer correctness. conversation contract semantic projection parity, effect-free dependency closure, immutable import, runtime authority, Store/UGUI/native-shell work, product acceptance, and cutover remain HOLD.
 
 ## Rollback
 
 Rollback is limited to the five MC5.1-owned paths:
 
 1. remove `tests/fixtures/catalyst_oracle/captured/reducer_inputs.json`;
-2. restore the prior F0c bytes of `tests/fixtures/catalyst_oracle/manifest.json` and `tests/agent/test_catalyst_oracle_fixture.py`;
+2. restore the prior captured input bytes of `tests/fixtures/catalyst_oracle/manifest.json` and `tests/agent/test_catalyst_oracle_fixture.py`;
 3. remove `tests/catalyst_capture/test_reducer_inputs_aggregate.py`;
-4. remove `docs/catalyst-distillation-f0c1.md`.
+4. remove `docs/conversation-prior-input-handoff.md`.
 
 Do not modify `schema.json`, `corpus.json`, family reducer-input captures/tests, prior mechanical captures/tests, production code, `package-lock.json`, or AgentExperiments state during rollback.
 
 ## Requested disposition
 
-AgentExperiments EM/WITNESS: bind review to F0c.1 aggregate
+AgentExperiments EM/WITNESS: bind review to captured prior input aggregate
 `3dd6ab7e6cf9f9414d43d3ef1e341c6615ff44d1a717a17ae107c6fa7a058274`
 and return exactly one of:
 
 ```text
-ATTEST F0c.1-PRIOR-INPUT
+ATTEST CAPTURED PRIOR INPUT
 REVISE
 HOLD
 ```

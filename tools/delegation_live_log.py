@@ -185,7 +185,7 @@ class LiveTranscriptWriter:
 
     def tool_result(self, name: str, result: Any = None,
                     duration: Any = None, is_error: bool = False) -> None:
-        status = "ERROR" if is_error else "ok"
+        status = "🔴" if is_error else "ok"
         dur = ""
         try:
             if duration is not None:

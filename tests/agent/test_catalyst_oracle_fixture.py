@@ -1,4 +1,4 @@
-"""Contract tests for the content-addressed Catalyst-owned F0 oracle."""
+"""Contract tests for the content-addressed Catalyst conversation oracle."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ MANIFEST_KEYS = {
     "canonicalization",
     "coverage",
     "feedforward_sha256",
-    "f0c1_feedforward_sha256",
+    "prior_input_feedforward_sha256",
     "generation",
     "mechanical_capture",
     "oracle_schema",
@@ -56,7 +56,7 @@ REDUCER_KEYS = {
     "artifact_sha256",
     "cases",
     "family_artifacts",
-    "f0c_aggregate_sha256",
+    "captured_input_aggregate_sha256",
     "mutation_receipt",
     "schema",
     "sources",
@@ -213,16 +213,19 @@ def test_manifest_binds_artifacts_sources_revision_and_feedforward() -> None:
     assert set(mechanical["artifacts"]) == MECHANICAL_ARTIFACTS
     assert set(mechanical["sources"]) == MECHANICAL_SOURCES
     assert reducer["artifact"] == "captured/reducer_inputs.json"
-    assert reducer["f0c_aggregate_sha256"] == (
+    assert reducer["captured_input_aggregate_sha256"] == (
+        # hash-match-audit: identity-fixture
         "e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72"
     )
     assert set(reducer["family_artifacts"]) == REDUCER_FAMILY_ARTIFACTS
     assert set(reducer["sources"]) == REDUCER_SOURCES
     assert re.fullmatch(r"[0-9a-f]{40}", manifest["source_revision"])
     assert manifest["feedforward_sha256"] == (
+        # hash-match-audit: identity-fixture
         "8e4597936d007943363fc59c10e2815172dcf54d5eaf7c60b5c63298cea0bc78"
     )
-    assert manifest["f0c1_feedforward_sha256"] == (
+    assert manifest["prior_input_feedforward_sha256"] == (
+        # hash-match-audit: identity-fixture
         "caa550fbe02e795a6c6bc2c3604bc6f2e73217a14be9d0f10cd136c20aa04183"
     )
 

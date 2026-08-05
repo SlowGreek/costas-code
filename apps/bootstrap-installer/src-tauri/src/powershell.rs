@@ -111,7 +111,7 @@ where
 }
 
 /// Hooks the caller installs to receive output.
-pub struct StreamSink {
+pub(crate) struct StreamSink {
     pub on_stdout_line: Box<dyn Fn(&str) + Send + Sync>,
     pub on_stderr_line: Box<dyn Fn(&str) + Send + Sync>,
 }
@@ -119,7 +119,7 @@ pub struct StreamSink {
 /// Outcome of a script invocation. Mirrors bootstrap-runner.ts's
 /// `{stdout, stderr, code, signal, killed}` shape.
 #[derive(Debug)]
-pub struct ScriptResult {
+pub(crate) struct ScriptResult {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: Option<i32>,
@@ -127,13 +127,13 @@ pub struct ScriptResult {
 }
 
 /// Cancellation signal — `cancel_tx.send(()).await` aborts the running script.
-pub type CancelRx = mpsc::Receiver<()>;
+pub(crate) type CancelRx = mpsc::Receiver<()>;
 
 /// Spawns install.ps1 / install.sh with the given args and streams output.
 ///
 /// `hermes_home_override` propagates to the child as $HERMES_HOME so the
 /// install script writes to the same directory the installer is reading from.
-pub async fn run_script(
+pub(crate) async fn run_script(
     script_path: &Path,
     args: &[String],
     sink: StreamSink,
@@ -154,9 +154,7 @@ pub async fn run_script(
         cmd.env("HERMES_HOME", home);
     }
 
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     // On Windows, avoid spawning a flashing cmd window when we're hosted
     // inside a GUI process. Tauri's main window is already created, so
@@ -167,9 +165,9 @@ pub async fn run_script(
         cmd.creation_flags(0x0800_0000);
     }
 
-    let mut child: Child = cmd
-        .spawn()
-        .with_context(|| format!("spawning {} via {}", script_path.display(), interpreter_label()))?;
+    let mut child: Child = cmd.spawn().with_context(|| {
+        format!("spawning {} via {}", script_path.display(), interpreter_label())
+    })?;
 
     let stdout = child.stdout.take().expect("stdout was piped");
     let stderr = child.stderr.take().expect("stderr was piped");
@@ -243,10 +241,7 @@ pub async fn run_script(
         combined_stderr.push('\n');
     }
 
-    let status = child
-        .wait()
-        .await
-        .context("waiting for install script to exit")?;
+    let status = child.wait().await.context("waiting for install script to exit")?;
 
     Ok(ScriptResult {
         stdout: combined_stdout,
@@ -256,7 +251,10 @@ pub async fn run_script(
     })
 }
 
-fn stable_script_cwd<'a>(script_path: &'a Path, hermes_home_override: Option<&'a str>) -> Option<&'a Path> {
+fn stable_script_cwd<'a>(
+    script_path: &'a Path,
+    hermes_home_override: Option<&'a str>,
+) -> Option<&'a Path> {
     if let Some(home) = hermes_home_override {
         let path = Path::new(home);
         if path.is_dir() {
@@ -308,10 +306,7 @@ fn build_command(script_path: &Path, args: &[String]) -> Command {
 /// host, not just Windows.
 #[cfg(any(target_os = "windows", test))]
 fn powershell_under_root(root: &Path) -> std::path::PathBuf {
-    root.join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe")
+    root.join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe")
 }
 
 /// Resolves the PowerShell interpreter to spawn.
@@ -362,7 +357,7 @@ fn interpreter_label() -> String {
 ///
 /// Mirrors `parseStageResult` from bootstrap-runner.ts. install.ps1 may
 /// print info/banner lines before the result frame; we scan from the end.
-pub fn parse_stage_result(stdout: &str) -> Option<crate::events::StageResultPayload> {
+pub(crate) fn parse_stage_result(stdout: &str) -> Option<crate::events::StageResultPayload> {
     for line in stdout.lines().rev() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -385,7 +380,7 @@ pub fn parse_stage_result(stdout: &str) -> Option<crate::events::StageResultPayl
 
 /// Same logic but for the `-Manifest` payload (the LAST line with a `stages`
 /// array). Returns the parsed manifest.
-pub fn parse_manifest(stdout: &str) -> Option<crate::events::Manifest> {
+pub(crate) fn parse_manifest(stdout: &str) -> Option<crate::events::Manifest> {
     for line in stdout.lines().rev() {
         let trimmed = line.trim();
         if trimmed.is_empty() {

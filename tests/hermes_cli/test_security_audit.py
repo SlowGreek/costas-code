@@ -130,7 +130,7 @@ class TestSeverityExtraction:
         assert sa._osv_severity_from_record(rec) == "HIGH"
 
     def test_unknown_when_no_severity(self):
-        assert sa._osv_severity_from_record({}) == "UNKNOWN"
+        assert sa._osv_severity_from_record({}) == "⏳"
 
     def test_ecosystem_specific_fallback(self):
         rec = {"affected": [{"ecosystem_specific": {"severity": "MODERATE"}}]}

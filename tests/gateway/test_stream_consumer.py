@@ -314,7 +314,7 @@ class TestSendOrEditMediaStripping:
             StreamConsumerConfig(cursor=" ▉"),
         )
         # No cursor in text — even short text should be sent
-        result = await consumer._send_or_edit("OK")
+        result = await consumer._send_or_edit("🟢")
         assert result is True
         adapter.send.assert_called_once()
 

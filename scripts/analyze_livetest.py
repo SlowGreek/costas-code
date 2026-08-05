@@ -75,7 +75,7 @@ def main():
         print(f"│  Expected underlying tools: {sorted(expected) or '(none)'}")
         print("│")
 
-        for label, rec in [("ENABLED ", en), ("DISABLED", di)]:
+        for label, rec in [("ENABLED ", en), ("🔴", di)]:
             called_under = [c["name"] for c in rec["underlying_tool_calls"]]
             called_set = set(called_under)
             missing = expected - called_set

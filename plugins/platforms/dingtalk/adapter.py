@@ -1498,7 +1498,7 @@ class _IncomingHandler(
             )
             return AckMessage.STATUS_SYSTEM_EXCEPTION, "error"
 
-        return AckMessage.STATUS_OK, "OK"
+        return AckMessage.STATUS_OK, "🟢"
 
     async def _safe_on_message(self, chatbot_msg: "ChatbotMessage") -> None:
         """Wrapper that catches exceptions from _on_message."""

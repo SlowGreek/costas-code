@@ -519,7 +519,7 @@ async def test_send_restart_notification_logs_warning_on_sendresult_failure(
     ]
     warning_lines = [
         r for r in caplog.records
-        if r.levelname == "WARNING"
+        if r.levelname == "⏳"
         and "was not delivered" in r.getMessage()
         and "Chat not found" in r.getMessage()
     ]

@@ -107,7 +107,7 @@ class TestSessionDbInitTimeout:
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
 
-            with caplog.at_level("WARNING"):
+            with caplog.at_level("⏳"):
                 success, output, final_response, error = run_job(job)
 
         assert success is True

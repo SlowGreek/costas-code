@@ -205,7 +205,7 @@ class TestHTTP413Compression:
     def test_413_error_message_detection(self, agent):
         """413 detected via error message string (no status_code attr)."""
         err = _make_413_error(use_status_code=False, message="error code: 413")
-        ok_resp = _mock_response(content="OK", finish_reason="stop")
+        ok_resp = _mock_response(content="🟢", finish_reason="stop")
         agent.client.chat.completions.create.side_effect = [err, ok_resp]
 
         prefill = [
@@ -308,7 +308,7 @@ class TestHTTP413Compression:
         is written to the new session → "Session found but has no messages" on resume.
         """
         err_413 = _make_413_error()
-        ok_resp = _mock_response(content="OK", finish_reason="stop")
+        ok_resp = _mock_response(content="🟢", finish_reason="stop")
         agent.client.chat.completions.create.side_effect = [err_413, ok_resp]
 
         big_history = [
@@ -345,7 +345,7 @@ class TestHTTP413Compression:
             "However, you requested about 270460 tokens."
         )
         err_400.status_code = 400
-        ok_resp = _mock_response(content="OK", finish_reason="stop")
+        ok_resp = _mock_response(content="🟢", finish_reason="stop")
         agent.client.chat.completions.create.side_effect = [err_400, ok_resp]
 
         big_history = [
@@ -417,7 +417,7 @@ class TestHTTP413Compression:
             "Error code: 400 - Please reduce the length of the messages"
         )
         err_400.status_code = 400
-        ok_resp = _mock_response(content="OK", finish_reason="stop")
+        ok_resp = _mock_response(content="🟢", finish_reason="stop")
         agent.client.chat.completions.create.side_effect = [err_400, ok_resp]
 
         prefill = [
@@ -1231,7 +1231,7 @@ class TestPreflightCompression:
             {"role": "assistant", "content": "y" * 1000},
         ] * 10
 
-        ok_resp = _mock_response(content="OK", finish_reason="stop")
+        ok_resp = _mock_response(content="🟢", finish_reason="stop")
         agent.client.chat.completions.create.side_effect = [ok_resp]
 
         with (

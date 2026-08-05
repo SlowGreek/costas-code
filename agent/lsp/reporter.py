@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 # Severity-1 only by default — warnings/info/hints would flood the
 # agent.  Lift this in config under ``lsp.severities`` if needed.
-SEVERITY_NAMES = {1: "ERROR", 2: "WARN", 3: "INFO", 4: "HINT"}
+SEVERITY_NAMES = {1: "🔴", 2: "⏳", 3: "INFO", 4: "HINT"}
 DEFAULT_SEVERITIES = frozenset({1})  # ERROR only
 
 MAX_PER_FILE = 20
@@ -69,7 +69,7 @@ def format_diagnostic(d: Dict[str, Any]) -> str:
     ``message``, ``code``, and ``source`` are sanitized before
     interpolation — see ``_sanitize_field``.
     """
-    sev = SEVERITY_NAMES.get(d.get("severity") or 1, "ERROR")
+    sev = SEVERITY_NAMES.get(d.get("severity") or 1, "🔴")
     rng = d.get("range") or {}
     start = rng.get("start") or {}
     line = int(start.get("line", 0)) + 1

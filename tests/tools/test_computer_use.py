@@ -1781,7 +1781,7 @@ class TestCaptureEmptyResultClipFallback:
         cli_calls = []
         def cli_call(name, args, timeout):
             cli_calls.append(name)
-            return {"data": "5 elements\n- [0] AXButton 'OK'", "images": [png_b64],
+            return {"data": "5 elements\n- [0] AXButton '🟢'", "images": [png_b64],
                     "structuredContent": {"element_count": 5}, "isError": False}
         sess._call_tool_via_cli.side_effect = cli_call
 
@@ -3068,7 +3068,7 @@ class TestStructuredElementsConsumption:
         from tools.computer_use.cua_backend import _parse_elements_from_structured
 
         raw = [
-            {"element_index": 1, "role": "AXButton", "label": "OK",
+            {"element_index": 1, "role": "AXButton", "label": "🟢",
              "frame": {"x": 10, "y": 20, "w": 80, "h": 30}},
             {"element_index": 2, "role": "AXTextField", "label": "search",
              "frame": {"x": 100, "y": 50, "w": 200, "h": 24}},
@@ -3077,7 +3077,7 @@ class TestStructuredElementsConsumption:
         assert len(out) == 2
         assert out[0].index == 1
         assert out[0].role == "AXButton"
-        assert out[0].label == "OK"
+        assert out[0].label == "🟢"
         assert out[0].bounds == (10, 20, 80, 30)
         assert out[1].bounds == (100, 50, 200, 24)
 
@@ -3503,7 +3503,7 @@ class TestElementTokenAttachment:
                     "data": '✅ Demo — 2 elements, turn 1\n',
                     "images": [], "image_mime_types": [],
                     "structuredContent": {"elements": [
-                        {"element_index": 1, "role": "AXButton", "label": "OK",
+                        {"element_index": 1, "role": "AXButton", "label": "🟢",
                          "element_token": "snap2:1"},
                         {"element_index": 2, "role": "AXButton", "label": "X",
                          "element_token": "snap2:2"},

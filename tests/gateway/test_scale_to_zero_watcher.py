@@ -5,7 +5,7 @@ would be slow/flaky).
 
 These cover the parts gateway/test_scale_to_zero.py (pure helpers) can't: that
 the watcher calls the relay adapter's go_dormant() exactly when idle+armed,
-respects the cooldown, and skips when busy — the F7/D3 + D12 behaviour.
+respects the cooldown, and skips when busy.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ async def test_watcher_noop_when_no_relay_adapter(monkeypatch):
 
 def test_bg_work_blocks_idle_via_background_tasks(monkeypatch):
     """_scale_to_zero_has_live_background_work() reports True when a tracked
-    background task is still live (D3/F7) — the guard that keeps a gateway with
+    background task is still live: the guard that keeps a gateway with
     an in-flight backgrounded subagent/terminal awake."""
     r = GatewayRunner.__new__(GatewayRunner)
 

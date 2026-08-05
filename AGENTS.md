@@ -10,7 +10,7 @@ applyTo: 'catalyst/**'
 
 ## AREA — `catalyst`
 
-> Catalyst/CostasCode desktop product shell — Electron + React hosts the canonical RUN executive and UGUI Scenes, routes bounded semantic intents to their exact owners, and packages one immutable AE generation without owning RUN, Butler, QUINE, or Store authority
+> Catalyst desktop product shell — Electron + React hosts the canonical RUN executive and UGUI Documents, routes bounded semantic intents to their exact owners, and packages one immutable AE generation without owning RUN, Butler, QUINE, or Store authority
 
 ### Codegen passes (this area's generators — source → artifact)
 

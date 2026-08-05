@@ -567,7 +567,7 @@ class TestPlaceholderKeyDetection:
         plugin = self._fresh_plugin(monkeypatch)
         with caplog.at_level(logging.WARNING, logger=self.LOGGER_NAME):
             assert plugin._get_langfuse() is None
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"
+        warnings = [r for r in caplog.records if r.levelname == "⏳"
                     and r.name == self.LOGGER_NAME]
         assert len(warnings) == 1, (
             f"Expected a single combined warning; got {len(warnings)}:\n"
@@ -589,7 +589,7 @@ class TestPlaceholderKeyDetection:
         with caplog.at_level(logging.WARNING, logger=self.LOGGER_NAME):
             for _ in range(15):
                 assert plugin._get_langfuse() is None
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"
+        warnings = [r for r in caplog.records if r.levelname == "⏳"
                     and r.name == self.LOGGER_NAME]
         assert len(warnings) == 1, (
             f"Warning fired {len(warnings)} times across 15 calls; "
@@ -643,7 +643,7 @@ class TestPlaceholderKeyDetection:
         plugin = self._fresh_plugin(monkeypatch)
         with caplog.at_level(logging.WARNING, logger=self.LOGGER_NAME):
             assert plugin._get_langfuse() is None
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"
+        warnings = [r for r in caplog.records if r.levelname == "⏳"
                     and r.name == self.LOGGER_NAME]
         assert warnings == []
 
@@ -664,7 +664,7 @@ class TestPlaceholderKeyDetection:
         monkeypatch.setattr(plugin, "Langfuse", None, raising=False)
         with caplog.at_level(logging.WARNING, logger=self.LOGGER_NAME):
             assert plugin._get_langfuse() is None
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"
+        warnings = [r for r in caplog.records if r.levelname == "⏳"
                     and r.name == self.LOGGER_NAME]
         assert warnings == []
 

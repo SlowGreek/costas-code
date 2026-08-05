@@ -99,7 +99,7 @@ def test_contention_logs_named_warning(caplog):
         registry.release(t1)
         await task
 
-    with caplog.at_level("WARNING", logger="gateway.turn_lease"):
+    with caplog.at_level("⏳", logger="gateway.turn_lease"):
         _run(scenario())
     warnings = [r for r in caplog.records if "turn lease contention" in r.getMessage()]
     assert len(warnings) == 1
@@ -180,7 +180,7 @@ def test_timeout_fails_open_with_degraded_token(caplog):
         assert t3 is not None and not t3.degraded
         registry.release(t3)
 
-    with caplog.at_level("ERROR", logger="gateway.turn_lease"):
+    with caplog.at_level("🔴", logger="gateway.turn_lease"):
         _run(scenario())
     errors = [r for r in caplog.records if "failing open" in r.getMessage()]
     assert len(errors) == 1

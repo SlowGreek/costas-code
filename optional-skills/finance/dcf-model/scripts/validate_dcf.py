@@ -46,7 +46,7 @@ class DCFModelValidator:
         results = {
             'file': self.excel_path,
             'validation_date': datetime.now().isoformat(),
-            'status': 'PASS' if len(self.errors) == 0 else 'FAIL',
+            'status': '🟢' if len(self.errors) == 0 else '🔴',
             'error_count': len(self.errors),
             'warning_count': len(self.warnings),
             'errors': self.errors,
@@ -275,12 +275,12 @@ def main():
                 json.dump(results, f, indent=2)
 
         # Exit with error code if validation failed
-        sys.exit(0 if results['status'] == 'PASS' else 1)
+        sys.exit(0 if results['status'] == '🟢' else 1)
 
     except Exception as e:
         error_result = {
             'file': excel_file,
-            'status': 'ERROR',
+            'status': '🔴',
             'error': str(e)
         }
         print(json.dumps(error_result, indent=2))

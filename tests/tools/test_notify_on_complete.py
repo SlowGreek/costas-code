@@ -107,7 +107,7 @@ class TestCompletionQueue:
         """Nonzero exit codes are captured correctly."""
         s = _make_session(
             notify_on_complete=True,
-            output="FAILED",
+            output="🔴",
             exit_code=1,
         )
         s.exited = True
@@ -118,7 +118,7 @@ class TestCompletionQueue:
 
         completion = registry.completion_queue.get_nowait()
         assert completion["exit_code"] == 1
-        assert "FAILED" in completion["output"]
+        assert "🔴" in completion["output"]
 
     def test_move_to_finished_idempotent_no_duplicate(self, registry):
         """Calling _move_to_finished twice must NOT enqueue two notifications.

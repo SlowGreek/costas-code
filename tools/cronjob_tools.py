@@ -716,7 +716,7 @@ def cronjob(
                     return tool_error(script_error, success=False)
 
             # Reject a model-supplied base_url that would route a named
-            # provider's stored credential to an attacker endpoint (F8).
+            # provider's stored credential to an attacker endpoint.
             base_url_error = _validate_cron_base_url(provider, base_url)
             if base_url_error:
                 return tool_error(base_url_error, success=False)
@@ -881,7 +881,7 @@ def cronjob(
             # already hold an unsafe named-provider + off-host base_url pair;
             # if we only checked when the update touches those axes, editing any
             # unrelated field (name, schedule, ...) would succeed and leave that
-            # exfil-capable pair active and schedulable (F8). The effective pair
+            # exfil-capable pair active and schedulable. The effective pair
             # merges this update's normalized values over the stored job; an
             # operator can still remediate in the same update by clearing
             # base_url or pointing provider/base_url at a safe pair.

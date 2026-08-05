@@ -2967,7 +2967,7 @@ class FeishuAdapter(BasePlatformAdapter):
 
         user_id_obj = getattr(event, "user_id", None)
         reaction_type_obj = getattr(event, "reaction_type", None)
-        emoji_type = str(getattr(reaction_type_obj, "emoji_type", "") or "UNKNOWN")
+        emoji_type = str(getattr(reaction_type_obj, "emoji_type", "") or "⏳")
         action = "added" if "created" in event_type else "removed"
         synthetic_text = f"reaction:{action}:{emoji_type}"
 

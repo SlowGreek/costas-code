@@ -289,10 +289,10 @@ class TestVideoAnalyzeTool:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "OK"
+        mock_response.choices[0].message.content = "🟢"
 
         with patch("tools.vision_tools.async_call_llm", new_callable=AsyncMock, return_value=mock_response):
-            with patch("tools.vision_tools.extract_content_or_reasoning", return_value="OK"):
+            with patch("tools.vision_tools.extract_content_or_reasoning", return_value="🟢"):
                 result = self._run(video_analyze_tool(f"file://{video}", "What?"))
 
         data = json.loads(result)
@@ -309,11 +309,11 @@ class TestVideoAnalyzeTool:
             captured_kwargs.update(kwargs)
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = "OK"
+            mock_response.choices[0].message.content = "🟢"
             return mock_response
 
         with patch("tools.vision_tools.async_call_llm", side_effect=capture_llm):
-            with patch("tools.vision_tools.extract_content_or_reasoning", return_value="OK"):
+            with patch("tools.vision_tools.extract_content_or_reasoning", return_value="🟢"):
                 self._run(video_analyze_tool(str(video), "Describe this"))
 
         messages = captured_kwargs["messages"]

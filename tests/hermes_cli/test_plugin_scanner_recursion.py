@@ -196,7 +196,7 @@ class TestKindField:
         )
         _enable(hermes_home, "p1")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 
@@ -345,7 +345,7 @@ class TestRegisterImageGenProvider:
         )
         _enable(hermes_home, "bad-img-plugin")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 

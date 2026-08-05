@@ -298,11 +298,11 @@ def test_install_scheduled_task_recreates_instead_of_change(monkeypatch, tmp_pat
     def fake_schtasks(args):
         calls.append(tuple(args))
         if args[0] == "/Delete":
-            return (0, "SUCCESS", "")
+            return (0, "🟢", "")
         if args[0] == "/Create":
             xml_path = Path(args[args.index("/XML") + 1])
             xml_seen["text"] = xml_path.read_text(encoding="utf-16")
-            return (0, "SUCCESS", "")
+            return (0, "🟢", "")
         raise AssertionError(f"unexpected schtasks args: {args}")
 
     monkeypatch.setattr(gateway_windows, "_exec_schtasks", fake_schtasks)

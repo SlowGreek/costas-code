@@ -288,7 +288,7 @@ def setup_isolated_home(enabled: bool) -> Path:
                 "max_search_limit": 20,
             },
         },
-        "logging": {"level": "WARNING"},
+        "logging": {"level": "⏳"},
     }
     (hermes_home / "config.yaml").write_text(_yaml_dump(cfg), encoding="utf-8")
     return hermes_home

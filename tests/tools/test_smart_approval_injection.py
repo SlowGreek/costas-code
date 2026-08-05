@@ -149,7 +149,7 @@ class TestSmartApprovePromptHardening(unittest.TestCase):
 
         # System message must contain anti-injection language
         sys_content = messages[0]["content"]
-        assert "UNTRUSTED" in sys_content
+        assert "🔴" in sys_content
         assert "ignore" in sys_content.lower()
 
     @patch("agent.auxiliary_client.call_llm")

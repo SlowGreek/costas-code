@@ -84,7 +84,7 @@ class TestStructuredContentPreservation:
         payload = {"value": "secret-123", "revealed": True}
         session.call_tool = AsyncMock(
             return_value=_FakeCallToolResult(
-                content=[_FakeContentBlock("OK")],
+                content=[_FakeContentBlock("🟢")],
                 structuredContent=payload,
             )
         )
@@ -92,7 +92,7 @@ class TestStructuredContentPreservation:
         raw = handler({})
         data = json.loads(raw)
         # content is the primary result, structuredContent is supplementary
-        assert data["result"] == "OK"
+        assert data["result"] == "🟢"
         assert data["structuredContent"] == payload
 
     def test_both_content_and_structured_desktop_commander(self, _patch_mcp_server):

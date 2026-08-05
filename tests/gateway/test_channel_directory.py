@@ -572,7 +572,7 @@ class TestBuildSlack:
         client = _make_slack_client([
             {"ok": False, "error": "missing_scope"},
         ])
-        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}), caplog.at_level("WARNING"):
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}), caplog.at_level("⏳"):
             entries = asyncio.run(_build_slack(_make_slack_adapter({"T1": client})))
 
         assert entries == []
@@ -587,7 +587,7 @@ class TestBuildSlack:
         client = MagicMock()
         client.users_conversations = AsyncMock(side_effect=SlackLikeError())
 
-        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}), caplog.at_level("WARNING"):
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}), caplog.at_level("⏳"):
             entries = asyncio.run(_build_slack(_make_slack_adapter({"T1": client})))
 
         assert entries == []
@@ -613,7 +613,7 @@ class TestBuildSlack:
         warning_messages = [
             record.getMessage()
             for record in caplog.records
-            if record.levelname == "WARNING"
+            if record.levelname == "⏳"
         ]
         assert len(warning_messages) == 1
         assert "ratelimited" in warning_messages[0]

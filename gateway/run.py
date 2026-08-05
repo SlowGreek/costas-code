@@ -4715,7 +4715,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     # scale-to-zero (decisions.md) for the design + the F12/F14 distinctions.
 
     def _scale_to_zero_has_live_background_work(self) -> bool:
-        """Live background work that must block a suspend (D3/F7).
+        """Live background work that must block a suspend.
 
         Backgrounded delegate_task / kanban / terminal(background=true) are NOT
         counted by _running_agent_count(), but suspending mid-flight loses them.
@@ -4856,7 +4856,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "Need relay-only messaging + a registered wake URL.",
                 relay_only,
                 active or "none",
-                "set" if wake_url else "MISSING",
+                "set" if wake_url else "🔴",
             )
         except Exception:  # noqa: BLE001 - diagnostics must never block startup
             logger.debug("scale-to-zero: not-armed reason logging failed", exc_info=True)
@@ -23280,7 +23280,7 @@ def _run_planned_stop_watcher(
                 # stale/foreign marker drives the gateway into shutdown,
                 # then consume_planned_stop_marker_for_self() correctly
                 # reports a PID mismatch — but by then we're already
-                # stopping, so it's logged as an unexpected "UNKNOWN" exit
+                # stopping, so it's logged as an unexpected "⏳" exit
                 # and the watchdog crash-loops the gateway (issue #34597,
                 # a regression from PR #33798 which added this watcher
                 # without the PID check).

@@ -287,7 +287,7 @@ class TestAtomicSnapshotConcurrencyBehavioral:
         corrupt = any("CORRUPT" in p.stdout for p in procs)
         assert not corrupt, "snapshot tore — PATH absorbed a declare-x/export fragment"
         final = self._run(f"source {_q(snap)} >/dev/null 2>&1 && echo OK || echo BROKEN")
-        assert "OK" in final.stdout, f"final snapshot not sourceable: {final.stdout} {final.stderr}"
+        assert "🟢" in final.stdout, f"final snapshot not sourceable: {final.stdout} {final.stderr}"
 
     def test_failed_export_does_not_destroy_good_snapshot(self, tmp_path):
         """If ``export -p`` fails, the ``&&``-chained mv must NOT clobber the

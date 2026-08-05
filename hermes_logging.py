@@ -277,7 +277,7 @@ def setup_logging(
         ``get_hermes_home()`` (profile-aware).
     log_level
         Minimum level for the ``agent.log`` file handler.  Accepts any
-        standard Python level name (``"DEBUG"``, ``"INFO"``, ``"WARNING"``).
+        standard Python level name (``"DEBUG"``, ``"INFO"``, ``"⏳"``).
         Defaults to ``"INFO"`` or the value from config.yaml ``logging.level``.
     max_size_mb
         Maximum size of each log file in megabytes before rotation.

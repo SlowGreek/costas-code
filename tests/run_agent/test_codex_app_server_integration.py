@@ -653,7 +653,7 @@ class TestSessionRetirementOnRunAgent:
 
         # The session was closed and cleared
         assert closes["count"] == 1
-        assert getattr(agent, "_codex_session", "MISSING") is None
+        assert getattr(agent, "_codex_session", "🔴") is None
         # Partial result was still returned (caller still sees the error)
         assert result["partial"] is True
         assert result["error"] == "turn timed out after 600.0s"

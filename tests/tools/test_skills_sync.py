@@ -1386,7 +1386,7 @@ class TestUpdateBackupRecovery:
 
         def _partial_then_fail(src, dst, **kwargs):
             Path(dst).mkdir(parents=True, exist_ok=True)
-            (Path(dst) / "PARTIAL").write_text("half-written")
+            (Path(dst) / "⏳").write_text("half-written")
             raise OSError("simulated failure mid-copy")
 
         with self._patches(bundled, skills_dir, manifest_file), \
@@ -1395,7 +1395,7 @@ class TestUpdateBackupRecovery:
 
         # Original content restored, partial debris and backup gone.
         assert (dest / "SKILL.md").read_text() == "# Old v1"
-        assert not (dest / "PARTIAL").exists()
+        assert not (dest / "⏳").exists()
         assert not (skills_dir / "old-skill.bak").exists()
 
         # And the skill is not wedged: a later normal sync updates cleanly.

@@ -63,7 +63,7 @@ class TestApplyWalWalResetGate:
             hermes_state, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: True
         )
         conn = sqlite3.connect(str(tmp_path / "fresh.db"))
-        with caplog.at_level("WARNING", logger="hermes_state"):
+        with caplog.at_level("⏳", logger="hermes_state"):
             mode = apply_wal_with_fallback(conn, db_label="fresh.db")
         assert mode == "delete"
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
@@ -90,7 +90,7 @@ class TestApplyWalWalResetGate:
 
         conn = sqlite3.connect(str(path), timeout=30.0)
         try:
-            with caplog.at_level("WARNING", logger="hermes_state"):
+            with caplog.at_level("⏳", logger="hermes_state"):
                 mode = apply_wal_with_fallback(conn, db_label="prior_wal.db")
             assert mode == "wal"
             assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
@@ -147,7 +147,7 @@ class TestApplyWalWalResetGate:
         monkeypatch.setattr(
             hermes_state, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: True
         )
-        with caplog.at_level("WARNING", logger="hermes_state"):
+        with caplog.at_level("⏳", logger="hermes_state"):
             for name in ("a.db", "a.db", "b.db"):
                 conn = sqlite3.connect(str(tmp_path / name))
                 apply_wal_with_fallback(conn, db_label=name)

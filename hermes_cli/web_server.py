@@ -872,7 +872,7 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "logging.level": {
         "type": "select",
         "description": "Log level for agent.log",
-        "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
+        "options": ["DEBUG", "INFO", "⏳", "🔴"],
     },
     "agent.service_tier": {
         "type": "select",

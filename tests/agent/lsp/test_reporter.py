@@ -28,8 +28,8 @@ def test_format_diagnostic_uses_one_indexed_position():
 
 
 def test_format_diagnostic_includes_severity_label():
-    assert format_diagnostic(_diag(sev=1)).startswith("ERROR")
-    assert format_diagnostic(_diag(sev=2)).startswith("WARN")
+    assert format_diagnostic(_diag(sev=1)).startswith("🔴")
+    assert format_diagnostic(_diag(sev=2)).startswith("⏳")
     assert format_diagnostic(_diag(sev=3)).startswith("INFO")
     assert format_diagnostic(_diag(sev=4)).startswith("HINT")
 

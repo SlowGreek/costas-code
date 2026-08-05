@@ -138,7 +138,7 @@ class TestDeliverOnlyBypassesAgent:
         async with TestClient(TestServer(app)) as cli:
             resp = await cli.post(
                 "/webhooks/alert",
-                json={"build": {"number": 77, "status": "FAILED"}},
+                json={"build": {"number": 77, "status": "🔴"}},
                 headers={"X-GitHub-Delivery": "d-render-1"},
             )
             assert resp.status == 200

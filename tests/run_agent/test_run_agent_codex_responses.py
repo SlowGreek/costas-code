@@ -1078,14 +1078,14 @@ def test_run_codex_stream_ignores_completed_response_with_null_output(monkeypatc
 
 def test_run_conversation_codex_plain_text(monkeypatch):
     agent = _build_agent(monkeypatch)
-    monkeypatch.setattr(agent, "_interruptible_api_call", lambda api_kwargs: _codex_message_response("OK"))
+    monkeypatch.setattr(agent, "_interruptible_api_call", lambda api_kwargs: _codex_message_response("🟢"))
 
     result = agent.run_conversation("Say OK")
 
     assert result["completed"] is True
-    assert result["final_response"] == "OK"
+    assert result["final_response"] == "🟢"
     assert result["messages"][-1]["role"] == "assistant"
-    assert result["messages"][-1]["content"] == "OK"
+    assert result["messages"][-1]["content"] == "🟢"
 
 
 def test_copilot_final_preflight_sanitizes_both_middleware_layers(monkeypatch):
@@ -1139,7 +1139,7 @@ def test_copilot_final_preflight_sanitizes_both_middleware_layers(monkeypatch):
 
     def _capture_api_call(api_kwargs):
         captured.update(api_kwargs)
-        return _codex_message_response("OK")
+        return _codex_message_response("🟢")
 
     monkeypatch.setattr(
         "hermes_cli.middleware.apply_llm_request_middleware",
@@ -1177,7 +1177,7 @@ def test_codex_final_preflight_bounds_middleware_cache_key(monkeypatch):
 
     def _capture_api_call(api_kwargs):
         captured.update(api_kwargs)
-        return _codex_message_response("OK")
+        return _codex_message_response("🟢")
 
     monkeypatch.setattr(
         "hermes_cli.middleware.run_llm_execution_middleware",

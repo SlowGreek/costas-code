@@ -19,19 +19,19 @@ import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
 
 const FILES = ["agent", "errors", "gateway"] as const;
-const LEVELS = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR"] as const;
+const LEVELS = ["ALL", "DEBUG", "INFO", "⏳", "🔴"] as const;
 const COMPONENTS = ["all", "gateway", "agent", "tools", "cli", "cron"] as const;
 const LINE_COUNTS = [50, 100, 200, 500] as const;
 
 function classifyLine(line: string): "error" | "warning" | "info" | "debug" {
   const upper = line.toUpperCase();
   if (
-    upper.includes("ERROR") ||
+    upper.includes("🔴") ||
     upper.includes("CRITICAL") ||
     upper.includes("FATAL")
   )
     return "error";
-  if (upper.includes("WARNING") || upper.includes("WARN")) return "warning";
+  if (upper.includes("⏳") || upper.includes("⏳")) return "warning";
   if (upper.includes("DEBUG")) return "debug";
   return "info";
 }

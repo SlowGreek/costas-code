@@ -56,7 +56,7 @@ def test_probe_returns_false_and_warns_on_oci_error(monkeypatch, caplog):
         )
 
     monkeypatch.setattr(docker_env.subprocess, "run", _run)
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("⏳"):
         assert docker_env._cgroup_limits_available("img") is False
     assert "Cgroup resource limits" in caplog.text
 

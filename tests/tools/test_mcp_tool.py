@@ -948,7 +948,7 @@ class TestToolHandler:
         from tools.mcp_tool import _make_tool_handler, _servers
 
         digest = "sha256:" + "e" * 64
-        intended_result = {"status": "GREEN", "rows": [{"id": "bounded-row"}]}
+        intended_result = {"status": "🟢", "rows": [{"id": "bounded-row"}]}
         result = _make_call_result(
             '{"intent":{"args":{"secret":"must-not-project"}}}',
             is_error=False,

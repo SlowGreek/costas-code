@@ -4476,7 +4476,7 @@ class HeartbeatManager:
                     heartbeat=heartbeat_val,
                 )
             await conn.ws.send(encoded)
-            status_name = "RUNNING" if heartbeat_val == WS_HEARTBEAT_RUNNING else "FINISH"
+            status_name = "⏳" if heartbeat_val == WS_HEARTBEAT_RUNNING else "FINISH"
             logger.debug(
                 "[%s] Reply heartbeat %s sent: chat=%s",
                 adapter.name, status_name, chat_id,

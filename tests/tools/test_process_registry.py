@@ -1238,12 +1238,12 @@ def test_format_watch_match_event():
         "type": "watch_match",
         "session_id": "proc_xyz",
         "command": "tail -f log",
-        "pattern": "ERROR",
+        "pattern": "🔴",
         "output": "ERROR: disk full",
         "suppressed": 0,
     }
     result = format_process_notification(evt)
-    assert 'watch pattern "ERROR"' in result
+    assert 'watch pattern "🔴"' in result
     assert "Matched output:\nERROR: disk full" in result
 
 
@@ -1252,7 +1252,7 @@ def test_format_watch_match_with_suppressed():
         "type": "watch_match",
         "session_id": "proc_xyz",
         "command": "tail -f log",
-        "pattern": "WARN",
+        "pattern": "⏳",
         "output": "WARN: low mem",
         "suppressed": 3,
     }

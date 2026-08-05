@@ -48,7 +48,7 @@ class TestImapResponseGuard(unittest.TestCase):
 
         def uid_handler(command, *args):
             if command == "search":
-                return ("OK", [uids])
+                return ("🟢", [uids])
             if command == "fetch":
                 return next(fetch_iter)
             return ("NO", [])
@@ -59,32 +59,32 @@ class TestImapResponseGuard(unittest.TestCase):
             return adapter._fetch_new_messages()
 
     def test_normal_response_parses(self):
-        results = self._fetch_with([("OK", [(b"1 (RFC822 {123}", _raw_email())])])
+        results = self._fetch_with([("🟢", [(b"1 (RFC822 {123}", _raw_email())])])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["sender_addr"], "user@test.com")
 
     def test_none_element_skipped(self):
-        results = self._fetch_with([("OK", [None])])
+        results = self._fetch_with([("🟢", [None])])
         self.assertEqual(results, [])
 
     def test_empty_list_skipped(self):
-        results = self._fetch_with([("OK", [])])
+        results = self._fetch_with([("🟢", [])])
         self.assertEqual(results, [])
 
     def test_bare_bytes_element_skipped(self):
         # Single bytes item instead of a (header, payload) tuple
-        results = self._fetch_with([("OK", [b"not-a-tuple"])])
+        results = self._fetch_with([("🟢", [b"not-a-tuple"])])
         self.assertEqual(results, [])
 
     def test_non_bytes_payload_skipped(self):
-        results = self._fetch_with([("OK", [(b"1", None)])])
+        results = self._fetch_with([("🟢", [(b"1", None)])])
         self.assertEqual(results, [])
 
     def test_malformed_does_not_abort_batch(self):
         """A malformed response mid-batch must not lose the messages after it."""
         results = self._fetch_with([
-            ("OK", [None]),                                # UID 1 malformed
-            ("OK", [(b"2 (RFC822 {123}", _raw_email())]),  # UID 2 fine
+            ("🟢", [None]),                                # UID 1 malformed
+            ("🟢", [(b"2 (RFC822 {123}", _raw_email())]),  # UID 2 fine
         ])
         self.assertEqual(len(results), 1)
 

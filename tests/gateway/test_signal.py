@@ -1140,7 +1140,7 @@ class TestSignalSendResultValidation:
             "results": [
                 {
                     "recipientAddress": {"number": "+155****4567"},
-                    "type": "SUCCESS"
+                    "type": "🟢"
                 }
             ]
         })

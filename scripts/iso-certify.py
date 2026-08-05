@@ -562,7 +562,7 @@ def run_certify(args: argparse.Namespace) -> dict[str, Any]:
                         "not the AC-4 incident regime, verdict cannot certify"
                     )
                 else:
-                    result["verdict"] = "PASS" if serving_ok else "FAIL"
+                    result["verdict"] = "🟢" if serving_ok else "🔴"
                 result["is_verdict"] = True
     finally:
         if not args.keep_home:
@@ -617,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     # Exit code: 0 only on a real PASS (or a clean dry-run smoke); non-zero
     # otherwise. A dry-run is never treated as a verdict for automation.
     if result.get("is_verdict"):
-        return 0 if result.get("verdict") == "PASS" else 1
+        return 0 if result.get("verdict") == "🟢" else 1
     return 0 if result.get("verdict") == "SMOKE-OK" else 1
 
 

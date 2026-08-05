@@ -51,7 +51,7 @@ def _make_httpx_response(status_code: int, body: dict | None = None, text: str =
     else:
         resp.json.side_effect = Exception("No body")
         resp.text = text
-    resp.reason_phrase = "OK" if status_code == 200 else "Error"
+    resp.reason_phrase = "🟢" if status_code == 200 else "Error"
     return resp
 
 

@@ -284,7 +284,7 @@ function assistantLucidMessage(): ThreadMessage {
         args: { path: 'fleet' },
         argsText: JSON.stringify({ path: 'fleet' }),
         result: {
-          result: { status: 'GREEN', rows: 2 },
+          result: { status: '🟢', rows: 2 },
           lucid_receipt: {
             schema: 'hermes-lucid-receipt/1',
             id: 'lucid:abc123',

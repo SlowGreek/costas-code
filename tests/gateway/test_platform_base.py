@@ -1968,7 +1968,7 @@ class TestMediaDeliveryDiagnosability:
         with patch.dict(os.environ, {"HERMES_MEDIA_DELIVERY_STRICT": "1",
                                      "HERMES_MEDIA_TRUST_RECENT_FILES": "0"}), \
                 patch("gateway.platforms.base.MEDIA_DELIVERY_SAFE_ROOTS", ()):
-            with caplog.at_level("WARNING"):
+            with caplog.at_level("⏳"):
                 out = BasePlatformAdapter.filter_media_delivery_paths([(str(outside), False)])
         assert out == []
         # The dropped path must be in the log so operators can diagnose it.

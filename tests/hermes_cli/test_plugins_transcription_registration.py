@@ -102,7 +102,7 @@ class TestRegisterTranscriptionProvider:
         )
         _enable(hermes_home, "bad-stt-plugin")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 
@@ -135,7 +135,7 @@ class TestRegisterTranscriptionProvider:
         )
         _enable(hermes_home, "shadow-stt-plugin")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 

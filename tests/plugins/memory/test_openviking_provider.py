@@ -973,7 +973,7 @@ def test_initialize_does_not_autostart_remote_openviking(monkeypatch, caplog):
         MagicMock(side_effect=AssertionError("remote endpoint should not wait")),
     )
 
-    with caplog.at_level("WARNING", logger=openviking_module.__name__):
+    with caplog.at_level("⏳", logger=openviking_module.__name__):
         provider = OpenVikingMemoryProvider()
         provider.initialize("session-1")
 
@@ -1004,7 +1004,7 @@ def test_initialize_warns_clearly_when_local_runtime_autostart_fails(monkeypatch
         MagicMock(side_effect=AssertionError("should not wait when server did not start")),
     )
 
-    with caplog.at_level("WARNING", logger=openviking_module.__name__):
+    with caplog.at_level("⏳", logger=openviking_module.__name__):
         provider = OpenVikingMemoryProvider()
         provider.initialize("session-1")
 

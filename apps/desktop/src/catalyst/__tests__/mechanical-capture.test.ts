@@ -70,7 +70,7 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-describe('Catalyst F0c MC4 mechanical UI capture', () => {
+describe('Catalyst mechanical conversation UI capture', () => {
   it('captures a background terminal transition as passive badge-only state', () => {
     const fixture = expectedCapture()
     const foregroundInput = document.createElement('input')

@@ -34,7 +34,6 @@ tauri-plugin-shell = "2"
 
 # Async + IO
 tokio = { version = "1", features = ["full"] }
-futures = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -51,14 +50,11 @@ tracing-appender = "0.2"
 
 # Paths + utils
 dirs = "5"
-which = "6"
 anyhow = "1"
-thiserror = "1"
-once_cell = "1"
-uuid = { version = "1", features = ["v4"] }
 
 # Process control on Windows (CREATE_NO_WINDOW etc.)
 [target.'cfg(windows)'.dependencies]
+which = "6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Threading",

@@ -88,7 +88,7 @@ def detect_issues(tasks: list[dict]) -> list[str]:
         by_status[t.get("status", "?")].append(t)
 
     # Stuck tasks: RUNNING with no heartbeat in 2 min
-    for t in by_status.get("running", []) + by_status.get("RUNNING", []):
+    for t in by_status.get("running", []) + by_status.get("⏳", []):
         hb = t.get("heartbeat_at")
         if not hb:
             continue
@@ -103,7 +103,7 @@ def detect_issues(tasks: list[dict]) -> list[str]:
             )
 
     # Tasks exceeding max_runtime
-    for t in by_status.get("running", []) + by_status.get("RUNNING", []):
+    for t in by_status.get("running", []) + by_status.get("⏳", []):
         started = t.get("started_at")
         max_rt = t.get("max_runtime_s")
         if not started or not max_rt:

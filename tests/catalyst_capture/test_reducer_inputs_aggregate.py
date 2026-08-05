@@ -1,4 +1,4 @@
-"""Closed F0c.1 aggregate for source-observed Catalyst reducer inputs."""
+"""Closed captured prior input aggregate for source-observed Catalyst reducer inputs."""
 
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ class _ExpectedAndFutureDataMustNotBeRead:
 
 def _load_family_modules() -> dict[str, ModuleType]:
     return {
-        family: _load_module(f"_catalyst_f0c1_{family}", ROOT / source)
+        family: _load_module(f"_catalyst_prior_input_{family}", ROOT / source)
         for family, source in FAMILY_SOURCES.items()
     }
 
@@ -473,7 +473,8 @@ def test_manifest_binds_family_inputs_sources_mutations_and_new_aggregate() -> N
     receipt = manifest["reducer_inputs"]
 
     assert receipt["schema"] == "catalyst-reducer-input-receipt/1"
-    assert receipt["f0c_aggregate_sha256"] == (
+    assert receipt["captured_input_aggregate_sha256"] == (
+        # hash-match-audit: identity-fixture
         "e0b029e833d5543877bc10625d3556d8b1b9ef402ae2a31502842cd50d7e5f72"
     )
     assert _sha256(AGGREGATE_PATH) == receipt["artifact_sha256"]

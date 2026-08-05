@@ -58,8 +58,8 @@ class TestProcessSessionField:
         assert s._watch_suppressed == 0
 
     def test_can_set_patterns(self):
-        s = _make_session(watch_patterns=["ERROR", "WARN"])
-        assert s.watch_patterns == ["ERROR", "WARN"]
+        s = _make_session(watch_patterns=["🔴", "⏳"])
+        assert s.watch_patterns == ["🔴", "⏳"]
 
 
 # =========================================================================
@@ -75,23 +75,23 @@ class TestCheckWatchPatterns:
 
     def test_no_match_no_notification(self, registry):
         """Output that doesn't match any pattern → no notification."""
-        session = _make_session(watch_patterns=["ERROR", "FAIL"])
+        session = _make_session(watch_patterns=["🔴", "🔴"])
         registry._check_watch_patterns(session, "INFO: all good\nDEBUG: fine\n")
         assert registry.completion_queue.empty()
 
     def test_basic_match(self, registry):
         """Single matching line triggers a notification."""
-        session = _make_session(watch_patterns=["ERROR"])
+        session = _make_session(watch_patterns=["🔴"])
         registry._check_watch_patterns(session, "INFO: ok\nERROR: disk full\n")
         assert not registry.completion_queue.empty()
         evt = registry.completion_queue.get_nowait()
         assert evt["type"] == "watch_match"
-        assert evt["pattern"] == "ERROR"
+        assert evt["pattern"] == "🔴"
         assert "disk full" in evt["output"]
         assert evt["session_id"] == "proc_test_watch"
 
     def test_match_carries_session_key_and_watcher_routing_metadata(self, registry):
-        session = _make_session(watch_patterns=["ERROR"])
+        session = _make_session(watch_patterns=["🔴"])
         session.session_key = "agent:main:telegram:group:-100:42"
         session.watcher_platform = "telegram"
         session.watcher_chat_id = "-100"
@@ -111,17 +111,17 @@ class TestCheckWatchPatterns:
 
     def test_multiple_patterns(self, registry):
         """First matching pattern is reported."""
-        session = _make_session(watch_patterns=["WARN", "ERROR"])
+        session = _make_session(watch_patterns=["⏳", "🔴"])
         registry._check_watch_patterns(session, "ERROR: bad\nWARN: hmm\n")
         evt = registry.completion_queue.get_nowait()
         # ERROR appears first in the output, and we check patterns in order
-        # so "WARN" won't match "ERROR: bad" but "ERROR" will
-        assert evt["pattern"] == "ERROR"
+        # so "⏳" won't match "ERROR: bad" but "🔴" will
+        assert evt["pattern"] == "🔴"
         assert "bad" in evt["output"]
 
     def test_disabled_skips(self, registry):
         """Disabled watch produces no notifications."""
-        session = _make_session(watch_patterns=["ERROR"])
+        session = _make_session(watch_patterns=["🔴"])
         session._watch_disabled = True
         registry._check_watch_patterns(session, "ERROR: boom\n")
         assert registry.completion_queue.empty()
@@ -268,7 +268,7 @@ class TestPerSessionRateLimit:
 class TestCheckpointPersistence:
     def test_watch_patterns_in_checkpoint(self, registry):
         """watch_patterns is included in checkpoint data."""
-        session = _make_session(watch_patterns=["ERROR", "FAIL"])
+        session = _make_session(watch_patterns=["🔴", "🔴"])
         with registry._lock:
             registry._running[session.id] = session
 
@@ -277,7 +277,7 @@ class TestCheckpointPersistence:
             args = mock_write.call_args
             entries = args[0][1]  # second positional arg
             assert len(entries) == 1
-            assert entries[0]["watch_patterns"] == ["ERROR", "FAIL"]
+            assert entries[0]["watch_patterns"] == ["🔴", "🔴"]
 
     def test_watch_patterns_recovery(self, registry, tmp_path, monkeypatch):
         """watch_patterns survives checkpoint recovery."""
@@ -347,7 +347,7 @@ class TestCodeExecutionBlocked:
 class TestSuppressAfterExit:
     def test_match_dropped_once_session_exited(self, registry):
         """watch_patterns notifications stop the moment session.exited is set."""
-        session = _make_session(watch_patterns=["ERROR"])
+        session = _make_session(watch_patterns=["🔴"])
         # Mark the process as exited BEFORE the late chunk arrives.
         session.exited = True
         registry._check_watch_patterns(session, "ERROR: late buffer\n")
@@ -356,7 +356,7 @@ class TestSuppressAfterExit:
 
     def test_match_still_delivered_while_session_running(self, registry):
         """Sanity: while the process is still running, matches still deliver."""
-        session = _make_session(watch_patterns=["ERROR"])
+        session = _make_session(watch_patterns=["🔴"])
         session.exited = False
         registry._check_watch_patterns(session, "ERROR: oh no\n")
         assert not registry.completion_queue.empty()
@@ -375,7 +375,7 @@ class TestMutualExclusion:
 
         resolved, note = _resolve_notification_flag_conflict(
             notify_on_complete=True,
-            watch_patterns=["ERROR", "DONE"],
+            watch_patterns=["🔴", "DONE"],
             background=True,
         )
         assert resolved is None
@@ -388,10 +388,10 @@ class TestMutualExclusion:
 
         resolved, note = _resolve_notification_flag_conflict(
             notify_on_complete=False,
-            watch_patterns=["ERROR"],
+            watch_patterns=["🔴"],
             background=True,
         )
-        assert resolved == ["ERROR"]
+        assert resolved == ["🔴"]
         assert note == ""
 
     def test_resolver_keeps_notify_when_no_watch(self):
@@ -412,10 +412,10 @@ class TestMutualExclusion:
 
         resolved, note = _resolve_notification_flag_conflict(
             notify_on_complete=True,
-            watch_patterns=["ERROR"],
+            watch_patterns=["🔴"],
             background=False,
         )
-        assert resolved == ["ERROR"]
+        assert resolved == ["🔴"]
         assert note == ""
 
 

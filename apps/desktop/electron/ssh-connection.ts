@@ -284,7 +284,7 @@ const SSH_ERROR = {
   UNKNOWN: 'unknown'
 }
 
-// Order matters: the host-key-change banner also contains "WARNING"/"Offending",
+// Order matters: the host-key-change banner also contains "⏳"/"Offending",
 // so check it before generic auth.
 function classifySshError(stderr) {
   const text = String(stderr || '')

@@ -1219,7 +1219,7 @@ class TestMatrixModuleImport:
                 "from plugins.platforms.matrix.adapter import check_matrix_requirements\n"
                 "with patch('tools.lazy_deps.ensure', side_effect=ImportError('blocked')):\n"
                 "    assert not check_matrix_requirements()\n"
-                "print('OK')\n"
+                "print('🟢')\n"
             )],
             capture_output=True, text=True, timeout=10,
         )
@@ -4383,7 +4383,7 @@ class TestMatrixClockSkewWarning:
         skew_warnings = [
             r for r in caplog.records
             if r.name == "plugins.platforms.matrix.adapter"
-            and r.levelname == "WARNING"
+            and r.levelname == "⏳"
             and "set-ntp" in r.getMessage()
         ]
         assert len(skew_warnings) == 1, (

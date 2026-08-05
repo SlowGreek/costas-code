@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -8,6 +9,17 @@ const aeRoot = path.resolve(import.meta.dirname, '../../../..')
 const bindingsDir = path.join(aeRoot, 'ugui', 'skins', 'bindings')
 
 describe('UGUI generated skin catalog admission', () => {
+  it('admits every generated binding without narrowing the catalog', () => {
+    const generated = fs.readdirSync(bindingsDir).filter(name => name.endsWith('.json'))
+    const catalog = loadUguiSkinCatalog(bindingsDir)
+
+    expect(generated.length).toBeGreaterThan(0)
+    expect(catalog.profiles.map(profile => `${profile.id}.json`).sort()).toEqual(generated.sort())
+    for (const profile of catalog.profiles) {
+      expect(() => normalizeUguiSkinBinding(profile), profile.id).not.toThrow()
+    }
+  })
+
   it('loads generated canonical profiles with all eight StyleModel axes', () => {
     const catalog = loadUguiSkinCatalog(bindingsDir)
     const windows = catalog.profiles.find(profile => profile.id === 'windows-95')
@@ -78,7 +90,7 @@ describe('UGUI generated skin catalog admission', () => {
       expect(profile.axes.motion.easing.length, profile.id).toBeLessThanOrEqual(128)
     }
 
-    expect(profiles.find(profile => profile.id === 'carbon')?.axes.motion.easing).toBe(
+    expect(profiles.find(profile => profile.id === 'ibm')?.axes.motion.easing).toBe(
       'cubic-bezier(0.2,0,0.38,0.9)'
     )
   })

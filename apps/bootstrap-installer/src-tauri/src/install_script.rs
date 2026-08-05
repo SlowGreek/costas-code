@@ -22,7 +22,7 @@ use crate::paths;
 /// Identity of the install.ps1 we'll execute. Used by both the manifest
 /// fetch and the per-stage runs.
 #[derive(Debug, Clone)]
-pub struct ResolvedScript {
+pub(crate) struct ResolvedScript {
     pub path: PathBuf,
     pub source: ScriptSource,
     /// Commit pin (40-char SHA) if known. install.ps1's `-Commit` arg is
@@ -32,7 +32,7 @@ pub struct ResolvedScript {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScriptSource {
+pub(crate) enum ScriptSource {
     DevCheckout,
     Bundled,
     Cached,
@@ -41,13 +41,13 @@ pub enum ScriptSource {
 
 /// What flavor of script (Windows .ps1 vs Unix .sh).
 #[derive(Debug, Clone, Copy)]
-pub enum ScriptKind {
+pub(crate) enum ScriptKind {
     Ps1,
     Sh,
 }
 
 impl ScriptKind {
-    pub fn for_current_os() -> Self {
+    pub(crate) fn for_current_os() -> Self {
         if cfg!(target_os = "windows") {
             Self::Ps1
         } else {
@@ -87,9 +87,7 @@ pub(crate) fn cache_plan(immutable: bool, cached_exists: bool) -> CachePlan {
     if immutable && cached_exists {
         CachePlan::Reuse
     } else {
-        CachePlan::Fetch {
-            stale_ok: !immutable && cached_exists,
-        }
+        CachePlan::Fetch { stale_ok: !immutable && cached_exists }
     }
 }
 
@@ -97,7 +95,7 @@ pub(crate) fn cache_plan(immutable: bool, cached_exists: bool) -> CachePlan {
 ///
 /// `pin` is the commit-or-branch from either Hermes-Setup's build-time
 /// constant (compiled into the installer) or a runtime override.
-pub async fn resolve(
+pub(crate) async fn resolve(
     kind: ScriptKind,
     pin: &Pin,
     emit_log: &impl Fn(&str),
@@ -131,9 +129,7 @@ pub async fn resolve(
         (Some(c), _) if is_valid_commit(c) => (c.clone(), true),
         (_, Some(b)) if !b.trim().is_empty() => (b.clone(), false),
         (Some(other), _) => {
-            return Err(anyhow!(
-                "install script pin commit `{other}` is not a valid git SHA"
-            ));
+            return Err(anyhow!("install script pin commit `{other}` is not a valid git SHA"));
         }
         _ => {
             return Err(anyhow!(
@@ -154,22 +150,18 @@ pub async fn resolve(
             // pre-BOM-fix installer would keep the #67193 encoding bug on
             // every retry. Upgrade it in place before handing it out.
             upgrade_cached_script(kind, &cached, emit_log);
-            return Ok(ResolvedScript {
+            Ok(ResolvedScript {
                 path: cached,
                 source: ScriptSource::Cached,
                 commit: pin.commit.clone(),
                 branch: pin.branch.clone(),
-            });
+            })
         }
         CachePlan::Fetch { stale_ok } => {
             emit_log(&format!(
                 "[bootstrap] downloading {} for {} {} from GitHub",
                 kind.filename(),
-                if immutable {
-                    "commit"
-                } else {
-                    "mutable ref"
-                },
+                if immutable { "commit" } else { "mutable ref" },
                 truncate_ref(&commit_or_ref)
             ));
 
@@ -206,7 +198,7 @@ pub async fn resolve(
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Pin {
+pub(crate) struct Pin {
     pub commit: Option<String>,
     pub branch: Option<String>,
 }
@@ -224,13 +216,15 @@ fn cached_path(kind: ScriptKind, commit_or_ref: &str) -> PathBuf {
 /// contain `/`, dots, etc.; we want a flat filename.
 fn sanitize_ref(s: &str) -> String {
     s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
+        .map(
+            |c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            },
+        )
         .collect()
 }
 
@@ -330,16 +324,12 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
     );
 
     if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("creating bootstrap-cache parent dir {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating bootstrap-cache parent dir {}", parent.display()))?;
     }
 
     let tmp_path = dest_path.with_extension({
-        let ext = dest_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("tmp");
+        let ext = dest_path.extension().and_then(|s| s.to_str()).unwrap_or("tmp");
         format!("{ext}.tmp")
     });
 
@@ -363,10 +353,7 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
         ));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .with_context(|| format!("reading body of {url}"))?;
+    let bytes = response.bytes().await.with_context(|| format!("reading body of {url}"))?;
     let bytes = prepare_cached_script_bytes(kind, &bytes);
 
     let mut file = tokio::fs::File::create(&tmp_path)
@@ -380,13 +367,7 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
 
     tokio::fs::rename(&tmp_path, dest_path)
         .await
-        .with_context(|| {
-            format!(
-                "renaming {} → {}",
-                tmp_path.display(),
-                dest_path.display()
-            )
-        })?;
+        .with_context(|| format!("renaming {} → {}", tmp_path.display(), dest_path.display()))?;
 
     Ok(())
 }

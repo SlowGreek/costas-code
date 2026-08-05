@@ -503,7 +503,7 @@ class TestSendViaRestApi:
     """send() uses REST API (not WebSocket) to avoid race conditions."""
 
     @staticmethod
-    def _mock_aiohttp_session(response_status=200, response_text="OK"):
+    def _mock_aiohttp_session(response_status=200, response_text="🟢"):
         """Build a mock aiohttp session + response for async-with patterns.
 
         aiohttp.ClientSession() is a sync constructor whose return value

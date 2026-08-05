@@ -430,7 +430,7 @@ class TestExecuteCodeModeIntegration(unittest.TestCase):
             code = (
                 "from hermes_tools import terminal\n"
                 "r = terminal('echo x')\n"
-                "print(r.get('output', 'MISSING'))\n"
+                "print(r.get('output', '🔴'))\n"
             )
             result = self._run(code, mode="project", extra_env={"TERMINAL_CWD": td})
             self.assertEqual(result["status"], "success")
@@ -441,7 +441,7 @@ class TestExecuteCodeModeIntegration(unittest.TestCase):
         code = (
             "from hermes_tools import terminal\n"
             "r = terminal('echo x')\n"
-            "print(r.get('output', 'MISSING'))\n"
+            "print(r.get('output', '🔴'))\n"
         )
         result = self._run(code, mode="strict")
         self.assertEqual(result["status"], "success")
@@ -481,8 +481,8 @@ class TestSecurityInvariantsAcrossModes(unittest.TestCase):
     def test_api_keys_scrubbed_in_strict_mode(self):
         code = (
             "import os\n"
-            "print('KEY=' + os.environ.get('OPENAI_API_KEY', 'MISSING'))\n"
-            "print('TOK=' + os.environ.get('ANTHROPIC_API_KEY', 'MISSING'))\n"
+            "print('KEY=' + os.environ.get('OPENAI_API_KEY', '🔴'))\n"
+            "print('TOK=' + os.environ.get('ANTHROPIC_API_KEY', '🔴'))\n"
         )
         with patch.dict(os.environ, {
             "OPENAI_API_KEY": "sk-should-not-leak",
@@ -499,9 +499,9 @@ class TestSecurityInvariantsAcrossModes(unittest.TestCase):
         """CRITICAL: the project-mode default does NOT leak user credentials."""
         code = (
             "import os\n"
-            "print('KEY=' + os.environ.get('OPENAI_API_KEY', 'MISSING'))\n"
-            "print('TOK=' + os.environ.get('ANTHROPIC_API_KEY', 'MISSING'))\n"
-            "print('SEC=' + os.environ.get('GITHUB_TOKEN', 'MISSING'))\n"
+            "print('KEY=' + os.environ.get('OPENAI_API_KEY', '🔴'))\n"
+            "print('TOK=' + os.environ.get('ANTHROPIC_API_KEY', '🔴'))\n"
+            "print('SEC=' + os.environ.get('GITHUB_TOKEN', '🔴'))\n"
         )
         with patch.dict(os.environ, {
             "OPENAI_API_KEY": "sk-should-not-leak",
@@ -521,7 +521,7 @@ class TestSecurityInvariantsAcrossModes(unittest.TestCase):
             "import os\n"
             "for k in ('MY_SECRET', 'DB_PASSWORD', 'VAULT_CREDENTIAL', "
             "'LDAP_PASSWD', 'AUTH_TOKEN'):\n"
-            "    print(f'{k}=' + os.environ.get(k, 'MISSING'))\n"
+            "    print(f'{k}=' + os.environ.get(k, '🔴'))\n"
         )
         with patch.dict(os.environ, {
             "MY_SECRET": "secret-should-not-leak",

@@ -65,10 +65,10 @@ class TestExtractLevel:
         assert _extract_level("2026-01-01 00:00:00 INFO gateway.run: msg") == "INFO"
 
     def test_warning(self):
-        assert _extract_level("2026-01-01 00:00:00 WARNING tools.file: msg") == "WARNING"
+        assert _extract_level("2026-01-01 00:00:00 WARNING tools.file: msg") == "⏳"
 
     def test_error(self):
-        assert _extract_level("2026-01-01 00:00:00 ERROR run_agent: msg") == "ERROR"
+        assert _extract_level("2026-01-01 00:00:00 ERROR run_agent: msg") == "🔴"
 
     def test_debug(self):
         assert _extract_level("2026-01-01 00:00:00 DEBUG agent.aux: msg") == "DEBUG"
@@ -164,9 +164,9 @@ class TestMatchesFilters:
 
     def test_level_filter(self):
         assert _matches_filters(
-            "2026-01-01 00:00:00 WARNING x: msg", min_level="WARNING")
+            "2026-01-01 00:00:00 WARNING x: msg", min_level="⏳")
         assert not _matches_filters(
-            "2026-01-01 00:00:00 INFO x: msg", min_level="WARNING")
+            "2026-01-01 00:00:00 INFO x: msg", min_level="⏳")
 
     def test_session_filter(self):
         assert _matches_filters(
@@ -187,14 +187,14 @@ class TestMatchesFilters:
         line = "2026-04-11 10:00:00 WARNING [sess_1] gateway.run: connection lost"
         assert _matches_filters(
             line,
-            min_level="WARNING",
+            min_level="⏳",
             session_filter="sess_1",
             component_prefixes=("gateway",),
         )
         # Fails component filter
         assert not _matches_filters(
             line,
-            min_level="WARNING",
+            min_level="⏳",
             session_filter="sess_1",
             component_prefixes=("tools",),
         )

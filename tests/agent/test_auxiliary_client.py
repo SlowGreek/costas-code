@@ -3035,7 +3035,7 @@ class TestAuxiliaryFallbackLayering:
                    return_value=(None, None, "")), \
              patch("agent.auxiliary_client._try_main_agent_model_fallback",
                    return_value=(None, None, "")), \
-             caplog.at_level("WARNING", logger="agent.auxiliary_client"):
+             caplog.at_level("⏳", logger="agent.auxiliary_client"):
             with pytest.raises(Exception, match="Payment Required"):
                 call_llm(
                     task="vision",

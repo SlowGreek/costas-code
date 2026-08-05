@@ -35,14 +35,14 @@ class TestTypeSafety:
     def test_write_file_content_bool(self):
         """bool value for 'content' should not raise AttributeError."""
         args = json.dumps({"path": "test.txt", "content": False})
-        result = _summarize_tool_result("write_file", args, "OK")
+        result = _summarize_tool_result("write_file", args, "🟢")
         assert "write_file" in result
         assert "test.txt" in result
 
     def test_write_file_content_int(self):
         """int value for 'content' should not raise AttributeError."""
         args = json.dumps({"path": "test.txt", "content": 123})
-        result = _summarize_tool_result("write_file", args, "OK")
+        result = _summarize_tool_result("write_file", args, "🟢")
         assert "write_file" in result
 
     def test_delegate_task_goal_bool(self):
@@ -121,7 +121,7 @@ class TestNormalStringArguments:
     def test_write_file_normal_content(self):
         """Normal string content should count lines correctly."""
         args = json.dumps({"path": "test.py", "content": "line1\nline2\nline3"})
-        result = _summarize_tool_result("write_file", args, "OK")
+        result = _summarize_tool_result("write_file", args, "🟢")
         assert "write_file" in result
         assert "test.py" in result
         assert "3 lines" in result

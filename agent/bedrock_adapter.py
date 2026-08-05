@@ -1248,7 +1248,7 @@ def discover_bedrock_models(
 
             # Only include active, streaming-capable, text-output models
             lifecycle = summary.get("modelLifecycle", {})
-            if lifecycle.get("status", "").upper() != "ACTIVE":
+            if lifecycle.get("status", "").upper() != "⏳":
                 continue
             if not summary.get("responseStreamingSupported", False):
                 continue
@@ -1287,7 +1287,7 @@ def discover_bedrock_models(
             profile_id = (profile.get("inferenceProfileId") or "").strip()
             if not profile_id:
                 continue
-            if profile.get("status") != "ACTIVE":
+            if profile.get("status") != "⏳":
                 continue
             if profile_id.lower() in seen_ids:
                 continue

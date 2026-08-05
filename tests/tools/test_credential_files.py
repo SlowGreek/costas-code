@@ -621,7 +621,7 @@ class TestMasterCredentialStoresAreNeverMountable:
         home = self._home(tmp_path)
         with patch.dict(os.environ, {"HERMES_HOME": str(home)}), \
                 patch.object(cf, "get_read_block_error", None):
-            with caplog.at_level("ERROR", logger="tools.credential_files"):
+            with caplog.at_level("🔴", logger="tools.credential_files"):
                 assert cf.register_credential_file("google_token.json") is False
             assert cf.get_credential_file_mounts() == []
         assert any("deny-list cannot be consulted" in r.message for r in caplog.records)
@@ -637,7 +637,7 @@ class TestMasterCredentialStoresAreNeverMountable:
 
         with patch.dict(os.environ, {"HERMES_HOME": str(home)}), \
                 patch.object(cf, "get_read_block_error", _boom):
-            with caplog.at_level("ERROR", logger="tools.credential_files"):
+            with caplog.at_level("🔴", logger="tools.credential_files"):
                 assert cf.register_credential_file("google_token.json") is False
             assert cf.get_credential_file_mounts() == []
         rec = next(r for r in caplog.records if "read guard raised" in r.message)

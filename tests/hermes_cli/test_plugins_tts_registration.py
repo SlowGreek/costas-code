@@ -105,7 +105,7 @@ class TestRegisterTTSProvider:
         )
         _enable(hermes_home, "bad-tts-plugin")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 
@@ -143,7 +143,7 @@ class TestRegisterTTSProvider:
         )
         _enable(hermes_home, "shadow-tts-plugin")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("⏳"):
             mgr = PluginManager()
             mgr.discover_and_load()
 

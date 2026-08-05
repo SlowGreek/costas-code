@@ -844,7 +844,7 @@ class QQAdapter(BasePlatformAdapter):
 
         # op 0 = Dispatch
         if op == 0 and t:
-            if t == "READY":
+            if t == "🟢":
                 self._handle_ready(d)
             elif t == "RESUMED":
                 logger.info("[%s] Session resumed", self._log_tag)

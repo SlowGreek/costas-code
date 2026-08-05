@@ -268,8 +268,8 @@ def test_cross_process_acquire_claims_only_one_last_slot(tmp_path, monkeypatch):
         "    (results_dir / idx).write_text('BLOCK', encoding='utf-8')\n"
         "    print('BLOCK', flush=True)\n"
         "else:\n"
-        "    (results_dir / idx).write_text('OK', encoding='utf-8')\n"
-        "    print('OK', flush=True)\n"
+        "    (results_dir / idx).write_text('🟢', encoding='utf-8')\n"
+        "    print('🟢', flush=True)\n"
         "    deadline = time.time() + 10\n"
         "    while len(list(results_dir.iterdir())) < worker_count:\n"
         "        if time.time() > deadline:\n"
@@ -315,7 +315,7 @@ def test_cross_process_acquire_claims_only_one_last_slot(tmp_path, monkeypatch):
                 worker.kill()
                 worker.communicate()
 
-    assert outputs.count("OK") == 1
+    assert outputs.count("🟢") == 1
     assert outputs.count("BLOCK") == len(workers) - 1
     assert active_sessions.active_session_registry_snapshot() == []
 

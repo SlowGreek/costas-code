@@ -57,7 +57,7 @@ _LOGGER_NAME_RE = re.compile(
 )
 
 # Level ordering for >= filtering
-_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "⏳": 2, "🔴": 3, "CRITICAL": 4}
 
 
 def _parse_since(since_str: str) -> Optional[datetime]:
@@ -163,7 +163,7 @@ def tail_log(
     follow
         If True, keep watching for new lines (Ctrl+C to stop).
     level
-        Minimum log level to show (e.g. ``"WARNING"``).
+        Minimum log level to show (e.g. ``"⏳"``).
     session
         Session ID substring to filter on.
     since

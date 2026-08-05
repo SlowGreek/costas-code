@@ -95,11 +95,11 @@ class TestApplyWalWithFallback:
     def test_falls_back_to_delete_on_locking_protocol(self, tmp_path, caplog):
         """NFS-style ``locking protocol`` error → DELETE mode + one WARNING."""
         conn, _ = _open_blocking(tmp_path / "nfs.db", isolation_level=None)
-        with caplog.at_level("WARNING", logger="hermes_state"):
+        with caplog.at_level("⏳", logger="hermes_state"):
             mode = apply_wal_with_fallback(conn, db_label="test.db")
 
         assert mode == "delete"
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        warnings = [r for r in caplog.records if r.levelname == "⏳"]
         assert len(warnings) == 1
         msg = warnings[0].getMessage()
         assert "test.db" in msg
@@ -214,7 +214,7 @@ class TestApplyWalWithFallback:
         on every kb.connect() call; without dedup, errors.log fills with
         hundreds of identical warnings per hour.
         """
-        with caplog.at_level("WARNING", logger="hermes_state"):
+        with caplog.at_level("⏳", logger="hermes_state"):
             # Three separate connections to "the same DB" via the same label
             for i in range(3):
                 conn, _ = _open_blocking(
@@ -227,7 +227,7 @@ class TestApplyWalWithFallback:
         # Exactly one warning across all three calls
         warnings = [
             r for r in caplog.records
-            if r.levelname == "WARNING" and "shared.db" in r.getMessage()
+            if r.levelname == "⏳" and "shared.db" in r.getMessage()
         ]
         assert len(warnings) == 1, (
             f"Expected 1 deduplicated warning, got {len(warnings)}: "
@@ -236,7 +236,7 @@ class TestApplyWalWithFallback:
 
     def test_warning_fires_independently_per_db_label(self, tmp_path, caplog):
         """Different db_labels each get their own one warning (not globally dedup'd)."""
-        with caplog.at_level("WARNING", logger="hermes_state"):
+        with caplog.at_level("⏳", logger="hermes_state"):
             conn1, _ = _open_blocking(tmp_path / "a.db", isolation_level=None)
             apply_wal_with_fallback(conn1, db_label="state.db")
             conn1.close()
@@ -245,7 +245,7 @@ class TestApplyWalWithFallback:
             apply_wal_with_fallback(conn2, db_label="kanban.db")
             conn2.close()
 
-        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        warnings = [r for r in caplog.records if r.levelname == "⏳"]
         labels_warned = {
             lbl for r in warnings for lbl in ("state.db", "kanban.db")
             if lbl in r.getMessage()

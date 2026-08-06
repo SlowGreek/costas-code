@@ -384,6 +384,49 @@ export function AeExecutiveWorkspace() {
     return () => release.forEach(off => off())
   }, [overlay])
 
+  // A keystroke is a gesture too, and the engine already decides what each one
+  // means; this host only listens and carries the decision out.
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const editing = (event.target as HTMLElement | null)?.closest?.('input, textarea, select')
+
+      if (editing) {return}
+
+      // Dismissing this overlay is host chrome, not Document semantics: the
+      // engine's key vocabulary has no say over a div this host owns.
+      if (event.key === 'Escape' && overlay) {
+        setOverlay(null)
+        event.preventDefault()
+
+        return
+      }
+
+      const decision = globalKey(event.key, {
+        meta: event.metaKey,
+        control: event.ctrlKey,
+        alt: event.altKey
+      })
+
+      switch (decision.kind) {
+        case 'focus-search':
+          surface.current?.querySelector<HTMLInputElement>('input[type="search"], input')?.focus()
+          event.preventDefault()
+
+          break
+        case 'system-app':
+          setDocumentNotice(`system-app · ${String(decision.value ?? '')}`)
+
+          break
+        default:
+          break
+      }
+    }
+
+    window.addEventListener('keydown', listener)
+
+    return () => window.removeEventListener('keydown', listener)
+  }, [overlay])
+
   const selectedRow = batch?.rows.find(row => row.tab === tabId)
   const painted = Boolean(catalogTab) || Boolean(selectedRow?.hasDocument)
 

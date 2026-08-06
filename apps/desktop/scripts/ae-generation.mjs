@@ -11,6 +11,14 @@ const exact = (value, keys) =>
   Object.keys(value).length === keys.length &&
   keys.every(key => Object.hasOwn(value, key))
 
+export function sourceChurnAction(attempt, maximumRetries) {
+  if (!Number.isSafeInteger(attempt) || attempt < 0) throw new Error('generation-churn-attempt')
+  if (!Number.isSafeInteger(maximumRetries) || maximumRetries < 0) {
+    throw new Error('generation-churn-retries')
+  }
+  return attempt < maximumRetries ? 'retry' : 'publish'
+}
+
 export function computeAeGenerationId(value) {
   const payload = {
     schema: value.schema,

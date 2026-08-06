@@ -27,37 +27,193 @@
       "level": "error",
       "findings": [
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:26:1:perfectionist/sort-imports:0",
+          "id": "eslint:apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts:9:3:perfectionist/sort-named-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
+          "line": 9,
+          "column": 3,
+          "end_line": 9,
+          "end_column": 12,
+          "rule": "perfectionist/sort-named-imports",
+          "message": "Expected \"globalKey\" to come before \"mountDocument\".",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts:14:3:perfectionist/sort-named-imports:1",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
+          "line": 14,
+          "column": 3,
+          "end_line": 14,
+          "end_column": 23,
+          "rule": "perfectionist/sort-named-imports",
+          "message": "Expected \"setAssetBaseForTests\" to come before \"skinField\".",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/catalyst-wasm.ts:18:3:perfectionist/sort-named-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/catalyst-wasm.ts",
+          "line": 18,
+          "column": 3,
+          "end_line": 18,
+          "end_column": 22,
+          "rule": "perfectionist/sort-named-imports",
+          "message": "Expected \"catalyst_global_key\" to come before \"catalyst_mount_document\".",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/catalyst-wasm.ts:24:3:perfectionist/sort-named-imports:1",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/catalyst-wasm.ts",
+          "line": 24,
+          "column": 3,
+          "end_line": 24,
+          "end_column": 26,
+          "rule": "perfectionist/sort-named-imports",
+          "message": "Expected \"catalyst_projects_input\" to come before \"catalyst_skin_variables\".",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.test.tsx:10:8:unused-imports/no-unused-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/index.test.tsx",
+          "line": 10,
+          "column": 8,
+          "end_line": 10,
+          "end_column": 13,
+          "rule": "unused-imports/no-unused-imports",
+          "message": "'skins' is defined but never used.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:30:1:perfectionist/sort-imports:0",
           "severity": "error",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 26,
+          "line": 30,
           "column": 1,
-          "end_line": 30,
+          "end_line": 34,
           "end_column": 32,
           "rule": "perfectionist/sort-imports",
           "message": "Expected \"@/store/render-profile\" (internal) to come before \"./catalyst-wasm\" (sibling).",
           "fixable": true
         },
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:213:9:padding-line-between-statements:1",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:226:9:padding-line-between-statements:1",
           "severity": "warning",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 213,
+          "line": 226,
           "column": 9,
-          "end_line": 213,
-          "end_column": 31,
+          "end_line": 246,
+          "end_column": 10,
           "rule": "padding-line-between-statements",
           "message": "Expected blank line before this statement.",
           "fixable": true
         },
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:248:5:padding-line-between-statements:2",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:241:11:padding-line-between-statements:2",
           "severity": "warning",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 248,
+          "line": 241,
+          "column": 11,
+          "end_line": 243,
+          "end_column": 12,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:247:9:padding-line-between-statements:3",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 247,
+          "column": 9,
+          "end_line": 247,
+          "end_column": 36,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:293:7:padding-line-between-statements:4",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 293,
+          "column": 7,
+          "end_line": 296,
+          "end_column": 14,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:297:7:padding-line-between-statements:5",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 297,
+          "column": 7,
+          "end_line": 300,
+          "end_column": 63,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:302:5:padding-line-between-statements:6",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 302,
           "column": 5,
-          "end_line": 248,
+          "end_line": 302,
+          "end_column": 87,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:314:5:padding-line-between-statements:7",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 314,
+          "column": 5,
+          "end_line": 318,
+          "end_column": 6,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:346:5:padding-line-between-statements:8",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 346,
+          "column": 5,
+          "end_line": 346,
           "end_column": 60,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:436:9:padding-line-between-statements:9",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 436,
+          "column": 9,
+          "end_line": 439,
+          "end_column": 16,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:440:9:padding-line-between-statements:10",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 440,
+          "column": 9,
+          "end_line": 441,
+          "end_column": 16,
           "rule": "padding-line-between-statements",
           "message": "Expected blank line before this statement.",
           "fixable": true
@@ -97,15 +253,27 @@
           "rule": "perfectionist/sort-imports",
           "message": "Expected \"node:fs\" (builtin) to come before \"./render-profile\" (sibling).",
           "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/themes/render-profile.ts:200:3:padding-line-between-statements:0",
+          "severity": "warning",
+          "file": "apps/desktop/src/themes/render-profile.ts",
+          "line": 200,
+          "column": 3,
+          "end_line": 200,
+          "end_column": 83,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
         }
       ]
     }
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:2bb4d32b4a3ce103f3e0aa5adccdc3b7b5c7bc1e187b48ce6dd819b908b3aca9",
+      "sha256": "sha256:8980f74cc4a66d59b14efec3eaaa74603182fa43c33c6395bb7efd9726b89d67",
       "files": 1190,
-      "bytes": 9337788
+      "bytes": 9355139
     },
     "tools": {
       "eslint": "9.39.4",

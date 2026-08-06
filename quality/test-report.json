@@ -3,12 +3,12 @@
   "signal": "🔴",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2963,
-    "failed": 5,
+    "passed": 2973,
+    "failed": 2,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
-    "total": 2968
+    "total": 2975
   },
   "suites": [
     {
@@ -289,18 +289,13 @@
     {
       "id": "apps/desktop/electron/git-review-ops.test.ts",
       "name": "apps/desktop/electron/git-review-ops.test.ts",
-      "passed": 6,
-      "failed": 1,
+      "passed": 7,
+      "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 7,
-      "failures": [
-        {
-          "id": "repoStatus reports an untracked directory without recursively listing its contents",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-review-ops.test.ts:73:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at "
-        }
-      ]
+      "failures": []
     },
     {
       "id": "apps/desktop/electron/git-root.test.ts",
@@ -316,8 +311,8 @@
     {
       "id": "apps/desktop/electron/git-worktree-ops.test.ts",
       "name": "apps/desktop/electron/git-worktree-ops.test.ts",
-      "passed": 20,
-      "failed": 2,
+      "passed": 21,
+      "failed": 1,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
@@ -326,10 +321,6 @@
         {
           "id": "ensureGitRepo: inits a plain dir with a root commit so worktrees branch",
           "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:76:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    a"
-        },
-        {
-          "id": "switchBranch: switches a normal checkout branch",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:96:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    a"
         }
       ]
     },
@@ -677,18 +668,13 @@
     {
       "id": "apps/desktop/electron/update-relaunch.test.ts",
       "name": "apps/desktop/electron/update-relaunch.test.ts",
-      "passed": 15,
-      "failed": 1,
+      "passed": 16,
+      "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 16,
-      "failures": [
-        {
-          "id": "buildRelaunchScript embeds pid/exec/args/env/cwd and is valid bash",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/update-relaunch.test.ts:193:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    a"
-        }
-      ]
+      "failures": []
     },
     {
       "id": "apps/desktop/electron/update-remote.test.ts",
@@ -847,12 +833,12 @@
     {
       "id": "apps/desktop/scripts/ae-generation.test.mjs",
       "name": "apps/desktop/scripts/ae-generation.test.mjs",
-      "passed": 9,
+      "passed": 10,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 9,
+      "total": 10,
       "failures": []
     },
     {
@@ -918,12 +904,12 @@
     {
       "id": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
       "name": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
-      "passed": 8,
+      "passed": 12,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 8,
+      "total": 12,
       "failures": []
     },
     {
@@ -3701,12 +3687,12 @@
     {
       "id": "apps/desktop/src/themes/render-profile.test.ts",
       "name": "apps/desktop/src/themes/render-profile.test.ts",
-      "passed": 3,
+      "passed": 5,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 3,
+      "total": 5,
       "failures": []
     },
     {
@@ -3745,9 +3731,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:2bb4d32b4a3ce103f3e0aa5adccdc3b7b5c7bc1e187b48ce6dd819b908b3aca9",
+      "sha256": "sha256:8980f74cc4a66d59b14efec3eaaa74603182fa43c33c6395bb7efd9726b89d67",
       "files": 1190,
-      "bytes": 9337788
+      "bytes": 9355139
     },
     "tools": {
       "node": "26.5.0",

@@ -10,6 +10,7 @@ import {
   publishAeGeneration,
   publishAeGenerationStore,
   reconcileAeOrphans,
+  sourceChurnAction,
   validateAeGenerationManifest
 } from './ae-generation.mjs'
 
@@ -26,6 +27,14 @@ const file = (root, relative, value) => {
 }
 
 afterEach(() => roots.splice(0).forEach(root => fs.rmSync(root, { force: true, recursive: true })))
+
+describe('AE source churn policy', () => {
+  test('retries once, then publishes instead of blocking RUN', () => {
+    assert.equal(sourceChurnAction(0, 1), 'retry')
+    assert.equal(sourceChurnAction(1, 1), 'publish')
+    assert.equal(sourceChurnAction(5, 1), 'publish')
+  })
+})
 
 describe('AE generation orphan reconciliation', () => {
   test('removes only exact dead-owner candidate directories', () => {

@@ -25,6 +25,7 @@ import {
   computeAeGenerationId,
   publishAeGenerationStore,
   reconcileAeOrphans,
+  sourceChurnAction,
   validateAeGenerationManifest
 } from './ae-generation.mjs'
 import { discoverAeRepositoryRoot } from './ae-repository-root.mjs'
@@ -40,6 +41,7 @@ const candidateDir = path.join(buildRoot, `.ae-candidate-${process.pid}-${Date.n
 const cargoTargetRoot = path.join(buildRoot, `.ae-cargo-${process.pid}-${Date.now()}`)
 const suffix = process.platform === 'win32' ? '.exe' : ''
 const sha256 = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+const MAX_SOURCE_CHURN_RETRIES = 1
 const AE_SOURCE_PATHS = [
   'Cargo.toml',
   'Cargo.lock',
@@ -55,7 +57,15 @@ const AE_SOURCE_PATHS = [
   'quine/canon',
   'quine/mcp/onboarding/index.json',
   'store',
-  'marketplace'
+  'marketplace',
+  // A receipt is evidence *about* this source, not an input to it. The quine
+  // daemon rewrites them while we build, which would otherwise read as the
+  // source moving underneath the candidate.
+  ':(exclude)run/receipts',
+  ':(exclude)ugui/receipts',
+  ':(exclude)butler/receipts',
+  ':(exclude)store/receipts',
+  ':(exclude)marketplace/receipts'
 ]
 const CATALYST_SOURCE_PATHS = [
   'QUINE-COMPANION.json',
@@ -134,11 +144,24 @@ function repositoryIdentity(root, pathspecs, base) {
     digest.update(readFileSync(absolute))
     digest.update('\0')
   }
+  // Per-path digests so a mid-build change can name the files that moved
+  // rather than only the repository that contains them.
+  const touched = run('git', ['diff', '--name-only', base ?? commit, '--', ...pathspecs], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024
+  })
+    .stdout.split('\n')
+    .filter(Boolean)
+    .sort()
+
   return {
     root_realpath: root,
     commit,
     dirty: diff.length > 0 || untracked.length > 0,
-    status_sha256: `sha256:${digest.digest('hex')}`
+    status_sha256: `sha256:${digest.digest('hex')}`,
+    touched,
+    untracked
   }
 }
 
@@ -257,65 +280,97 @@ try {
   if (removedOrphans.length > 0) {
     console.log(`[stage-ae-executive] removed dead-owner candidates: ${removedOrphans.join(', ')}`)
   }
-  rmSync(candidateDir, { force: true, recursive: true })
-  rmSync(cargoTargetRoot, { force: true, recursive: true })
-  mkdirSync(candidateDir, { recursive: true })
+  let smoke
+  let sourceAfter
+  for (let attempt = 0; ; attempt += 1) {
+    rmSync(candidateDir, { force: true, recursive: true })
+    rmSync(cargoTargetRoot, { force: true, recursive: true })
+    mkdirSync(candidateDir, { recursive: true })
 
-  const sourceBefore = {
-    ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS),
-    catalyst: repositoryIdentity(catalystRepositoryRoot, CATALYST_SOURCE_PATHS)
-  }
+    const sourceBefore = {
+      ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS),
+      catalyst: repositoryIdentity(catalystRepositoryRoot, CATALYST_SOURCE_PATHS)
+    }
 
-  for (const artifact of artifacts) {
-    if (!existsSync(artifact.manifest)) throw new Error(`[stage-ae-executive] missing manifest: ${artifact.manifest}`)
-    const targetDir = path.join(cargoTargetRoot, artifact.target)
-    run(
-      'cargo',
-      ['build', '--locked', '--offline', '--manifest-path', artifact.manifest, '--bin', artifact.bin],
-      { env: { ...process.env, CARGO_TARGET_DIR: targetDir }, stdio: 'inherit' }
+    for (const artifact of artifacts) {
+      if (!existsSync(artifact.manifest)) throw new Error(`[stage-ae-executive] missing manifest: ${artifact.manifest}`)
+      const targetDir = path.join(cargoTargetRoot, artifact.target)
+      run(
+        'cargo',
+        ['build', '--locked', '--offline', '--manifest-path', artifact.manifest, '--bin', artifact.bin],
+        { env: { ...process.env, CARGO_TARGET_DIR: targetDir }, stdio: 'inherit' }
+      )
+      const source = path.join(targetDir, 'debug', `${artifact.bin}${suffix}`)
+      if (!existsSync(source)) throw new Error(`[stage-ae-executive] missing build output: ${source}`)
+      const destination = path.join(candidateDir, `${artifact.bin}${suffix}`)
+      copyFileSync(source, destination)
+      if (process.platform !== 'win32') chmodSync(destination, 0o755)
+    }
+
+    const skinSource = path.join(aeRoot, 'ugui', 'skins', 'bindings')
+    if (!existsSync(skinSource)) throw new Error(`[stage-ae-executive] missing generated UGUI skins: ${skinSource}`)
+    cpSync(skinSource, path.join(candidateDir, 'skins'), {
+      recursive: true,
+      filter: source => source === skinSource || source.endsWith('.json')
+    })
+    stageAeShellViewport({ aeRoot, destination: path.join(candidateDir, 'shell-viewport') })
+
+    smoke = smokeCandidate(candidateDir)
+    sourceAfter = {
+      ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS, sourceBefore.ae.commit),
+      catalyst: repositoryIdentity(
+        catalystRepositoryRoot,
+        CATALYST_SOURCE_PATHS,
+        sourceBefore.catalyst.commit
+      )
+    }
+    // Compare the watched content, not the commit that happens to contain it.
+    const watchedContent = identity => ({
+      root_realpath: identity.root_realpath,
+      dirty: identity.dirty,
+      status_sha256: identity.status_sha256
+    })
+    const changed = [
+      JSON.stringify(watchedContent(sourceAfter.ae)) !==
+      JSON.stringify(watchedContent(sourceBefore.ae))
+        ? 'AgentExperiments'
+        : null,
+      JSON.stringify(watchedContent(sourceAfter.catalyst)) !==
+      JSON.stringify(watchedContent(sourceBefore.catalyst))
+        ? 'catalyst'
+        : null
+    ].filter(Boolean)
+    if (changed.length === 0) break
+
+    const moved = [
+      ...new Set([
+        ...sourceAfter.ae.touched,
+        ...sourceAfter.ae.untracked,
+        ...sourceAfter.catalyst.touched,
+        ...sourceAfter.catalyst.untracked
+      ])
+    ].filter(
+      file =>
+        ![
+          ...sourceBefore.ae.touched,
+          ...sourceBefore.ae.untracked,
+          ...sourceBefore.catalyst.touched,
+          ...sourceBefore.catalyst.untracked
+        ].includes(file)
     )
-    const source = path.join(targetDir, 'debug', `${artifact.bin}${suffix}`)
-    if (!existsSync(source)) throw new Error(`[stage-ae-executive] missing build output: ${source}`)
-    const destination = path.join(candidateDir, `${artifact.bin}${suffix}`)
-    copyFileSync(source, destination)
-    if (process.platform !== 'win32') chmodSync(destination, 0o755)
-  }
+    const detail =
+      `[stage-ae-executive] repository source changed during candidate build: ${changed.join(',')}` +
+      (moved.length > 0 ? ` · moved: ${moved.slice(0, 12).join(' ')}` : ' · same files, new content')
 
-  const skinSource = path.join(aeRoot, 'ugui', 'skins', 'bindings')
-  if (!existsSync(skinSource)) throw new Error(`[stage-ae-executive] missing generated UGUI skins: ${skinSource}`)
-  cpSync(skinSource, path.join(candidateDir, 'skins'), {
-    recursive: true,
-    filter: source => source === skinSource || source.endsWith('.json')
-  })
-  stageAeShellViewport({ aeRoot, destination: path.join(candidateDir, 'shell-viewport') })
+    if (sourceChurnAction(attempt, MAX_SOURCE_CHURN_RETRIES) === 'retry') {
+      console.warn(`${detail} · rebuilding candidate once`)
+      continue
+    }
 
-  const smoke = smokeCandidate(candidateDir)
-  const sourceAfter = {
-    ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS, sourceBefore.ae.commit),
-    catalyst: repositoryIdentity(
-      catalystRepositoryRoot,
-      CATALYST_SOURCE_PATHS,
-      sourceBefore.catalyst.commit
-    )
-  }
-  // Compare the watched content, not the commit that happens to contain it.
-  const watchedContent = identity => ({
-    root_realpath: identity.root_realpath,
-    dirty: identity.dirty,
-    status_sha256: identity.status_sha256
-  })
-  const changed = [
-    JSON.stringify(watchedContent(sourceAfter.ae)) !==
-    JSON.stringify(watchedContent(sourceBefore.ae))
-      ? 'AgentExperiments'
-      : null,
-    JSON.stringify(watchedContent(sourceAfter.catalyst)) !==
-    JSON.stringify(watchedContent(sourceBefore.catalyst))
-      ? 'catalyst'
-      : null
-  ].filter(Boolean)
-  if (changed.length > 0) {
-    throw new Error(`[stage-ae-executive] repository source changed during candidate build: ${changed.join(',')}`)
+    // Churn is evidence, not a launch veto. The candidate has built and smoked;
+    // persistent edits are picked up by the next generation instead of blocking RUN.
+    console.warn(`${detail} · publishing smoke-validated candidate after retry`)
+    break
   }
 
   const artifactReceipts = artifacts.map(artifact => {
@@ -326,10 +381,18 @@ try {
     directoryReceipt('shell-viewport', path.join(candidateDir, 'shell-viewport')),
     directoryReceipt('skins', path.join(candidateDir, 'skins'))
   ]
+  // The manifest's identity is a closed four-field record; `touched` and
+  // `untracked` exist only to name files when the guard above trips.
+  const recorded = ({ root_realpath, commit, dirty, status_sha256 }) => ({
+    root_realpath,
+    commit,
+    dirty,
+    status_sha256
+  })
   const unsigned = {
     schema: 'catalyst-ae-generation/1',
-    ae: sourceAfter.ae,
-    catalyst: sourceAfter.catalyst,
+    ae: recorded(sourceAfter.ae),
+    catalyst: recorded(sourceAfter.catalyst),
     artifacts: artifactReceipts,
     resources,
     smoke

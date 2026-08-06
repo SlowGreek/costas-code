@@ -1,10 +1,10 @@
 {
   "schema": "test/1",
-  "signal": "🔴",
+  "signal": "🟢",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2965,
-    "failed": 1,
+    "passed": 2966,
+    "failed": 0,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
@@ -311,18 +311,13 @@
     {
       "id": "apps/desktop/electron/git-worktree-ops.test.ts",
       "name": "apps/desktop/electron/git-worktree-ops.test.ts",
-      "passed": 21,
-      "failed": 1,
+      "passed": 22,
+      "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 22,
-      "failures": [
-        {
-          "id": "listBranches: flags a free default branch as default, not checked out",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:136:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
-        }
-      ]
+      "failures": []
     },
     {
       "id": "apps/desktop/electron/hardening.test.ts",
@@ -899,23 +894,23 @@
     {
       "id": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
       "name": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
-      "passed": 8,
+      "passed": 7,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 8,
+      "total": 7,
       "failures": []
     },
     {
       "id": "apps/desktop/src/app/ae-executive/index.test.tsx",
       "name": "apps/desktop/src/app/ae-executive/index.test.tsx",
-      "passed": 10,
+      "passed": 11,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 10,
+      "total": 11,
       "failures": []
     },
     {
@@ -3726,9 +3721,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:18f2b52d1cc585b6c266bfc33c159d3b62d44a01c20fff0e95d33189981049d2",
+      "sha256": "sha256:75c6fc40d79e27f7b1c0761754ea863be9aed741e086361a08766b83454932a2",
       "files": 1190,
-      "bytes": 9333179
+      "bytes": 9333535
     },
     "tools": {
       "node": "26.5.0",

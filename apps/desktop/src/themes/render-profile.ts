@@ -1,3 +1,5 @@
+import { profileCss } from '@/app/ae-executive/catalyst-wasm'
+
 export const RENDER_PROFILE_SCHEMA = 'hermes-render-profile/1' as const
 
 export interface RenderProfile {
@@ -156,43 +158,10 @@ export function parseRenderProfile(value: unknown): RenderProfile | null {
   return value as unknown as RenderProfile
 }
 
-const px = (value: number) => `${value}px`
 
 export function renderProfileCss(profile: RenderProfile): Record<string, string> {
-  const a = profile.axes
-  const radii = a.geometry.radius_px.length ? a.geometry.radius_px : [0]
-  const spacing = a.density.spacing_px.length ? a.density.spacing_px : [a.geometry.grid_unit_px]
-  const duration = a.motion.mode === 'instant' ? 0 : (a.motion.durations_ms[0] ?? 0)
-
-  const shadow =
-    a.border.model === 'bevel'
-      ? 'inset 2px 2px 0 #ffffff, inset -2px -2px 0 #808080'
-      : `${px(0)} ${px(a.elevation.y_offset_px)} ${px(a.elevation.blur_px)} ${px(a.elevation.spread_px)} color-mix(in srgb, #000 22%, transparent)`
-
-  return {
-    '--morph-surface': a.palette.surface,
-    '--morph-on-surface': a.palette.on_surface,
-    '--morph-accent': a.palette.accent,
-    '--morph-border-color': a.palette.border,
-    '--morph-desktop': a.palette.desktop ?? a.palette.surface,
-    '--morph-titlebar': a.palette.titlebar ?? a.palette.surface,
-    '--morph-translucency': String(a.palette.translucency),
-    '--morph-font-family': a.typography.family_stack,
-    '--morph-radius-sm': px(radii[0] ?? 0),
-    '--morph-radius-md': px(radii[Math.min(1, radii.length - 1)] ?? 0),
-    '--morph-radius-lg': px(radii[radii.length - 1] ?? 0),
-    '--morph-stroke-width': px(a.geometry.stroke_width_px),
-    '--morph-grid-unit': px(a.geometry.grid_unit_px),
-    '--morph-spacing': px(spacing[0] ?? a.geometry.grid_unit_px),
-    '--morph-control-height': px(a.density.control_height_px ?? 32),
-    '--morph-hit-target': px(a.density.hit_target_px ?? a.density.control_height_px ?? 32),
-    '--morph-shadow': shadow,
-    '--morph-backdrop-blur': px(a.elevation.backdrop_blur_px),
-    '--morph-motion-duration': `${duration}ms`,
-    '--morph-motion-easing': a.motion.mode === 'instant' ? 'step-end' : a.motion.easing,
-    '--morph-scrollbar-width': px(a.chrome.scrollbar_width_px ?? 8),
-    '--morph-titlebar-height': px(a.chrome.titlebar_height_px ?? 28)
-  }
+  // The engine owns what an axis means in CSS; this host owns normalization.
+  return profileCss(profile.axes)
 }
 
 export function applyRenderProfile(profile: RenderProfile, root: HTMLElement = document.documentElement): void {

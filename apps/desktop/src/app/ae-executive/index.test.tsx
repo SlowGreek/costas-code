@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import settings from '../../../../../../projects/apps/settings.json'
+import skins from '../../../../../../projects/apps/skins.json'
 
 import { resetForTests, setWasmInputForTests } from './catalyst-wasm'
 import {
@@ -278,6 +279,93 @@ describe('authored L2 documents', () => {
       const notice = window.document.querySelector('[data-ae-document-action]')?.textContent ?? ''
 
       expect(notice).toMatch(/preference|skin|media|handler|open-document|external|system-app/)
+    })
+  })
+})
+
+const stubProfile = (id: string) => ({
+  id,
+  label: id,
+  axes: {
+    palette: {
+      surface: '#ece9d8',
+      on_surface: '#222222',
+      accent: '#0055e5',
+      border: '#003c74',
+      translucency: 0
+    },
+    typography: { family_stack: 'Tahoma', scale_px: [11], weights: [400], casing: 'none' },
+    geometry: { radius_px: [0, 3, 8], stroke_width_px: 1, grid_unit_px: 4 },
+    border: { model: 'bevel', raw: {} },
+    elevation: { blur_px: 0, backdrop_blur_px: 0, spread_px: 0, y_offset_px: 1 },
+    density: { spacing_px: [4, 8] },
+    motion: { mode: 'instant', durations_ms: [0], easing: 'linear' },
+    chrome: { frame: 'beveled' }
+  }
+})
+
+describe('one skin state, two doors', () => {
+  it('drives the same store Appearance settings drives', async () => {
+    const { $renderProfileCatalog, $renderProfilePreviewId } = await import(
+      '@/store/render-profile'
+    )
+
+    $renderProfileCatalog.set({
+      schema: 'ugui-skin-catalog/1',
+      profiles: [stubProfile('winxp'), stubProfile('terminal')]
+    } as never)
+    $renderProfilePreviewId.set(null)
+
+    const { previewRenderProfile } = await import('@/store/render-profile')
+
+    // The applet's skin action is this call; Appearance settings makes the same one.
+    expect(previewRenderProfile('winxp')).toBe(true)
+    expect($renderProfilePreviewId.get()).toBe('winxp')
+    expect(previewRenderProfile('not-a-skin')).toBe(false)
+    expect($renderProfilePreviewId.get()).toBe('winxp')
+  })
+
+  it('applies the skin the dropdown selects, not the one a click guesses', async () => {
+    const { $renderProfileCatalog, $renderProfilePreviewId } = await import(
+      '@/store/render-profile'
+    )
+
+    $renderProfileCatalog.set({
+      schema: 'ugui-skin-catalog/1',
+      profiles: [stubProfile('winxp'), stubProfile('terminal')]
+    } as never)
+    $renderProfilePreviewId.set(null)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => skins }) as unknown as Response)
+    )
+    renderTab('microsoft')
+    await waitFor(() => {
+      expect(
+        window.document.querySelector('[data-ugui-action="projects.source.open"]')
+      ).not.toBeNull()
+    })
+    fireEvent.click(
+      window.document.querySelector('[data-ugui-action="projects.source.open"]') as Element
+    )
+
+    const select = await waitFor(() => {
+      const found = window.document.querySelector<HTMLSelectElement>(
+        '[data-ae-l2-overlay] [data-ugui-action="projects.skin.select"]'
+      )
+
+      expect(found).not.toBeNull()
+
+      return found as HTMLSelectElement
+    })
+
+    // The engine says a dropdown commits on change; a click must stay silent.
+    fireEvent.click(select)
+    expect($renderProfilePreviewId.get()).toBeNull()
+
+    fireEvent.change(select, { target: { value: 'winxp' } })
+    await waitFor(() => {
+      expect($renderProfilePreviewId.get()).toBe('winxp')
     })
   })
 })

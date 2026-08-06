@@ -1,6 +1,6 @@
 {
   "schema": "lint/1",
-  "signal": "🟢",
+  "signal": "🔴",
   "command": "node scripts/quality/lint.mjs",
   "checks": [
     {
@@ -25,14 +25,39 @@
       "id": "eslint",
       "name": "desktop ESLint",
       "level": "error",
-      "findings": []
+      "findings": [
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:24:1:perfectionist/sort-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 24,
+          "column": 1,
+          "end_line": 24,
+          "end_column": 90,
+          "rule": "perfectionist/sort-imports",
+          "message": "Expected \"@/store/render-profile\" (internal) to come before \"./catalyst-wasm\" (sibling).",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:207:9:padding-line-between-statements:1",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 207,
+          "column": 9,
+          "end_line": 209,
+          "end_column": 10,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        }
+      ]
     }
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:98f517049067246b66443a0e978c2e5743caffdb4f4f2ca4462b72db18b70767",
+      "sha256": "sha256:75c6fc40d79e27f7b1c0761754ea863be9aed741e086361a08766b83454932a2",
       "files": 1190,
-      "bytes": 9333182
+      "bytes": 9333535
     },
     "tools": {
       "eslint": "9.39.4",

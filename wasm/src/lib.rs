@@ -401,3 +401,17 @@ pub fn catalyst_skin_variables(skin_id: &str) -> String {
         None => refusal("E_CATALYST_SKIN", skin_id),
     }
 }
+
+/// The shell's CSS variables for one normalized render profile. The host owns
+/// normalization; what the axes mean in CSS is the engine's answer.
+#[wasm_bindgen]
+pub fn catalyst_profile_css(axes_source: &str) -> String {
+    let axes = json::parse(axes_source).unwrap_or(Json::Null);
+
+    json::canonical_string(&Json::Obj(
+        ugui_render::style_css::profile_variables(&axes)
+            .into_iter()
+            .map(|(name, value)| (name, json::s(&value)))
+            .collect(),
+    ))
+}

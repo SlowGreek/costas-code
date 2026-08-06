@@ -14,9 +14,9 @@ import initWasm, {
   catalyst_controller_select_tab,
   catalyst_document_action,
   catalyst_mount_document,
+  catalyst_profile_css,
   catalyst_projects_input,
   catalyst_set_asset_base,
-  catalyst_skin_variables,
   catalyst_tab_document,
   catalyst_tabs
 } from '../../../public/wasm/catalyst_wasm.js'
@@ -123,6 +123,16 @@ export function assetBase(): string {
   return location?.protocol === 'file:' ? new URL('.', location.href).href : '/'
 }
 
+/** Bring the engine up before anything asks it to answer synchronously. */
+export function startEngine(): Promise<void> {
+  return start()
+}
+
+/** The shell's CSS variables for a normalized profile, answered by the engine. */
+export function profileCss(axes: unknown): Record<string, string> {
+  return JSON.parse(catalyst_profile_css(JSON.stringify(axes ?? null))) as Record<string, string>
+}
+
 function start(): Promise<void> {
   return (ready ??= initWasm(wasmInput as never).then(() => {
     catalyst_set_asset_base(assetBase())
@@ -218,20 +228,40 @@ export function tabDocument(tabId: string): Promise<string> {
   return start().then(() => catalyst_tab_document(tabId))
 }
 
-/** Resolve the action a click landed on, as painted by the engine. */
-export function uguiActionFromClick(
-  target: EventTarget | null
-): { action: string; itemId: string; source: string | null } | null {
+/**
+ * Every gesture the engine can bind. Pinned to the canon by the Rust test
+ * `every_gesture_is_a_dom_event_a_host_can_listen_for`.
+ */
+export const UGUI_GESTURES = ['click', 'change', 'input'] as const
+
+export interface UguiHit {
+  readonly action: string
+  readonly itemId: string
+  readonly source: string | null
+  readonly value: unknown
+}
+
+/**
+ * Resolve the action an event landed on. The engine paints the gesture that
+ * commits each control, so a dropdown is heard on `change` and a button on
+ * `click` without the host knowing which is which.
+ */
+export function uguiActionFromEvent(target: EventTarget | null, gesture: string): UguiHit | null {
   const element = (target as HTMLElement | null)?.closest?.('[data-ugui-action]')
   const action = element?.getAttribute('data-ugui-action')
 
-  return action
-    ? {
-        action,
-        itemId: element?.getAttribute('data-ugui-id') ?? '',
-        source: element?.getAttribute('data-ugui-source') ?? null
-      }
-    : null
+  if (!action || (element?.getAttribute('data-ugui-gesture') ?? 'click') !== gesture) {return null}
+
+  const source = element?.getAttribute('data-ugui-source') ?? null
+  const control = element as HTMLInputElement | HTMLSelectElement | null
+
+  return {
+    action,
+    itemId: element?.getAttribute('data-ugui-id') ?? '',
+    source,
+    // A control that commits a value carries it; a press is named by its source.
+    value: gesture === 'click' ? source : (control?.value ?? source)
+  }
 }
 
 export interface DocumentAction {
@@ -279,29 +309,6 @@ export function projectsInput(handler: string, nodeId: string, value: unknown): 
   return JSON.parse(
     catalyst_projects_input(handler, nodeId, JSON.stringify(value ?? null))
   ) as ProjectsFrame
-}
-
-/** Apply a skin's projected variables at the document root, so the whole
- *  harness moves with the painted Document rather than only the tab. */
-export function applySkin(skinId: string): boolean {
-  const projected = JSON.parse(catalyst_skin_variables(skinId)) as {
-    variables?: Record<string, string>
-    error?: string
-  }
-
-  if (!projected.variables) {return false}
-
-  const root = globalThis.document?.documentElement
-
-  if (!root) {return false}
-
-  for (const [property, value] of Object.entries(projected.variables)) {
-    root.style.setProperty(property, value)
-  }
-
-  root.setAttribute('data-ugui-skin', skinId)
-
-  return true
 }
 
 /** A nested-card names another authored Document; the host fetches and paints it. */

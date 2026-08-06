@@ -1,3 +1,4 @@
+import { startEngine } from '@/app/ae-executive/catalyst-wasm'
 import { atom, computed } from 'nanostores'
 
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
@@ -35,6 +36,8 @@ const validProfileId = (catalog: RenderProfileCatalog, id: string) =>
   catalog.profiles.some(profile => profile.id === id) ? id : DEFAULT_RENDER_PROFILE
 
 export async function loadRenderProfileCatalog(): Promise<RenderProfileCatalog> {
+  // Applying a profile asks the engine synchronously, so it must be up first.
+  await startEngine().catch(() => undefined)
   const token = ++generation
   const profile = profileKey()
   $renderProfileLoading.set(true)

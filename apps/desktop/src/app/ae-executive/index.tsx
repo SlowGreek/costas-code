@@ -5,7 +5,6 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 
 import {
-  applySkin,
   type CatalystBatch,
   type CatalystEffect,
   type CatalystTab,
@@ -20,8 +19,16 @@ import {
   paintCatalogTab,
   projectsInput,
   selectTab,
-  uguiActionFromClick
+  UGUI_GESTURES,
+  uguiActionFromEvent,
+  type UguiHit
 } from './catalyst-wasm'
+import {
+  loadRenderProfileCatalog,
+  previewRenderProfile,
+  revertRenderProfilePreview
+} from '@/store/render-profile'
+
 import { AE_EXECUTIVE_TAB_IDS, aeExecutiveTab } from './contract'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
@@ -181,8 +188,8 @@ export function AeExecutiveWorkspace() {
   }, [overlay])
 
   // The engine says what a Document action means; this host only carries it out.
-  function routeDocument(hit: { action: string; itemId: string; source: string | null }) {
-    const resolved = documentAction(hit.action, hit.itemId, hit.source)
+  function routeDocument(hit: UguiHit) {
+    const resolved = documentAction(hit.action, hit.itemId, hit.value)
 
     switch (resolved.kind) {
       case 'open-document':
@@ -195,11 +202,15 @@ export function AeExecutiveWorkspace() {
 
         break
       case 'skin': {
+        // Appearance settings and this applet are two doors onto one skin state.
         const skinId = typeof resolved.value === 'string' ? resolved.value : ''
 
-        setDocumentNotice(
-          applySkin(skinId) ? `skin · ${skinId}` : `skin refused · ${skinId || resolved.operation}`
-        )
+        if (resolved.operation === 'reset') {
+          setDocumentNotice(revertRenderProfilePreview() ? 'skin · reverted' : 'skin refused')
+
+          break
+        }
+        void applySkin(skinId)
 
         break
       }
@@ -225,6 +236,75 @@ export function AeExecutiveWorkspace() {
         setDocumentNotice(`${resolved.kind} · ${hit.action}`)
     }
   }
+
+  // This door may be the first one opened, so it seats the catalog the way the
+  // Appearance settings door does rather than refusing an unseated skin.
+  async function applySkin(skinId: string) {
+    if (previewRenderProfile(skinId)) {
+      setDocumentNotice(`skin · ${skinId}`)
+
+      return
+    }
+    await loadRenderProfileCatalog().catch(() => undefined)
+    setDocumentNotice(
+      previewRenderProfile(skinId) ? `skin · ${skinId}` : `skin refused · ${skinId}`
+    )
+  }
+
+  function routeOverlayGesture(target: EventTarget | null, gesture: string) {
+    const hit = uguiActionFromEvent(target, gesture)
+
+    if (hit) {routeDocument(hit)}
+  }
+
+  function routeGesture(target: EventTarget | null, gesture: string) {
+    const hit = uguiActionFromEvent(target, gesture)
+
+    if (!hit) {return}
+
+    // A catalog Document speaks the engine's web vocabulary; only a
+    // RUN tab speaks the executive intent set.
+    if (catalogTab) {
+      routeDocument(hit)
+
+      return
+    }
+
+    void dispatchEvent({
+      schema: 'ugui-document-event/1',
+      document_id: tabId,
+      item_id: hit.itemId,
+      gesture: gesture === 'click' ? 'tap' : gesture,
+      action: hit.action,
+      payload: hit.value ?? null
+    })
+  }
+
+  // The engine paints these surfaces, so they are listened to natively: React
+  // only tracks value changes on elements it rendered itself.
+  const routers = useRef({ routeGesture, routeOverlayGesture })
+
+  routers.current = { routeGesture, routeOverlayGesture }
+
+  useEffect(() => {
+    const bind = (element: HTMLElement | null, route: 'routeGesture' | 'routeOverlayGesture') =>
+      UGUI_GESTURES.flatMap(gesture => {
+        if (!element) {return []}
+
+        const listener = (event: Event) => routers.current[route](event.target, gesture)
+
+        element.addEventListener(gesture, listener)
+
+        return [() => element.removeEventListener(gesture, listener)]
+      })
+
+    const release = [
+      ...bind(surface.current, 'routeGesture'),
+      ...bind(overlaySurface.current, 'routeOverlayGesture')
+    ]
+
+    return () => release.forEach(off => off())
+  }, [overlay])
 
   const selectedRow = batch?.rows.find(row => row.tab === tabId)
   const painted = Boolean(catalogTab) || Boolean(selectedRow?.hasDocument)
@@ -257,33 +337,7 @@ export function AeExecutiveWorkspace() {
               </div>
             ) : null}
             {/* The engine paints into this region; React never walks the Document. */}
-            <div
-              className="min-h-0 flex-1"
-              data-ugui-surface
-              onClick={event => {
-                const hit = uguiActionFromClick(event.target)
-
-                if (!hit) {return}
-
-                // A catalog Document speaks the engine's web vocabulary; only a
-                // RUN tab speaks the executive intent set.
-                if (catalogTab) {
-                  routeDocument(hit)
-
-                  return
-                }
-
-                void dispatchEvent({
-                  schema: 'ugui-document-event/1',
-                  document_id: tabId,
-                  item_id: hit.itemId,
-                  gesture: 'tap',
-                  action: hit.action,
-                  payload: null
-                })
-              }}
-              ref={surface}
-            />
+            <div className="min-h-0 flex-1" data-ugui-surface ref={surface} />
           </div>
           {painted ? null : error ? (
             <DocumentUnavailable reason={error} tone="destructive" />
@@ -313,15 +367,7 @@ export function AeExecutiveWorkspace() {
             role="dialog"
           >
             {/* The engine paints the L2 Document; React never walks it either. */}
-            <div
-              data-ugui-surface
-              onClick={event => {
-                const hit = uguiActionFromClick(event.target)
-
-                if (hit) {routeDocument(hit)}
-              }}
-              ref={overlaySurface}
-            />
+            <div data-ugui-surface ref={overlaySurface} />
           </div>
         </div>
       ) : null}

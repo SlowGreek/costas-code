@@ -5,14 +5,13 @@ import { resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
-  applySkin,
   mountDocument,
   projectsInput,
   setAssetBaseForTests,
   setWasmInputForTests,
   tabDocument,
   tabsJson,
-  uguiActionFromClick
+  uguiActionFromEvent
 } from './catalyst-wasm'
 
 const document = {
@@ -51,12 +50,47 @@ describe('catalyst UGUI client', () => {
 
     const button = root.querySelector('[data-ugui-action="shell.tab.dashboard"]')
 
-    expect(uguiActionFromClick(button)).toEqual({
+    expect(uguiActionFromEvent(button, 'click')).toEqual({
       action: 'shell.tab.dashboard',
       itemId: 'home-tab-dashboard',
-      source: null
+      source: null,
+      value: null
     })
-    expect(uguiActionFromClick(root)).toBeNull()
+    expect(uguiActionFromEvent(root, 'click')).toBeNull()
+  })
+
+  it('hears a select on change rather than on click, and carries its value', async () => {
+    const root = window.document.createElement('div')
+
+    window.document.body.append(root)
+    await mountDocument(root, {
+      ...document,
+      id: 'skins',
+      actions: [
+        {
+          id: 'projects.skins.select',
+          type: 'select',
+          label: 'Skin',
+          action: 'projects.skin.select',
+          value: 'glassmorphism',
+          choices: [
+            { label: 'Glassmorphism', value: 'glassmorphism' },
+            { label: 'Windows XP', value: 'winxp' }
+          ]
+        }
+      ]
+    })
+
+    const select = root.querySelector<HTMLSelectElement>('[data-ugui-action="projects.skin.select"]')
+
+    expect(select).not.toBeNull()
+    expect(select?.getAttribute('data-ugui-gesture')).toBe('change')
+    // A dropdown never commits on click, which is why it used to do nothing.
+    expect(uguiActionFromEvent(select, 'click')).toBeNull()
+
+    select!.value = 'winxp'
+
+    expect(uguiActionFromEvent(select, 'change')?.value).toBe('winxp')
   })
 
   it('refuses a Document the engine does not admit', async () => {
@@ -173,18 +207,3 @@ it('drives the seated Projects applet through the engine reducer', () => {
   expect(refused.error).toBe('E_CATALYST_PROJECTS_HOST_INPUT')
 })
 
-it('repaints the whole harness when a skin is selected', () => {
-  const root = window.document.documentElement
-
-  expect(applySkin('winxp')).toBe(true)
-  // The variables the vocabulary sheet reads, not a private namespace.
-  expect(root.style.getPropertyValue('--color-surface')).toBe('#ece9d8')
-  expect(root.style.getPropertyValue('--accent-blue')).toBe('#0055e5')
-  expect(root.style.getPropertyValue('--font-sans')).toBe('Tahoma, Arial, sans-serif')
-  expect(root.getAttribute('data-ugui-skin')).toBe('winxp')
-
-  // Switching skins moves the same variables rather than layering.
-  expect(applySkin('terminal')).toBe(true)
-  expect(root.style.getPropertyValue('--color-surface')).not.toBe('#ece9d8')
-  expect(applySkin('not-a-skin')).toBe(false)
-})

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   mountDocument,
-  uguiActionFromClick,
+  uguiActionFromEvent,
   type UguiDocumentEvent
 } from '@/app/ae-executive/catalyst-wasm'
 import { Button } from '@/components/ui/button'
@@ -161,7 +161,7 @@ export function UguiSkinSettings() {
           {/* The engine paints; this component only routes the gesture back. */}
           <div
             onClick={clicked => {
-              const hit = uguiActionFromClick(clicked.target)
+              const hit = uguiActionFromEvent(clicked.target, 'click')
 
               if (hit) {
                 onEvent({

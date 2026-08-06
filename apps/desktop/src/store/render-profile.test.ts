@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { parseRenderProfileCatalog, type RenderProfileCatalog } from '@/themes/render-profile'
 
@@ -13,6 +13,19 @@ import {
   previewRenderProfile,
   revertRenderProfilePreview
 } from './render-profile'
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
+
+// The shell's variables come from the engine, so tests seat it like the app does.
+beforeAll(async () => {
+  setWasmInputForTests(readFileSync(resolve(process.cwd(), 'public/wasm/catalyst_wasm_bg.wasm')))
+  const { startEngine } = await import('@/app/ae-executive/catalyst-wasm')
+
+  await startEngine()
+})
 
 const rawCatalog = {
   schema: 'hermes-render-profile-catalog/1',

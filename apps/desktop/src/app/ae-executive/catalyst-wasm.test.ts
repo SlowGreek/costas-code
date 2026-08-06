@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
+  applySkin,
   mountDocument,
+  projectsInput,
+  setAssetBaseForTests,
   setWasmInputForTests,
   tabDocument,
   tabsJson,
@@ -70,9 +74,11 @@ describe('authored tab set', () => {
     const root = window.document.createElement('div')
 
     window.document.body.append(root)
+
     const catalog = JSON.parse(await tabsJson()) as {
       tabs: { id: string; source: string; app: string; live: boolean }[]
     }
+
     const keystone = catalog.tabs.find(tab => tab.id === 'microsoft')
 
     expect(keystone).toMatchObject({ source: 'projects', app: 'projects.microsoft', live: false })
@@ -88,4 +94,97 @@ describe('authored tab set', () => {
   it('refuses a live RUN tab as a static document', async () => {
     await expect(tabDocument('dashboard')).resolves.toContain('E_CATALYST_TAB_DOCUMENT')
   })
+})
+
+it('resolves Document assets against the host base, not the filesystem root', async () => {
+  const root = window.document.createElement('div')
+
+  window.document.body.append(root)
+  await mountDocument(root, {
+    id: 'assets',
+    type: 'document',
+    header: [],
+    sections: [
+      { id: 'brand', type: 'image', source: '/png/settings.svg', alt: 'Settings' }
+    ],
+    actions: []
+  })
+
+  // jsdom serves http, so the site root stays the base and the URL is untouched.
+  expect(root.querySelector('img')?.getAttribute('src')).toBe('/png/settings.svg')
+
+  setAssetBaseForTests('file:///Applications/Catalyst.app/dist/')
+  const rebased = window.document.createElement('div')
+
+  window.document.body.append(rebased)
+  // Every item that names an asset, not just images: a missed painter site is
+  // a broken icon in a packaged build.
+  await mountDocument(rebased, {
+    id: 'assets',
+    type: 'document',
+    header: [
+      { id: 'brand', type: 'image', source: '/png/settings.svg', alt: 'Settings' },
+      {
+        id: 'gear',
+        type: 'nested-card',
+        label: 'Settings',
+        iconSource: '/png/settings.svg',
+        source: '/apps/settings.json'
+      }
+    ],
+    sections: [
+      {
+        id: 'vertical',
+        type: 'button',
+        label: 'Xbox',
+        action: 'projects.applet.input.facet-domain',
+        source: '/png/xbox.svg'
+      }
+    ],
+    actions: []
+  })
+
+  const painted = [...rebased.querySelectorAll('img')].map(image => image.getAttribute('src'))
+
+  expect(painted).toEqual([
+    'file:///Applications/Catalyst.app/dist/png/settings.svg',
+    'file:///Applications/Catalyst.app/dist/png/settings.svg',
+    'file:///Applications/Catalyst.app/dist/png/xbox.svg'
+  ])
+  setAssetBaseForTests('/')
+})
+
+it('drives the seated Projects applet through the engine reducer', () => {
+  // The engine owns the reducer; this host only carries the input and repaints.
+  const filtered = projectsInput('projects.applet.input.facet-hat', 'projects-hat', 'architect')
+
+  expect(filtered.status).toBe('accepted')
+  // The corpus ships with the engine, so this host filters real records rather
+  // than painting an empty board.
+  expect(JSON.stringify(filtered.document)).toMatch(/one-pager|proposal|record|projects/i)
+
+  const searched = projectsInput('projects.applet.input.search', 'projects-search', 'agents')
+
+  expect(searched.status).toBe('accepted')
+
+  // A handler the query does not own is refused, not silently applied.
+  const refused = projectsInput('projects.inspector.field', 'node', null)
+
+  expect(refused.error).toBe('E_CATALYST_PROJECTS_HOST_INPUT')
+})
+
+it('repaints the whole harness when a skin is selected', () => {
+  const root = window.document.documentElement
+
+  expect(applySkin('winxp')).toBe(true)
+  // The variables the vocabulary sheet reads, not a private namespace.
+  expect(root.style.getPropertyValue('--color-surface')).toBe('#ece9d8')
+  expect(root.style.getPropertyValue('--accent-blue')).toBe('#0055e5')
+  expect(root.style.getPropertyValue('--font-sans')).toBe('Tahoma, Arial, sans-serif')
+  expect(root.getAttribute('data-ugui-skin')).toBe('winxp')
+
+  // Switching skins moves the same variables rather than layering.
+  expect(applySkin('terminal')).toBe(true)
+  expect(root.style.getPropertyValue('--color-surface')).not.toBe('#ece9d8')
+  expect(applySkin('not-a-skin')).toBe(false)
 })

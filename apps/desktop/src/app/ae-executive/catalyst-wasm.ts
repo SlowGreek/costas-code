@@ -12,7 +12,11 @@ import initWasm, {
   catalyst_controller_observe,
   catalyst_controller_paint,
   catalyst_controller_select_tab,
+  catalyst_document_action,
   catalyst_mount_document,
+  catalyst_projects_input,
+  catalyst_set_asset_base,
+  catalyst_skin_variables,
   catalyst_tab_document,
   catalyst_tabs
 } from '../../../public/wasm/catalyst_wasm.js'
@@ -108,8 +112,21 @@ export function setWasmInputForTests(input: unknown) {
   wasmInput = input
 }
 
+/** A file:// renderer has no site root, so Document assets resolve against it. */
+export function setAssetBaseForTests(base: string): void {
+  catalyst_set_asset_base(base)
+}
+
+export function assetBase(): string {
+  const location = globalThis.location
+
+  return location?.protocol === 'file:' ? new URL('.', location.href).href : '/'
+}
+
 function start(): Promise<void> {
-  return (ready ??= initWasm(wasmInput as never).then(() => undefined))
+  return (ready ??= initWasm(wasmInput as never).then(() => {
+    catalyst_set_asset_base(assetBase())
+  }))
 }
 
 function check(encoded: string): CatalystReceipt {
@@ -163,6 +180,7 @@ export async function dispatchEvent(event: unknown): Promise<CatalystReceipt> {
   const receipt = check(
     catalyst_controller_dispatch_event(JSON.stringify(event), HOST_ADAPTER.operationId())
   )
+
   await enact(receipt.effects)
 
   return receipt
@@ -216,13 +234,86 @@ export function uguiActionFromClick(
     : null
 }
 
+export interface DocumentAction {
+  readonly schema: string
+  readonly kind:
+    | 'none'
+    | 'open-document'
+    | 'external'
+    | 'system-app'
+    | 'preference'
+    | 'skin'
+    | 'media'
+    | 'handler'
+    | 'refused'
+  readonly source?: string
+  readonly url?: string
+  readonly name?: string
+  readonly preference?: string
+  readonly operation?: string
+  readonly intent?: string
+  readonly channel?: string
+  readonly handler?: string
+  readonly nodeId?: string
+  readonly value?: unknown
+  readonly code?: string
+  readonly detail?: string
+}
+
+/** What a painted Document's action means, answered by the engine. */
+export function documentAction(action: string, nodeId: string, value: unknown): DocumentAction {
+  return JSON.parse(catalyst_document_action(action, nodeId, JSON.stringify(value ?? null))) as DocumentAction
+}
+
+export interface ProjectsFrame {
+  readonly schema: string
+  readonly status?: string
+  readonly seated?: boolean
+  readonly document?: unknown
+  readonly error?: string
+  readonly detail?: string
+}
+
+/** Drive the seated Projects applet; the engine returns the next Document. */
+export function projectsInput(handler: string, nodeId: string, value: unknown): ProjectsFrame {
+  return JSON.parse(
+    catalyst_projects_input(handler, nodeId, JSON.stringify(value ?? null))
+  ) as ProjectsFrame
+}
+
+/** Apply a skin's projected variables at the document root, so the whole
+ *  harness moves with the painted Document rather than only the tab. */
+export function applySkin(skinId: string): boolean {
+  const projected = JSON.parse(catalyst_skin_variables(skinId)) as {
+    variables?: Record<string, string>
+    error?: string
+  }
+
+  if (!projected.variables) {return false}
+
+  const root = globalThis.document?.documentElement
+
+  if (!root) {return false}
+
+  for (const [property, value] of Object.entries(projected.variables)) {
+    root.style.setProperty(property, value)
+  }
+
+  root.setAttribute('data-ugui-skin', skinId)
+
+  return true
+}
+
 /** A nested-card names another authored Document; the host fetches and paints it. */
 export function openDocumentSource(element: Element, source: string): Promise<void> {
   if (!/^\/apps\/[a-z0-9-]+\.json$/.test(source)) {
     return Promise.reject(new Error(`document source is not admitted: ${source}`))
   }
 
-  return fetch(source)
+  const base = assetBase()
+  const url = base === '/' ? source : new URL(source.slice(1), base).href
+
+  return fetch(url)
     .then(response => (response.ok ? response.json() : Promise.reject(new Error(source))))
     .then(document => mountDocument(element, document))
 }
@@ -232,17 +323,24 @@ async function enact(effects: readonly CatalystEffect[] = []): Promise<void> {
     switch (effect.kind) {
       case 'paint':
         paint()
+
         break
+
       case 'lucid.intent':
         await HOST_ADAPTER.intent(effect.intent)
+
         break
+
       case 'studio.submit':
         await HOST_ADAPTER.studio({
           event: effect.event,
           context: { revision: effect.revision, documentHash: effect.documentHash }
         })
+
         break
+
       case 'tab.select':
+
       case 'refused':
         break
     }

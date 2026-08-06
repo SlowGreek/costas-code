@@ -1,11 +1,11 @@
-// @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+// @vitest-environment jsdom
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
-
 import { parseRenderProfileCatalog, type RenderProfileCatalog } from '@/themes/render-profile'
 
 import { UguiSkinSettings } from './ugui-skin-settings'

@@ -1,9 +1,12 @@
-// @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import settings from '../../../../../../projects/apps/settings.json'
 
 import { resetForTests, setWasmInputForTests } from './catalyst-wasm'
 import {
@@ -217,13 +220,7 @@ describe('authored catalog tabs', () => {
 
 describe('authored L2 documents', () => {
   it('opens a nested-card source as an overlay the engine paints', async () => {
-    const settings = {
-      id: 'projects.settings',
-      type: 'card',
-      header: [{ id: 'settings.title', type: 'text', body: 'Settings', style: 'heading' }],
-      sections: [{ id: 'settings.theme', type: 'text', body: 'Appearance', style: 'body' }],
-      actions: []
-    }
+    // The authored Document, not a stand-in: this is what the host really fetches.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true, json: async () => settings }) as unknown as Response)
@@ -247,8 +244,40 @@ describe('authored L2 documents', () => {
     expect(global.fetch).toHaveBeenCalledWith('/apps/settings.json')
     await waitFor(() => {
       expect(window.document.querySelector('[data-ae-l2-overlay]')?.textContent).toContain(
-        'Appearance'
+        'Settings'
       )
+    })
+  })
+
+  it('routes an L2 button through the engine instead of swallowing it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => settings }) as unknown as Response)
+    )
+    renderTab('microsoft')
+    await waitFor(() => {
+      expect(
+        window.document.querySelector('[data-ugui-action="projects.source.open"]')
+      ).not.toBeNull()
+    })
+    fireEvent.click(
+      window.document.querySelector('[data-ugui-action="projects.source.open"]') as Element
+    )
+    await waitFor(() => {
+      expect(window.document.querySelector('[data-ae-l2-overlay]')).not.toBeNull()
+    })
+
+    const overlay = window.document.querySelector('[data-ae-l2-overlay]') as Element
+    const button = overlay.querySelector('[data-ugui-action^="projects."]') as Element
+
+    // A Document action is answered by the engine's web vocabulary, never by the
+    // RUN intent set this host uses for executive tabs.
+    expect(button).not.toBeNull()
+    fireEvent.click(button)
+    await waitFor(() => {
+      const notice = window.document.querySelector('[data-ae-document-action]')?.textContent ?? ''
+
+      expect(notice).toMatch(/preference|skin|media|handler|open-document|external|system-app/)
     })
   })
 })

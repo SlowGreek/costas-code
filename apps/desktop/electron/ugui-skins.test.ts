@@ -15,6 +15,7 @@ describe('UGUI generated skin catalog admission', () => {
 
     expect(generated.length).toBeGreaterThan(0)
     expect(catalog.profiles.map(profile => `${profile.id}.json`).sort()).toEqual(generated.sort())
+
     for (const profile of catalog.profiles) {
       expect(() => normalizeUguiSkinBinding(profile), profile.id).not.toThrow()
     }

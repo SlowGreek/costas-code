@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { type UguiDocument, validateUguiDocument } from '@hermes/shared/ugui-document'
 
 const SAFE_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 

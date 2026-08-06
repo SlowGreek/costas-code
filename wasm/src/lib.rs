@@ -329,3 +329,75 @@ mod tests {
         assert_eq!(refused.get("error").and_then(Json::as_str), Some("E_CATALYST_UGUI_SURFACE"));
     }
 }
+
+/// Where this host serves `/png` and `/apps`. A `file://` renderer has no site
+/// root, so the Document's root-absolute asset URLs need the host's base.
+#[wasm_bindgen]
+pub fn catalyst_set_asset_base(base: &str) {
+    ugui_render::native_webview::set_asset_base(base);
+}
+
+/// Resolve a painted Document's action with the engine's web vocabulary — the
+/// same meaning projects/ proved, rather than this host's RUN-shaped intent set.
+#[wasm_bindgen]
+pub fn catalyst_document_action(action: &str, node_id: &str, value_source: &str) -> String {
+    let value = json::parse(value_source).unwrap_or(Json::Null);
+
+    json::canonical_string(&ugui_render::web_action::to_json(&ugui_render::web_action::resolve(
+        action, node_id, &value,
+    )))
+}
+
+thread_local! {
+    static PROJECTS: std::cell::RefCell<ugui_render::applets::projects::session::ProjectsSession> =
+        std::cell::RefCell::new(ugui_render::applets::projects::session::ProjectsSession::repository());
+}
+
+/// Drive the seated Projects applet with one authored input and re-project it.
+/// The engine owns what the input means; this host only carries it and repaints.
+#[wasm_bindgen]
+pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str) -> String {
+    use ugui_render::applets::projects::session::{Applied, ProjectsInput};
+
+    let input = ProjectsInput {
+        handler: handler.to_owned(),
+        node_id: node_id.to_owned(),
+        value: json::parse(value_source).unwrap_or(Json::Null),
+    };
+
+    PROJECTS.with(|session| {
+        let mut session = session.borrow_mut();
+        match session.apply(&input) {
+            Ok(Applied::Query) => json::canonical_string(&json::obj(vec![
+                ("schema", json::s("catalyst-projects-frame/1")),
+                ("status", json::s("accepted")),
+                (
+                    "document",
+                    json::parse(
+                        &session.document(ugui_render::applets::AppletSurface::Desktop, false),
+                    )
+                    .unwrap_or(Json::Null),
+                ),
+            ])),
+            Ok(Applied::Host) => refusal("E_CATALYST_PROJECTS_HOST_INPUT", handler),
+            Err(code) => refusal("E_CATALYST_PROJECTS_INPUT", code),
+        }
+    })
+}
+
+/// The CSS custom properties a skin projects. The engine owns the style matrix,
+/// the skins that bind it, and the vocabulary sheet that reads them.
+#[wasm_bindgen]
+pub fn catalyst_skin_variables(skin_id: &str) -> String {
+    match ugui_render::style_css::skin_variables(skin_id) {
+        Some(variables) => json::canonical_string(&json::obj(vec![
+            ("schema", json::s("catalyst-skin-variables/1")),
+            ("skin", json::s(skin_id)),
+            (
+                "variables",
+                Json::Obj(variables.into_iter().map(|(name, value)| (name, json::s(&value))).collect()),
+            ),
+        ])),
+        None => refusal("E_CATALYST_SKIN", skin_id),
+    }
+}

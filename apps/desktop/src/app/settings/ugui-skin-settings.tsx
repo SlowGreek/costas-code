@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   mountDocument,
-  type UguiDocumentEvent,
-  uguiActionFromClick
+  uguiActionFromClick,
+  type UguiDocumentEvent
 } from '@/app/ae-executive/catalyst-wasm'
 import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCw } from '@/lib/icons'
@@ -104,6 +104,7 @@ export function UguiSkinSettings() {
 
       return
     }
+
     const action = event.action
 
     if (action === 'skin.apply') {

@@ -5,16 +5,20 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 
 import {
+  applySkin,
   type CatalystBatch,
   type CatalystEffect,
   type CatalystTab,
   dispatchEvent,
+  documentAction,
   init,
   loadTabs,
+  mountDocument,
   observe,
   onEffect,
   openDocumentSource,
   paintCatalogTab,
+  projectsInput,
   selectTab,
   uguiActionFromClick
 } from './catalyst-wasm'
@@ -58,15 +62,18 @@ export function AeExecutiveWorkspace() {
   const [seated, setSeated] = useState(false)
   const [authoredTabs, setAuthoredTabs] = useState<readonly CatalystTab[]>([])
   const [overlay, setOverlay] = useState<string | null>(null)
+  const [documentNotice, setDocumentNotice] = useState<string | null>(null)
   const overlaySurface = useRef<HTMLDivElement | null>(null)
   const surface = useRef<HTMLDivElement | null>(null)
   const admitted = useRef(false)
 
   const requestedTab = params.tab ?? ''
   const authored = authoredTabs.find(tab => tab.id === requestedTab)
+
   const tabId = authored || AE_EXECUTIVE_TAB_IDS.includes(requestedTab as never)
     ? requestedTab
     : aeExecutiveTab(requestedTab).id
+
   const catalogTab = authoredTabs.find(tab => tab.id === tabId && !tab.batch)
 
   useEffect(() => {
@@ -161,6 +168,7 @@ export function AeExecutiveWorkspace() {
 
       return
     }
+
     void selectTab(tabId).catch(() => setNotice(`Tab refused · ${tabId}`))
   }, [catalogTab, seated, tabId])
 
@@ -171,6 +179,52 @@ export function AeExecutiveWorkspace() {
       setNotice(`Document refused · ${String(reason)}`)
     )
   }, [overlay])
+
+  // The engine says what a Document action means; this host only carries it out.
+  function routeDocument(hit: { action: string; itemId: string; source: string | null }) {
+    const resolved = documentAction(hit.action, hit.itemId, hit.source)
+
+    switch (resolved.kind) {
+      case 'open-document':
+        setOverlay(resolved.source ?? null)
+
+        break
+
+      case 'external':
+        if (resolved.url) {window.open(resolved.url, '_blank', 'noopener,noreferrer')}
+
+        break
+      case 'skin': {
+        const skinId = typeof resolved.value === 'string' ? resolved.value : ''
+
+        setDocumentNotice(
+          applySkin(skinId) ? `skin · ${skinId}` : `skin refused · ${skinId || resolved.operation}`
+        )
+
+        break
+      }
+
+      case 'refused':
+        setDocumentNotice(`Action refused · ${resolved.code ?? ''} ${resolved.detail ?? ''}`)
+
+        break
+      case 'handler': {
+        const frame = projectsInput(resolved.handler ?? hit.action, resolved.nodeId ?? '', resolved.value)
+
+        if (frame.document && surface.current) {
+          void mountDocument(surface.current, frame.document)
+          setDocumentNotice(`${resolved.handler ?? hit.action} · applied`)
+        } else {
+          setDocumentNotice(`${resolved.handler ?? hit.action} · ${frame.error ?? frame.detail ?? 'unseated'}`)
+        }
+
+        break
+      }
+
+      default:
+        setDocumentNotice(`${resolved.kind} · ${hit.action}`)
+    }
+  }
 
   const selectedRow = batch?.rows.find(row => row.tab === tabId)
   const painted = Boolean(catalogTab) || Boolean(selectedRow?.hasDocument)
@@ -184,7 +238,10 @@ export function AeExecutiveWorkspace() {
     : null
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background" data-ae-executive-tab={tabId}>
+    <div
+      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background"
+      data-ae-executive-tab={tabId}
+    >
       <main className="min-h-0 flex-1 overflow-hidden p-3">
         <div className="mx-auto h-full min-h-0 w-full max-w-7xl">
           <div className={cn('flex h-full min-h-0 flex-col gap-2', painted ? '' : 'hidden')}>
@@ -206,21 +263,24 @@ export function AeExecutiveWorkspace() {
               onClick={event => {
                 const hit = uguiActionFromClick(event.target)
 
-                if (hit?.action === 'projects.source.open' && hit.source) {
-                  setOverlay(hit.source)
+                if (!hit) {return}
+
+                // A catalog Document speaks the engine's web vocabulary; only a
+                // RUN tab speaks the executive intent set.
+                if (catalogTab) {
+                  routeDocument(hit)
 
                   return
                 }
-                if (hit) {
-                  void dispatchEvent({
-                    schema: 'ugui-document-event/1',
-                    document_id: tabId,
-                    item_id: hit.itemId,
-                    gesture: 'tap',
-                    action: hit.action,
-                    payload: null
-                  })
-                }
+
+                void dispatchEvent({
+                  schema: 'ugui-document-event/1',
+                  document_id: tabId,
+                  item_id: hit.itemId,
+                  gesture: 'tap',
+                  action: hit.action,
+                  payload: null
+                })
               }}
               ref={surface}
             />
@@ -239,7 +299,7 @@ export function AeExecutiveWorkspace() {
 
       {overlay ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8"
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-8"
           onClick={event => {
             if (event.target === event.currentTarget) {setOverlay(null)}
           }}
@@ -253,7 +313,15 @@ export function AeExecutiveWorkspace() {
             role="dialog"
           >
             {/* The engine paints the L2 Document; React never walks it either. */}
-            <div data-ugui-surface ref={overlaySurface} />
+            <div
+              data-ugui-surface
+              onClick={event => {
+                const hit = uguiActionFromClick(event.target)
+
+                if (hit) {routeDocument(hit)}
+              }}
+              ref={overlaySurface}
+            />
           </div>
         </div>
       ) : null}
@@ -265,6 +333,9 @@ export function AeExecutiveWorkspace() {
           data-ugui-structural-status
         />
         <span aria-live="polite" data-ae-trust-footer>{trust}</span>
+        <span className="truncate" data-ae-document-action>
+          {documentNotice ? `${documentNotice} · ` : ''}
+        </span>
         <span className="truncate" data-ae-reconcile-notice>
           · {notice}
         </span>

@@ -99,7 +99,7 @@ describe('UGUI SHELL viewport model', () => {
     )
 
     const semantic = (document: typeof android) =>
-      document.actions.filter(action =>
+      (document.actions as Record<string, unknown>[]).filter(action =>
         typeof action === 'object' && !Array.isArray(action) && action.id === 'viewport-demo-action'
       )
 
@@ -118,7 +118,7 @@ describe('UGUI SHELL viewport model', () => {
 
     const document = composeShellViewportDocument(model)
 
-    const actions = document.actions
+    const actions = (document.actions as Record<string, unknown>[])
       .map(item => typeof item === 'object' && item && !Array.isArray(item) ? item.action : null)
       .filter((action): action is string => typeof action === 'string')
 

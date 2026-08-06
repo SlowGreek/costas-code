@@ -134,9 +134,15 @@ export function startEngine(): Promise<void> {
 }
 
 /** The shell's CSS variables for a normalized profile, answered by the engine. */
-export function profileCss(axes: unknown): Record<string, string> {
-  return JSON.parse(catalyst_profile_css(JSON.stringify(axes ?? null))) as Record<string, string>
+export function profileCss(axes: unknown, mode: RenderMode): Record<string, string> {
+  return JSON.parse(catalyst_profile_css(JSON.stringify(axes ?? null), mode)) as Record<
+    string,
+    string
+  >
 }
+
+/** Light and dark are one skin read two ways, so the engine is told which. */
+export type RenderMode = 'light' | 'dark'
 
 export interface KeyDecision {
   readonly kind: string
@@ -176,9 +182,12 @@ export function preferenceVocabulary(): Record<string, { action: string | null; 
 export function skinField(
   skinId: string,
   nodeId: string,
-  value: unknown
+  value: unknown,
+  mode: RenderMode
 ): Record<string, string> | null {
-  const answer = JSON.parse(catalyst_skin_field(skinId, nodeId, JSON.stringify(value ?? null))) as {
+  const answer = JSON.parse(
+    catalyst_skin_field(skinId, nodeId, JSON.stringify(value ?? null), mode)
+  ) as {
     variables?: Record<string, string>
   }
 
@@ -190,8 +199,8 @@ export function skinField(
  * Document reads as well as the shell's own. Null when the engine does not
  * carry the skin, so the caller can fall back to the host's normalized axes.
  */
-export function skinCss(skinId: string): Record<string, string> | null {
-  const answer = JSON.parse(catalyst_skin_variables(skinId)) as {
+export function skinCss(skinId: string, mode: RenderMode): Record<string, string> | null {
+  const answer = JSON.parse(catalyst_skin_variables(skinId, mode)) as {
     variables?: Record<string, string>
   }
 

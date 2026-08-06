@@ -93,13 +93,50 @@ describe('render profile admission and projection', () => {
     root.innerHTML = '<button aria-label="Run">Run</button>'
     const before = root.innerHTML
 
-    applyRenderProfile(profile('windows-95'), root)
+    applyRenderProfile(profile('windows-95'), 'light', root)
     expect(root.dataset).toMatchObject({ uguiSkin: 'windows-95', uguiBorder: 'bevel', uguiChrome: 'beveled', uguiMotion: 'instant' })
     expect(root.style.getPropertyValue('--morph-radius-lg')).toBe('0px')
     expect(root.innerHTML).toBe(before)
 
-    applyRenderProfile(profile('glassmorphism'), root)
+    applyRenderProfile(profile('glassmorphism'), 'light', root)
     expect(root.dataset.uguiSkin).toBe('glassmorphism')
     expect(root.innerHTML).toBe(before)
   })
+})
+
+it('repaints the same skin against black when the mode is dark', () => {
+  const root = document.createElement('div')
+  const surfaces = ['--morph-surface', '--morph-desktop', '--morph-on-surface', '--color-surface']
+
+  applyRenderProfile(profile('windows-95'), 'light', root)
+
+  const light = surfaces.map(name => root.style.getPropertyValue(name))
+
+  applyRenderProfile(profile('windows-95'), 'dark', root)
+
+  const dark = surfaces.map(name => root.style.getPropertyValue(name))
+
+  // Every visible shell surface resolves through these, so if they do not move
+  // the window stays pinned to the skin's light palette whatever the class says.
+  expect(dark).not.toEqual(light)
+  expect(root.dataset.uguiMode).toBe('dark')
+  // A metric means the same thing in either mode.
+  expect(root.style.getPropertyValue('--morph-radius-md')).toBe(
+    (() => {
+      applyRenderProfile(profile('windows-95'), 'light', root)
+
+      return root.style.getPropertyValue('--morph-radius-md')
+    })()
+  )
+})
+
+it('reads the mode off the element when a caller does not name one', () => {
+  const root = document.createElement('div')
+
+  root.classList.add('dark')
+  applyRenderProfile(profile('windows-95'), undefined, root)
+
+  // Every store path applies a profile without knowing the mode, so the element
+  // it paints onto is the one source of truth.
+  expect(root.dataset.uguiMode).toBe('dark')
 })

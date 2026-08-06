@@ -226,7 +226,12 @@ export function AeExecutiveWorkspace() {
         if (resolved.operation === 'field') {
           // The engine generates Skin Studio, so it owns which field an edit may
           // address and what the edit repaints.
-          const variables = skinField(activeSkin.current, resolved.nodeId ?? hit.itemId, resolved.value)
+          const variables = skinField(
+            activeSkin.current,
+            resolved.nodeId ?? hit.itemId,
+            resolved.value,
+            document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+          )
 
           if (variables) {
             for (const [name, value] of Object.entries(variables)) {

@@ -372,7 +372,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(activeTheme, resolvedMode)
 
-    if (activeRenderProfile) {applyRenderProfile(activeRenderProfile)}
+    if (activeRenderProfile) {applyRenderProfile(activeRenderProfile, resolvedMode)}
   }, [activeRenderProfile, activeTheme, resolvedMode])
 
   useEffect(() => {

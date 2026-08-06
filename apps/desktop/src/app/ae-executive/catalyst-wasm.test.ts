@@ -242,13 +242,13 @@ it('carries the preference vocabulary from the engine instead of a copied list',
 it('applies a Skin Studio field edit and repaints from the edited binding', () => {
   // Skin Studio addresses a field by `{slot}/{token}`; the painter writes that
   // onto `data-ugui-id`, so this is the id a gesture actually carries back.
-  const variables = skinField('winxp', 'palette/surface', '#101010')
+  const variables = skinField('winxp', 'palette/surface', '#101010', 'light')
 
   expect(variables?.['--ugui-palette-surface']).toBe('#101010')
   // The vocabulary alias moves with it, so a painted Document repaints too.
   expect(variables?.['--color-surface']).toBe('#101010')
 
   // A token outside the style matrix is refused, not silently written.
-  expect(skinField('winxp', 'palette/not-a-role', '#000000')).toBeNull()
-  expect(skinField('winxp', 'not-a-slot/surface', '#000000')).toBeNull()
+  expect(skinField('winxp', 'palette/not-a-role', '#000000', 'light')).toBeNull()
+  expect(skinField('winxp', 'not-a-slot/surface', '#000000', 'light')).toBeNull()
 })

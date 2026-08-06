@@ -391,8 +391,11 @@ pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str)
 /// The CSS custom properties a skin projects. The engine owns the style matrix,
 /// the skins that bind it, and the vocabulary sheet that reads them.
 #[wasm_bindgen]
-pub fn catalyst_skin_variables(skin_id: &str) -> String {
-    match ugui_render::style_css::skin_variables(skin_id) {
+pub fn catalyst_skin_variables(skin_id: &str, mode: &str) -> String {
+    match ugui_render::style_css::skin_variables(
+        skin_id,
+        ugui_render::style_css::Mode::from_id(mode),
+    ) {
         Some(variables) => json::canonical_string(&json::obj(vec![
             ("schema", json::s("catalyst-skin-variables/1")),
             ("skin", json::s(skin_id)),
@@ -410,14 +413,17 @@ pub fn catalyst_skin_variables(skin_id: &str) -> String {
 /// The shell's CSS variables for one normalized render profile. The host owns
 /// normalization; what the axes mean in CSS is the engine's answer.
 #[wasm_bindgen]
-pub fn catalyst_profile_css(axes_source: &str) -> String {
+pub fn catalyst_profile_css(axes_source: &str, mode: &str) -> String {
     let axes = json::parse(axes_source).unwrap_or(Json::Null);
 
     json::canonical_string(&Json::Obj(
-        ugui_render::style_css::profile_variables(&axes)
-            .into_iter()
-            .map(|(name, value)| (name, json::s(&value)))
-            .collect(),
+        ugui_render::style_css::profile_variables(
+            &axes,
+            ugui_render::style_css::Mode::from_id(mode),
+        )
+        .into_iter()
+        .map(|(name, value)| (name, json::s(&value)))
+        .collect(),
     ))
 }
 
@@ -495,7 +501,7 @@ thread_local! {
 /// Apply one Skin Studio edit. The engine generates that Document and owns the
 /// style matrix, so it owns which `{slot}/{token}` an edit may address.
 #[wasm_bindgen]
-pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str) -> String {
+pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str, mode: &str) -> String {
     use ugui_render::skin_session;
 
     let value = json::parse(value_source).unwrap_or(Json::Null);
@@ -530,10 +536,13 @@ pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str) -> 
                 (
                     "variables",
                     Json::Obj(
-                        ugui_render::style_css::variables(&editing.binding)
-                            .into_iter()
-                            .map(|(name, value)| (name, json::s(&value)))
-                            .collect(),
+                        ugui_render::style_css::variables(
+                            &editing.binding,
+                            ugui_render::style_css::Mode::from_id(mode),
+                        )
+                        .into_iter()
+                        .map(|(name, value)| (name, json::s(&value)))
+                        .collect(),
                     ),
                 ),
             ])),

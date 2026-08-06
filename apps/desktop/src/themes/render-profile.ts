@@ -1,4 +1,4 @@
-import { profileCss, skinCss } from '@/app/ae-executive/catalyst-wasm'
+import { profileCss, type RenderMode, skinCss } from '@/app/ae-executive/catalyst-wasm'
 
 export const RENDER_PROFILE_SCHEMA = 'hermes-render-profile/1' as const
 
@@ -159,22 +159,44 @@ export function parseRenderProfile(value: unknown): RenderProfile | null {
 }
 
 
-export function renderProfileCss(profile: RenderProfile): Record<string, string> {
+export function renderProfileCss(
+  profile: RenderProfile,
+  mode: RenderMode = 'light'
+): Record<string, string> {
   // A catalogued skin is projected whole — the vocabulary names a painted
   // Document reads as well as the shell's — so one skin paints both coherently.
   // A profile the engine does not carry still gets the shell's own variables.
-  return skinCss(profile.id) ?? profileCss(profile.axes)
+  return skinCss(profile.id, mode) ?? profileCss(profile.axes, mode)
 }
 
-export function applyRenderProfile(profile: RenderProfile, root: HTMLElement = document.documentElement): void {
+/** The mode already lives on the element, so a caller need not carry it too. */
+function renderedMode(root: HTMLElement): RenderMode {
+  return root.classList.contains('dark') || root.dataset.hermesMode === 'dark' ? 'dark' : 'light'
+}
+
+export function applyRenderProfile(
+  profile: RenderProfile,
+  mode?: RenderMode,
+  root: HTMLElement = document.documentElement
+): void {
+  // These variables are written inline, which outranks every stylesheet rule a
+  // dark class could bring — so the projection itself has to know the mode.
+  const rendered = mode ?? renderedMode(root)
+
   root.dataset.uguiSkin = profile.id
   root.dataset.uguiBorder = profile.axes.border.model
   root.dataset.uguiChrome = profile.axes.chrome.frame
   root.dataset.uguiMotion = profile.axes.motion.mode
+  root.dataset.uguiMode = rendered
 
-  for (const [name, value] of Object.entries(renderProfileCss(profile))) {root.style.setProperty(name, value)}
+  for (const [name, value] of Object.entries(renderProfileCss(profile, rendered))) {
+    root.style.setProperty(name, value)
+  }
 
-  const background = opaqueNativeColor(profile.axes.palette.surface, profile.axes.palette.desktop ?? '#101010')
+  const background = opaqueNativeColor(
+    profile.axes.palette.surface,
+    profile.axes.palette.desktop ?? '#101010'
+  )
   const foreground = opaqueNativeColor(profile.axes.palette.on_surface, '#ffffff')
 
   if (background && foreground) {window.hermesDesktop?.setTitleBarTheme?.({ background, foreground })}

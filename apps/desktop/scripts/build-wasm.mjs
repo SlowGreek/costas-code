@@ -47,7 +47,7 @@ if (build.error || build.status !== 0) {
 const aeRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const publicDir = fileURLToPath(new URL("../public", import.meta.url));
 for (const [from, to, filter] of [
-  ["projects/png", "png", name => name.endsWith(".svg") || name.endsWith(".png")],
+  ["ugui/assets/png", "png", name => name.endsWith(".svg")],
   ["projects/apps", "apps", name => name.endsWith(".json")],
 ]) {
   const destination = path.join(publicDir, to);

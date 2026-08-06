@@ -49,7 +49,8 @@ describe('catalyst UGUI client', () => {
 
     expect(uguiActionFromClick(button)).toEqual({
       action: 'shell.tab.dashboard',
-      itemId: 'home-tab-dashboard'
+      itemId: 'home-tab-dashboard',
+      source: null
     })
     expect(uguiActionFromClick(root)).toBeNull()
   })

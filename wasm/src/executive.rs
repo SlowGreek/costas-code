@@ -11,8 +11,7 @@ pub const ENVELOPE_SCHEMA: &str = "ae-executive-document-envelope/1";
 pub const ROW_SCHEMA: &str = "ae-executive-document-row/1";
 
 const FRESHNESS: [&str; 4] = ["fresh", "degraded", "stale", "unavailable"];
-const POSTURES: [&str; 6] =
-    ["observed", "missing", "fixture", "held", "structural", "unavailable"];
+const POSTURES: [&str; 6] = ["observed", "missing", "fixture", "held", "structural", "unavailable"];
 const AUTHORITIES: [&str; 2] = ["none", "RUN_EXECUTIVE_COMPOSER"];
 const RUN_COMPOSER: &str = "RUN_EXECUTIVE_COMPOSER";
 const MAX_TEXT: usize = 256;
@@ -300,7 +299,10 @@ pub fn parse_envelope(value: &Json, tabs: &[&str]) -> Result<Batch, Fault> {
         .filter(|text| is_hash(text))
         .ok_or_else(fault)?
         .to_owned();
-    let rows = field(value, "rows").as_array().filter(|rows| rows.len() == tabs.len()).ok_or_else(fault)?;
+    let rows = field(value, "rows")
+        .as_array()
+        .filter(|rows| rows.len() == tabs.len())
+        .ok_or_else(fault)?;
 
     let live = executive_generation > 0;
     let provenance = || Fault::new("ae-executive-document-provenance");
@@ -360,11 +362,8 @@ pub fn parse_envelope(value: &Json, tabs: &[&str]) -> Result<Batch, Fault> {
 }
 
 pub fn reconcile(previous: Option<&Batch>, incoming: Batch) -> Reconciliation {
-    let accept = |batch: Batch, reason: &'static str| Reconciliation {
-        accepted: true,
-        reason,
-        batch,
-    };
+    let accept =
+        |batch: Batch, reason: &'static str| Reconciliation { accepted: true, reason, batch };
     let refuse = |batch: &Batch, reason: &'static str| Reconciliation {
         accepted: false,
         reason,

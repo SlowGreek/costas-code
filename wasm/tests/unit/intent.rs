@@ -54,11 +54,9 @@ fn parametric_actions_admit_only_well_formed_identities() {
 
 #[test]
 fn posture_bounds_which_verbs_may_leave_the_client() {
-    for (posture, verb_admitted) in [
-        (ActionPosture::Held, false),
-        (ActionPosture::Read, true),
-        (ActionPosture::Ready, true),
-    ] {
+    for (posture, verb_admitted) in
+        [(ActionPosture::Held, false), (ActionPosture::Read, true), (ActionPosture::Ready, true)]
+    {
         let built = build_intent("lucid.show.status", &context(posture), "op-1");
         assert_eq!(built.is_some(), verb_admitted, "show under {}", posture.as_str());
     }
@@ -81,8 +79,8 @@ fn an_intent_without_provenance_is_never_built() {
 
 #[test]
 fn a_built_intent_carries_the_expected_generation_and_hash() {
-    let intent = build_intent("lucid.get.evidence", &context(ActionPosture::Read), "op-42")
-        .expect("intent");
+    let intent =
+        build_intent("lucid.get.evidence", &context(ActionPosture::Read), "op-42").expect("intent");
     assert_eq!(intent.get("schema").and_then(Json::as_str), Some(INTENT_SCHEMA));
     assert_eq!(intent.get("verb").and_then(Json::as_str), Some("get"));
     assert_eq!(intent.get("expected_generation"), Some(&Json::Int(7)));
@@ -98,7 +96,10 @@ fn posture_disables_every_action_the_engine_would_refuse() {
         (
             "actions",
             Json::Arr(vec![
-                json::obj(vec![("type", json::s("button")), ("action", json::s("lucid.show.status"))]),
+                json::obj(vec![
+                    ("type", json::s("button")),
+                    ("action", json::s("lucid.show.status")),
+                ]),
                 json::obj(vec![
                     ("type", json::s("button")),
                     ("action", json::s("lucid.set.view-policy")),

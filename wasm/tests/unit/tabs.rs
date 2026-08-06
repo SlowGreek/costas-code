@@ -55,7 +55,8 @@ fn the_microsoft_keystone_paints_a_rich_document_no_run_tab_provides() {
 
     // The engine admits it, and it exercises vocabulary the RUN tabs never do.
     assert_eq!(ugui_render::validate_document_value(&value), "[]");
-    for rich in ["\"image\"", "\"select\"", "\"input\"", "\"nested-card\"", "\"row\"", "\"column\""] {
+    for rich in ["\"image\"", "\"select\"", "\"input\"", "\"nested-card\"", "\"row\"", "\"column\""]
+    {
         assert!(document.contains(rich), "keystone must exercise {rich}");
     }
 }

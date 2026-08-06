@@ -62,7 +62,10 @@ pub fn tabs() -> Vec<Tab> {
         .iter()
         .map(|row| {
             let text = |key: &str| {
-                row.get(key).and_then(Json::as_str).unwrap_or_else(|| panic!("tab {key}")).to_owned()
+                row.get(key)
+                    .and_then(Json::as_str)
+                    .unwrap_or_else(|| panic!("tab {key}"))
+                    .to_owned()
             };
             Tab {
                 id: text("id"),

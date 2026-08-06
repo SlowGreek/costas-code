@@ -6,7 +6,11 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
   mountDocument,
+  globalKey,
+  preferenceSelection,
+  preferenceVocabulary,
   projectsInput,
+  skinField,
   setAssetBaseForTests,
   setWasmInputForTests,
   tabDocument,
@@ -207,3 +211,44 @@ it('drives the seated Projects applet through the engine reducer', () => {
   expect(refused.error).toBe('E_CATALYST_PROJECTS_HOST_INPUT')
 })
 
+
+it('answers what a keystroke means from the engine, not from this host', () => {
+  // The projects client and this one must agree on every key, so neither
+  // invents a meaning the other does not have.
+  expect(globalKey('/', { meta: false, control: false, alt: false }).kind).toBe('focus-search')
+  expect(globalKey('?', { meta: false, control: false, alt: false }).kind).toBe('system-app')
+  // A modifier belongs to the host's own shortcuts, so the engine stands down.
+  expect(globalKey('/', { meta: true, control: false, alt: false }).kind).toBe('none')
+})
+
+it('names the control each committed preference selects', () => {
+  const selected = preferenceSelection({ theme: 'dark', background: 'grid' })
+
+  expect(selected.theme).toBe('projects.theme.dark')
+  expect(selected.background).toBe('projects.background.grid')
+
+  // A choice outside the vocabulary selects nothing rather than a bad node.
+  expect(preferenceSelection({ theme: 'sepia' }).theme).toBeUndefined()
+})
+
+it('carries the preference vocabulary from the engine instead of a copied list', () => {
+  const vocabulary = preferenceVocabulary()
+
+  expect(vocabulary.theme?.choices).toEqual(['light', 'dark'])
+  expect(vocabulary.theme?.action).toBe('projects.theme')
+  expect(vocabulary.background?.choices).toContain('parallax')
+})
+
+it('applies a Skin Studio field edit and repaints from the edited binding', () => {
+  // Skin Studio addresses a field by `{slot}/{token}`; the painter writes that
+  // onto `data-ugui-id`, so this is the id a gesture actually carries back.
+  const variables = skinField('winxp', 'palette/surface', '#101010')
+
+  expect(variables?.['--ugui-palette-surface']).toBe('#101010')
+  // The vocabulary alias moves with it, so a painted Document repaints too.
+  expect(variables?.['--color-surface']).toBe('#101010')
+
+  // A token outside the style matrix is refused, not silently written.
+  expect(skinField('winxp', 'palette/not-a-role', '#000000')).toBeNull()
+  expect(skinField('winxp', 'not-a-slot/surface', '#000000')).toBeNull()
+})

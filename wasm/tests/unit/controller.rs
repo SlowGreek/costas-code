@@ -141,12 +141,14 @@ fn a_read_posture_emits_read_intents_and_refuses_mutations() {
     assert_eq!(built.get("expected_generation"), Some(&Json::Int(2)));
     assert_eq!(built.get("operation_id").and_then(Json::as_str), Some("op-7"));
 
-    assert_eq!(effect_kinds(&controller.dispatch_action("lucid.set.view-policy", "op-8")), vec![
-        "refused"
-    ]);
-    assert_eq!(effect_kinds(&controller.dispatch_action("lucid.show.everything", "op-9")), vec![
-        "refused"
-    ]);
+    assert_eq!(
+        effect_kinds(&controller.dispatch_action("lucid.set.view-policy", "op-8")),
+        vec!["refused"]
+    );
+    assert_eq!(
+        effect_kinds(&controller.dispatch_action("lucid.show.everything", "op-9")),
+        vec!["refused"]
+    );
 }
 
 #[test]

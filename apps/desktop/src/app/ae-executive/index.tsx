@@ -19,6 +19,7 @@ import {
   openDocumentSource,
   paintCatalogTab,
   preferenceSelection,
+  preferenceVocabulary,
   projectsInput,
   selectTab,
   skinField,
@@ -177,7 +178,10 @@ export function AeExecutiveWorkspace() {
 
     if (catalogTab) {
       void paintCatalogTab(catalogTab.id)
-        .then(() => setNotice(`${catalogTab.label} · painted from the ${catalogTab.source} catalog`))
+        .then(() => {
+          setNotice(`${catalogTab.label} · painted from the ${catalogTab.source} catalog`)
+          paintSelection.current()
+        })
         .catch((reason: unknown) => setNotice(`Tab refused · ${String(reason)}`))
 
       return
@@ -189,9 +193,11 @@ export function AeExecutiveWorkspace() {
   useEffect(() => {
     if (!overlay || !overlaySurface.current) {return}
 
-    void openDocumentSource(overlaySurface.current, overlay).catch((reason: unknown) =>
-      setNotice(`Document refused · ${String(reason)}`)
-    )
+    // A fresh paint carries no selection, so the committed choice is restated
+    // onto it — otherwise every control looks unselected on first open.
+    void openDocumentSource(overlaySurface.current, overlay)
+      .then(() => paintSelection.current())
+      .catch((reason: unknown) => setNotice(`Document refused · ${String(reason)}`))
   }, [overlay])
 
   // The engine says what a Document action means; this host only carries it out.
@@ -295,25 +301,34 @@ export function AeExecutiveWorkspace() {
   }
 
   // A control group has to show which choice is committed, or every door looks
-  // inert even when it worked. The engine names the node that is selected.
+  // inert even when it worked. The engine names both the actions that form a
+  // group and the node each committed choice selects.
   function paintPreferenceSelection() {
     const selected = preferenceSelection(activePreferences.current)
+    const committed = new Set(Object.values(selected))
+    const grouped = new Set(
+      Object.values(preferenceVocabulary())
+        .map(preference => preference.action)
+        .filter((action): action is string => Boolean(action))
+    )
 
     for (const root of [surface.current, overlaySurface.current]) {
       for (const control of root?.querySelectorAll('[data-ugui-action]') ?? []) {
-        const kind = Object.keys(selected).find(
-          name => selected[name] === control.getAttribute('data-ugui-id')
-        )
+        if (!grouped.has(control.getAttribute('data-ugui-action') ?? '')) {continue}
 
-        if (!kind && !control.hasAttribute('aria-pressed')) {continue}
-
-        const active = Boolean(kind)
+        const active = committed.has(control.getAttribute('data-ugui-id') ?? '')
 
         control.setAttribute('aria-pressed', String(active))
         control.toggleAttribute('data-selected', active)
       }
     }
   }
+
+  // A repaint replaces the DOM these attributes live on, so the painter is held
+  // in a ref that mount effects can call after the engine has finished.
+  const paintSelection = useRef(paintPreferenceSelection)
+
+  paintSelection.current = paintPreferenceSelection
 
   // This door may be the first one opened, so it seats the catalog the way the
   // Appearance settings door does rather than refusing an unseated skin.

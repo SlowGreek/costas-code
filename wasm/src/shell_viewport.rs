@@ -39,11 +39,7 @@ fn button(id: &str, label: &str, handler: &str, primary: bool) -> Json {
 }
 
 fn status_item(label: &str, value: Json) -> Json {
-    json::obj(vec![
-        ("label", json::s(label)),
-        ("value", value),
-        ("status", json::s("ok")),
-    ])
+    json::obj(vec![("label", json::s(label)), ("value", value), ("status", json::s("ok"))])
 }
 
 fn selector_actions(model: &Json, key: &str, prefix: &str, selected: &str) -> Vec<Json> {
@@ -101,7 +97,9 @@ pub fn compose_document(model: &Json) -> Result<Json, Fault> {
         status_item("Reason", json::s(text(target, "reason"))),
     ];
     evidence.extend(
-        entries(field(target, "rungs")).into_iter().map(|(label, value)| status_item(&label, value)),
+        entries(field(target, "rungs"))
+            .into_iter()
+            .map(|(label, value)| status_item(&label, value)),
     );
 
     let capability = entries(field(model, "capability_summary"))

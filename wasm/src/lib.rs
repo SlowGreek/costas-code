@@ -123,7 +123,8 @@ pub fn catalyst_tab_document(tab_id: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn catalyst_controller_paint(root: web_sys::Element) -> String {
-    let document = CONTROLLER.with(|cell| cell.borrow().as_ref().and_then(|c| c.painted_document()));
+    let document =
+        CONTROLLER.with(|cell| cell.borrow().as_ref().and_then(|c| c.painted_document()));
     match document {
         Some(document) => catalyst_mount_document(root, &json::canonical_string(&document)),
         None => refusal("E_CATALYST_EXECUTIVE_DOCUMENT", "selected tab has no admitted document"),
@@ -188,7 +189,10 @@ pub fn catalyst_app_catalog() -> String {
         (
             "sources",
             Json::Arr(
-                ugui_render::app_catalog::sources().iter().map(|id| json::s(id)).collect::<Vec<_>>(),
+                ugui_render::app_catalog::sources()
+                    .iter()
+                    .map(|id| json::s(id))
+                    .collect::<Vec<_>>(),
             ),
         ),
         ("apps", Json::Arr(apps)),
@@ -305,8 +309,7 @@ mod tests {
     fn the_client_reads_its_vocabulary_from_the_engine() {
         let types = json::parse(&catalyst_document_item_types()).expect("types");
         let listed = types.get("types").and_then(Json::as_array).expect("type list");
-        let names =
-            listed.iter().filter_map(Json::as_str).map(str::to_owned).collect::<Vec<_>>();
+        let names = listed.iter().filter_map(Json::as_str).map(str::to_owned).collect::<Vec<_>>();
 
         for canonical in ["text", "button", "image", "input", "select", "row", "column"] {
             assert!(names.iter().any(|name| name == canonical), "{canonical} is canonical");
@@ -395,7 +398,9 @@ pub fn catalyst_skin_variables(skin_id: &str) -> String {
             ("skin", json::s(skin_id)),
             (
                 "variables",
-                Json::Obj(variables.into_iter().map(|(name, value)| (name, json::s(&value))).collect()),
+                Json::Obj(
+                    variables.into_iter().map(|(name, value)| (name, json::s(&value))).collect(),
+                ),
             ),
         ])),
         None => refusal("E_CATALYST_SKIN", skin_id),
@@ -427,7 +432,11 @@ pub fn catalyst_global_key(
     executable: bool,
 ) -> String {
     let resolved = ugui_render::interaction::resolve_global_key(
-        key, meta, control, alt, false, false, "", executable,
+        &ugui_render::interaction::Keystroke { key, shift: false, meta, control, alt },
+        false,
+        false,
+        "",
+        executable,
     );
 
     json::canonical_string(&ugui_render::interaction::to_json(&resolved))
@@ -441,7 +450,8 @@ pub fn catalyst_preference_selection(active_source: &str) -> String {
     let selected = ugui_render::preferences::kinds()
         .filter_map(|kind| {
             let choice = active.get(kind).and_then(Json::as_str)?;
-            ugui_render::preferences::node_id(kind, choice).map(|node| (kind.to_owned(), json::s(&node)))
+            ugui_render::preferences::node_id(kind, choice)
+                .map(|node| (kind.to_owned(), json::s(&node)))
         })
         .collect::<Vec<_>>();
 
@@ -461,10 +471,13 @@ pub fn catalyst_preference_vocabulary() -> String {
                 .map(|choices| Json::Arr(choices.iter().map(|choice| json::s(choice)).collect()))
                 .unwrap_or(Json::Null);
 
-            (kind.to_owned(), json::obj(vec![
-                ("action", ugui_render::preferences::action(kind).map_or(Json::Null, json::s)),
-                ("choices", choices),
-            ]))
+            (
+                kind.to_owned(),
+                json::obj(vec![
+                    ("action", ugui_render::preferences::action(kind).map_or(Json::Null, json::s)),
+                    ("choices", choices),
+                ]),
+            )
         })
         .collect::<Vec<_>>();
 

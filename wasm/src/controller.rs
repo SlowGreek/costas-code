@@ -82,7 +82,8 @@ impl Controller {
     pub fn studio_context(&self) -> Option<(i64, String)> {
         let row = self.batch.as_ref()?.row(self.tab.as_deref()?)?;
         let hash = row.source_hash.clone()?;
-        (row.document.is_some() && row.source_generation >= 0).then_some((row.source_generation, hash))
+        (row.document.is_some() && row.source_generation >= 0)
+            .then_some((row.source_generation, hash))
     }
 
     pub fn observe(&mut self, envelope_json: &str) -> Json {
@@ -172,11 +173,9 @@ impl Controller {
         let action = event.get("action").and_then(Json::as_str).unwrap_or_default().to_owned();
         if self.tab.as_deref() == Some("studio") && !action.starts_with("shell.tab.") {
             let effect = match self.studio_context() {
-                Some((revision, document_hash)) => Effect::StudioSubmit {
-                    event: event_json.to_owned(),
-                    revision,
-                    document_hash,
-                },
+                Some((revision, document_hash)) => {
+                    Effect::StudioSubmit { event: event_json.to_owned(), revision, document_hash }
+                }
                 None => Effect::Refused {
                     code: "E_CATALYST_STUDIO_REVISION".to_string(),
                     detail: "editor revision or hash unavailable".to_string(),

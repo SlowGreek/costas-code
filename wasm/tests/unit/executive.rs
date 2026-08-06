@@ -300,7 +300,8 @@ fn an_envelope_or_row_with_unknown_or_missing_fields_is_refused() {
     };
 
     set(&mut row_fields, "smuggled", json::s("extra"));
-    let rows = vec![Json::Obj(row_fields), row("dashboard", "observed", "fresh", document("dashboard"))];
+    let rows =
+        vec![Json::Obj(row_fields), row("dashboard", "observed", "fresh", document("dashboard"))];
     assert_eq!(
         parse_envelope(&envelope(2, HASH_B, rows), &TABS).expect_err("refusal").0,
         "ae-executive-document-row:home"

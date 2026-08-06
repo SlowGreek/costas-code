@@ -56,9 +56,9 @@ fn is_hex64(value: &str) -> bool {
 pub fn action_context(batch: &crate::executive::Batch, tab: &str) -> ActionContext {
     let generation = batch.generation.unwrap_or(0);
     let document_hash = batch.document_hash.clone().unwrap_or_default();
-    let readable = batch
-        .row(tab)
-        .is_some_and(|row| row.state == crate::executive::RowState::Fresh && row.document.is_some());
+    let readable = batch.row(tab).is_some_and(|row| {
+        row.state == crate::executive::RowState::Fresh && row.document.is_some()
+    });
     let admitted = generation > 0 && is_hash(&document_hash) && readable;
     ActionContext {
         generation: if generation > 0 { generation } else { 0 },
@@ -75,22 +75,18 @@ pub fn action_for_handler(action: &str) -> Option<(&'static str, Json)> {
         "lucid.show.status" => ("show", payload(vec![("kind", json::s("status"))])),
         "lucid.get.evidence" => ("get", payload(vec![("kind", json::s("evidence"))])),
         "lucid.get.posture" => ("get", payload(vec![("kind", json::s("posture"))])),
-        "lucid.set.view-policy" => (
-            "set",
-            payload(vec![("kind", json::s("view-policy")), ("value", json::s("balanced"))]),
-        ),
-        "lucid.set.view-policy.compact" => (
-            "set",
-            payload(vec![("kind", json::s("view-policy")), ("value", json::s("compact"))]),
-        ),
-        "lucid.morph.fidelity" => (
-            "morph",
-            payload(vec![("kind", json::s("fidelity")), ("value", json::s("balanced"))]),
-        ),
-        "lucid.morph.fidelity.lossless" => (
-            "morph",
-            payload(vec![("kind", json::s("fidelity")), ("value", json::s("lossless"))]),
-        ),
+        "lucid.set.view-policy" => {
+            ("set", payload(vec![("kind", json::s("view-policy")), ("value", json::s("balanced"))]))
+        }
+        "lucid.set.view-policy.compact" => {
+            ("set", payload(vec![("kind", json::s("view-policy")), ("value", json::s("compact"))]))
+        }
+        "lucid.morph.fidelity" => {
+            ("morph", payload(vec![("kind", json::s("fidelity")), ("value", json::s("balanced"))]))
+        }
+        "lucid.morph.fidelity.lossless" => {
+            ("morph", payload(vec![("kind", json::s("fidelity")), ("value", json::s("lossless"))]))
+        }
         "lucid.steer.hold.em" => (
             "steer",
             payload(vec![
@@ -117,10 +113,7 @@ fn parametric_action(action: &str) -> Option<(&'static str, Json)> {
         return is_hex64(id).then(|| {
             (
                 "dispatch",
-                json::obj(vec![
-                    ("kind", json::s("plan")),
-                    ("id", json::s(&format!("plan:{id}"))),
-                ]),
+                json::obj(vec![("kind", json::s("plan")), ("id", json::s(&format!("plan:{id}")))]),
             )
         });
     }
@@ -177,8 +170,7 @@ pub fn apply_posture(document: &Json, context: &ActionContext) -> Json {
             if !action.starts_with("lucid.") {
                 return Json::Obj(mapped);
             }
-            let enabled = action_for_handler(action)
-                .is_some_and(|(verb, _)| admits(context, verb));
+            let enabled = action_for_handler(action).is_some_and(|(verb, _)| admits(context, verb));
             if !enabled {
                 mapped.push(("disabled".to_string(), Json::Bool(true)));
                 mapped.push((

@@ -117,13 +117,16 @@ fn a_foreign_model_schema_refuses_rather_than_composing() {
 fn selectors_become_actions_with_the_current_choice_primary() {
     let document = compose_document(&model()).expect("document");
 
-    assert_eq!(actions(&document), vec![
-        ("shell.target.macos-shell".to_owned(), true),
-        ("shell.target.linux-shell".to_owned(), false),
-        ("shell.surface.desktop-16".to_owned(), true),
-        ("shell.build.aarch64-apple-darwin".to_owned(), true),
-        ("shell.inspect".to_owned(), false),
-    ]);
+    assert_eq!(
+        actions(&document),
+        vec![
+            ("shell.target.macos-shell".to_owned(), true),
+            ("shell.target.linux-shell".to_owned(), false),
+            ("shell.surface.desktop-16".to_owned(), true),
+            ("shell.build.aarch64-apple-darwin".to_owned(), true),
+            ("shell.inspect".to_owned(), false),
+        ]
+    );
 }
 
 #[test]
@@ -141,14 +144,10 @@ fn evidence_and_capability_counts_reach_the_status_grids() {
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(labels(&sections[1]), [
-        "Owner",
-        "Reason",
-        "source",
-        "artifact",
-        "package_install",
-        "physical_runtime"
-    ]);
+    assert_eq!(
+        labels(&sections[1]),
+        ["Owner", "Reason", "source", "artifact", "package_install", "physical_runtime"]
+    );
     assert_eq!(labels(&sections[2]), ["available", "degraded", "unavailable", "unknown"]);
 }
 
@@ -172,7 +171,10 @@ fn the_native_section_carries_the_surface_geometry_the_host_observed() {
     let sections = document.get("sections").and_then(Json::as_array).expect("sections");
     let native = sections[0].get("model").expect("native model");
 
-    assert_eq!(sections[0].get("catalog").and_then(Json::as_str), Some("shell-structural-viewport"));
+    assert_eq!(
+        sections[0].get("catalog").and_then(Json::as_str),
+        Some("shell-structural-viewport")
+    );
     assert_eq!(native.get("shell_id").and_then(Json::as_str), Some("macos-shell"));
     assert_eq!(native.get("window_policy").and_then(Json::as_str), Some("resizable"));
     assert_eq!(

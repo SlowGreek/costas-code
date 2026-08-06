@@ -387,11 +387,6 @@ export function projectsInput(handler: string, nodeId: string, value: unknown): 
 }
 
 /** A nested-card names another authored Document; the host fetches and paints it. */
-/** test probe */
-export function rawDocumentSource(source: string): string {
-  return catalyst_document_source(source)
-}
-
 export function openDocumentSource(element: Element, source: string): Promise<void> {
   if (!/^\/apps\/[a-z0-9-]+\.json$/.test(source)) {
     return Promise.reject(new Error(`document source is not admitted: ${source}`))

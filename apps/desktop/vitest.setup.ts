@@ -35,3 +35,58 @@ if (!globalThis.localStorage) {
 // CPU contention in CI. Success still resolves the instant the node appears;
 // the wider deadline only absorbs a starved runner, killing timing flakes.
 configure({ asyncUtilTimeout: 5000 })
+
+// jsdom ships no 2D context, so any Document carrying a canvas item (waveform,
+// sparkline) aborts the engine's paint mid-region. `dyn_into` is an `instanceof`
+// check, so the shim needs the constructor jsdom omits — not just a stub object.
+class StubCanvasRenderingContext2D {
+  canvas: unknown = null
+  fillStyle = ''
+  strokeStyle = ''
+  lineWidth = 1
+  font = ''
+  globalAlpha = 1
+  lineCap = 'butt'
+  lineJoin = 'miter'
+  textAlign = 'start'
+  textBaseline = 'alphabetic'
+  save() {}
+  restore() {}
+  beginPath() {}
+  closePath() {}
+  moveTo() {}
+  lineTo() {}
+  arc() {}
+  rect() {}
+  fill() {}
+  stroke() {}
+  fillRect() {}
+  clearRect() {}
+  strokeRect() {}
+  fillText() {}
+  translate() {}
+  scale() {}
+  setLineDash() {}
+  measureText() {
+    return { width: 0 }
+  }
+  createLinearGradient() {
+    return { addColorStop() {} }
+  }
+}
+
+Object.defineProperty(globalThis, 'CanvasRenderingContext2D', {
+  configurable: true,
+  value: StubCanvasRenderingContext2D
+})
+
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  value(this: HTMLCanvasElement) {
+    const context = new StubCanvasRenderingContext2D()
+
+    context.canvas = this
+
+    return context
+  }
+})

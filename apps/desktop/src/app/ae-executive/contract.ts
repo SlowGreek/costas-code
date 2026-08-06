@@ -1,22 +1,4 @@
-export const AE_EXECUTIVE_TAB_IDS = [
-  'home',
-  'dashboard',
-  'lucid',
-  'quine',
-  'scores',
-  'metrics',
-  'logs',
-  'github',
-  'studio',
-  'settings',
-  'marketplace',
-  'shell',
-  'mermaid'
-] as const
-
-export type AeExecutiveTabId = (typeof AE_EXECUTIVE_TAB_IDS)[number]
-export const AE_EXECUTIVE_HOST_DERIVED_TAB_IDS = [] as const
-export const AE_EXECUTIVE_BATCH_TAB_IDS = AE_EXECUTIVE_TAB_IDS
+import tabsDocument from '../../../../../TABS.json'
 
 export interface AeExecutiveTab {
   readonly id: AeExecutiveTabId
@@ -27,112 +9,54 @@ export interface AeExecutiveTab {
   readonly summary: string
 }
 
-export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = [
-  {
-    id: 'home',
-    label: '[H]OME',
-    mnemonic: 'H',
-    route: '/ae/home',
-    icon: 'home',
-    summary: 'Resident executive overview and profile identity.'
-  },
-  {
-    id: 'dashboard',
-    label: '[D]ASHBOARD',
-    mnemonic: 'D',
-    route: '/ae/dashboard',
-    icon: 'dashboard',
-    summary: 'Readiness lattice, active work, and system topology.'
-  },
-  {
-    id: 'lucid',
-    label: '[L]UCID',
-    mnemonic: 'L',
-    route: '/ae/lucid',
-    icon: 'lightbulb',
-    summary: 'Typed executive verbs and receipt-bearing operations.'
-  },
-  {
-    id: 'quine',
-    label: '[Q]UINE',
-    mnemonic: 'Q',
-    route: '/ae/quine',
-    icon: 'symbol-structure',
-    summary: 'Acceptance, evidence, dispatch, and recursive improvement.'
-  },
-  {
-    id: 'scores',
-    label: 'S[C]ORES',
-    mnemonic: 'C',
-    route: '/ae/scores',
-    icon: 'graph-line',
-    summary: 'Alignment scoreboards and exact completion identity.'
-  },
-  {
-    id: 'metrics',
-    label: '[M]ETRICS',
-    mnemonic: 'M',
-    route: '/ae/metrics',
-    icon: 'pulse',
-    summary: 'Resource, readiness, and fidelity evidence.'
-  },
-  {
-    id: 'logs',
-    label: 'L[O]GS',
-    mnemonic: 'O',
-    route: '/ae/logs',
-    icon: 'output',
-    summary: 'Bounded operational journal and fault evidence.'
-  },
-  {
-    id: 'github',
-    label: '[G]ITHUB',
-    mnemonic: 'G',
-    route: '/ae/github',
-    icon: 'github',
-    summary: 'Fixture-backed repository intent shelf and held realization pipeline.'
-  },
-  {
-    id: 'studio',
-    label: 'S[T]UDIO',
-    mnemonic: 'T',
-    route: '/ae/studio',
-    icon: 'beaker',
-    summary: 'UGUI applets, native surfaces, and development workbench.'
-  },
-  {
-    id: 'settings',
-    label: '[S]ETTINGS',
-    mnemonic: 'S',
-    route: '/ae/settings',
-    icon: 'settings-gear',
-    summary: 'Profile-scoped executive presentation policy.'
-  },
-  {
-    id: 'marketplace',
-    label: 'MA[R]KETPLACE',
-    mnemonic: 'R',
-    route: '/ae/marketplace',
-    icon: 'extensions',
-    summary: 'Discover, inspect, and pin qualified UGUI applets.'
-  },
-  {
-    id: 'shell',
-    label: 'SH[E]LL',
-    mnemonic: 'E',
-    route: '/ae/shell',
-    icon: 'device-desktop',
-    summary: 'Enter the canonical recursive UGUI system shell with independent OS and surface projection axes.'
-  },
-  {
-    id: 'mermaid',
-    label: 'MERM[A]ID',
-    mnemonic: 'A',
-    route: '/ae/mermaid',
-    icon: 'graph-line',
-    summary: 'Inspect the admitted Mermaid document families and their exact source artifacts.'
-  }
-] as const
+interface AuthoredTab {
+  readonly id: string
+  readonly source: string
+  readonly label: string
+  readonly mnemonic: string
+  readonly icon: string
+  readonly summary: string
+}
+
+const AUTHORED_TABS = (tabsDocument as { tabs: AuthoredTab[] }).tabs
+
+// TABS.json names icons semantically for every surface; this host draws codicons.
+const CODICON: Record<string, string> = {
+  home: 'home',
+  dashboard: 'dashboard',
+  lucid: 'lightbulb',
+  quine: 'symbol-structure',
+  scores: 'graph-line',
+  metrics: 'pulse',
+  logs: 'output',
+  github: 'github',
+  studio: 'beaker',
+  settings: 'settings-gear',
+  marketplace: 'extensions',
+  shell: 'device-desktop',
+  mermaid: 'graph-line',
+  projects: 'project'
+}
+
+export type AeExecutiveTabId = string
+export const AE_EXECUTIVE_TAB_IDS = AUTHORED_TABS.map(tab => tab.id)
+
+/// A catalog tab is painted from a static document, so the executive envelope
+/// carries no row for it. Mirrors `Tab::in_batch` in catalyst/wasm.
+export const AE_EXECUTIVE_BATCH_TAB_IDS = AUTHORED_TABS.filter(
+  tab => tab.source === 'run' || tab.source === 'host'
+).map(tab => tab.id)
+
+export const AE_EXECUTIVE_HOST_DERIVED_TAB_IDS = [] as const
+
+export const AE_EXECUTIVE_TABS: readonly AeExecutiveTab[] = AUTHORED_TABS.map(tab => ({
+  id: tab.id,
+  label: tab.label,
+  mnemonic: tab.mnemonic,
+  route: `/ae/${tab.id}`,
+  icon: CODICON[tab.icon] ?? tab.icon,
+  summary: tab.summary
+}))
 
 export const AE_EXECUTIVE_ROUTE_SET: ReadonlySet<string> = new Set(AE_EXECUTIVE_TABS.map(tab => tab.route))
 

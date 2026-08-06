@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Catalyst ships the same UGUI engine projects/ proved out; this projects it
@@ -40,4 +42,20 @@ const build = spawnSync(
 if (build.error || build.status !== 0) {
   process.exit(build.status || 1);
 }
+// Catalog tabs paint Documents that reference /png and /apps by absolute URL,
+// so the renderer must serve the same assets projects/ serves.
+const aeRoot = fileURLToPath(new URL("../../../..", import.meta.url));
+const publicDir = fileURLToPath(new URL("../public", import.meta.url));
+for (const [from, to, filter] of [
+  ["projects/png", "png", name => name.endsWith(".svg") || name.endsWith(".png")],
+  ["projects/apps", "apps", name => name.endsWith(".json")],
+]) {
+  const destination = path.join(publicDir, to);
+  mkdirSync(destination, { recursive: true });
+  cpSync(path.join(aeRoot, from), destination, {
+    recursive: true,
+    filter: source => !path.extname(source) || filter(source),
+  });
+}
+
 console.log("Catalyst UGUI client release projection: ok");

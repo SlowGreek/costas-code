@@ -201,11 +201,30 @@ export function tabDocument(tabId: string): Promise<string> {
 }
 
 /** Resolve the action a click landed on, as painted by the engine. */
-export function uguiActionFromClick(target: EventTarget | null): { action: string; itemId: string } | null {
+export function uguiActionFromClick(
+  target: EventTarget | null
+): { action: string; itemId: string; source: string | null } | null {
   const element = (target as HTMLElement | null)?.closest?.('[data-ugui-action]')
   const action = element?.getAttribute('data-ugui-action')
 
-  return action ? { action, itemId: element?.getAttribute('data-ugui-id') ?? '' } : null
+  return action
+    ? {
+        action,
+        itemId: element?.getAttribute('data-ugui-id') ?? '',
+        source: element?.getAttribute('data-ugui-source') ?? null
+      }
+    : null
+}
+
+/** A nested-card names another authored Document; the host fetches and paints it. */
+export function openDocumentSource(element: Element, source: string): Promise<void> {
+  if (!/^\/apps\/[a-z0-9-]+\.json$/.test(source)) {
+    return Promise.reject(new Error(`document source is not admitted: ${source}`))
+  }
+
+  return fetch(source)
+    .then(response => (response.ok ? response.json() : Promise.reject(new Error(source))))
+    .then(document => mountDocument(element, document))
 }
 
 async function enact(effects: readonly CatalystEffect[] = []): Promise<void> {

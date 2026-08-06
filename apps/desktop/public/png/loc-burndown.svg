@@ -1,0 +1,772 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1022" height="4904" viewBox="0 0 1022 4904" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+<rect width="1022" height="4904" fill="#0d1117"/>
+<text x="20" y="34" fill="#e6edf3" font-size="22" font-weight="700">LOC BURNDOWN</text>
+<text x="20" y="58" fill="#8b949e" font-size="13">217 files ≥ 1000 lines · 466,587 total lines to refactor</text>
+<rect x="20" y="72" width="12" height="12" rx="2" fill="#e5484d"/>
+<text x="37" y="82" fill="#8b949e" font-size="12">≥2500 now</text>
+<rect x="139" y="72" width="12" height="12" rx="2" fill="#e2a336"/>
+<text x="156" y="82" fill="#8b949e" font-size="12">≥1500 soon</text>
+<rect x="267" y="72" width="12" height="12" rx="2" fill="#d8c15a"/>
+<text x="284" y="82" fill="#8b949e" font-size="12">&lt;1500 watch</text>
+<rect x="16" y="96" width="990" height="22" fill="#161b22"/>
+<text x="400" y="111" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/fleet.rs</text>
+<rect x="412" y="100" width="520" height="14" rx="2" fill="#e5484d"/>
+<text x="940" y="111" fill="#8b949e" font-size="12" font-weight="600">25,148</text>
+<text x="400" y="133" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/qualification.rs</text>
+<rect x="412" y="122" width="341" height="14" rx="2" fill="#e5484d"/>
+<text x="761" y="133" fill="#8b949e" font-size="12" font-weight="600">16,537</text>
+<rect x="16" y="140" width="990" height="22" fill="#161b22"/>
+<text x="400" y="155" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/board.rs</text>
+<rect x="412" y="144" width="249" height="14" rx="2" fill="#e5484d"/>
+<text x="669" y="155" fill="#8b949e" font-size="12" font-weight="600">12,047</text>
+<text x="400" y="177" fill="#e6edf3" font-size="12" text-anchor="end">run/src/runtime.rs</text>
+<rect x="412" y="166" width="207" height="14" rx="2" fill="#e5484d"/>
+<text x="627" y="177" fill="#8b949e" font-size="12" font-weight="600">10,053</text>
+<rect x="16" y="184" width="990" height="22" fill="#161b22"/>
+<text x="400" y="199" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/server/tools.rs</text>
+<rect x="412" y="188" width="196" height="14" rx="2" fill="#e5484d"/>
+<text x="616" y="199" fill="#8b949e" font-size="12" font-weight="600">9,520</text>
+<text x="400" y="221" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/dispatch_plan.rs</text>
+<rect x="412" y="210" width="196" height="14" rx="2" fill="#e5484d"/>
+<text x="616" y="221" fill="#8b949e" font-size="12" font-weight="600">9,500</text>
+<rect x="16" y="228" width="990" height="22" fill="#161b22"/>
+<text x="400" y="243" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/root_catalog.rs</text>
+<rect x="412" y="232" width="182" height="14" rx="2" fill="#e5484d"/>
+<text x="602" y="243" fill="#8b949e" font-size="12" font-weight="600">8,829</text>
+<text x="400" y="265" fill="#e6edf3" font-size="12" text-anchor="end">run/src/tui.rs</text>
+<rect x="412" y="254" width="177" height="14" rx="2" fill="#e5484d"/>
+<text x="597" y="265" fill="#8b949e" font-size="12" font-weight="600">8,564</text>
+<rect x="16" y="272" width="990" height="22" fill="#161b22"/>
+<text x="400" y="287" fill="#e6edf3" font-size="12" text-anchor="end">quine/css/STYLE2.css</text>
+<rect x="412" y="276" width="165" height="14" rx="2" fill="#e5484d"/>
+<text x="585" y="287" fill="#8b949e" font-size="12" font-weight="600">8,005</text>
+<text x="400" y="309" fill="#e6edf3" font-size="12" text-anchor="end">…os-shell/GeneratedSources/AppletCatalog.generated.swift</text>
+<rect x="412" y="298" width="160" height="14" rx="2" fill="#e5484d"/>
+<text x="580" y="309" fill="#8b949e" font-size="12" font-weight="600">7,774</text>
+<rect x="16" y="316" width="990" height="22" fill="#161b22"/>
+<text x="400" y="331" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/python_transition.rs</text>
+<rect x="412" y="320" width="152" height="14" rx="2" fill="#e5484d"/>
+<text x="572" y="331" fill="#8b949e" font-size="12" font-weight="600">7,393</text>
+<text x="400" y="353" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/engineer_dispatch.rs</text>
+<rect x="412" y="342" width="131" height="14" rx="2" fill="#e5484d"/>
+<text x="551" y="353" fill="#8b949e" font-size="12" font-weight="600">6,371</text>
+<rect x="16" y="360" width="990" height="22" fill="#161b22"/>
+<text x="400" y="375" fill="#e6edf3" font-size="12" text-anchor="end">run/src/shell_build.rs</text>
+<rect x="412" y="364" width="124" height="14" rx="2" fill="#e5484d"/>
+<text x="544" y="375" fill="#8b949e" font-size="12" font-weight="600">6,004</text>
+<text x="400" y="397" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/scores.rs</text>
+<rect x="412" y="386" width="123" height="14" rx="2" fill="#e5484d"/>
+<text x="543" y="397" fill="#8b949e" font-size="12" font-weight="600">5,973</text>
+<rect x="16" y="404" width="990" height="22" fill="#161b22"/>
+<text x="400" y="419" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/copilot_sdk.rs</text>
+<rect x="412" y="408" width="104" height="14" rx="2" fill="#e5484d"/>
+<text x="524" y="419" fill="#8b949e" font-size="12" font-weight="600">5,076</text>
+<text x="400" y="441" fill="#e6edf3" font-size="12" text-anchor="end">RUN.py</text>
+<rect x="412" y="430" width="99" height="14" rx="2" fill="#e5484d"/>
+<text x="519" y="441" fill="#8b949e" font-size="12" font-weight="600">4,835</text>
+<rect x="16" y="448" width="990" height="22" fill="#161b22"/>
+<text x="400" y="463" fill="#e6edf3" font-size="12" text-anchor="end">store/src/metrics.rs</text>
+<rect x="412" y="452" width="89" height="14" rx="2" fill="#e5484d"/>
+<text x="509" y="463" fill="#8b949e" font-size="12" font-weight="600">4,324</text>
+<text x="400" y="485" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/fleet_terminal_settlement.rs</text>
+<rect x="412" y="474" width="87" height="14" rx="2" fill="#e5484d"/>
+<text x="507" y="485" fill="#8b949e" font-size="12" font-weight="600">4,245</text>
+<rect x="16" y="492" width="990" height="22" fill="#161b22"/>
+<text x="400" y="507" fill="#e6edf3" font-size="12" text-anchor="end">run/src/supervisor.rs</text>
+<rect x="412" y="496" width="78" height="14" rx="2" fill="#e5484d"/>
+<text x="498" y="507" fill="#8b949e" font-size="12" font-weight="600">3,795</text>
+<text x="400" y="529" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/plan_sync.rs</text>
+<rect x="412" y="518" width="75" height="14" rx="2" fill="#e5484d"/>
+<text x="495" y="529" fill="#8b949e" font-size="12" font-weight="600">3,651</text>
+<rect x="16" y="536" width="990" height="22" fill="#161b22"/>
+<text x="400" y="551" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/rust_prompt_gate.rs</text>
+<rect x="412" y="540" width="68" height="14" rx="2" fill="#e5484d"/>
+<text x="488" y="551" fill="#8b949e" font-size="12" font-weight="600">3,314</text>
+<text x="400" y="573" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/store.rs</text>
+<rect x="412" y="562" width="67" height="14" rx="2" fill="#e5484d"/>
+<text x="487" y="573" fill="#8b949e" font-size="12" font-weight="600">3,248</text>
+<rect x="16" y="580" width="990" height="22" fill="#161b22"/>
+<text x="400" y="595" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/dispatch_evaluation.rs</text>
+<rect x="412" y="584" width="63" height="14" rx="2" fill="#e5484d"/>
+<text x="483" y="595" fill="#8b949e" font-size="12" font-weight="600">3,074</text>
+<text x="400" y="617" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/market.rs</text>
+<rect x="412" y="606" width="63" height="14" rx="2" fill="#e5484d"/>
+<text x="483" y="617" fill="#8b949e" font-size="12" font-weight="600">3,067</text>
+<rect x="16" y="624" width="990" height="22" fill="#161b22"/>
+<text x="400" y="639" fill="#e6edf3" font-size="12" text-anchor="end">quine/js/SKILLTREE.js</text>
+<rect x="412" y="628" width="63" height="14" rx="2" fill="#e5484d"/>
+<text x="483" y="639" fill="#8b949e" font-size="12" font-weight="600">3,058</text>
+<text x="400" y="661" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/lib.rs</text>
+<rect x="412" y="650" width="62" height="14" rx="2" fill="#e5484d"/>
+<text x="482" y="661" fill="#8b949e" font-size="12" font-weight="600">3,040</text>
+<rect x="16" y="668" width="990" height="22" fill="#161b22"/>
+<text x="400" y="683" fill="#e6edf3" font-size="12" text-anchor="end">run/tests/tui.rs</text>
+<rect x="412" y="672" width="61" height="14" rx="2" fill="#e5484d"/>
+<text x="481" y="683" fill="#8b949e" font-size="12" font-weight="600">2,952</text>
+<text x="400" y="705" fill="#e6edf3" font-size="12" text-anchor="end">store/src/ug3d.rs</text>
+<rect x="412" y="694" width="60" height="14" rx="2" fill="#e5484d"/>
+<text x="480" y="705" fill="#8b949e" font-size="12" font-weight="600">2,939</text>
+<rect x="16" y="712" width="990" height="22" fill="#161b22"/>
+<text x="400" y="727" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/quality.rs</text>
+<rect x="412" y="716" width="57" height="14" rx="2" fill="#e5484d"/>
+<text x="477" y="727" fill="#8b949e" font-size="12" font-weight="600">2,799</text>
+<text x="400" y="749" fill="#e6edf3" font-size="12" text-anchor="end">run/src/bundle/admission.rs</text>
+<rect x="412" y="738" width="55" height="14" rx="2" fill="#e5484d"/>
+<text x="475" y="749" fill="#8b949e" font-size="12" font-weight="600">2,705</text>
+<rect x="16" y="756" width="990" height="22" fill="#161b22"/>
+<text x="400" y="771" fill="#e6edf3" font-size="12" text-anchor="end">run/tests/unit/supervisor_quine_runtime.rs</text>
+<rect x="412" y="760" width="52" height="14" rx="2" fill="#e5484d"/>
+<text x="472" y="771" fill="#8b949e" font-size="12" font-weight="600">2,528</text>
+<text x="400" y="793" fill="#e6edf3" font-size="12" text-anchor="end">projects/tools/tests/test_lucid_viewer.py</text>
+<rect x="412" y="782" width="51" height="14" rx="2" fill="#e2a336"/>
+<text x="471" y="793" fill="#8b949e" font-size="12" font-weight="600">2,471</text>
+<rect x="16" y="800" width="990" height="22" fill="#161b22"/>
+<text x="400" y="815" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/executive/quine_studio.rs</text>
+<rect x="412" y="804" width="48" height="14" rx="2" fill="#e2a336"/>
+<text x="468" y="815" fill="#8b949e" font-size="12" font-weight="600">2,354</text>
+<text x="400" y="837" fill="#e6edf3" font-size="12" text-anchor="end">projects/tools/serve_handler.py</text>
+<rect x="412" y="826" width="48" height="14" rx="2" fill="#e2a336"/>
+<text x="468" y="837" fill="#8b949e" font-size="12" font-weight="600">2,343</text>
+<rect x="16" y="844" width="990" height="22" fill="#161b22"/>
+<text x="400" y="859" fill="#e6edf3" font-size="12" text-anchor="end">…atialPerceptionLab/SpatialPerceptionLabController.swift</text>
+<rect x="412" y="848" width="48" height="14" rx="2" fill="#e2a336"/>
+<text x="468" y="859" fill="#8b949e" font-size="12" font-weight="600">2,327</text>
+<text x="400" y="881" fill="#e6edf3" font-size="12" text-anchor="end">…atialPerceptionLab/SpatialPerceptionLabController.swift</text>
+<rect x="412" y="870" width="47" height="14" rx="2" fill="#e2a336"/>
+<text x="467" y="881" fill="#8b949e" font-size="12" font-weight="600">2,313</text>
+<rect x="16" y="888" width="990" height="22" fill="#161b22"/>
+<text x="400" y="903" fill="#e6edf3" font-size="12" text-anchor="end">…atialPerceptionLab/SpatialPerceptionLabController.swift</text>
+<rect x="412" y="892" width="47" height="14" rx="2" fill="#e2a336"/>
+<text x="467" y="903" fill="#8b949e" font-size="12" font-weight="600">2,313</text>
+<text x="400" y="925" fill="#e6edf3" font-size="12" text-anchor="end">…atialPerceptionLab/SpatialPerceptionLabController.swift</text>
+<rect x="412" y="914" width="47" height="14" rx="2" fill="#e2a336"/>
+<text x="467" y="925" fill="#8b949e" font-size="12" font-weight="600">2,313</text>
+<rect x="16" y="932" width="990" height="22" fill="#161b22"/>
+<text x="400" y="947" fill="#e6edf3" font-size="12" text-anchor="end">projects/tooling-census/src/lib.rs</text>
+<rect x="412" y="936" width="46" height="14" rx="2" fill="#e2a336"/>
+<text x="466" y="947" fill="#8b949e" font-size="12" font-weight="600">2,258</text>
+<text x="400" y="969" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/unit/server/tools.rs</text>
+<rect x="412" y="958" width="45" height="14" rx="2" fill="#e2a336"/>
+<text x="465" y="969" fill="#8b949e" font-size="12" font-weight="600">2,205</text>
+<rect x="16" y="976" width="990" height="22" fill="#161b22"/>
+<text x="400" y="991" fill="#e6edf3" font-size="12" text-anchor="end">run/src/main.rs</text>
+<rect x="412" y="980" width="44" height="14" rx="2" fill="#e2a336"/>
+<text x="464" y="991" fill="#8b949e" font-size="12" font-weight="600">2,158</text>
+<text x="400" y="1013" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/role_session/host.rs</text>
+<rect x="412" y="1002" width="44" height="14" rx="2" fill="#e2a336"/>
+<text x="464" y="1013" fill="#8b949e" font-size="12" font-weight="600">2,153</text>
+<rect x="16" y="1020" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1035" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/executive/dashboard_metrics.rs</text>
+<rect x="412" y="1024" width="43" height="14" rx="2" fill="#e2a336"/>
+<text x="463" y="1035" fill="#8b949e" font-size="12" font-weight="600">2,105</text>
+<text x="400" y="1057" fill="#e6edf3" font-size="12" text-anchor="end">run/src/system_tree/adapters.rs</text>
+<rect x="412" y="1046" width="43" height="14" rx="2" fill="#e2a336"/>
+<text x="463" y="1057" fill="#8b949e" font-size="12" font-weight="600">2,099</text>
+<rect x="16" y="1064" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1079" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/metrics/kx.rs</text>
+<rect x="412" y="1068" width="41" height="14" rx="2" fill="#e2a336"/>
+<text x="461" y="1079" fill="#8b949e" font-size="12" font-weight="600">2,029</text>
+<text x="400" y="1101" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/session_operations.rs</text>
+<rect x="412" y="1090" width="41" height="14" rx="2" fill="#e2a336"/>
+<text x="461" y="1101" fill="#8b949e" font-size="12" font-weight="600">2,025</text>
+<rect x="16" y="1108" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1123" fill="#e6edf3" font-size="12" text-anchor="end">maintainer-console/src/styles.css</text>
+<rect x="412" y="1112" width="41" height="14" rx="2" fill="#e2a336"/>
+<text x="461" y="1123" fill="#8b949e" font-size="12" font-weight="600">2,020</text>
+<text x="400" y="1145" fill="#e6edf3" font-size="12" text-anchor="end">store/src/system_index.rs</text>
+<rect x="412" y="1134" width="41" height="14" rx="2" fill="#e2a336"/>
+<text x="461" y="1145" fill="#8b949e" font-size="12" font-weight="600">1,987</text>
+<rect x="16" y="1152" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1167" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/committer.rs</text>
+<rect x="412" y="1156" width="40" height="14" rx="2" fill="#e2a336"/>
+<text x="460" y="1167" fill="#8b949e" font-size="12" font-weight="600">1,964</text>
+<text x="400" y="1189" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/witness_console.rs</text>
+<rect x="412" y="1178" width="40" height="14" rx="2" fill="#e2a336"/>
+<text x="460" y="1189" fill="#8b949e" font-size="12" font-weight="600">1,946</text>
+<rect x="16" y="1196" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1211" fill="#e6edf3" font-size="12" text-anchor="end">macos-shell/Shared/ScenePaintKit/SceneStyle.swift</text>
+<rect x="412" y="1200" width="39" height="14" rx="2" fill="#e2a336"/>
+<text x="459" y="1211" fill="#8b949e" font-size="12" font-weight="600">1,912</text>
+<text x="400" y="1233" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/board_evidence.rs</text>
+<rect x="412" y="1222" width="38" height="14" rx="2" fill="#e2a336"/>
+<text x="458" y="1233" fill="#8b949e" font-size="12" font-weight="600">1,872</text>
+<rect x="16" y="1240" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1255" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/unit/fleet.rs</text>
+<rect x="412" y="1244" width="38" height="14" rx="2" fill="#e2a336"/>
+<text x="458" y="1255" fill="#8b949e" font-size="12" font-weight="600">1,847</text>
+<text x="400" y="1277" fill="#e6edf3" font-size="12" text-anchor="end">run/src/registry.rs</text>
+<rect x="412" y="1266" width="38" height="14" rx="2" fill="#e2a336"/>
+<text x="458" y="1277" fill="#8b949e" font-size="12" font-weight="600">1,843</text>
+<rect x="16" y="1284" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1299" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/duplex_audio.rs</text>
+<rect x="412" y="1288" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1299" fill="#8b949e" font-size="12" font-weight="600">1,837</text>
+<text x="400" y="1321" fill="#e6edf3" font-size="12" text-anchor="end">android-shell/rust-hub/src/ug3d.rs</text>
+<rect x="412" y="1310" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1321" fill="#8b949e" font-size="12" font-weight="600">1,827</text>
+<rect x="16" y="1328" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1343" fill="#e6edf3" font-size="12" text-anchor="end">run/src/logs.rs</text>
+<rect x="412" y="1332" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1343" fill="#8b949e" font-size="12" font-weight="600">1,826</text>
+<text x="400" y="1365" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/metrics/telemetry.rs</text>
+<rect x="412" y="1354" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1365" fill="#8b949e" font-size="12" font-weight="600">1,824</text>
+<rect x="16" y="1372" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1387" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/voice_turn.rs</text>
+<rect x="412" y="1376" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1387" fill="#8b949e" font-size="12" font-weight="600">1,815</text>
+<text x="400" y="1409" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/role_session/lifecycle.rs</text>
+<rect x="412" y="1398" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1409" fill="#8b949e" font-size="12" font-weight="600">1,793</text>
+<rect x="16" y="1416" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1431" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/role_session.rs</text>
+<rect x="412" y="1420" width="37" height="14" rx="2" fill="#e2a336"/>
+<text x="457" y="1431" fill="#8b949e" font-size="12" font-weight="600">1,790</text>
+<text x="400" y="1453" fill="#e6edf3" font-size="12" text-anchor="end">plexus-service/src/main.rs</text>
+<rect x="412" y="1442" width="36" height="14" rx="2" fill="#e2a336"/>
+<text x="456" y="1453" fill="#8b949e" font-size="12" font-weight="600">1,771</text>
+<rect x="16" y="1460" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1475" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/executive_applet/query.rs</text>
+<rect x="412" y="1464" width="36" height="14" rx="2" fill="#e2a336"/>
+<text x="456" y="1475" fill="#8b949e" font-size="12" font-weight="600">1,769</text>
+<text x="400" y="1497" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/project_canon.rs</text>
+<rect x="412" y="1486" width="36" height="14" rx="2" fill="#e2a336"/>
+<text x="456" y="1497" fill="#8b949e" font-size="12" font-weight="600">1,765</text>
+<rect x="16" y="1504" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1519" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/providers.rs</text>
+<rect x="412" y="1508" width="36" height="14" rx="2" fill="#e2a336"/>
+<text x="456" y="1519" fill="#8b949e" font-size="12" font-weight="600">1,762</text>
+<text x="400" y="1541" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/effigy/mod.rs</text>
+<rect x="412" y="1530" width="36" height="14" rx="2" fill="#e2a336"/>
+<text x="456" y="1541" fill="#8b949e" font-size="12" font-weight="600">1,759</text>
+<rect x="16" y="1548" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1563" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/session_operations.rs</text>
+<rect x="412" y="1552" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1563" fill="#8b949e" font-size="12" font-weight="600">1,741</text>
+<text x="400" y="1585" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/screen.rs</text>
+<rect x="412" y="1574" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1585" fill="#8b949e" font-size="12" font-weight="600">1,740</text>
+<rect x="16" y="1592" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1607" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/terminal_scene.rs</text>
+<rect x="412" y="1596" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1607" fill="#8b949e" font-size="12" font-weight="600">1,734</text>
+<text x="400" y="1629" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/ug3d/render_plan.rs</text>
+<rect x="412" y="1618" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1629" fill="#8b949e" font-size="12" font-weight="600">1,732</text>
+<rect x="16" y="1636" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1651" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/mod.rs</text>
+<rect x="412" y="1640" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1651" fill="#8b949e" font-size="12" font-weight="600">1,722</text>
+<text x="400" y="1673" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/domain/conversation.rs</text>
+<rect x="412" y="1662" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1673" fill="#8b949e" font-size="12" font-weight="600">1,719</text>
+<rect x="16" y="1680" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1695" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/shell_parity.rs</text>
+<rect x="412" y="1684" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1695" fill="#8b949e" font-size="12" font-weight="600">1,717</text>
+<text x="400" y="1717" fill="#e6edf3" font-size="12" text-anchor="end">quine/js/MERMAID.js</text>
+<rect x="412" y="1706" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1717" fill="#8b949e" font-size="12" font-weight="600">1,714</text>
+<rect x="16" y="1724" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1739" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/root_catalog.rs</text>
+<rect x="412" y="1728" width="35" height="14" rx="2" fill="#e2a336"/>
+<text x="455" y="1739" fill="#8b949e" font-size="12" font-weight="600">1,712</text>
+<text x="400" y="1761" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/android_hub.rs</text>
+<rect x="412" y="1750" width="34" height="14" rx="2" fill="#e2a336"/>
+<text x="454" y="1761" fill="#8b949e" font-size="12" font-weight="600">1,685</text>
+<rect x="16" y="1768" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1783" fill="#e6edf3" font-size="12" text-anchor="end">run/src/models.rs</text>
+<rect x="412" y="1772" width="34" height="14" rx="2" fill="#e2a336"/>
+<text x="454" y="1783" fill="#8b949e" font-size="12" font-weight="600">1,681</text>
+<text x="400" y="1805" fill="#e6edf3" font-size="12" text-anchor="end">run/src/system_tree/presentation.rs</text>
+<rect x="412" y="1794" width="34" height="14" rx="2" fill="#e2a336"/>
+<text x="454" y="1805" fill="#8b949e" font-size="12" font-weight="600">1,679</text>
+<rect x="16" y="1812" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1827" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/viz/state.rs</text>
+<rect x="412" y="1816" width="34" height="14" rx="2" fill="#e2a336"/>
+<text x="454" y="1827" fill="#8b949e" font-size="12" font-weight="600">1,659</text>
+<text x="400" y="1849" fill="#e6edf3" font-size="12" text-anchor="end">store/src/schema_registry.rs</text>
+<rect x="412" y="1838" width="34" height="14" rx="2" fill="#e2a336"/>
+<text x="454" y="1849" fill="#8b949e" font-size="12" font-weight="600">1,656</text>
+<rect x="16" y="1856" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1871" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/ug3d/morph.rs</text>
+<rect x="412" y="1860" width="33" height="14" rx="2" fill="#e2a336"/>
+<text x="453" y="1871" fill="#8b949e" font-size="12" font-weight="600">1,642</text>
+<text x="400" y="1893" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/companion.rs</text>
+<rect x="412" y="1882" width="33" height="14" rx="2" fill="#e2a336"/>
+<text x="453" y="1893" fill="#8b949e" font-size="12" font-weight="600">1,636</text>
+<rect x="16" y="1900" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1915" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/pulse.rs</text>
+<rect x="412" y="1904" width="33" height="14" rx="2" fill="#e2a336"/>
+<text x="453" y="1915" fill="#8b949e" font-size="12" font-weight="600">1,612</text>
+<text x="400" y="1937" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/watcher_service/state.rs</text>
+<rect x="412" y="1926" width="33" height="14" rx="2" fill="#e2a336"/>
+<text x="453" y="1937" fill="#8b949e" font-size="12" font-weight="600">1,608</text>
+<rect x="16" y="1944" width="990" height="22" fill="#161b22"/>
+<text x="400" y="1959" fill="#e6edf3" font-size="12" text-anchor="end">store/src/applet.rs</text>
+<rect x="412" y="1948" width="33" height="14" rx="2" fill="#e2a336"/>
+<text x="453" y="1959" fill="#8b949e" font-size="12" font-weight="600">1,597</text>
+<text x="400" y="1981" fill="#e6edf3" font-size="12" text-anchor="end">run/tests/system_tree.rs</text>
+<rect x="412" y="1970" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="1981" fill="#8b949e" font-size="12" font-weight="600">1,589</text>
+<rect x="16" y="1988" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2003" fill="#e6edf3" font-size="12" text-anchor="end">ugui/fixtures/market/frozen/assistant-ui-ag-ui-api.ts</text>
+<rect x="412" y="1992" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="2003" fill="#8b949e" font-size="12" font-weight="600">1,587</text>
+<text x="400" y="2025" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/json.rs</text>
+<rect x="412" y="2014" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="2025" fill="#8b949e" font-size="12" font-weight="600">1,584</text>
+<rect x="16" y="2032" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2047" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/sync.rs</text>
+<rect x="412" y="2036" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="2047" fill="#8b949e" font-size="12" font-weight="600">1,580</text>
+<text x="400" y="2069" fill="#e6edf3" font-size="12" text-anchor="end">ugui/fixtures/market/frozen/json-render-0.19.0-schema.ts</text>
+<rect x="412" y="2058" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="2069" fill="#8b949e" font-size="12" font-weight="600">1,570</text>
+<rect x="16" y="2076" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2091" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/system_shell/types.rs</text>
+<rect x="412" y="2080" width="32" height="14" rx="2" fill="#e2a336"/>
+<text x="452" y="2091" fill="#8b949e" font-size="12" font-weight="600">1,550</text>
+<text x="400" y="2113" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/test_isolation.rs</text>
+<rect x="412" y="2102" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2113" fill="#8b949e" font-size="12" font-weight="600">1,530</text>
+<rect x="16" y="2120" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2135" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/viz/adapters.rs</text>
+<rect x="412" y="2124" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2135" fill="#8b949e" font-size="12" font-weight="600">1,529</text>
+<text x="400" y="2157" fill="#e6edf3" font-size="12" text-anchor="end">run/src/root_spec.rs</text>
+<rect x="412" y="2146" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2157" fill="#8b949e" font-size="12" font-weight="600">1,527</text>
+<rect x="16" y="2164" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2179" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/model_evidence.rs</text>
+<rect x="412" y="2168" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2179" fill="#8b949e" font-size="12" font-weight="600">1,516</text>
+<text x="400" y="2201" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/capability_broker.rs</text>
+<rect x="412" y="2190" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2201" fill="#8b949e" font-size="12" font-weight="600">1,507</text>
+<rect x="16" y="2208" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2223" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/operator_summary.rs</text>
+<rect x="412" y="2212" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2223" fill="#8b949e" font-size="12" font-weight="600">1,506</text>
+<text x="400" y="2245" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/ignore_policy.rs</text>
+<rect x="412" y="2234" width="31" height="14" rx="2" fill="#e2a336"/>
+<text x="451" y="2245" fill="#8b949e" font-size="12" font-weight="600">1,503</text>
+<rect x="16" y="2252" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2267" fill="#e6edf3" font-size="12" text-anchor="end">linux-shell/src/kiosk.rs</text>
+<rect x="412" y="2256" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2267" fill="#8b949e" font-size="12" font-weight="600">1,482</text>
+<text x="400" y="2289" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/qualification_execution.rs</text>
+<rect x="412" y="2278" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2289" fill="#8b949e" font-size="12" font-weight="600">1,475</text>
+<rect x="16" y="2296" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2311" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tests/unit/system_shell/tests.rs</text>
+<rect x="412" y="2300" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2311" fill="#8b949e" font-size="12" font-weight="600">1,471</text>
+<text x="400" y="2333" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tests/unit/applets/searauber/tests.rs</text>
+<rect x="412" y="2322" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2333" fill="#8b949e" font-size="12" font-weight="600">1,465</text>
+<rect x="16" y="2340" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2355" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/fleet_auto_settlement.rs</text>
+<rect x="412" y="2344" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2355" fill="#8b949e" font-size="12" font-weight="600">1,453</text>
+<text x="400" y="2377" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/recon.rs</text>
+<rect x="412" y="2366" width="30" height="14" rx="2" fill="#d8c15a"/>
+<text x="450" y="2377" fill="#8b949e" font-size="12" font-weight="600">1,451</text>
+<rect x="16" y="2384" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2399" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/app/records.rs</text>
+<rect x="412" y="2388" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2399" fill="#8b949e" font-size="12" font-weight="600">1,447</text>
+<text x="400" y="2421" fill="#e6edf3" font-size="12" text-anchor="end">…src/main/java/dev/agentexperiments/ae/scene/Ug3dSceneCoreHost.kt</text>
+<rect x="412" y="2410" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2421" fill="#8b949e" font-size="12" font-weight="600">1,446</text>
+<rect x="16" y="2428" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2443" fill="#e6edf3" font-size="12" text-anchor="end">plexus-service/src/qualification.rs</text>
+<rect x="412" y="2432" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2443" fill="#8b949e" font-size="12" font-weight="600">1,446</text>
+<text x="400" y="2465" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/prompt.rs</text>
+<rect x="412" y="2454" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2465" fill="#8b949e" font-size="12" font-weight="600">1,442</text>
+<rect x="16" y="2472" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2487" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/penguin_score.rs</text>
+<rect x="412" y="2476" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2487" fill="#8b949e" font-size="12" font-weight="600">1,438</text>
+<text x="400" y="2509" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/watcher_service.rs</text>
+<rect x="412" y="2498" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2509" fill="#8b949e" font-size="12" font-weight="600">1,432</text>
+<rect x="16" y="2516" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2531" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/domain/knowledge_ask.rs</text>
+<rect x="412" y="2520" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2531" fill="#8b949e" font-size="12" font-weight="600">1,428</text>
+<text x="400" y="2553" fill="#e6edf3" font-size="12" text-anchor="end">store/src/memory.rs</text>
+<rect x="412" y="2542" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2553" fill="#8b949e" font-size="12" font-weight="600">1,424</text>
+<rect x="16" y="2560" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2575" fill="#e6edf3" font-size="12" text-anchor="end">quine/js/MODALS.js</text>
+<rect x="412" y="2564" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2575" fill="#8b949e" font-size="12" font-weight="600">1,419</text>
+<text x="400" y="2597" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/completion_speech.rs</text>
+<rect x="412" y="2586" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2597" fill="#8b949e" font-size="12" font-weight="600">1,418</text>
+<rect x="16" y="2604" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2619" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/lucid_help.rs</text>
+<rect x="412" y="2608" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2619" fill="#8b949e" font-size="12" font-weight="600">1,418</text>
+<text x="400" y="2641" fill="#e6edf3" font-size="12" text-anchor="end">run/src/it_e2e/model.rs</text>
+<rect x="412" y="2630" width="29" height="14" rx="2" fill="#d8c15a"/>
+<text x="449" y="2641" fill="#8b949e" font-size="12" font-weight="600">1,410</text>
+<rect x="16" y="2648" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2663" fill="#e6edf3" font-size="12" text-anchor="end">store/src/ledger.rs</text>
+<rect x="412" y="2652" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2663" fill="#8b949e" font-size="12" font-weight="600">1,401</text>
+<text x="400" y="2685" fill="#e6edf3" font-size="12" text-anchor="end">quine/js/VIZ.js</text>
+<rect x="412" y="2674" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2685" fill="#8b949e" font-size="12" font-weight="600">1,395</text>
+<rect x="16" y="2692" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2707" fill="#e6edf3" font-size="12" text-anchor="end">macos-shell/Shared/ScenePaintKit/RustProjector.swift</text>
+<rect x="412" y="2696" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2707" fill="#8b949e" font-size="12" font-weight="600">1,386</text>
+<text x="400" y="2729" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/metrics/kx/scanner.rs</text>
+<rect x="412" y="2718" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2729" fill="#8b949e" font-size="12" font-weight="600">1,381</text>
+<rect x="16" y="2736" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2751" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/screen_pyramid.rs</text>
+<rect x="412" y="2740" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2751" fill="#8b949e" font-size="12" font-weight="600">1,379</text>
+<text x="400" y="2773" fill="#e6edf3" font-size="12" text-anchor="end">…/app/src/main/java/dev/agentexperiments/ae/scene/Ug3dRenderer.kt</text>
+<rect x="412" y="2762" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2773" fill="#8b949e" font-size="12" font-weight="600">1,378</text>
+<rect x="16" y="2780" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2795" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/screen_core.rs</text>
+<rect x="412" y="2784" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2795" fill="#8b949e" font-size="12" font-weight="600">1,377</text>
+<text x="400" y="2817" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/app/op_ir/execution_plan.rs</text>
+<rect x="412" y="2806" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2817" fill="#8b949e" font-size="12" font-weight="600">1,377</text>
+<rect x="16" y="2824" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2839" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/viz/projection.rs</text>
+<rect x="412" y="2828" width="28" height="14" rx="2" fill="#d8c15a"/>
+<text x="448" y="2839" fill="#8b949e" font-size="12" font-weight="600">1,376</text>
+<text x="400" y="2861" fill="#e6edf3" font-size="12" text-anchor="end">…ll/Shared/ModelLab/Core/LanguageModelAuditHarness.swift</text>
+<rect x="412" y="2850" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2861" fill="#8b949e" font-size="12" font-weight="600">1,346</text>
+<rect x="16" y="2868" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2883" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/domain/history.rs</text>
+<rect x="412" y="2872" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2883" fill="#8b949e" font-size="12" font-weight="600">1,341</text>
+<text x="400" y="2905" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/intent_cache.rs</text>
+<rect x="412" y="2894" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2905" fill="#8b949e" font-size="12" font-weight="600">1,318</text>
+<rect x="16" y="2912" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2927" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/scheduler.rs</text>
+<rect x="412" y="2916" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2927" fill="#8b949e" font-size="12" font-weight="600">1,318</text>
+<text x="400" y="2949" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/effigy/transfer.rs</text>
+<rect x="412" y="2938" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2949" fill="#8b949e" font-size="12" font-weight="600">1,317</text>
+<rect x="16" y="2956" width="990" height="22" fill="#161b22"/>
+<text x="400" y="2971" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/game/runtime.rs</text>
+<rect x="412" y="2960" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2971" fill="#8b949e" font-size="12" font-weight="600">1,310</text>
+<text x="400" y="2993" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/rust_magic_number_lint.rs</text>
+<rect x="412" y="2982" width="27" height="14" rx="2" fill="#d8c15a"/>
+<text x="447" y="2993" fill="#8b949e" font-size="12" font-weight="600">1,307</text>
+<rect x="16" y="3000" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3015" fill="#e6edf3" font-size="12" text-anchor="end">…src/test/java/dev/agentexperiments/ae/scene/Ug3dContractsTest.kt</text>
+<rect x="412" y="3004" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3015" fill="#8b949e" font-size="12" font-weight="600">1,298</text>
+<text x="400" y="3037" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/dispatch_draft.rs</text>
+<rect x="412" y="3026" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3037" fill="#8b949e" font-size="12" font-weight="600">1,295</text>
+<rect x="16" y="3044" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3059" fill="#e6edf3" font-size="12" text-anchor="end">run/src/shell_metrics.rs</text>
+<rect x="412" y="3048" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3059" fill="#8b949e" font-size="12" font-weight="600">1,282</text>
+<text x="400" y="3081" fill="#e6edf3" font-size="12" text-anchor="end">run/src/catalyst/f7b/workspace.rs</text>
+<rect x="412" y="3070" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3081" fill="#8b949e" font-size="12" font-weight="600">1,275</text>
+<rect x="16" y="3088" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3103" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/carry.rs</text>
+<rect x="412" y="3092" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3103" fill="#8b949e" font-size="12" font-weight="600">1,274</text>
+<text x="400" y="3125" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tests/quine_applet.rs</text>
+<rect x="412" y="3114" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3125" fill="#8b949e" font-size="12" font-weight="600">1,262</text>
+<rect x="16" y="3132" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3147" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/context/clipboard/model.rs</text>
+<rect x="412" y="3136" width="26" height="14" rx="2" fill="#d8c15a"/>
+<text x="446" y="3147" fill="#8b949e" font-size="12" font-weight="600">1,261</text>
+<text x="400" y="3169" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/lucid_signal_lint.rs</text>
+<rect x="412" y="3158" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3169" fill="#8b949e" font-size="12" font-weight="600">1,253</text>
+<rect x="16" y="3176" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3191" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/system_shell/interaction.rs</text>
+<rect x="412" y="3180" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3191" fill="#8b949e" font-size="12" font-weight="600">1,243</text>
+<text x="400" y="3213" fill="#e6edf3" font-size="12" text-anchor="end">envelope/src/capabilities.rs</text>
+<rect x="412" y="3202" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3213" fill="#8b949e" font-size="12" font-weight="600">1,241</text>
+<rect x="16" y="3220" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3235" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/ug3d/renderer/mod.rs</text>
+<rect x="412" y="3224" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3235" fill="#8b949e" font-size="12" font-weight="600">1,241</text>
+<text x="400" y="3257" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/executive_applet/projection.rs</text>
+<rect x="412" y="3246" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3257" fill="#8b949e" font-size="12" font-weight="600">1,229</text>
+<rect x="16" y="3264" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3279" fill="#e6edf3" font-size="12" text-anchor="end">run/tests/supervisor_authority.rs</text>
+<rect x="412" y="3268" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3279" fill="#8b949e" font-size="12" font-weight="600">1,226</text>
+<text x="400" y="3301" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/unit/copilot_sdk.rs</text>
+<rect x="412" y="3290" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3301" fill="#8b949e" font-size="12" font-weight="600">1,225</text>
+<rect x="16" y="3308" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3323" fill="#e6edf3" font-size="12" text-anchor="end">projects/native/src/lib.rs</text>
+<rect x="412" y="3312" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3323" fill="#8b949e" font-size="12" font-weight="600">1,225</text>
+<text x="400" y="3345" fill="#e6edf3" font-size="12" text-anchor="end">linux-shell/src/vm/process.rs</text>
+<rect x="412" y="3334" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3345" fill="#8b949e" font-size="12" font-weight="600">1,217</text>
+<rect x="16" y="3352" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3367" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/game/package.rs</text>
+<rect x="412" y="3356" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3367" fill="#8b949e" font-size="12" font-weight="600">1,216</text>
+<text x="400" y="3389" fill="#e6edf3" font-size="12" text-anchor="end">…pp/src/main/java/dev/agentexperiments/ae/scene/Ug3dRenderPlan.kt</text>
+<rect x="412" y="3378" width="25" height="14" rx="2" fill="#d8c15a"/>
+<text x="445" y="3389" fill="#8b949e" font-size="12" font-weight="600">1,212</text>
+<rect x="16" y="3396" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3411" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/plan_sync.rs</text>
+<rect x="412" y="3400" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3411" fill="#8b949e" font-size="12" font-weight="600">1,204</text>
+<text x="400" y="3433" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/copilot_sdk_fs.rs</text>
+<rect x="412" y="3422" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3433" fill="#8b949e" font-size="12" font-weight="600">1,203</text>
+<rect x="16" y="3440" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3455" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/butler.rs</text>
+<rect x="412" y="3444" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3455" fill="#8b949e" font-size="12" font-weight="600">1,196</text>
+<text x="400" y="3477" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/operator_summary/rendering/pulse.rs</text>
+<rect x="412" y="3466" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3477" fill="#8b949e" font-size="12" font-weight="600">1,190</text>
+<rect x="16" y="3484" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3499" fill="#e6edf3" font-size="12" text-anchor="end">projects/native/src/host.rs</text>
+<rect x="412" y="3488" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3499" fill="#8b949e" font-size="12" font-weight="600">1,188</text>
+<text x="400" y="3521" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/dispatch_plan_mutations.rs</text>
+<rect x="412" y="3510" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3521" fill="#8b949e" font-size="12" font-weight="600">1,188</text>
+<rect x="16" y="3528" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3543" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tests/local_intelligence.rs</text>
+<rect x="412" y="3532" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3543" fill="#8b949e" font-size="12" font-weight="600">1,187</text>
+<text x="400" y="3565" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/system_shell/resident_apps.rs</text>
+<rect x="412" y="3554" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3565" fill="#8b949e" font-size="12" font-weight="600">1,184</text>
+<rect x="16" y="3572" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3587" fill="#e6edf3" font-size="12" text-anchor="end">marketplace/src/artifacts.rs</text>
+<rect x="412" y="3576" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3587" fill="#8b949e" font-size="12" font-weight="600">1,179</text>
+<text x="400" y="3609" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tools/codegen/src/general.rs</text>
+<rect x="412" y="3598" width="24" height="14" rx="2" fill="#d8c15a"/>
+<text x="444" y="3609" fill="#8b949e" font-size="12" font-weight="600">1,176</text>
+<rect x="16" y="3616" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3631" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/executive/ae_shell_scene.rs</text>
+<rect x="412" y="3620" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3631" fill="#8b949e" font-size="12" font-weight="600">1,160</text>
+<text x="400" y="3653" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/lucid.rs</text>
+<rect x="412" y="3642" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3653" fill="#8b949e" font-size="12" font-weight="600">1,158</text>
+<rect x="16" y="3660" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3675" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/service_wire.rs</text>
+<rect x="412" y="3664" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3675" fill="#8b949e" font-size="12" font-weight="600">1,153</text>
+<text x="400" y="3697" fill="#e6edf3" font-size="12" text-anchor="end">projects/tools/world_knowledge.py</text>
+<rect x="412" y="3686" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3697" fill="#8b949e" font-size="12" font-weight="600">1,150</text>
+<rect x="16" y="3704" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3719" fill="#e6edf3" font-size="12" text-anchor="end">…/app/src/main/java/dev/agentexperiments/ae/scene/MainActivity.kt</text>
+<rect x="412" y="3708" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3719" fill="#8b949e" font-size="12" font-weight="600">1,149</text>
+<text x="400" y="3741" fill="#e6edf3" font-size="12" text-anchor="end">run/src/executive_state.rs</text>
+<rect x="412" y="3730" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3741" fill="#8b949e" font-size="12" font-weight="600">1,144</text>
+<rect x="16" y="3748" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3763" fill="#e6edf3" font-size="12" text-anchor="end">…Shell/Sources/MochiIOSNativeApp/MochiIOSNativeApp.swift</text>
+<rect x="412" y="3752" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3763" fill="#8b949e" font-size="12" font-weight="600">1,139</text>
+<text x="400" y="3785" fill="#e6edf3" font-size="12" text-anchor="end">plexus/src/relay.rs</text>
+<rect x="412" y="3774" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3785" fill="#8b949e" font-size="12" font-weight="600">1,130</text>
+<rect x="16" y="3792" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3807" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/applet.rs</text>
+<rect x="412" y="3796" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3807" fill="#8b949e" font-size="12" font-weight="600">1,120</text>
+<text x="400" y="3829" fill="#e6edf3" font-size="12" text-anchor="end">windows-shell/src/qualification.rs</text>
+<rect x="412" y="3818" width="23" height="14" rx="2" fill="#d8c15a"/>
+<text x="443" y="3829" fill="#8b949e" font-size="12" font-weight="600">1,114</text>
+<rect x="16" y="3836" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3851" fill="#e6edf3" font-size="12" text-anchor="end">run/src/studio_state.rs</text>
+<rect x="412" y="3840" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3851" fill="#8b949e" font-size="12" font-weight="600">1,112</text>
+<text x="400" y="3873" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tests/remaining_root_applets.rs</text>
+<rect x="412" y="3862" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3873" fill="#8b949e" font-size="12" font-weight="600">1,108</text>
+<rect x="16" y="3880" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3895" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tools/codegen/src/fixtures.rs</text>
+<rect x="412" y="3884" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3895" fill="#8b949e" font-size="12" font-weight="600">1,103</text>
+<text x="400" y="3917" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/github_read_policy.rs</text>
+<rect x="412" y="3906" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3917" fill="#8b949e" font-size="12" font-weight="600">1,101</text>
+<rect x="16" y="3924" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3939" fill="#e6edf3" font-size="12" text-anchor="end">quine/tests/watcher_committer_shipping.rs</text>
+<rect x="412" y="3928" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3939" fill="#8b949e" font-size="12" font-weight="600">1,100</text>
+<text x="400" y="3961" fill="#e6edf3" font-size="12" text-anchor="end">…cos-shell/IOSShell/Sources/ModelLab/ModelLabProbe.swift</text>
+<rect x="412" y="3950" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3961" fill="#8b949e" font-size="12" font-weight="600">1,099</text>
+<rect x="16" y="3968" width="990" height="22" fill="#161b22"/>
+<text x="400" y="3983" fill="#e6edf3" font-size="12" text-anchor="end">…253060/ios-project/Sources/ModelLab/ModelLabProbe.swift</text>
+<rect x="412" y="3972" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="3983" fill="#8b949e" font-size="12" font-weight="600">1,099</text>
+<text x="400" y="4005" fill="#e6edf3" font-size="12" text-anchor="end">…091134/ios-project/Sources/ModelLab/ModelLabProbe.swift</text>
+<rect x="412" y="3994" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4005" fill="#8b949e" font-size="12" font-weight="600">1,099</text>
+<rect x="16" y="4012" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4027" fill="#e6edf3" font-size="12" text-anchor="end">…922390/ios-project/Sources/ModelLab/ModelLabProbe.swift</text>
+<rect x="412" y="4016" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4027" fill="#8b949e" font-size="12" font-weight="600">1,099</text>
+<text x="400" y="4049" fill="#e6edf3" font-size="12" text-anchor="end">macos-shell/macos-shell/SurfaceHostView.swift</text>
+<rect x="412" y="4038" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4049" fill="#8b949e" font-size="12" font-weight="600">1,098</text>
+<rect x="16" y="4056" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4071" fill="#e6edf3" font-size="12" text-anchor="end">store/src/envelope.rs</text>
+<rect x="412" y="4060" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4071" fill="#8b949e" font-size="12" font-weight="600">1,098</text>
+<text x="400" y="4093" fill="#e6edf3" font-size="12" text-anchor="end">plexus-service/src/control_plane.rs</text>
+<rect x="412" y="4082" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4093" fill="#8b949e" font-size="12" font-weight="600">1,096</text>
+<rect x="16" y="4100" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4115" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tools/codegen/src/skins.rs</text>
+<rect x="412" y="4104" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4115" fill="#8b949e" font-size="12" font-weight="600">1,092</text>
+<text x="400" y="4137" fill="#e6edf3" font-size="12" text-anchor="end">…a922b281d1964e8/1218386130/projector-package/src/lib.rs</text>
+<rect x="412" y="4126" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4137" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<rect x="16" y="4144" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4159" fill="#e6edf3" font-size="12" text-anchor="end">…a922b281d1964e8/1662774176/projector-package/src/lib.rs</text>
+<rect x="412" y="4148" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4159" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<text x="400" y="4181" fill="#e6edf3" font-size="12" text-anchor="end">…a922b281d1964e8/1759253060/projector-package/src/lib.rs</text>
+<rect x="412" y="4170" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4181" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<rect x="16" y="4188" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4203" fill="#e6edf3" font-size="12" text-anchor="end">…aa922b281d1964e8/352071453/projector-package/src/lib.rs</text>
+<rect x="412" y="4192" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4203" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<text x="400" y="4225" fill="#e6edf3" font-size="12" text-anchor="end">…aa922b281d1964e8/529179550/projector-package/src/lib.rs</text>
+<rect x="412" y="4214" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4225" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<rect x="16" y="4232" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4247" fill="#e6edf3" font-size="12" text-anchor="end">…aa922b281d1964e8/653091134/projector-package/src/lib.rs</text>
+<rect x="412" y="4236" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4247" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<text x="400" y="4269" fill="#e6edf3" font-size="12" text-anchor="end">…aa922b281d1964e8/700922390/projector-package/src/lib.rs</text>
+<rect x="412" y="4258" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4269" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<rect x="16" y="4276" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4291" fill="#e6edf3" font-size="12" text-anchor="end">…aa922b281d1964e8/784986792/projector-package/src/lib.rs</text>
+<rect x="412" y="4280" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4291" fill="#8b949e" font-size="12" font-weight="600">1,089</text>
+<text x="400" y="4313" fill="#e6edf3" font-size="12" text-anchor="end">…oject/Sources/MochiIOSNativeApp/MochiIOSNativeApp.swift</text>
+<rect x="412" y="4302" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4313" fill="#8b949e" font-size="12" font-weight="600">1,087</text>
+<rect x="16" y="4320" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4335" fill="#e6edf3" font-size="12" text-anchor="end">…oject/Sources/MochiIOSNativeApp/MochiIOSNativeApp.swift</text>
+<rect x="412" y="4324" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4335" fill="#8b949e" font-size="12" font-weight="600">1,087</text>
+<text x="400" y="4357" fill="#e6edf3" font-size="12" text-anchor="end">…oject/Sources/MochiIOSNativeApp/MochiIOSNativeApp.swift</text>
+<rect x="412" y="4346" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4357" fill="#8b949e" font-size="12" font-weight="600">1,087</text>
+<rect x="16" y="4364" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4379" fill="#e6edf3" font-size="12" text-anchor="end">ugui/native-projector/src/lib.rs</text>
+<rect x="412" y="4368" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4379" fill="#8b949e" font-size="12" font-weight="600">1,081</text>
+<text x="400" y="4401" fill="#e6edf3" font-size="12" text-anchor="end">projects/js/demo.js</text>
+<rect x="412" y="4390" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4401" fill="#8b949e" font-size="12" font-weight="600">1,078</text>
+<rect x="16" y="4408" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4423" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/schema_version_lint.rs</text>
+<rect x="412" y="4412" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4423" fill="#8b949e" font-size="12" font-weight="600">1,073</text>
+<text x="400" y="4445" fill="#e6edf3" font-size="12" text-anchor="end">ugui/tools/codegen/src/macos.rs</text>
+<rect x="412" y="4434" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4445" fill="#8b949e" font-size="12" font-weight="600">1,071</text>
+<rect x="16" y="4452" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4467" fill="#e6edf3" font-size="12" text-anchor="end">store/src/conversation/store.rs</text>
+<rect x="412" y="4456" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4467" fill="#8b949e" font-size="12" font-weight="600">1,069</text>
+<text x="400" y="4489" fill="#e6edf3" font-size="12" text-anchor="end">projects/tools/tests/test_recon_world.py</text>
+<rect x="412" y="4478" width="22" height="14" rx="2" fill="#d8c15a"/>
+<text x="442" y="4489" fill="#8b949e" font-size="12" font-weight="600">1,065</text>
+<rect x="16" y="4496" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4511" fill="#e6edf3" font-size="12" text-anchor="end">projects/tools/helpers/bake_demo_voices.py</text>
+<rect x="412" y="4500" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4511" fill="#8b949e" font-size="12" font-weight="600">1,060</text>
+<text x="400" y="4533" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/terminal.rs</text>
+<rect x="412" y="4522" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4533" fill="#8b949e" font-size="12" font-weight="600">1,060</text>
+<rect x="16" y="4540" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4555" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/app/studio.rs</text>
+<rect x="412" y="4544" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4555" fill="#8b949e" font-size="12" font-weight="600">1,058</text>
+<text x="400" y="4577" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/ug3d/editor/reducer.rs</text>
+<rect x="412" y="4566" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4577" fill="#8b949e" font-size="12" font-weight="600">1,055</text>
+<rect x="16" y="4584" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4599" fill="#e6edf3" font-size="12" text-anchor="end">run/src/system_observer.rs</text>
+<rect x="412" y="4588" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4599" fill="#8b949e" font-size="12" font-weight="600">1,046</text>
+<text x="400" y="4621" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/app/studio/edit.rs</text>
+<rect x="412" y="4610" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4621" fill="#8b949e" font-size="12" font-weight="600">1,044</text>
+<rect x="16" y="4628" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4643" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/projects/mod.rs</text>
+<rect x="412" y="4632" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4643" fill="#8b949e" font-size="12" font-weight="600">1,041</text>
+<text x="400" y="4665" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/metrics/history.rs</text>
+<rect x="412" y="4654" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4665" fill="#8b949e" font-size="12" font-weight="600">1,039</text>
+<rect x="16" y="4672" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4687" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/screen_analysis.rs</text>
+<rect x="412" y="4676" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4687" fill="#8b949e" font-size="12" font-weight="600">1,034</text>
+<text x="400" y="4709" fill="#e6edf3" font-size="12" text-anchor="end">butler/tests/unit/engineer_dispatch.rs</text>
+<rect x="412" y="4698" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4709" fill="#8b949e" font-size="12" font-weight="600">1,031</text>
+<rect x="16" y="4716" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4731" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/evaluation_effects.rs</text>
+<rect x="412" y="4720" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4731" fill="#8b949e" font-size="12" font-weight="600">1,030</text>
+<text x="400" y="4753" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/marketplace.rs</text>
+<rect x="412" y="4742" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4753" fill="#8b949e" font-size="12" font-weight="600">1,026</text>
+<rect x="16" y="4760" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4775" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/executive/scores_settings.rs</text>
+<rect x="412" y="4764" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4775" fill="#8b949e" font-size="12" font-weight="600">1,021</text>
+<text x="400" y="4797" fill="#e6edf3" font-size="12" text-anchor="end">run/src/system_tree/store.rs</text>
+<rect x="412" y="4786" width="21" height="14" rx="2" fill="#d8c15a"/>
+<text x="441" y="4797" fill="#8b949e" font-size="12" font-weight="600">1,020</text>
+<rect x="16" y="4804" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4819" fill="#e6edf3" font-size="12" text-anchor="end">ugui/src/applets/searauber/runtime.rs</text>
+<rect x="412" y="4808" width="20" height="14" rx="2" fill="#d8c15a"/>
+<text x="440" y="4819" fill="#8b949e" font-size="12" font-weight="600">1,013</text>
+<text x="400" y="4841" fill="#e6edf3" font-size="12" text-anchor="end">butler/src/catalyst_provider/runtime.rs</text>
+<rect x="412" y="4830" width="20" height="14" rx="2" fill="#d8c15a"/>
+<text x="440" y="4841" fill="#8b949e" font-size="12" font-weight="600">1,006</text>
+<rect x="16" y="4848" width="990" height="22" fill="#161b22"/>
+<text x="400" y="4863" fill="#e6edf3" font-size="12" text-anchor="end">quine/src/applet_coverage.rs</text>
+<rect x="412" y="4852" width="20" height="14" rx="2" fill="#d8c15a"/>
+<text x="440" y="4863" fill="#8b949e" font-size="12" font-weight="600">1,003</text>
+<text x="20" y="4892" fill="#8b949e" font-size="11">SOT: projects/json/gen/LOC-BURNDOWN.json · gen: projects/tools/helpers/gen_loc_burndown.py · generated files excluded (fix the generator) 🐧</text>
+</svg>

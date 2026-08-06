@@ -6,7 +6,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetForTests, setWasmInputForTests } from './catalyst-wasm'
-import { AE_EXECUTIVE_TAB_IDS, AE_EXECUTIVE_TABS, aeExecutiveTab } from './contract'
+import {
+  AE_EXECUTIVE_BATCH_TAB_IDS,
+  AE_EXECUTIVE_TAB_IDS,
+  AE_EXECUTIVE_TABS,
+  aeExecutiveTab
+} from './contract'
 
 import { AeExecutiveWorkspace } from '.'
 
@@ -24,7 +29,7 @@ const uguiDocument = (tab: string, body = `RUN ${tab.toUpperCase()}`) => ({
   sections: [
     { id: `${tab}-status`, type: 'status_grid', items: [{ label: 'State', value: 'Ready', status: 'ok' }] }
   ],
-  actions: AE_EXECUTIVE_TAB_IDS.map(item => ({
+  actions: AE_EXECUTIVE_BATCH_TAB_IDS.map(item => ({
     id: `${tab}-tab-${item}`,
     type: 'button',
     label: AE_EXECUTIVE_TABS.find(candidate => candidate.id === item)!.label,
@@ -47,7 +52,7 @@ function envelope(generation = 1, textByTab: Readonly<Record<string, string>> = 
     admission_code: 'admitted',
     blocker: null,
     artifact_generation: ARTIFACT_GENERATION,
-    rows: AE_EXECUTIVE_TAB_IDS.map((tab, index) => ({
+    rows: AE_EXECUTIVE_BATCH_TAB_IDS.map((tab, index) => ({
       schema: 'ae-executive-document-row/1' as const,
       tab,
       source_hash: generationHash(generation, index + 1),
@@ -99,11 +104,14 @@ afterEach(() => {
 })
 
 describe('AE executive Document registry', () => {
-  it('matches the producer-owned 13-tab order and mnemonics', () => {
-    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(13)
-    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOGTSREA')
+  it('matches the authored tab order and mnemonics, catalog tabs included', () => {
+    // 13 batch tabs carry envelope rows; MICROSOFT is painted from the projects catalog.
+    expect(AE_EXECUTIVE_TAB_IDS).toHaveLength(14)
+    expect(AE_EXECUTIVE_BATCH_TAB_IDS).toHaveLength(13)
+    expect(AE_EXECUTIVE_BATCH_TAB_IDS).not.toContain('microsoft')
+    expect(AE_EXECUTIVE_TABS.map(tab => tab.mnemonic).join('')).toBe('HDLQCMOGTSREAF')
     expect(AE_EXECUTIVE_TABS.map(tab => tab.route)).toEqual(AE_EXECUTIVE_TAB_IDS.map(tab => `/ae/${tab}`))
-    expect(AE_EXECUTIVE_TABS.at(-1)?.label).toBe('MERM[A]ID')
+    expect(AE_EXECUTIVE_TABS.at(-1)?.label).toBe('MICROS[F]T')
   })
 
   it('falls back to HOME for an unknown tab', () => {
@@ -204,5 +212,43 @@ describe('authored catalog tabs', () => {
     expect(surface.querySelector('input')).not.toBeNull()
     // No envelope row backs this tab, so nothing reports it unavailable.
     expect(screen.queryByText(/UGUI Document unavailable/)).toBeNull()
+  })
+})
+
+describe('authored L2 documents', () => {
+  it('opens a nested-card source as an overlay the engine paints', async () => {
+    const settings = {
+      id: 'projects.settings',
+      type: 'card',
+      header: [{ id: 'settings.title', type: 'text', body: 'Settings', style: 'heading' }],
+      sections: [{ id: 'settings.theme', type: 'text', body: 'Appearance', style: 'body' }],
+      actions: []
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => settings }) as unknown as Response)
+    )
+    renderTab('microsoft')
+    await waitFor(() => {
+      expect(
+        window.document.querySelector('[data-ugui-action="projects.source.open"]')
+      ).not.toBeNull()
+    })
+
+    const trigger = window.document.querySelector('[data-ugui-action="projects.source.open"]')
+
+    expect(trigger).not.toBeNull()
+    fireEvent.click(trigger as Element)
+
+    // The overlay is a second painted surface, not React-rendered Document markup.
+    await waitFor(() => {
+      expect(window.document.querySelector('[data-ae-l2-overlay]')).not.toBeNull()
+    })
+    expect(global.fetch).toHaveBeenCalledWith('/apps/settings.json')
+    await waitFor(() => {
+      expect(window.document.querySelector('[data-ae-l2-overlay]')?.textContent).toContain(
+        'Appearance'
+      )
+    })
   })
 })

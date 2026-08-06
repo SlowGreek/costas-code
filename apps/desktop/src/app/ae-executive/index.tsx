@@ -13,6 +13,7 @@ import {
   loadTabs,
   observe,
   onEffect,
+  openDocumentSource,
   paintCatalogTab,
   selectTab,
   uguiActionFromClick
@@ -56,6 +57,8 @@ export function AeExecutiveWorkspace() {
   const [notice, setNotice] = useState('Loading UGUI projection…')
   const [seated, setSeated] = useState(false)
   const [authoredTabs, setAuthoredTabs] = useState<readonly CatalystTab[]>([])
+  const [overlay, setOverlay] = useState<string | null>(null)
+  const overlaySurface = useRef<HTMLDivElement | null>(null)
   const surface = useRef<HTMLDivElement | null>(null)
   const admitted = useRef(false)
 
@@ -161,6 +164,14 @@ export function AeExecutiveWorkspace() {
     void selectTab(tabId).catch(() => setNotice(`Tab refused · ${tabId}`))
   }, [catalogTab, seated, tabId])
 
+  useEffect(() => {
+    if (!overlay || !overlaySurface.current) {return}
+
+    void openDocumentSource(overlaySurface.current, overlay).catch((reason: unknown) =>
+      setNotice(`Document refused · ${String(reason)}`)
+    )
+  }, [overlay])
+
   const selectedRow = batch?.rows.find(row => row.tab === tabId)
   const painted = Boolean(catalogTab) || Boolean(selectedRow?.hasDocument)
 
@@ -195,6 +206,11 @@ export function AeExecutiveWorkspace() {
               onClick={event => {
                 const hit = uguiActionFromClick(event.target)
 
+                if (hit?.action === 'projects.source.open' && hit.source) {
+                  setOverlay(hit.source)
+
+                  return
+                }
                 if (hit) {
                   void dispatchEvent({
                     schema: 'ugui-document-event/1',
@@ -220,6 +236,27 @@ export function AeExecutiveWorkspace() {
           )}
         </div>
       </main>
+
+      {overlay ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8"
+          onClick={event => {
+            if (event.target === event.currentTarget) {setOverlay(null)}
+          }}
+          role="presentation"
+        >
+          <div
+            aria-label={overlay}
+            aria-modal="true"
+            className="max-h-full w-full max-w-3xl overflow-auto rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-primary) p-6"
+            data-ae-l2-overlay={overlay}
+            role="dialog"
+          >
+            {/* The engine paints the L2 Document; React never walks it either. */}
+            <div data-ugui-surface ref={overlaySurface} />
+          </div>
+        </div>
+      ) : null}
 
       <footer className="flex h-7 shrink-0 items-center gap-2 border-t border-(--ui-stroke-tertiary) px-4 text-[0.65rem] text-(--ui-text-quaternary)">
         <span

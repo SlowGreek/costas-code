@@ -97,13 +97,16 @@ function run(program, args, options = {}) {
   return result
 }
 
-function repositoryIdentity(root, pathspecs) {
+function repositoryIdentity(root, pathspecs, base) {
   const commit = run('git', ['rev-parse', 'HEAD'], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024
   }).stdout.trim()
-  const diff = run('git', ['diff', '--binary', '--no-ext-diff', 'HEAD', '--', ...pathspecs], {
+  // Diff against the base captured before the build: the quine daemon commits
+  // green fixpoints while we build, and a commit must not read as a source
+  // change when the watched files are byte-identical.
+  const diff = run('git', ['diff', '--binary', '--no-ext-diff', base ?? commit, '--', ...pathspecs], {
     cwd: root,
     encoding: 'buffer',
     maxBuffer: 128 * 1024 * 1024
@@ -288,14 +291,30 @@ try {
 
   const smoke = smokeCandidate(candidateDir)
   const sourceAfter = {
-    ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS),
-    catalyst: repositoryIdentity(catalystRepositoryRoot, CATALYST_SOURCE_PATHS)
+    ae: repositoryIdentity(aeRoot, AE_SOURCE_PATHS, sourceBefore.ae.commit),
+    catalyst: repositoryIdentity(
+      catalystRepositoryRoot,
+      CATALYST_SOURCE_PATHS,
+      sourceBefore.catalyst.commit
+    )
   }
-  if (JSON.stringify(sourceAfter) !== JSON.stringify(sourceBefore)) {
-    const changed = [
-      JSON.stringify(sourceAfter.ae) !== JSON.stringify(sourceBefore.ae) ? 'AgentExperiments' : null,
-      JSON.stringify(sourceAfter.catalyst) !== JSON.stringify(sourceBefore.catalyst) ? 'catalyst' : null
-    ].filter(Boolean)
+  // Compare the watched content, not the commit that happens to contain it.
+  const watchedContent = identity => ({
+    root_realpath: identity.root_realpath,
+    dirty: identity.dirty,
+    status_sha256: identity.status_sha256
+  })
+  const changed = [
+    JSON.stringify(watchedContent(sourceAfter.ae)) !==
+    JSON.stringify(watchedContent(sourceBefore.ae))
+      ? 'AgentExperiments'
+      : null,
+    JSON.stringify(watchedContent(sourceAfter.catalyst)) !==
+    JSON.stringify(watchedContent(sourceBefore.catalyst))
+      ? 'catalyst'
+      : null
+  ].filter(Boolean)
+  if (changed.length > 0) {
     throw new Error(`[stage-ae-executive] repository source changed during candidate build: ${changed.join(',')}`)
   }
 

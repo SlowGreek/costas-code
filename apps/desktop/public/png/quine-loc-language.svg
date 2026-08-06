@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="488" viewBox="0 0 860 488" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+<rect width="860" height="488" fill="#0d1117"/>
+<text x="20.0" y="34.0" fill="#e6edf3" font-size="15" text-anchor="start" font-weight="700">QUINE polyglot surface — LOC × language × area</text>
+<text x="20.0" y="54.0" fill="#8b949e" font-size="12" text-anchor="start">each row is one board area; segments are languages by LOC</text>
+<text x="150.0" y="101.0" fill="#e6edf3" font-size="12" text-anchor="end">apps</text>
+<rect x="160.0" y="89.0" width="3.6" height="16.0" fill="#7B68EE"/>
+<rect x="163.6" y="89.0" width="18.3" height="16.0" fill="#E17055"/>
+<rect x="181.9" y="89.0" width="0.8" height="16.0" fill="#00D2FF"/>
+<rect x="182.7" y="89.0" width="3.2" height="16.0" fill="#A29BFE"/>
+<rect x="185.9" y="89.0" width="0.1" height="16.0" fill="#55EFC4"/>
+<rect x="185.9" y="89.0" width="2.1" height="16.0" fill="#FD79A8"/>
+<rect x="188.1" y="89.0" width="1.0" height="16.0" fill="#63e6be"/>
+<text x="195.1" y="101.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">9,553</text>
+<text x="150.0" y="127.0" fill="#e6edf3" font-size="12" text-anchor="end">benchmark</text>
+<rect x="160.0" y="115.0" width="2.7" height="16.0" fill="#7B68EE"/>
+<rect x="162.7" y="115.0" width="10.1" height="16.0" fill="#E17055"/>
+<rect x="172.8" y="115.0" width="0.7" height="16.0" fill="#A29BFE"/>
+<rect x="173.5" y="115.0" width="0.4" height="16.0" fill="#74B9FF"/>
+<text x="179.9" y="127.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">4,578</text>
+<text x="150.0" y="153.0" fill="#e6edf3" font-size="12" text-anchor="end">butler</text>
+<rect x="160.0" y="141.0" width="5.1" height="16.0" fill="#7B68EE"/>
+<rect x="165.1" y="141.0" width="13.9" height="16.0" fill="#E17055"/>
+<rect x="179.0" y="141.0" width="1.1" height="16.0" fill="#A29BFE"/>
+<rect x="180.1" y="141.0" width="0.1" height="16.0" fill="#63e6be"/>
+<text x="186.2" y="153.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">6,614</text>
+<text x="150.0" y="179.0" fill="#e6edf3" font-size="12" text-anchor="end">envelope</text>
+<rect x="160.0" y="167.0" width="26.4" height="16.0" fill="#7B68EE"/>
+<rect x="186.4" y="167.0" width="14.4" height="16.0" fill="#E17055"/>
+<rect x="200.7" y="167.0" width="0.8" height="16.0" fill="#00D2FF"/>
+<rect x="201.6" y="167.0" width="1.1" height="16.0" fill="#A29BFE"/>
+<rect x="202.7" y="167.0" width="0.8" height="16.0" fill="#FD79A8"/>
+<text x="209.5" y="179.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">14,278</text>
+<text x="150.0" y="205.0" fill="#e6edf3" font-size="12" text-anchor="end">governance</text>
+<rect x="160.0" y="193.0" width="0.3" height="16.0" fill="#7B68EE"/>
+<rect x="160.3" y="193.0" width="2.0" height="16.0" fill="#E17055"/>
+<rect x="162.3" y="193.0" width="0.2" height="16.0" fill="#A29BFE"/>
+<text x="168.5" y="205.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">823</text>
+<text x="150.0" y="231.0" fill="#e6edf3" font-size="12" text-anchor="end">marketplace</text>
+<rect x="160.0" y="219.0" width="0.3" height="16.0" fill="#7B68EE"/>
+<rect x="160.3" y="219.0" width="14.2" height="16.0" fill="#E17055"/>
+<rect x="174.5" y="219.0" width="0.3" height="16.0" fill="#A29BFE"/>
+<text x="180.8" y="231.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">4,859</text>
+<text x="150.0" y="257.0" fill="#e6edf3" font-size="12" text-anchor="end">perception</text>
+<rect x="160.0" y="245.0" width="3.1" height="16.0" fill="#7B68EE"/>
+<rect x="163.1" y="245.0" width="52.1" height="16.0" fill="#E17055"/>
+<rect x="215.2" y="245.0" width="1.1" height="16.0" fill="#A29BFE"/>
+<rect x="216.3" y="245.0" width="0.7" height="16.0" fill="#55EFC4"/>
+<rect x="217.0" y="245.0" width="0.5" height="16.0" fill="#74B9FF"/>
+<rect x="217.5" y="245.0" width="0.2" height="16.0" fill="#63e6be"/>
+<text x="223.7" y="257.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">18,952</text>
+<text x="150.0" y="283.0" fill="#e6edf3" font-size="12" text-anchor="end">plexus</text>
+<rect x="160.0" y="271.0" width="0.2" height="16.0" fill="#7B68EE"/>
+<rect x="160.2" y="271.0" width="0.6" height="16.0" fill="#E17055"/>
+<rect x="160.9" y="271.0" width="0.1" height="16.0" fill="#A29BFE"/>
+<rect x="160.9" y="271.0" width="0.0" height="16.0" fill="#63e6be"/>
+<text x="167.0" y="283.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">318</text>
+<text x="150.0" y="309.0" fill="#e6edf3" font-size="12" text-anchor="end">projects</text>
+<rect x="160.0" y="297.0" width="250.0" height="16.0" fill="#7B68EE"/>
+<rect x="410.0" y="297.0" width="76.5" height="16.0" fill="#E17055"/>
+<rect x="486.5" y="297.0" width="92.9" height="16.0" fill="#00D2FF"/>
+<rect x="579.4" y="297.0" width="180.7" height="16.0" fill="#A29BFE"/>
+<rect x="760.1" y="297.0" width="8.1" height="16.0" fill="#FECA57"/>
+<rect x="768.3" y="297.0" width="1.2" height="16.0" fill="#55EFC4"/>
+<rect x="769.4" y="297.0" width="0.2" height="16.0" fill="#74B9FF"/>
+<rect x="769.6" y="297.0" width="0.4" height="16.0" fill="#63e6be"/>
+<text x="776.0" y="309.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">200,216</text>
+<text x="150.0" y="335.0" fill="#e6edf3" font-size="12" text-anchor="end">quine</text>
+<rect x="160.0" y="323.0" width="11.9" height="16.0" fill="#7B68EE"/>
+<rect x="171.9" y="323.0" width="67.0" height="16.0" fill="#E17055"/>
+<rect x="238.9" y="323.0" width="1.7" height="16.0" fill="#A29BFE"/>
+<rect x="240.6" y="323.0" width="0.0" height="16.0" fill="#63e6be"/>
+<text x="246.6" y="335.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">26,457</text>
+<text x="150.0" y="361.0" fill="#e6edf3" font-size="12" text-anchor="end">seastar-shell</text>
+<rect x="160.0" y="349.0" width="23.7" height="16.0" fill="#7B68EE"/>
+<rect x="183.7" y="349.0" width="48.3" height="16.0" fill="#00D2FF"/>
+<rect x="231.9" y="349.0" width="6.1" height="16.0" fill="#A29BFE"/>
+<rect x="238.1" y="349.0" width="44.0" height="16.0" fill="#FECA57"/>
+<rect x="282.1" y="349.0" width="0.5" height="16.0" fill="#55EFC4"/>
+<rect x="282.5" y="349.0" width="0.5" height="16.0" fill="#74B9FF"/>
+<rect x="283.0" y="349.0" width="0.1" height="16.0" fill="#63e6be"/>
+<text x="289.1" y="361.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">40,408</text>
+<text x="150.0" y="387.0" fill="#e6edf3" font-size="12" text-anchor="end">tools</text>
+<rect x="160.0" y="375.0" width="0.6" height="16.0" fill="#7B68EE"/>
+<rect x="160.6" y="375.0" width="7.3" height="16.0" fill="#E17055"/>
+<rect x="167.9" y="375.0" width="0.3" height="16.0" fill="#A29BFE"/>
+<text x="174.2" y="387.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">2,684</text>
+<text x="150.0" y="413.0" fill="#e6edf3" font-size="12" text-anchor="end">ugui</text>
+<rect x="160.0" y="401.0" width="195.6" height="16.0" fill="#7B68EE"/>
+<rect x="355.6" y="401.0" width="23.5" height="16.0" fill="#E17055"/>
+<rect x="379.1" y="401.0" width="143.4" height="16.0" fill="#00D2FF"/>
+<rect x="522.5" y="401.0" width="2.9" height="16.0" fill="#A29BFE"/>
+<rect x="525.4" y="401.0" width="0.8" height="16.0" fill="#55EFC4"/>
+<rect x="526.2" y="401.0" width="0.4" height="16.0" fill="#63e6be"/>
+<text x="532.6" y="413.0" fill="#8b949e" font-size="11" text-anchor="start" font-weight="600">120,320</text>
+<rect x="20.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#7B68EE"/>
+<text x="36.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">JSON</text>
+<rect x="130.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#E17055"/>
+<text x="146.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">Python</text>
+<rect x="240.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#00D2FF"/>
+<text x="256.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">JavaScript</text>
+<rect x="350.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#A29BFE"/>
+<text x="366.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">Markdown</text>
+<rect x="460.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#FECA57"/>
+<text x="476.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">CSS</text>
+<rect x="570.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#55EFC4"/>
+<text x="586.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">HTML</text>
+<rect x="680.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#FD79A8"/>
+<text x="696.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">Kotlin</text>
+<rect x="790.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#74B9FF"/>
+<text x="806.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">YAML</text>
+<rect x="900.0" y="439.0" width="11.0" height="11.0" rx="2" fill="#63e6be"/>
+<text x="916.0" y="448.0" fill="#8b949e" font-size="11" text-anchor="start">Other</text>
+<text x="14.0" y="476.0" fill="#8b949e" font-size="11" text-anchor="start">gen: tools/helpers/gen_diagrams.py · zero-dependency SVG 🐧</text>
+</svg>

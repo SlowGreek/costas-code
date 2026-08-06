@@ -15,6 +15,7 @@ import initWasm, {
   catalyst_document_action,
   catalyst_mount_document,
   catalyst_profile_css,
+  catalyst_skin_variables,
   catalyst_projects_input,
   catalyst_set_asset_base,
   catalyst_tab_document,
@@ -131,6 +132,19 @@ export function startEngine(): Promise<void> {
 /** The shell's CSS variables for a normalized profile, answered by the engine. */
 export function profileCss(axes: unknown): Record<string, string> {
   return JSON.parse(catalyst_profile_css(JSON.stringify(axes ?? null))) as Record<string, string>
+}
+
+/**
+ * Every variable a catalogued skin projects — the vocabulary names a painted
+ * Document reads as well as the shell's own. Null when the engine does not
+ * carry the skin, so the caller can fall back to the host's normalized axes.
+ */
+export function skinCss(skinId: string): Record<string, string> | null {
+  const answer = JSON.parse(catalyst_skin_variables(skinId)) as {
+    variables?: Record<string, string>
+  }
+
+  return answer.variables ?? null
 }
 
 function start(): Promise<void> {

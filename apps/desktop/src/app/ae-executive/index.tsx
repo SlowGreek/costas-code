@@ -215,6 +215,14 @@ export function AeExecutiveWorkspace() {
         break
       }
 
+      case 'preference': {
+        setDocumentNotice(
+          applyPreference(resolved.preference ?? '', String(resolved.value ?? ''))
+        )
+
+        break
+      }
+
       case 'refused':
         setDocumentNotice(`Action refused · ${resolved.code ?? ''} ${resolved.detail ?? ''}`)
 
@@ -234,6 +242,35 @@ export function AeExecutiveWorkspace() {
 
       default:
         setDocumentNotice(`${resolved.kind} · ${hit.action}`)
+    }
+  }
+
+  // The engine resolves which preference and which choice; this host owns only
+  // where that choice is written for CSS to read.
+  function applyPreference(preference: string, choice: string): string {
+    if (!choice) {return `${preference} refused · no choice`}
+
+    switch (preference) {
+      case 'theme':
+        document.documentElement.dataset.theme = choice
+
+        return `theme · ${choice}`
+      case 'background':
+        document.documentElement.dataset.uguiBackground = choice
+
+        return `background · ${choice}`
+      default: {
+        // `surface` and `vertical` re-shape the Document, so the applet answers.
+        const frame = projectsInput(`projects.applet.input.${preference}`, '', choice)
+
+        if (frame.document && surface.current) {
+          void mountDocument(surface.current, frame.document)
+
+          return `${preference} · ${choice}`
+        }
+
+        return `${preference} · ${frame.error ?? frame.detail ?? 'unseated'}`
+      }
     }
   }
 

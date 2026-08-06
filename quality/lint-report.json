@@ -27,27 +27,75 @@
       "level": "error",
       "findings": [
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:24:1:perfectionist/sort-imports:0",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:26:1:perfectionist/sort-imports:0",
           "severity": "error",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 24,
+          "line": 26,
           "column": 1,
-          "end_line": 24,
-          "end_column": 90,
+          "end_line": 30,
+          "end_column": 32,
           "rule": "perfectionist/sort-imports",
           "message": "Expected \"@/store/render-profile\" (internal) to come before \"./catalyst-wasm\" (sibling).",
           "fixable": true
         },
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:207:9:padding-line-between-statements:1",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:213:9:padding-line-between-statements:1",
           "severity": "warning",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 207,
+          "line": 213,
           "column": 9,
-          "end_line": 209,
-          "end_column": 10,
+          "end_line": 213,
+          "end_column": 31,
           "rule": "padding-line-between-statements",
           "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:248:5:padding-line-between-statements:2",
+          "severity": "warning",
+          "file": "apps/desktop/src/app/ae-executive/index.tsx",
+          "line": 248,
+          "column": 5,
+          "end_line": 248,
+          "end_column": 60,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/store/render-profile.test.ts:17:1:perfectionist/sort-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/store/render-profile.test.ts",
+          "line": 17,
+          "column": 1,
+          "end_line": 17,
+          "end_column": 39,
+          "rule": "perfectionist/sort-imports",
+          "message": "Expected \"node:fs\" (builtin) to come before \"./render-profile\" (sibling).",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/store/render-profile.ts:2:1:perfectionist/sort-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/store/render-profile.ts",
+          "line": 2,
+          "column": 1,
+          "end_line": 2,
+          "end_column": 44,
+          "rule": "perfectionist/sort-imports",
+          "message": "Expected \"nanostores\" (external) to come before \"@/app/ae-executive/catalyst-wasm\" (internal).",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/src/themes/render-profile.test.ts:5:1:perfectionist/sort-imports:0",
+          "severity": "error",
+          "file": "apps/desktop/src/themes/render-profile.test.ts",
+          "line": 5,
+          "column": 1,
+          "end_line": 5,
+          "end_column": 39,
+          "rule": "perfectionist/sort-imports",
+          "message": "Expected \"node:fs\" (builtin) to come before \"./render-profile\" (sibling).",
           "fixable": true
         }
       ]
@@ -55,9 +103,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:75c6fc40d79e27f7b1c0761754ea863be9aed741e086361a08766b83454932a2",
+      "sha256": "sha256:2bb4d32b4a3ce103f3e0aa5adccdc3b7b5c7bc1e187b48ce6dd819b908b3aca9",
       "files": 1190,
-      "bytes": 9333535
+      "bytes": 9337788
     },
     "tools": {
       "eslint": "9.39.4",

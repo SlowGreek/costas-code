@@ -1,4 +1,4 @@
-import { profileCss } from '@/app/ae-executive/catalyst-wasm'
+import { profileCss, skinCss } from '@/app/ae-executive/catalyst-wasm'
 
 export const RENDER_PROFILE_SCHEMA = 'hermes-render-profile/1' as const
 
@@ -160,8 +160,10 @@ export function parseRenderProfile(value: unknown): RenderProfile | null {
 
 
 export function renderProfileCss(profile: RenderProfile): Record<string, string> {
-  // The engine owns what an axis means in CSS; this host owns normalization.
-  return profileCss(profile.axes)
+  // A catalogued skin is projected whole — the vocabulary names a painted
+  // Document reads as well as the shell's — so one skin paints both coherently.
+  // A profile the engine does not carry still gets the shell's own variables.
+  return skinCss(profile.id) ?? profileCss(profile.axes)
 }
 
 export function applyRenderProfile(profile: RenderProfile, root: HTMLElement = document.documentElement): void {

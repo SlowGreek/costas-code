@@ -39,39 +39,44 @@ configure({ asyncUtilTimeout: 5000 })
 // jsdom ships no 2D context, so any Document carrying a canvas item (waveform,
 // sparkline) aborts the engine's paint mid-region. `dyn_into` is an `instanceof`
 // check, so the shim needs the constructor jsdom omits — not just a stub object.
+const CANVAS_2D_STATE: Record<string, unknown> = {
+  canvas: null,
+  fillStyle: '',
+  strokeStyle: '',
+  lineWidth: 1,
+  font: '',
+  globalAlpha: 1,
+  lineCap: 'butt',
+  lineJoin: 'miter',
+  textAlign: 'start',
+  textBaseline: 'alphabetic',
+  globalCompositeOperation: 'source-over',
+  imageSmoothingEnabled: true
+}
+
+// Any method the painter reaches for answers; only the few with a return value
+// worth having are named, so a new drawing call never fails the suite.
+const CANVAS_2D_RESULTS: Record<string, () => unknown> = {
+  measureText: () => ({ width: 0 }),
+  createLinearGradient: () => ({ addColorStop() {} }),
+  createRadialGradient: () => ({ addColorStop() {} }),
+  createPattern: () => null,
+  getImageData: () => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 }),
+  isPointInPath: () => false,
+  isPointInStroke: () => false
+}
+
 class StubCanvasRenderingContext2D {
-  canvas: unknown = null
-  fillStyle = ''
-  strokeStyle = ''
-  lineWidth = 1
-  font = ''
-  globalAlpha = 1
-  lineCap = 'butt'
-  lineJoin = 'miter'
-  textAlign = 'start'
-  textBaseline = 'alphabetic'
-  save() {}
-  restore() {}
-  beginPath() {}
-  closePath() {}
-  moveTo() {}
-  lineTo() {}
-  arc() {}
-  rect() {}
-  fill() {}
-  stroke() {}
-  fillRect() {}
-  clearRect() {}
-  strokeRect() {}
-  fillText() {}
-  translate() {}
-  scale() {}
-  setLineDash() {}
-  measureText() {
-    return { width: 0 }
-  }
-  createLinearGradient() {
-    return { addColorStop() {} }
+  constructor(canvas: HTMLCanvasElement) {
+    Object.assign(this, CANVAS_2D_STATE, { canvas })
+
+    return new Proxy(this, {
+      get: (target, key: string) =>
+        key in target
+          ? Reflect.get(target, key)
+          : (CANVAS_2D_RESULTS[key] ?? (() => undefined)),
+      set: (target, key, value) => Reflect.set(target, key, value)
+    })
   }
 }
 
@@ -82,11 +87,7 @@ Object.defineProperty(globalThis, 'CanvasRenderingContext2D', {
 
 Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
   configurable: true,
-  value(this: HTMLCanvasElement) {
-    const context = new StubCanvasRenderingContext2D()
-
-    context.canvas = this
-
-    return context
+  value(this: HTMLCanvasElement, kind: string) {
+    return kind === '2d' ? new StubCanvasRenderingContext2D(this) : null
   }
 })

@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { mountDocument, setWasmInputForTests, uguiActionFromClick } from './catalyst-wasm'
+import {
+  mountDocument,
+  setWasmInputForTests,
+  tabDocument,
+  tabsJson,
+  uguiActionFromClick
+} from './catalyst-wasm'
 
 const document = {
   id: 'run-home',
@@ -55,5 +61,30 @@ describe('catalyst UGUI client', () => {
     await expect(mountDocument(root, { id: 'x', sceneVersion: 1 })).rejects.toThrow(
       /E_CATALYST_UGUI/
     )
+  })
+})
+
+describe('authored tab set', () => {
+  it('publishes TABS.json and paints the MICROSOFT keystone from the projects catalog', async () => {
+    const root = window.document.createElement('div')
+
+    window.document.body.append(root)
+    const catalog = JSON.parse(await tabsJson()) as {
+      tabs: { id: string; source: string; app: string; live: boolean }[]
+    }
+    const keystone = catalog.tabs.find(tab => tab.id === 'microsoft')
+
+    expect(keystone).toMatchObject({ source: 'projects', app: 'projects.microsoft', live: false })
+
+    await mountDocument(root, JSON.parse(await tabDocument('microsoft')))
+    // Rich vocabulary no RUN-composed tab exercises.
+    expect(root.querySelector('img')).not.toBeNull()
+    expect(root.querySelector('select')).not.toBeNull()
+    expect(root.querySelector('input')).not.toBeNull()
+    expect(root.getAttribute('data-ugui-painter')).toBe('rust-wasm')
+  })
+
+  it('refuses a live RUN tab as a static document', async () => {
+    await expect(tabDocument('dashboard')).resolves.toContain('E_CATALYST_TAB_DOCUMENT')
   })
 })

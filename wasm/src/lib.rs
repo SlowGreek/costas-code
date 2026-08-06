@@ -9,6 +9,7 @@ pub mod controller;
 pub mod executive;
 pub mod intent;
 pub mod shell_viewport;
+pub mod tabs;
 
 use std::cell::RefCell;
 use ugui_render::json::{self, Json};
@@ -94,6 +95,27 @@ pub fn catalyst_shell_viewport_document(model_json: &str) -> String {
     match shell_viewport::compose_document(&model) {
         Ok(document) => json::canonical_string(&document),
         Err(fault) => refusal("E_CATALYST_SHELL_VIEWPORT", &fault.0),
+    }
+}
+
+/// The authored tab set, so the host never hardcodes one.
+#[wasm_bindgen]
+pub fn catalyst_tabs() -> String {
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s(tabs::TABS_SCHEMA)),
+        ("tabs", Json::Arr(tabs::tabs().iter().map(tabs::Tab::to_json).collect())),
+    ]))
+}
+
+/// Resolve one catalog tab's Document; live RUN tabs return a refusal.
+#[wasm_bindgen]
+pub fn catalyst_tab_document(tab_id: &str) -> String {
+    let Some(tab) = tabs::tabs().into_iter().find(|tab| tab.id == tab_id) else {
+        return refusal("E_CATALYST_EXECUTIVE_TAB", "tab is not authored");
+    };
+    match tabs::tab_document(&tab) {
+        Some(document) => document.to_string(),
+        None => refusal("E_CATALYST_TAB_DOCUMENT", "tab has no static catalog document"),
     }
 }
 

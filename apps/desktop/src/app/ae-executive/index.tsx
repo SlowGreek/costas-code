@@ -7,10 +7,13 @@ import { cn } from '@/lib/utils'
 import {
   type CatalystBatch,
   type CatalystEffect,
+  type CatalystTab,
   dispatchEvent,
   init,
+  loadTabs,
   observe,
   onEffect,
+  paintCatalogTab,
   selectTab,
   uguiActionFromClick
 } from './catalyst-wasm'
@@ -52,13 +55,16 @@ export function AeExecutiveWorkspace() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('Loading UGUI projection…')
   const [seated, setSeated] = useState(false)
+  const [authoredTabs, setAuthoredTabs] = useState<readonly CatalystTab[]>([])
   const surface = useRef<HTMLDivElement | null>(null)
   const admitted = useRef(false)
 
   const requestedTab = params.tab ?? ''
-  const tabId = AE_EXECUTIVE_TAB_IDS.includes(requestedTab as never)
+  const authored = authoredTabs.find(tab => tab.id === requestedTab)
+  const tabId = authored || AE_EXECUTIVE_TAB_IDS.includes(requestedTab as never)
     ? requestedTab
     : aeExecutiveTab(requestedTab).id
+  const catalogTab = authoredTabs.find(tab => tab.id === tabId && !tab.batch)
 
   useEffect(() => {
     let active = true
@@ -66,7 +72,15 @@ export function AeExecutiveWorkspace() {
     admitted.current = false
 
     if (surface.current) {
-      void init(surface.current, AE_EXECUTIVE_TAB_IDS).then(
+      const element = surface.current
+
+      void loadTabs()
+        .then(tabs => {
+          if (active) {setAuthoredTabs(tabs)}
+
+          return init(element, tabs.filter(tab => tab.batch).map(tab => tab.id))
+        })
+        .then(
         () => {
           if (active) {setSeated(true)}
         },
@@ -135,11 +149,20 @@ export function AeExecutiveWorkspace() {
   }, [navigate, seated])
 
   useEffect(() => {
-    if (seated) {void selectTab(tabId).catch(() => setNotice(`Tab refused · ${tabId}`))}
-  }, [seated, tabId])
+    if (!seated) {return}
+
+    if (catalogTab) {
+      void paintCatalogTab(catalogTab.id)
+        .then(() => setNotice(`${catalogTab.label} · painted from the ${catalogTab.source} catalog`))
+        .catch((reason: unknown) => setNotice(`Tab refused · ${String(reason)}`))
+
+      return
+    }
+    void selectTab(tabId).catch(() => setNotice(`Tab refused · ${tabId}`))
+  }, [catalogTab, seated, tabId])
 
   const selectedRow = batch?.rows.find(row => row.tab === tabId)
-  const painted = Boolean(selectedRow?.hasDocument)
+  const painted = Boolean(catalogTab) || Boolean(selectedRow?.hasDocument)
 
   const trust = batch
     ? `Generation ${displayGeneration(batch)} · authority ${batch.authority} · observed ${batch.observedMs ?? 'unverified'} · freshness ${batch.freshness} · posture ${batch.posture} · artifact ${batch.artifactGeneration}`

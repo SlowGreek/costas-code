@@ -186,3 +186,23 @@ describe('AE executive Document workspace', () => {
     )
   })
 })
+
+describe('authored catalog tabs', () => {
+  it('paints the MICROSOFT keystone from the projects catalog, not the RUN envelope', async () => {
+    renderTab('microsoft')
+
+    // The envelope carries no row for a catalog tab; the engine paints it anyway.
+    await waitFor(() => {
+      const surface = window.document.querySelector('[data-ugui-surface]')
+
+      expect(surface?.getAttribute('data-ugui-painter')).toBe('rust-wasm')
+    })
+    const surface = window.document.querySelector('[data-ugui-surface]') as Element
+
+    expect(surface.querySelector('img')).not.toBeNull()
+    expect(surface.querySelector('select')).not.toBeNull()
+    expect(surface.querySelector('input')).not.toBeNull()
+    // No envelope row backs this tab, so nothing reports it unavailable.
+    expect(screen.queryByText(/UGUI Document unavailable/)).toBeNull()
+  })
+})

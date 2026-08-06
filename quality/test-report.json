@@ -3,12 +3,12 @@
   "signal": "🟢",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2956,
+    "passed": 2958,
     "failed": 0,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
-    "total": 2956
+    "total": 2958
   },
   "suites": [
     {
@@ -894,12 +894,12 @@
     {
       "id": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
       "name": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
-      "passed": 3,
+      "passed": 5,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 3,
+      "total": 5,
       "failures": []
     },
     {
@@ -3721,9 +3721,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:736e7db764b3adab28522bac9c96cb7232addb199b812e180df54d57231cfe2d",
-      "files": 1189,
-      "bytes": 9317422
+      "sha256": "sha256:fdb33db8104994977c2d031810e4d256a6168cf10ad9d7010a5079a749508df9",
+      "files": 1190,
+      "bytes": 9318255
     },
     "tools": {
       "node": "26.5.0",

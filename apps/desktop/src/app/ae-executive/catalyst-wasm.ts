@@ -12,7 +12,9 @@ import initWasm, {
   catalyst_controller_observe,
   catalyst_controller_paint,
   catalyst_controller_select_tab,
-  catalyst_mount_document
+  catalyst_mount_document,
+  catalyst_tab_document,
+  catalyst_tabs
 } from '../../../public/wasm/catalyst_wasm.js'
 
 /** One semantic gesture on a painted Document. */
@@ -38,6 +40,16 @@ export type LucidActionResult =
   | { readonly result: unknown; readonly lucid_receipt: Record<string, unknown> }
   | { readonly error: string; readonly lucid_receipt: Record<string, unknown> }
   | { readonly error: string; readonly code: string; readonly retryable: false }
+
+export interface CatalystTab {
+  readonly id: string
+  readonly source: string
+  readonly app: string
+  readonly label: string
+  readonly mnemonic: string
+  readonly live: boolean
+  readonly batch: boolean
+}
 
 export interface CatalystEffect {
   readonly kind: 'tab.select' | 'paint' | 'lucid.intent' | 'studio.submit' | 'refused'
@@ -165,6 +177,27 @@ export function mountDocument(element: Element, document: unknown): Promise<void
   return start().then(() => {
     check(catalyst_mount_document(element, JSON.stringify(document)))
   })
+}
+
+/** The authored tab set from catalyst/TABS.json. */
+export function tabsJson(): Promise<string> {
+  return start().then(() => catalyst_tabs())
+}
+
+export function loadTabs(): Promise<readonly CatalystTab[]> {
+  return tabsJson().then(encoded => (JSON.parse(encoded) as { tabs: CatalystTab[] }).tabs)
+}
+
+/** Paint a catalog tab straight from the shared catalog. */
+export function paintCatalogTab(tabId: string): Promise<void> {
+  if (!root) {return Promise.resolve()}
+
+  return tabDocument(tabId).then(document => mountDocument(root as Element, JSON.parse(document)))
+}
+
+/** One catalog tab's Document, painted by the engine rather than composed here. */
+export function tabDocument(tabId: string): Promise<string> {
+  return start().then(() => catalyst_tab_document(tabId))
 }
 
 /** Resolve the action a click landed on, as painted by the engine. */

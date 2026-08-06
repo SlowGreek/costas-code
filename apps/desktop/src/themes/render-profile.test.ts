@@ -73,12 +73,18 @@ describe('render profile admission and projection', () => {
     const glass = renderProfileCss(profile('glassmorphism'))
 
     expect(Object.keys(windows)).toEqual(Object.keys(glass))
-    expect(Object.keys(windows)).toHaveLength(22)
+    expect(Object.keys(windows)).toHaveLength(129)
     expect(windows['--morph-radius-lg']).toBe('0px')
     expect(windows['--morph-control-height']).toBe('23px')
     expect(windows['--morph-motion-duration']).toBe('0ms')
     expect(glass['--morph-radius-lg']).toBe('20px')
     expect(glass['--morph-backdrop-blur']).toBe('20px')
+    // The shell and a painted Document read one projection, so a skin reaches
+    // the vocabulary names too rather than only the shell's own.
+    expect(windows['--color-surface']).toBe('#c0c0c0')
+    expect(windows['--font-sans']).toContain('MS Sans Serif')
+    // A role this skin leaves unbound reads as unset, not as the last skin's.
+    expect(windows['--color-danger']).toBe('initial')
     expect(JSON.stringify(windows)).not.toContain('javascript:')
   })
 

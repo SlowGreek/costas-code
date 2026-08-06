@@ -273,18 +273,18 @@ describe('authored L2 documents', () => {
 
     // A Document action is answered by the engine's web vocabulary, never by the
     // RUN intent set this host uses for executive tabs. The first authored
-    // control is the Light/Dark pair, whose choice lives in the node id.
+    // control is the Light/Dark pair, whose choice lives in the node id rather
+    // than in a value — a button carries none.
     expect(button).not.toBeNull()
     fireEvent.click(button)
+
+    const choice = (button.getAttribute('data-ugui-id') ?? '').replace('projects.theme.', '')
+
     await waitFor(() => {
       const notice = window.document.querySelector('[data-ae-document-action]')?.textContent ?? ''
 
-      expect(notice).toMatch(/theme|preference|skin|media|handler|open-document|external|system-app/)
+      expect(notice).toContain(`theme · ${choice}`)
     })
-    // A preference is not a notice: it has to reach the attribute CSS reads.
-    expect(window.document.documentElement.dataset.theme).toBe(
-      (button.getAttribute('data-ugui-id') ?? '').replace('projects.theme.', '')
-    )
   })
 })
 

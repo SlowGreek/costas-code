@@ -28,6 +28,7 @@ import {
   previewRenderProfile,
   revertRenderProfilePreview
 } from '@/store/render-profile'
+import { useTheme } from '@/themes/context'
 
 import { AE_EXECUTIVE_TAB_IDS, aeExecutiveTab } from './contract'
 
@@ -73,6 +74,7 @@ export function AeExecutiveWorkspace() {
   const overlaySurface = useRef<HTMLDivElement | null>(null)
   const surface = useRef<HTMLDivElement | null>(null)
   const admitted = useRef(false)
+  const { setMode } = useTheme()
 
   const requestedTab = params.tab ?? ''
   const authored = authoredTabs.find(tab => tab.id === requestedTab)
@@ -246,13 +248,15 @@ export function AeExecutiveWorkspace() {
   }
 
   // The engine resolves which preference and which choice; this host owns only
-  // where that choice is written for CSS to read.
+  // where that choice is carried out.
   function applyPreference(preference: string, choice: string): string {
     if (!choice) {return `${preference} refused · no choice`}
 
     switch (preference) {
       case 'theme':
-        document.documentElement.dataset.theme = choice
+        if (choice !== 'light' && choice !== 'dark') {return `theme refused · ${choice}`}
+        // The shell already owns light/dark; this is a second door onto it.
+        setMode(choice)
 
         return `theme · ${choice}`
       case 'background':

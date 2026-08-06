@@ -10,6 +10,7 @@ import {
   type CatalystTab,
   dispatchEvent,
   documentAction,
+  globalKey,
   init,
   loadTabs,
   mountDocument,
@@ -17,8 +18,10 @@ import {
   onEffect,
   openDocumentSource,
   paintCatalogTab,
+  preferenceSelection,
   projectsInput,
   selectTab,
+  skinField,
   UGUI_GESTURES,
   uguiActionFromEvent,
   type UguiHit
@@ -74,6 +77,8 @@ export function AeExecutiveWorkspace() {
   const overlaySurface = useRef<HTMLDivElement | null>(null)
   const surface = useRef<HTMLDivElement | null>(null)
   const admitted = useRef(false)
+  const activeSkin = useRef('')
+  const activePreferences = useRef<Record<string, string>>({})
   const { setMode } = useTheme()
 
   const requestedTab = params.tab ?? ''
@@ -212,6 +217,23 @@ export function AeExecutiveWorkspace() {
 
           break
         }
+        if (resolved.operation === 'field') {
+          // The engine generates Skin Studio, so it owns which field an edit may
+          // address and what the edit repaints.
+          const variables = skinField(activeSkin.current, resolved.nodeId ?? hit.itemId, resolved.value)
+
+          if (variables) {
+            for (const [name, value] of Object.entries(variables)) {
+              document.documentElement.style.setProperty(name, value)
+            }
+          }
+          setDocumentNotice(
+            variables ? `skin field · ${resolved.nodeId ?? hit.itemId}` : `skin field refused · ${hit.itemId}`
+          )
+
+          break
+        }
+        activeSkin.current = skinId
         void applySkin(skinId)
 
         break
@@ -247,33 +269,48 @@ export function AeExecutiveWorkspace() {
     }
   }
 
-  // The engine resolves which preference and which choice; this host owns only
-  // where that choice is carried out.
+  // The engine resolves which preference and which choice, and admits the choice
+  // against its own vocabulary; this host owns only where it is carried out.
   function applyPreference(preference: string, choice: string): string {
     if (!choice) {return `${preference} refused · no choice`}
 
     switch (preference) {
       case 'theme':
-        if (choice !== 'light' && choice !== 'dark') {return `theme refused · ${choice}`}
-        // The shell already owns light/dark; this is a second door onto it.
-        setMode(choice)
+        setMode(choice === 'dark' ? 'dark' : 'light')
 
-        return `theme · ${choice}`
+        break
       case 'background':
         document.documentElement.dataset.uguiBackground = choice
 
-        return `background · ${choice}`
-      default: {
-        // `surface` and `vertical` re-shape the Document, so the applet answers.
-        const frame = projectsInput(`projects.applet.input.${preference}`, '', choice)
+        break
+      default:
+        // `surface` and `vertical` reshape the Document rather than the shell,
+        // and no applet handler answers them yet.
+        return `${preference} · ${choice} · not yet projected`
+    }
+    activePreferences.current = { ...activePreferences.current, [preference]: choice }
+    paintPreferenceSelection()
 
-        if (frame.document && surface.current) {
-          void mountDocument(surface.current, frame.document)
+    return `${preference} · ${choice}`
+  }
 
-          return `${preference} · ${choice}`
-        }
+  // A control group has to show which choice is committed, or every door looks
+  // inert even when it worked. The engine names the node that is selected.
+  function paintPreferenceSelection() {
+    const selected = preferenceSelection(activePreferences.current)
 
-        return `${preference} · ${frame.error ?? frame.detail ?? 'unseated'}`
+    for (const root of [surface.current, overlaySurface.current]) {
+      for (const control of root?.querySelectorAll('[data-ugui-action]') ?? []) {
+        const kind = Object.keys(selected).find(
+          name => selected[name] === control.getAttribute('data-ugui-id')
+        )
+
+        if (!kind && !control.hasAttribute('aria-pressed')) {continue}
+
+        const active = Boolean(kind)
+
+        control.setAttribute('aria-pressed', String(active))
+        control.toggleAttribute('data-selected', active)
       }
     }
   }

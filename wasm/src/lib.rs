@@ -415,3 +415,116 @@ pub fn catalyst_profile_css(axes_source: &str) -> String {
             .collect(),
     ))
 }
+
+/// What a key or pointer gesture means. The engine owns the decision so a
+/// second client cannot invent a different one for the same keystroke.
+#[wasm_bindgen]
+pub fn catalyst_global_key(
+    key: &str,
+    meta: bool,
+    control: bool,
+    alt: bool,
+    executable: bool,
+) -> String {
+    let resolved = ugui_render::interaction::resolve_global_key(
+        key, meta, control, alt, false, false, "", executable,
+    );
+
+    json::canonical_string(&ugui_render::interaction::to_json(&resolved))
+}
+
+/// Which control of a preference group is currently committed, so a painted
+/// Document can show its own state instead of looking inert.
+#[wasm_bindgen]
+pub fn catalyst_preference_selection(active_source: &str) -> String {
+    let active = json::parse(active_source).unwrap_or(Json::Null);
+    let selected = ugui_render::preferences::kinds()
+        .filter_map(|kind| {
+            let choice = active.get(kind).and_then(Json::as_str)?;
+            ugui_render::preferences::node_id(kind, choice).map(|node| (kind.to_owned(), json::s(&node)))
+        })
+        .collect::<Vec<_>>();
+
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s(ugui_render::preferences::SCHEMA)),
+        ("selected", Json::Obj(selected)),
+    ]))
+}
+
+/// The choices a preference admits, so a host validates against the engine's
+/// vocabulary rather than a hand-copied list.
+#[wasm_bindgen]
+pub fn catalyst_preference_vocabulary() -> String {
+    let table = ugui_render::preferences::kinds()
+        .map(|kind| {
+            let choices = ugui_render::preferences::choices(kind)
+                .map(|choices| Json::Arr(choices.iter().map(|choice| json::s(choice)).collect()))
+                .unwrap_or(Json::Null);
+
+            (kind.to_owned(), json::obj(vec![
+                ("action", ugui_render::preferences::action(kind).map_or(Json::Null, json::s)),
+                ("choices", choices),
+            ]))
+        })
+        .collect::<Vec<_>>();
+
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s(ugui_render::preferences::SCHEMA)),
+        ("preferences", Json::Obj(table)),
+    ]))
+}
+
+thread_local! {
+    static SKIN_EDIT: std::cell::RefCell<Option<ugui_render::skin_session::SkinSession>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Apply one Skin Studio edit. The engine generates that Document and owns the
+/// style matrix, so it owns which `{slot}/{token}` an edit may address.
+#[wasm_bindgen]
+pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str) -> String {
+    use ugui_render::skin_session;
+
+    let value = json::parse(value_source).unwrap_or(Json::Null);
+
+    SKIN_EDIT.with(|session| {
+        let mut session = session.borrow_mut();
+        let seated = match session.as_ref() {
+            Some(seated) if seated.skin_id == skin_id => true,
+            _ => false,
+        };
+        if !seated {
+            let Some(fresh) = skin_session::select(skin_id) else {
+                return refusal("E_CATALYST_SKIN", skin_id);
+            };
+            *session = Some(fresh);
+        }
+        let Some(editing) = session.as_mut() else {
+            return refusal("E_CATALYST_SKIN", skin_id);
+        };
+        let applied = match node_id {
+            "" => {
+                skin_session::reset(editing);
+                Ok(())
+            }
+            path => skin_session::apply_field(editing, path, &value),
+        };
+
+        match applied {
+            Ok(()) => json::canonical_string(&json::obj(vec![
+                ("schema", json::s(skin_session::SCHEMA)),
+                ("skin", json::s(&editing.skin_id)),
+                (
+                    "variables",
+                    Json::Obj(
+                        ugui_render::style_css::variables(&editing.binding)
+                            .into_iter()
+                            .map(|(name, value)| (name, json::s(&value)))
+                            .collect(),
+                    ),
+                ),
+            ])),
+            Err(detail) => refusal("E_CATALYST_SKIN_FIELD", detail),
+        }
+    })
+}

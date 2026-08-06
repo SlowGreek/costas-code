@@ -14,7 +14,11 @@ import initWasm, {
   catalyst_controller_select_tab,
   catalyst_document_action,
   catalyst_mount_document,
+  catalyst_global_key,
+  catalyst_preference_selection,
+  catalyst_preference_vocabulary,
   catalyst_profile_css,
+  catalyst_skin_field,
   catalyst_skin_variables,
   catalyst_projects_input,
   catalyst_set_asset_base,
@@ -132,6 +136,53 @@ export function startEngine(): Promise<void> {
 /** The shell's CSS variables for a normalized profile, answered by the engine. */
 export function profileCss(axes: unknown): Record<string, string> {
   return JSON.parse(catalyst_profile_css(JSON.stringify(axes ?? null))) as Record<string, string>
+}
+
+export interface KeyDecision {
+  readonly kind: string
+  readonly value?: unknown
+}
+
+/** What a keystroke means. The engine decides; this host only carries it out. */
+export function globalKey(
+  key: string,
+  modifiers: { meta: boolean; control: boolean; alt: boolean },
+  executable = false
+): KeyDecision {
+  return JSON.parse(
+    catalyst_global_key(key, modifiers.meta, modifiers.control, modifiers.alt, executable)
+  ) as KeyDecision
+}
+
+/** Which control of each preference group is currently committed. */
+export function preferenceSelection(active: Record<string, string>): Record<string, string> {
+  const answer = JSON.parse(catalyst_preference_selection(JSON.stringify(active))) as {
+    selected?: Record<string, string>
+  }
+
+  return answer.selected ?? {}
+}
+
+/** The choices each preference admits, so this host validates nothing itself. */
+export function preferenceVocabulary(): Record<string, { action: string | null; choices: string[] | null }> {
+  const answer = JSON.parse(catalyst_preference_vocabulary()) as {
+    preferences?: Record<string, { action: string | null; choices: string[] | null }>
+  }
+
+  return answer.preferences ?? {}
+}
+
+/** Apply one Skin Studio field edit and get the repainted variables back. */
+export function skinField(
+  skinId: string,
+  nodeId: string,
+  value: unknown
+): Record<string, string> | null {
+  const answer = JSON.parse(catalyst_skin_field(skinId, nodeId, JSON.stringify(value ?? null))) as {
+    variables?: Record<string, string>
+  }
+
+  return answer.variables ?? null
 }
 
 /**

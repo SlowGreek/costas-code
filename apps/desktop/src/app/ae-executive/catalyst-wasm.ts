@@ -387,6 +387,11 @@ export function projectsInput(handler: string, nodeId: string, value: unknown): 
 }
 
 /** A nested-card names another authored Document; the host fetches and paints it. */
+/** test probe */
+export function rawDocumentSource(source: string): string {
+  return catalyst_document_source(source)
+}
+
 export function openDocumentSource(element: Element, source: string): Promise<void> {
   if (!/^\/apps\/[a-z0-9-]+\.json$/.test(source)) {
     return Promise.reject(new Error(`document source is not admitted: ${source}`))
@@ -394,13 +399,15 @@ export function openDocumentSource(element: Element, source: string): Promise<vo
 
   // The engine carries these documents, so opening one is neither a fetch nor a
   // read of a staged copy of the projects folder.
-  const carried = JSON.parse(catalyst_document_source(source)) as { error?: string }
+  return start().then(() => {
+    const carried = JSON.parse(catalyst_document_source(source)) as { error?: string }
 
-  if (carried.error) {
-    return Promise.reject(new Error(`document source is not carried: ${source}`))
-  }
+    if (carried.error) {
+      throw new Error(`document source is not carried: ${source}`)
+    }
 
-  return Promise.resolve(mountDocument(element, carried))
+    return mountDocument(element, carried)
+  })
 }
 
 async function enact(effects: readonly CatalystEffect[] = []): Promise<void> {

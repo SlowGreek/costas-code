@@ -252,3 +252,10 @@ it('applies a Skin Studio field edit and repaints from the edited binding', () =
   expect(skinField('winxp', 'palette/not-a-role', '#000000', 'light')).toBeNull()
   expect(skinField('winxp', 'not-a-slot/surface', '#000000', 'light')).toBeNull()
 })
+
+it('PROBE validates the real settings document', async () => {
+  const { rawDocumentSource, validateDocument, startEngine } = await import('./catalyst-wasm')
+  await startEngine()
+  const source = rawDocumentSource('/apps/settings.json')
+  console.log('FINDINGS:', JSON.stringify(validateDocument(JSON.parse(source))).slice(0, 400))
+})

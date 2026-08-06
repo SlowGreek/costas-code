@@ -354,6 +354,14 @@ describe('one skin state, two doors', () => {
         '[data-ae-l2-overlay] [data-ugui-source="/apps/skins.json"]'
       )
 
+      if (!found) {
+        const ov = window.document.querySelector('[data-ae-l2-overlay]')
+        console.log('ACTIONS:', [...(ov?.querySelectorAll('[data-ugui-action]') ?? [])].map(e => e.getAttribute('data-ugui-action') + '#' + e.getAttribute('data-ugui-id')).join(' | '))
+        console.log('DOCKEYS:', JSON.stringify(Object.keys(JSON.parse((await import('./catalyst-wasm')).rawDocumentSource?.('/apps/settings.json') ?? '{}'))))
+        console.log('REGIONS:', [...(ov?.querySelectorAll('[data-ugui-region]') ?? [])].map(e => e.getAttribute('data-ugui-region')).join(','))
+        console.log('TAIL:', ov?.textContent?.slice(-120))
+        console.log('NOTICE:', [...window.document.querySelectorAll('*')].map(e => e.textContent ?? '').filter(t => t.includes('refused') || t.includes('Document refused')).slice(-1)[0]?.slice(0, 240))
+      }
       expect(found).not.toBeNull()
 
       return found as Element

@@ -550,3 +550,13 @@ pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str, mod
         }
     })
 }
+
+/// Resolve a Document the projects site serves by path. The engine carries the
+/// app documents, so this host neither stages a copy of the folder nor fetches.
+#[wasm_bindgen]
+pub fn catalyst_document_source(source: &str) -> String {
+    match ugui_render::app_catalog::projects_document_for_source(source) {
+        Some(document) => document.to_owned(),
+        None => refusal("E_CATALYST_UGUI_APP", "document source is not carried"),
+    }
+}

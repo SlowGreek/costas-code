@@ -42,13 +42,13 @@ const build = spawnSync(
 if (build.error || build.status !== 0) {
   process.exit(build.status || 1);
 }
-// Catalog tabs paint Documents that reference /png and /apps by absolute URL,
-// so the renderer must serve the same assets projects/ serves.
+// Catalog tabs paint Documents that reference /png by absolute URL, so the
+// renderer must serve the same icons projects/ serves. App documents are not
+// staged: the engine carries them, and `catalyst_document_source` answers.
 const aeRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const publicDir = fileURLToPath(new URL("../public", import.meta.url));
 for (const [from, to, filter] of [
   ["ugui/assets/png", "png", name => name.endsWith(".svg")],
-  ["projects/apps", "apps", name => name.endsWith(".json")],
 ]) {
   const destination = path.join(publicDir, to);
   mkdirSync(destination, { recursive: true });

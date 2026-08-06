@@ -221,11 +221,9 @@ describe('authored catalog tabs', () => {
 
 describe('authored L2 documents', () => {
   it('opens a nested-card source as an overlay the engine paints', async () => {
-    // The authored Document, not a stand-in: this is what the host really fetches.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: true, json: async () => settings }) as unknown as Response)
-    )
+    // The engine carries the authored Document, so opening one must not reach
+    // the network or a staged copy of the projects folder.
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('no fetch') }))
     renderTab('microsoft')
     await waitFor(() => {
       expect(
@@ -242,7 +240,7 @@ describe('authored L2 documents', () => {
     await waitFor(() => {
       expect(window.document.querySelector('[data-ae-l2-overlay]')).not.toBeNull()
     })
-    expect(global.fetch).toHaveBeenCalledWith('/apps/settings.json')
+    expect(global.fetch).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(window.document.querySelector('[data-ae-l2-overlay]')?.textContent).toContain(
         'Settings'
@@ -340,10 +338,6 @@ describe('one skin state, two doors', () => {
       profiles: [stubProfile('winxp'), stubProfile('terminal')]
     } as never)
     $renderProfilePreviewId.set(null)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: true, json: async () => skins }) as unknown as Response)
-    )
     renderTab('microsoft')
     await waitFor(() => {
       expect(
@@ -353,6 +347,19 @@ describe('one skin state, two doors', () => {
     fireEvent.click(
       window.document.querySelector('[data-ugui-action="projects.source.open"]') as Element
     )
+
+    // Settings opens first; Designer is the door onto Skin Studio inside it.
+    const designer = await waitFor(() => {
+      const found = window.document.querySelector(
+        '[data-ae-l2-overlay] [data-ugui-source="/apps/skins.json"]'
+      )
+
+      expect(found).not.toBeNull()
+
+      return found as Element
+    })
+
+    fireEvent.click(designer)
 
     const select = await waitFor(() => {
       const found = window.document.querySelector<HTMLSelectElement>(

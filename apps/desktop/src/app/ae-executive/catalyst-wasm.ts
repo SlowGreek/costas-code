@@ -13,6 +13,7 @@ import initWasm, {
   catalyst_controller_paint,
   catalyst_controller_select_tab,
   catalyst_document_action,
+  catalyst_document_source,
   catalyst_mount_document,
   catalyst_global_key,
   catalyst_preference_selection,
@@ -391,12 +392,15 @@ export function openDocumentSource(element: Element, source: string): Promise<vo
     return Promise.reject(new Error(`document source is not admitted: ${source}`))
   }
 
-  const base = assetBase()
-  const url = base === '/' ? source : new URL(source.slice(1), base).href
+  // The engine carries these documents, so opening one is neither a fetch nor a
+  // read of a staged copy of the projects folder.
+  const carried = JSON.parse(catalyst_document_source(source)) as { error?: string }
 
-  return fetch(url)
-    .then(response => (response.ok ? response.json() : Promise.reject(new Error(source))))
-    .then(document => mountDocument(element, document))
+  if (carried.error) {
+    return Promise.reject(new Error(`document source is not carried: ${source}`))
+  }
+
+  return Promise.resolve(mountDocument(element, carried))
 }
 
 async function enact(effects: readonly CatalystEffect[] = []): Promise<void> {

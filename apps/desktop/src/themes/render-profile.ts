@@ -1,4 +1,10 @@
-import { profileCss, type RenderMode, skinCss } from '@/app/ae-executive/catalyst-wasm'
+import {
+  profileCss,
+  type RenderMode,
+  setActiveSkin,
+  skinAttributes,
+  skinCss
+} from '@/app/ae-executive/catalyst-wasm'
 
 export const RENDER_PROFILE_SCHEMA = 'hermes-render-profile/1' as const
 
@@ -174,6 +180,54 @@ function renderedMode(root: HTMLElement): RenderMode {
   return root.classList.contains('dark') || root.dataset.hermesMode === 'dark' ? 'dark' : 'light'
 }
 
+/**
+ * Every shell token a skin owns, expressed against the engine's `--morph-*`
+ * vocabulary. This has to be applied inline: `applyTheme` writes the desktop
+ * palette inline on `:root`, and no stylesheet rule — however specific — can
+ * outrank that. A skin is the outermost authority over how the shell looks,
+ * so it paints last and it paints here.
+ */
+const SKIN_SHELL_TOKENS: Readonly<Record<string, string>> = {
+  '--radius-scalar': '1',
+  '--radius-xs': 'var(--morph-radius-sm)',
+  '--radius-sm': 'var(--morph-radius-sm)',
+  '--radius-md': 'var(--morph-radius-md)',
+  '--radius-lg': 'var(--morph-radius-md)',
+  '--radius-xl': 'var(--morph-radius-lg)',
+  '--radius-2xl': 'var(--morph-radius-lg)',
+  '--radius-3xl': 'var(--morph-radius-lg)',
+  '--radius-4xl': 'var(--morph-radius-lg)',
+  '--titlebar-height': 'var(--morph-titlebar-height)',
+  '--dt-font-sans': 'var(--morph-font-family)',
+  '--dt-background': 'var(--morph-surface)',
+  '--dt-foreground': 'var(--morph-on-surface)',
+  '--dt-card': 'var(--morph-surface)',
+  '--dt-card-foreground': 'var(--morph-on-surface)',
+  '--dt-popover': 'var(--morph-surface)',
+  '--dt-popover-foreground': 'var(--morph-on-surface)',
+  '--dt-primary': 'var(--morph-accent)',
+  '--dt-border': 'var(--morph-border-color)',
+  '--dt-input': 'var(--morph-border-color)',
+  '--dt-ring': 'var(--morph-accent)',
+  '--dt-midground': 'var(--morph-accent)',
+  '--ui-base': 'var(--morph-on-surface)',
+  '--ui-accent': 'var(--morph-accent)',
+  '--ui-bg-chrome': 'var(--morph-surface)',
+  '--ui-bg-sidebar': 'var(--morph-surface)',
+  '--ui-bg-editor': 'var(--morph-surface)',
+  '--ui-bg-elevated': 'var(--morph-surface)',
+  '--ui-chat-surface-background': 'var(--morph-desktop)',
+  '--ui-editor-surface-background': 'var(--morph-surface)',
+  '--ui-sidebar-surface-background': 'var(--morph-surface)',
+  '--ui-stroke-primary': 'var(--morph-border-color)',
+  '--ui-stroke-secondary': 'var(--morph-border-color)',
+  '--ui-stroke-tertiary': 'var(--morph-border-color)',
+  '--stroke-nous': 'var(--morph-border-color)'
+}
+
+/** The shell tokens a skin governs, in the order they are painted. */
+export const skinShellTokens = (): readonly string[] => Object.keys(SKIN_SHELL_TOKENS)
+
 export function applyRenderProfile(
   profile: RenderProfile,
   mode?: RenderMode,
@@ -189,7 +243,21 @@ export function applyRenderProfile(
   root.dataset.uguiMotion = profile.axes.motion.mode
   root.dataset.uguiMode = rendered
 
+  // A skin implies attributes as well as variables; the close control and the
+  // rest of the window furniture are styled through them.
+  for (const [name, value] of Object.entries(skinAttributes(profile.id, rendered))) {
+    root.setAttribute(name, value)
+  }
+
+  setActiveSkin(profile.id)
+
   for (const [name, value] of Object.entries(renderProfileCss(profile, rendered))) {
+    root.style.setProperty(name, value)
+  }
+
+  // Last word: the skin's own vocabulary reaches every shell token, so a font
+  // or an accent generalizes past the Document to the whole desktop.
+  for (const [name, value] of Object.entries(SKIN_SHELL_TOKENS)) {
     root.style.setProperty(name, value)
   }
 

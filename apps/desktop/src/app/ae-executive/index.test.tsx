@@ -304,6 +304,45 @@ describe('authored L2 documents', () => {
       expect(notice).toContain(`theme · ${choice}`)
     })
   })
+
+  it('carries a vertical chosen in Settings into the painted Document', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => settings }) as unknown as Response)
+    )
+    renderTab('microsoft')
+    await waitFor(() => {
+      expect(
+        window.document.querySelector('[data-ugui-action="projects.source.open"]')
+      ).not.toBeNull()
+    })
+    fireEvent.click(
+      window.document.querySelector('[data-ugui-action="projects.source.open"]') as Element
+    )
+    await waitFor(() => {
+      expect(window.document.querySelector('[data-ae-l2-overlay]')).not.toBeNull()
+    })
+
+    const overlay = window.document.querySelector('[data-ae-l2-overlay]') as Element
+    const vertical = overlay.querySelector(
+      '.ugui-l2-document [data-ugui-action="projects.vertical"]'
+    ) as Element
+
+    // `vertical` reshapes the Document rather than the shell, so this host has
+    // to reach the applet instead of reporting the choice as unprojectable.
+    expect(vertical).not.toBeNull()
+    fireEvent.click(vertical)
+
+    const choice = (vertical.getAttribute('data-ugui-id') ?? '').replace('projects.vertical.', '')
+
+    await waitFor(() => {
+      const notice = window.document.querySelector('[data-ae-document-action]')?.textContent ?? ''
+
+      expect(notice).toContain(`vertical · ${choice}`)
+      expect(notice).not.toContain('not yet projected')
+      expect(notice).not.toContain('no carrier')
+    })
+  })
 })
 
 const stubProfile = (id: string) => ({

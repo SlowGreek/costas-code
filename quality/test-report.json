@@ -1,14 +1,14 @@
 {
   "schema": "test/1",
-  "signal": "🟢",
+  "signal": "🔴",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2977,
-    "failed": 0,
+    "passed": 2979,
+    "failed": 1,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
-    "total": 2977
+    "total": 2980
   },
   "suites": [
     {
@@ -311,13 +311,18 @@
     {
       "id": "apps/desktop/electron/git-worktree-ops.test.ts",
       "name": "apps/desktop/electron/git-worktree-ops.test.ts",
-      "passed": 22,
-      "failed": 0,
+      "passed": 21,
+      "failed": 1,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 22,
-      "failures": []
+      "failures": [
+        {
+          "id": "listBranches: a branch claimed by a worktree is flagged checked out",
+          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:156:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
+        }
+      ]
     },
     {
       "id": "apps/desktop/electron/hardening.test.ts",
@@ -894,23 +899,23 @@
     {
       "id": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
       "name": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
-      "passed": 14,
+      "passed": 16,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 14,
+      "total": 16,
       "failures": []
     },
     {
       "id": "apps/desktop/src/app/ae-executive/index.test.tsx",
       "name": "apps/desktop/src/app/ae-executive/index.test.tsx",
-      "passed": 12,
+      "passed": 13,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 12,
+      "total": 13,
       "failures": []
     },
     {
@@ -3721,9 +3726,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:0b6d5bd0c33060ac669beff449d088449e56b7c63b786492d86a4ff55ac9ab66",
+      "sha256": "sha256:4ccea3a01665686bdda5bd21240a0729a241597b2dd8cc5919d9a74dd04ff695",
       "files": 1190,
-      "bytes": 9360041
+      "bytes": 9365413
     },
     "tools": {
       "node": "26.5.0",

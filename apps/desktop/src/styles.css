@@ -514,43 +514,11 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  :root[data-ugui-skin] {
-    --radius-scalar: 1;
-    --radius-xs: var(--morph-radius-sm);
-    --radius-sm: var(--morph-radius-sm);
-    --radius-md: var(--morph-radius-md);
-    --radius-lg: var(--morph-radius-md);
-    --radius-xl: var(--morph-radius-lg);
-    --radius-2xl: var(--morph-radius-lg);
-    --radius-3xl: var(--morph-radius-lg);
-    --radius-4xl: var(--morph-radius-lg);
-    --titlebar-height: var(--morph-titlebar-height);
-    --dt-font-sans: var(--morph-font-family);
-    --dt-background: var(--morph-surface);
-    --dt-foreground: var(--morph-on-surface);
-    --dt-card: var(--morph-surface);
-    --dt-card-foreground: var(--morph-on-surface);
-    --dt-popover: var(--morph-surface);
-    --dt-popover-foreground: var(--morph-on-surface);
-    --dt-primary: var(--morph-accent);
-    --dt-border: var(--morph-border-color);
-    --dt-input: var(--morph-border-color);
-    --dt-ring: var(--morph-accent);
-    --dt-midground: var(--morph-accent);
-    --ui-base: var(--morph-on-surface);
-    --ui-accent: var(--morph-accent);
-    --ui-bg-chrome: var(--morph-surface);
-    --ui-bg-sidebar: var(--morph-surface);
-    --ui-bg-editor: var(--morph-surface);
-    --ui-bg-elevated: var(--morph-surface);
-    --ui-chat-surface-background: var(--morph-desktop);
-    --ui-editor-surface-background: var(--morph-surface);
-    --ui-sidebar-surface-background: var(--morph-surface);
-    --ui-stroke-primary: var(--morph-border-color);
-    --ui-stroke-secondary: var(--morph-border-color);
-    --ui-stroke-tertiary: var(--morph-border-color);
-    --stroke-nous: var(--morph-border-color);
-  }
+  /* The skin→shell token bridge USED to live here, and a stylesheet always
+     loses to the inline palette `applyTheme` writes on `:root` — so the
+     skin's font, border and ring silently never left the Document. It now
+     lives in `SKIN_SHELL_TOKENS` (themes/render-profile.ts), applied inline
+     after the theme, which is the only way a skin can outrank it. */
 
   :root[data-ugui-skin] body {
     background: var(--morph-desktop);

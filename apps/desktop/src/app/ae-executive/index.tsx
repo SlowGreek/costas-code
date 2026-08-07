@@ -24,12 +24,16 @@ import {
   mountL2Document,
   observe,
   onEffect,
+  overlayClose,
+  overlayPush,
+  overlaySnapshot,
   paintCatalogTab,
   preferenceSelection,
   preferenceVocabulary,
   projectsInput,
   selectTab,
   skinField,
+  type SurfaceFrame,
   UGUI_GESTURES,
   uguiActionFromEvent,
   type UguiHit
@@ -193,13 +197,33 @@ export function AeExecutiveWorkspace() {
   useEffect(() => {
     if (!overlay || !overlaySurface.current) {return}
 
-    // A fresh paint carries no selection, so the committed choice is restated
-    // onto it — otherwise every control looks unselected on first open.
-    void loadDocumentSource(overlay)
-      .then(document => mountL2Document(overlaySurface.current as HTMLDivElement, document))
+    // The engine holds the stack, so a repaint mounts whatever is innermost
+    // rather than whichever source this host opened last.
+    const showing = overlaySnapshot().current
+
+    if (!showing) {return}
+    void Promise.resolve(mountL2Document(overlaySurface.current, showing))
       .then(() => paintSelection.current())
       .catch((reason: unknown) => setNotice(`Document refused · ${String(reason)}`))
   }, [overlay])
+
+  // Opening a Document over another is nesting, which the engine owns.
+  function openOverlay(source: string) {
+    void loadDocumentSource(source)
+      .then(document => {
+        const stack = overlayPush(document)
+
+        setOverlay(`${source}#${stack.depth}`)
+      })
+      .catch((reason: unknown) => setNotice(`Document refused · ${String(reason)}`))
+  }
+
+  // Closing returns to the parent when the engine says one is underneath.
+  function closeOverlay() {
+    const stack = overlayClose()
+
+    setOverlay(stack.depth > 0 ? `overlay#${stack.depth}` : null)
+  }
 
   // The engine says what a Document action means; this host only carries it out.
   function routeDocument(hit: UguiHit) {
@@ -207,7 +231,7 @@ export function AeExecutiveWorkspace() {
 
     switch (resolved.kind) {
       case 'open-document':
-        setOverlay(resolved.source ?? null)
+        if (resolved.source) {openOverlay(resolved.source)}
 
         break
 
@@ -300,16 +324,41 @@ export function AeExecutiveWorkspace() {
 
         break
 
-      default:
-        // `surface` and `vertical` reshape the Document rather than the shell,
-        // and no applet handler answers them yet.
-        return `${preference} · ${choice} · not yet projected`
+      default: {
+        // The engine names which preferences reshape the Document rather than
+        // the shell, so this host routes rather than deciding.
+        const appletInput = preferenceVocabulary()[preference]?.appletInput
+
+        if (!appletInput) {return `${preference} · ${choice} · no carrier`}
+
+        const frame = projectsInput(appletInput, '', choice)
+
+        if (!frame.document || !surface.current) {
+          return `${preference} refused · ${frame.error ?? frame.detail ?? 'unseated'}`
+        }
+        void mountDocument(surface.current, frame.document)
+        applySurfaceFrame(frame.surface)
+      }
     }
 
     activePreferences.current = { ...activePreferences.current, [preference]: choice }
     paintPreferenceSelection()
 
     return `${preference} · ${choice}`
+  }
+
+  // An authored vertical Document cannot answer the surface, so the frame it is
+  // painted in carries it. The engine resolves the plan; this host wears it.
+  function applySurfaceFrame(frame: SurfaceFrame | undefined) {
+    const root = surface.current
+
+    if (!frame || !root) {return}
+
+    // `data-ugui-surface` is already this host's mount marker, so the resolved
+    // surface is carried under its own names.
+    root.dataset.uguiSurfaceId = frame.id
+    root.dataset.uguiRenderMode = frame.renderMode
+    root.dataset.uguiAppletSurface = frame.appletSurface
   }
 
   // A control group has to show which choice is committed, or every door looks
@@ -363,7 +412,7 @@ export function AeExecutiveWorkspace() {
       gesture === 'click' &&
       (target as HTMLElement | null)?.closest?.('.ugui-installed-app-close')
     ) {
-      setOverlay(null)
+      closeOverlay()
 
       return
     }
@@ -433,7 +482,7 @@ export function AeExecutiveWorkspace() {
       // Dismissing this overlay is host chrome, not Document semantics: the
       // engine's key vocabulary has no say over a div this host owns.
       if (event.key === 'Escape' && overlay) {
-        setOverlay(null)
+        closeOverlay()
         event.preventDefault()
 
         return
@@ -516,7 +565,7 @@ export function AeExecutiveWorkspace() {
         <div
           className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-8"
           onClick={event => {
-            if (event.target === event.currentTarget) {setOverlay(null)}
+            if (event.target === event.currentTarget) {closeOverlay()}
           }}
           role="presentation"
         >

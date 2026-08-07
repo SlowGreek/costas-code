@@ -6,7 +6,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
 
-import { applyRenderProfile, parseRenderProfileCatalog, type RenderProfile, renderProfileCss } from './render-profile'
+import {
+  applyRenderProfile,
+  parseRenderProfileCatalog,
+  type RenderProfile,
+  renderProfileCss,
+  skinShellTokens
+} from './render-profile'
 
 // The shell's variables come from the engine, so tests seat it like the app does.
 beforeAll(async () => {
@@ -159,4 +165,26 @@ it('reads the mode off the element when a caller does not name one', () => {
   // Every store path applies a profile without knowing the mode, so the element
   // it paints onto is the one source of truth.
   expect(root.dataset.uguiMode).toBe('dark')
+})
+
+it('outranks the desktop theme on every shell token a skin governs', () => {
+  const root = document.createElement('div')
+
+  // applyTheme paints the desktop palette inline, so a skin bridge kept in a
+  // stylesheet could never win — the font and the accent stopped at the
+  // Document instead of restyling the whole shell.
+  for (const token of skinShellTokens()) {
+    root.style.setProperty(token, 'theme-owned')
+  }
+
+  applyRenderProfile(profile('windows-95'), 'light', root)
+
+  for (const token of skinShellTokens()) {
+    expect(root.style.getPropertyValue(token)).not.toBe('theme-owned')
+  }
+
+  expect(root.style.getPropertyValue('--dt-font-sans')).toBe('var(--morph-font-family)')
+  // The token it points at has to be a real family, or the shell inherits
+  // nothing and silently keeps the theme font.
+  expect(root.style.getPropertyValue('--morph-font-family')).toMatch(/[A-Za-z]/)
 })

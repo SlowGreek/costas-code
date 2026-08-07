@@ -17,10 +17,15 @@ import initWasm, {
   catalyst_global_key,
   catalyst_mount_document,
   catalyst_mount_l2_document,
+  catalyst_overlay_clear,
+  catalyst_overlay_close,
+  catalyst_overlay_push,
+  catalyst_overlay_snapshot,
   catalyst_preference_selection,
   catalyst_preference_vocabulary,
   catalyst_profile_css,
   catalyst_projects_input,
+  catalyst_set_active_skin,
   catalyst_set_asset_base,
   catalyst_skin_field,
   catalyst_skin_variables,
@@ -162,6 +167,41 @@ export function globalKey(
   ) as KeyDecision
 }
 
+/** What the engine's Document stack is currently showing. */
+export interface OverlayStack {
+  readonly depth: number
+  readonly current: unknown
+  readonly selectedApp: string | null
+}
+
+const overlayStack = (encoded: string): OverlayStack => {
+  const answer = JSON.parse(encoded) as Partial<OverlayStack>
+
+  return {
+    depth: answer.depth ?? 0,
+    current: answer.current ?? null,
+    selectedApp: answer.selectedApp ?? null
+  }
+}
+
+/** Open a Document over whatever is already open. */
+export function overlayPush(document: unknown): OverlayStack {
+  return overlayStack(catalyst_overlay_push(JSON.stringify(document ?? null)))
+}
+
+/** Close the showing Document; the engine decides whether a parent remains. */
+export function overlayClose(): OverlayStack {
+  return overlayStack(catalyst_overlay_close())
+}
+
+export function overlayClear(): OverlayStack {
+  return overlayStack(catalyst_overlay_clear())
+}
+
+export function overlaySnapshot(): OverlayStack {
+  return overlayStack(catalyst_overlay_snapshot())
+}
+
 /** Which control of each preference group is currently committed. */
 export function preferenceSelection(active: Record<string, string>): Record<string, string> {
   const answer = JSON.parse(catalyst_preference_selection(JSON.stringify(active))) as {
@@ -171,10 +211,17 @@ export function preferenceSelection(active: Record<string, string>): Record<stri
   return answer.selected ?? {}
 }
 
+/** One preference's control group, and the applet input that carries it. */
+export interface PreferenceEntry {
+  readonly action: string | null
+  readonly choices: string[] | null
+  readonly appletInput: string | null
+}
+
 /** The choices each preference admits, so this host validates nothing itself. */
-export function preferenceVocabulary(): Record<string, { action: string | null; choices: string[] | null }> {
+export function preferenceVocabulary(): Record<string, PreferenceEntry> {
   const answer = JSON.parse(catalyst_preference_vocabulary()) as {
-    preferences?: Record<string, { action: string | null; choices: string[] | null }>
+    preferences?: Record<string, PreferenceEntry>
   }
 
   return answer.preferences ?? {}
@@ -207,6 +254,20 @@ export function skinCss(skinId: string, mode: RenderMode): Record<string, string
   }
 
   return answer.variables ?? null
+}
+
+/** The attributes a skin implies. Rules keyed on chrome state need these. */
+export function skinAttributes(skinId: string, mode: RenderMode): Record<string, string> {
+  const answer = JSON.parse(catalyst_skin_variables(skinId, mode)) as {
+    attributes?: Record<string, string>
+  }
+
+  return answer.attributes ?? {}
+}
+
+/** Tell the engine which skin is showing, so the Studio opens on it. */
+export function setActiveSkin(skinId: string): void {
+  catalyst_set_active_skin(skinId)
 }
 
 function start(): Promise<void> {
@@ -378,11 +439,22 @@ export function documentAction(action: string, nodeId: string, value: unknown): 
   return JSON.parse(catalyst_document_action(action, nodeId, JSON.stringify(value ?? null))) as DocumentAction
 }
 
+/** How the engine says the seated surface is presented. */
+export interface SurfaceFrame {
+  readonly id: string
+  readonly renderMode: string
+  readonly appletSurface: string
+  readonly overlay: boolean
+  readonly wearable: boolean
+  readonly resizable: boolean
+}
+
 export interface ProjectsFrame {
   readonly schema: string
   readonly status?: string
   readonly seated?: boolean
   readonly document?: unknown
+  readonly surface?: SurfaceFrame
   readonly error?: string
   readonly detail?: string
 }

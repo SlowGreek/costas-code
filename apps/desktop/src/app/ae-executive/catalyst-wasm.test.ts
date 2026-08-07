@@ -6,13 +6,20 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
   globalKey,
+  loadDocumentSource,
   mountDocument,
   mountL2Document,
+  overlayClear,
+  overlayClose,
+  overlayPush,
+  overlaySnapshot,
   preferenceSelection,
   preferenceVocabulary,
   projectsInput,
+  setActiveSkin,
   setAssetBaseForTests,
   setWasmInputForTests,
+  skinAttributes,
   skinField,
   tabDocument,
   tabsJson,
@@ -226,10 +233,116 @@ it('drives the seated Projects applet through the engine reducer', () => {
 
   expect(searched.status).toBe('accepted')
 
+
   // A handler the query does not own is refused, not silently applied.
   const refused = projectsInput('projects.inspector.field', 'node', null)
 
   expect(refused.error).toBe('E_CATALYST_PROJECTS_HOST_INPUT')
+})
+
+it('nests Documents and closes back to the parent', () => {
+  overlayClear()
+
+  // A single `current` cannot nest; this host had exactly that until the
+  // engine's stack backed it.
+  expect(overlayPush({ id: 'settings' }).depth).toBe(1)
+  expect(overlayPush({ id: 'skins' }).depth).toBe(2)
+  expect(overlaySnapshot().current).toEqual({ id: 'skins' })
+
+  const parent = overlayClose()
+
+  expect(parent.depth).toBe(1)
+  expect(parent.current).toEqual({ id: 'settings' })
+
+  // Closing the root closes the stack rather than leaving an empty frame open.
+  expect(overlayClose().depth).toBe(0)
+  expect(overlaySnapshot().current).toBeNull()
+
+  // A malformed Document is refused rather than pushed.
+  expect(overlayPush(undefined).depth).toBe(0)
+  overlayClear()
+})
+
+it('opens the Skin Studio on the skin that is active', async () => {
+  // The authored `skins.json` names whichever skin it shipped with, so opening
+  // it showed glassmorphism however far the skin had been changed.
+  setActiveSkin('windows-95')
+
+  const studio = (await loadDocumentSource('/apps/skins.json')) as {
+    sections?: { id?: string; value?: string; choices?: unknown[] }[]
+  }
+
+  const select = studio.sections?.find(section => section.id === 'projects.skins.select')
+
+  expect(select?.value).toBe('windows-95')
+  expect(select?.choices?.length).toBeGreaterThan(1)
+
+  setActiveSkin('glassmorphism')
+
+  const reopened = (await loadDocumentSource('/apps/skins.json')) as {
+    sections?: { id?: string; value?: string }[]
+  }
+
+  expect(
+    reopened.sections?.find(section => section.id === 'projects.skins.select')?.value
+  ).toBe('glassmorphism')
+})
+
+it('carries the attributes a skin implies, not only its variables', () => {
+  // `html[data-skin-chrome-controls="true"]` is what styles the close control;
+  // a host given only variables can never reach those rules.
+  expect(skinAttributes('windows-95', 'light')['data-skin-chrome-controls']).toBe('true')
+  expect(skinAttributes('brutalism', 'light')['data-skin-chrome-controls']).toBe('false')
+})
+
+it('names which preferences reshape the Document instead of the shell', () => {  const vocabulary = preferenceVocabulary()
+
+  // Without this, a host implements the shell preferences and silently drops
+  // the two that only the applet can answer.
+  expect(vocabulary.vertical?.appletInput).toBe('projects.applet.input.vertical')
+  expect(vocabulary.surface?.appletInput).toBe('projects.applet.input.surface')
+  // Theme and background are the shell's own, so the engine claims no carrier.
+  expect(vocabulary.theme?.appletInput).toBeNull()
+  expect(vocabulary.background?.appletInput).toBeNull()
+})
+
+it('re-projects the Document when the vertical or surface changes', () => {
+  // Surface first: a seated vertical projects its own Document, which the
+  // surface does not reshape.
+  const phone = projectsInput('projects.applet.input.surface', '', 'phone')
+  const desktop = projectsInput('projects.applet.input.surface', '', 'desktop')
+
+  expect(phone.status).toBe('accepted')
+  expect(desktop.status).toBe('accepted')
+  // Naming a surface at the bridge pinned every re-projection to Desktop
+  // however far the setting moved.
+  expect(JSON.stringify(phone.document)).not.toBe(JSON.stringify(desktop.document))
+
+  // An authored vertical Document cannot answer the surface, so the frame it is
+  // painted in has to carry it.
+  expect(phone.surface?.id).toBe('phone')
+  expect(phone.surface?.appletSurface).toBe('mobile')
+  expect(phone.surface?.renderMode).toBe('mobile')
+  expect(desktop.surface?.appletSurface).toBe('desktop')
+
+  // Two surfaces can share one applet geometry without being the same surface,
+  // which the coarse geometry alone cannot tell apart.
+  const gopilot = projectsInput('projects.applet.input.surface', '', 'gopilot')
+  const watch = projectsInput('projects.applet.input.surface', '', 'watch')
+
+  expect(gopilot.surface?.id).toBe('gopilot')
+  expect(watch.surface?.id).toBe('watch')
+  expect(gopilot.surface?.appletSurface).toBe('watch')
+  expect(watch.surface?.appletSurface).toBe('watch')
+  expect(gopilot.surface?.wearable).toBe(true)
+
+  const vertical = projectsInput('projects.applet.input.vertical', '', 'github')
+
+  expect(vertical.status).toBe('accepted')
+  expect(JSON.stringify(vertical.document)).toMatch(/github/i)
+
+  // A choice outside the engine's vocabulary is refused, not painted.
+  expect(projectsInput('projects.applet.input.surface', '', 'hologram').error).toBeTruthy()
 })
 
 

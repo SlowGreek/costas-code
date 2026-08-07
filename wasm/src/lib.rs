@@ -384,13 +384,53 @@ pub fn catalyst_document_action(action: &str, node_id: &str, value_source: &str)
 thread_local! {
     static PROJECTS: std::cell::RefCell<ugui_render::applets::projects::session::ProjectsSession> =
         std::cell::RefCell::new(ugui_render::applets::projects::session::ProjectsSession::repository());
+    static OVERLAYS: std::cell::RefCell<ugui_render::document_stack::DocumentStack> =
+        const { std::cell::RefCell::new(ugui_render::document_stack::DocumentStack::new()) };
+}
+
+/// This host's wire label for the engine's Document stack.
+const OVERLAY_SCHEMA: &str = "catalyst-document-stack/1";
+
+/// Open a Document over whatever is already open. Nesting is the engine's, so
+/// this host does not have to decide what depth means.
+#[wasm_bindgen]
+pub fn catalyst_overlay_push(document_source: &str) -> String {
+    // A Document is an object; anything else would open an empty frame.
+    let Some(document) = json::parse(document_source).filter(|value| value.get("id").is_some())
+    else {
+        return refusal("E_CATALYST_OVERLAY", "document is not a Document");
+    };
+    OVERLAYS.with(|overlays| overlays.borrow_mut().push(document));
+    catalyst_overlay_snapshot()
+}
+
+/// Close the showing Document. The root of a stack closes the stack.
+#[wasm_bindgen]
+pub fn catalyst_overlay_close() -> String {
+    OVERLAYS.with(|overlays| {
+        let mut overlays = overlays.borrow_mut();
+        if !overlays.pop() {
+            overlays.clear();
+        }
+    });
+    catalyst_overlay_snapshot()
+}
+
+#[wasm_bindgen]
+pub fn catalyst_overlay_clear() -> String {
+    OVERLAYS.with(|overlays| overlays.borrow_mut().clear());
+    catalyst_overlay_snapshot()
+}
+
+#[wasm_bindgen]
+pub fn catalyst_overlay_snapshot() -> String {
+    OVERLAYS.with(|overlays| json::canonical_string(&overlays.borrow().to_json(OVERLAY_SCHEMA)))
 }
 
 /// Drive the seated Projects applet with one authored input and re-project it.
 /// The engine owns what the input means; this host only carries it and repaints.
 #[wasm_bindgen]
-pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str) -> String {
-    use ugui_render::applets::projects::session::{Applied, ProjectsInput};
+pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str) -> String {    use ugui_render::applets::projects::session::{Applied, ProjectsInput};
 
     let input = ProjectsInput {
         handler: handler.to_owned(),
@@ -406,11 +446,13 @@ pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str)
                 ("status", json::s("accepted")),
                 (
                     "document",
-                    json::parse(
-                        &session.document(ugui_render::applets::AppletSurface::Desktop, false),
-                    )
-                    .unwrap_or(Json::Null),
+                    // `None` paints the surface the session remembers; naming one
+                    // here would pin every re-projection to Desktop.
+                    json::parse(&session.document(None, false)).unwrap_or(Json::Null),
                 ),
+                // A vertical Document is authored, so its content cannot answer
+                // the surface. The frame it is painted in still has to.
+                ("surface", surface_frame(&session)),
             ])),
             Ok(Applied::Host) => refusal("E_CATALYST_PROJECTS_HOST_INPUT", handler),
             Err(code) => refusal("E_CATALYST_PROJECTS_INPUT", code),
@@ -418,8 +460,37 @@ pub fn catalyst_projects_input(handler: &str, node_id: &str, value_source: &str)
     })
 }
 
+/// How the seated surface is presented. A host frames its viewport from the
+/// engine's plan rather than deciding for itself what `watch` or `phone` means.
+fn surface_frame(session: &ugui_render::applets::projects::session::ProjectsSession) -> Json {
+    let plan = session.surface_plan();
+
+    json::obj(vec![
+        ("id", json::s(plan.id)),
+        ("renderMode", json::s(plan.render_mode.name())),
+        ("appletSurface", json::s(plan.applet_surface.name())),
+        ("overlay", Json::Bool(plan.overlay)),
+        ("wearable", Json::Bool(plan.wearable)),
+        ("resizable", Json::Bool(plan.resizable)),
+    ])
+}
+
 /// The CSS custom properties a skin projects. The engine owns the style matrix,
 /// the skins that bind it, and the vocabulary sheet that reads them.
+/// The attributes a skin implies, so rules keyed on chrome state are reachable.
+fn skin_attributes(skin_id: &str) -> Json {
+    let closes = ugui_render::theme::CATALOG
+        .iter()
+        .find(|skin| skin.id == skin_id || skin.canonical_id == skin_id)
+        .and_then(|skin| json::parse(skin.binding_json))
+        .is_some_and(|binding| ugui_render::style_chrome::closes_windows(&binding));
+
+    json::obj(vec![(
+        "data-skin-chrome-controls",
+        json::s(if closes { "true" } else { "false" }),
+    )])
+}
+
 #[wasm_bindgen]
 pub fn catalyst_skin_variables(skin_id: &str, mode: &str) -> String {
     match ugui_render::style_css::skin_variables(
@@ -435,6 +506,9 @@ pub fn catalyst_skin_variables(skin_id: &str, mode: &str) -> String {
                     variables.into_iter().map(|(name, value)| (name, json::s(&value))).collect(),
                 ),
             ),
+            // A skin implies attributes as well as variables. Carrying only the
+            // variables leaves every rule keyed on chrome state unreachable.
+            ("attributes", skin_attributes(skin_id)),
         ])),
         None => refusal("E_CATALYST_SKIN", skin_id),
     }
@@ -512,6 +586,10 @@ pub fn catalyst_preference_vocabulary() -> String {
                 json::obj(vec![
                     ("action", ugui_render::preferences::action(kind).map_or(Json::Null, json::s)),
                     ("choices", choices),
+                    (
+                        "appletInput",
+                        ugui_render::preferences::applet_input(kind).map_or(Json::Null, json::s),
+                    ),
                 ]),
             )
         })
@@ -585,8 +663,44 @@ pub fn catalyst_skin_field(skin_id: &str, node_id: &str, value_source: &str, mod
 /// app documents, so this host neither stages a copy of the folder nor fetches.
 #[wasm_bindgen]
 pub fn catalyst_document_source(source: &str) -> String {
+    // The Skin Studio is projected from the skin that is active, not read from
+    // the authored file, which names whichever skin it shipped with.
+    if source == "/apps/skins.json" {
+        let active = SKIN_EDIT.with(|session| {
+            session.borrow().as_ref().map(|seated| seated.skin_id.clone())
+        });
+        let skin_id = active.unwrap_or_else(|| ACTIVE_SKIN.with(|skin| skin.borrow().clone()));
+
+        return match ugui_render::skin_template::studio(&skin_id) {
+            Ok(document) => json::canonical_string(&document),
+            Err(findings) => refusal("E_CATALYST_SKIN_STUDIO", &findings.join("; ")),
+        };
+    }
     match ugui_render::app_catalog::projects_document_for_source(source) {
         Some(document) => document.to_owned(),
         None => refusal("E_CATALYST_UGUI_APP", "document source is not carried"),
     }
+}
+
+thread_local! {
+    /// The skin this host last committed, so the Studio opens on it.
+    static ACTIVE_SKIN: std::cell::RefCell<String> =
+        std::cell::RefCell::new("glassmorphism".to_owned());
+}
+
+/// Tell the engine which skin this host is showing.
+#[wasm_bindgen]
+pub fn catalyst_set_active_skin(skin_id: &str) -> String {
+    let seated = ugui_render::theme::CATALOG
+        .iter()
+        .find(|skin| skin.id == skin_id || skin.canonical_id == skin_id);
+    let Some(skin) = seated else {
+        return refusal("E_CATALYST_SKIN", "skin is not catalogued");
+    };
+    ACTIVE_SKIN.with(|active| *active.borrow_mut() = skin.canonical_id.to_owned());
+
+    json::canonical_string(&json::obj(vec![
+        ("schema", json::s("catalyst-active-skin/1")),
+        ("skin", json::s(skin.canonical_id)),
+    ]))
 }

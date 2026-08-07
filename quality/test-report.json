@@ -3,8 +3,8 @@
   "signal": "🔴",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2983,
-    "failed": 1,
+    "passed": 2982,
+    "failed": 2,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
@@ -311,16 +311,20 @@
     {
       "id": "apps/desktop/electron/git-worktree-ops.test.ts",
       "name": "apps/desktop/electron/git-worktree-ops.test.ts",
-      "passed": 21,
-      "failed": 1,
+      "passed": 20,
+      "failed": 2,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 22,
       "failures": [
         {
-          "id": "addWorktree: existingBranch checks the branch out without a new branch",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:186:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
+          "id": "cleanupManagedWorktree: never removes a user-created worktree",
+          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:303:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
+        },
+        {
+          "id": "cleanupManagedWorktree: removes an empty managed worktree and its branch",
+          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:288:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
         }
       ]
     },

@@ -39,24 +39,24 @@
           "fixable": true
         },
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:304:7:padding-line-between-statements:0",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:327:7:padding-line-between-statements:0",
           "severity": "warning",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 304,
+          "line": 327,
           "column": 7,
-          "end_line": 318,
+          "end_line": 341,
           "end_column": 8,
           "rule": "padding-line-between-statements",
           "message": "Unexpected blank line before this statement.",
           "fixable": true
         },
         {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:316:9:padding-line-between-statements:1",
+          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:339:9:padding-line-between-statements:1",
           "severity": "warning",
           "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 316,
+          "line": 339,
           "column": 9,
-          "end_line": 316,
+          "end_line": 339,
           "end_column": 60,
           "rule": "padding-line-between-statements",
           "message": "Expected blank line before this statement.",
@@ -67,9 +67,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:4ccea3a01665686bdda5bd21240a0729a241597b2dd8cc5919d9a74dd04ff695",
+      "sha256": "sha256:c4dc475597461a80619b4b6caf2be2f31364366fb2a972ac4f53a40f7653289f",
       "files": 1190,
-      "bytes": 9365413
+      "bytes": 9372364
     },
     "tools": {
       "eslint": "9.39.4",

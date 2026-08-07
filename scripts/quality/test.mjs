@@ -78,6 +78,16 @@ try {
     provenance: { source, tools: { node: process.versions.node, vitest: vitest.version } }
   }
   publishReport('test-report.json', shaped)
+  // One anchored line per failure: an aggregate count forces a full re-run to find the 2 that broke.
+  for (const suite of suites) {
+    for (const failure of suite.failures) {
+      const escaped = suite.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const frame = new RegExp(`${escaped}:(\\d+)`).exec(failure.message)
+      process.stdout.write(
+        `FAIL ${frame ? `${suite.id}:${frame[1]}` : suite.id} ${failure.id}\n`
+      )
+    }
+  }
   process.stdout.write(
     `test result: ${failed === 0 && result.ok ? 'ok' : '🔴'}. ${passed} passed; ${failed} failed; 0 ignored; 0 measured; ${skipped + todo} filtered out\n`
   )

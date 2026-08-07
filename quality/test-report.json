@@ -3,12 +3,12 @@
   "signal": "🔴",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2979,
-    "failed": 1,
+    "passed": 2982,
+    "failed": 2,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
-    "total": 2980
+    "total": 2984
   },
   "suites": [
     {
@@ -319,8 +319,8 @@
       "total": 22,
       "failures": [
         {
-          "id": "listBranches: a branch claimed by a worktree is flagged checked out",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:156:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    "
+          "id": "switchBranch: switches a normal checkout branch",
+          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:96:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    a"
         }
       ]
     },
@@ -866,13 +866,18 @@
     {
       "id": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
       "name": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
-      "passed": 7,
-      "failed": 0,
+      "passed": 6,
+      "failed": 1,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 7,
-      "failures": []
+      "failures": [
+        {
+          "id": "desktop lifecycle source hashing treats a tracked deletion as a source change without reading the missing file",
+          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/scripts/desktop-lifecycle.test.mjs:93:7\n    at file://node_modules/@vitest/runner/dist/chunk-artifact.js:1889:40\n    at"
+        }
+      ]
     },
     {
       "id": "apps/desktop/scripts/stage-native-deps.test.mjs",
@@ -899,12 +904,12 @@
     {
       "id": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
       "name": "apps/desktop/src/app/ae-executive/catalyst-wasm.test.ts",
-      "passed": 16,
+      "passed": 19,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 16,
+      "total": 19,
       "failures": []
     },
     {
@@ -3682,12 +3687,12 @@
     {
       "id": "apps/desktop/src/themes/render-profile.test.ts",
       "name": "apps/desktop/src/themes/render-profile.test.ts",
-      "passed": 5,
+      "passed": 6,
       "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
-      "total": 5,
+      "total": 6,
       "failures": []
     },
     {
@@ -3726,9 +3731,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:4ccea3a01665686bdda5bd21240a0729a241597b2dd8cc5919d9a74dd04ff695",
+      "sha256": "sha256:c4dc475597461a80619b4b6caf2be2f31364366fb2a972ac4f53a40f7653289f",
       "files": 1190,
-      "bytes": 9365413
+      "bytes": 9372364
     },
     "tools": {
       "node": "26.5.0",

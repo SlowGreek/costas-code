@@ -1,10 +1,10 @@
 {
   "schema": "test/1",
-  "signal": "🔴",
+  "signal": "🟢",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2982,
-    "failed": 2,
+    "passed": 2984,
+    "failed": 0,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
@@ -311,18 +311,13 @@
     {
       "id": "apps/desktop/electron/git-worktree-ops.test.ts",
       "name": "apps/desktop/electron/git-worktree-ops.test.ts",
-      "passed": 21,
-      "failed": 1,
+      "passed": 22,
+      "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 22,
-      "failures": [
-        {
-          "id": "switchBranch: switches a normal checkout branch",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/electron/git-worktree-ops.test.ts:96:1\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    a"
-        }
-      ]
+      "failures": []
     },
     {
       "id": "apps/desktop/electron/hardening.test.ts",
@@ -866,18 +861,13 @@
     {
       "id": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
       "name": "apps/desktop/scripts/desktop-lifecycle.test.mjs",
-      "passed": 6,
-      "failed": 1,
+      "passed": 7,
+      "failed": 0,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 7,
-      "failures": [
-        {
-          "id": "desktop lifecycle source hashing treats a tracked deletion as a source change without reading the missing file",
-          "message": "Error: STACK_TRACE_ERROR\n    at task (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1784:27)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1817:16)\n    at Object.<anonymous> (file://node_modules/@vitest/runner/dist/chunk-artifact.js:1563:28)\n    at chain (file://node_modules/@vitest/runner/dist/chunk-artifact.js:599:14)\n    at apps/desktop/scripts/desktop-lifecycle.test.mjs:93:7\n    at file://node_modules/@vitest/runner/dist/chunk-artifact.js:1889:40\n    at"
-        }
-      ]
+      "failures": []
     },
     {
       "id": "apps/desktop/scripts/stage-native-deps.test.mjs",
@@ -3731,9 +3721,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:c4dc475597461a80619b4b6caf2be2f31364366fb2a972ac4f53a40f7653289f",
+      "sha256": "sha256:4c08a8967d7a8072bc75e5eccf8f7157974f31a707603393165eea3f3fee91d8",
       "files": 1190,
-      "bytes": 9372364
+      "bytes": 9372812
     },
     "tools": {
       "node": "26.5.0",

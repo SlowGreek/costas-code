@@ -324,6 +324,7 @@ describe('authored L2 documents', () => {
     })
 
     const overlay = window.document.querySelector('[data-ae-l2-overlay]') as Element
+
     const vertical = overlay.querySelector(
       '.ugui-l2-document [data-ugui-action="projects.vertical"]'
     ) as Element

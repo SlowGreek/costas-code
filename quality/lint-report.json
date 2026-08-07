@@ -1,6 +1,6 @@
 {
   "schema": "lint/1",
-  "signal": "🔴",
+  "signal": "🟢",
   "command": "node scripts/quality/lint.mjs",
   "checks": [
     {
@@ -25,51 +25,14 @@
       "id": "eslint",
       "name": "desktop ESLint",
       "level": "error",
-      "findings": [
-        {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.test.tsx:327:5:padding-line-between-statements:0",
-          "severity": "warning",
-          "file": "apps/desktop/src/app/ae-executive/index.test.tsx",
-          "line": 327,
-          "column": 5,
-          "end_line": 329,
-          "end_column": 17,
-          "rule": "padding-line-between-statements",
-          "message": "Expected blank line before this statement.",
-          "fixable": true
-        },
-        {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:327:7:padding-line-between-statements:0",
-          "severity": "warning",
-          "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 327,
-          "column": 7,
-          "end_line": 341,
-          "end_column": 8,
-          "rule": "padding-line-between-statements",
-          "message": "Unexpected blank line before this statement.",
-          "fixable": true
-        },
-        {
-          "id": "eslint:apps/desktop/src/app/ae-executive/index.tsx:339:9:padding-line-between-statements:1",
-          "severity": "warning",
-          "file": "apps/desktop/src/app/ae-executive/index.tsx",
-          "line": 339,
-          "column": 9,
-          "end_line": 339,
-          "end_column": 60,
-          "rule": "padding-line-between-statements",
-          "message": "Expected blank line before this statement.",
-          "fixable": true
-        }
-      ]
+      "findings": []
     }
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:c4dc475597461a80619b4b6caf2be2f31364366fb2a972ac4f53a40f7653289f",
+      "sha256": "sha256:4c08a8967d7a8072bc75e5eccf8f7157974f31a707603393165eea3f3fee91d8",
       "files": 1190,
-      "bytes": 9372364
+      "bytes": 9372812
     },
     "tools": {
       "eslint": "9.39.4",

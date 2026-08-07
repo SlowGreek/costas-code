@@ -323,7 +323,6 @@ export function AeExecutiveWorkspace() {
         document.documentElement.dataset.uguiBackground = choice
 
         break
-
       default: {
         // The engine names which preferences reshape the Document rather than
         // the shell, so this host routes rather than deciding.
@@ -336,6 +335,7 @@ export function AeExecutiveWorkspace() {
         if (!frame.document || !surface.current) {
           return `${preference} refused · ${frame.error ?? frame.detail ?? 'unseated'}`
         }
+
         void mountDocument(surface.current, frame.document)
         applySurfaceFrame(frame.surface)
       }

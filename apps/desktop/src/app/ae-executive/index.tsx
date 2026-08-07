@@ -3,6 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
+import {
+  loadRenderProfileCatalog,
+  previewRenderProfile,
+  revertRenderProfilePreview
+} from '@/store/render-profile'
+import { useTheme } from '@/themes/context'
 
 import {
   type CatalystBatch,
@@ -12,11 +18,12 @@ import {
   documentAction,
   globalKey,
   init,
+  loadDocumentSource,
   loadTabs,
   mountDocument,
+  mountL2Document,
   observe,
   onEffect,
-  openDocumentSource,
   paintCatalogTab,
   preferenceSelection,
   preferenceVocabulary,
@@ -27,13 +34,6 @@ import {
   uguiActionFromEvent,
   type UguiHit
 } from './catalyst-wasm'
-import {
-  loadRenderProfileCatalog,
-  previewRenderProfile,
-  revertRenderProfilePreview
-} from '@/store/render-profile'
-import { useTheme } from '@/themes/context'
-
 import { AE_EXECUTIVE_TAB_IDS, aeExecutiveTab } from './contract'
 
 const EXECUTIVE_RECONCILE_INTERVAL_MS = 1_000
@@ -195,7 +195,8 @@ export function AeExecutiveWorkspace() {
 
     // A fresh paint carries no selection, so the committed choice is restated
     // onto it — otherwise every control looks unselected on first open.
-    void openDocumentSource(overlaySurface.current, overlay)
+    void loadDocumentSource(overlay)
+      .then(document => mountL2Document(overlaySurface.current as HTMLDivElement, document))
       .then(() => paintSelection.current())
       .catch((reason: unknown) => setNotice(`Document refused · ${String(reason)}`))
   }, [overlay])
@@ -223,6 +224,7 @@ export function AeExecutiveWorkspace() {
 
           break
         }
+
         if (resolved.operation === 'field') {
           // The engine generates Skin Studio, so it owns which field an edit may
           // address and what the edit repaints.
@@ -238,12 +240,14 @@ export function AeExecutiveWorkspace() {
               document.documentElement.style.setProperty(name, value)
             }
           }
+
           setDocumentNotice(
             variables ? `skin field · ${resolved.nodeId ?? hit.itemId}` : `skin field refused · ${hit.itemId}`
           )
 
           break
         }
+
         activeSkin.current = skinId
         void applySkin(skinId)
 
@@ -290,15 +294,18 @@ export function AeExecutiveWorkspace() {
         setMode(choice === 'dark' ? 'dark' : 'light')
 
         break
+
       case 'background':
         document.documentElement.dataset.uguiBackground = choice
 
         break
+
       default:
         // `surface` and `vertical` reshape the Document rather than the shell,
         // and no applet handler answers them yet.
         return `${preference} · ${choice} · not yet projected`
     }
+
     activePreferences.current = { ...activePreferences.current, [preference]: choice }
     paintPreferenceSelection()
 
@@ -311,6 +318,7 @@ export function AeExecutiveWorkspace() {
   function paintPreferenceSelection() {
     const selected = preferenceSelection(activePreferences.current)
     const committed = new Set(Object.values(selected))
+
     const grouped = new Set(
       Object.values(preferenceVocabulary())
         .map(preference => preference.action)
@@ -343,6 +351,7 @@ export function AeExecutiveWorkspace() {
 
       return
     }
+
     await loadRenderProfileCatalog().catch(() => undefined)
     setDocumentNotice(
       previewRenderProfile(skinId) ? `skin · ${skinId}` : `skin refused · ${skinId}`
@@ -350,6 +359,15 @@ export function AeExecutiveWorkspace() {
   }
 
   function routeOverlayGesture(target: EventTarget | null, gesture: string) {
+    if (
+      gesture === 'click' &&
+      (target as HTMLElement | null)?.closest?.('.ugui-installed-app-close')
+    ) {
+      setOverlay(null)
+
+      return
+    }
+
     const hit = uguiActionFromEvent(target, gesture)
 
     if (hit) {routeDocument(hit)}
@@ -433,10 +451,12 @@ export function AeExecutiveWorkspace() {
           event.preventDefault()
 
           break
+
         case 'system-app':
           setDocumentNotice(`system-app · ${String(decision.value ?? '')}`)
 
           break
+
         default:
           break
       }
@@ -503,7 +523,7 @@ export function AeExecutiveWorkspace() {
           <div
             aria-label={overlay}
             aria-modal="true"
-            className="max-h-full w-full max-w-3xl overflow-auto rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-primary) p-6"
+            className="max-h-full w-full max-w-3xl overflow-hidden"
             data-ae-l2-overlay={overlay}
             role="dialog"
           >

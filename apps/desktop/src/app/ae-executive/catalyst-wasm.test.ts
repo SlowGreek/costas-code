@@ -5,14 +5,15 @@ import { resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
-  mountDocument,
   globalKey,
+  mountDocument,
+  mountL2Document,
   preferenceSelection,
   preferenceVocabulary,
   projectsInput,
-  skinField,
   setAssetBaseForTests,
   setWasmInputForTests,
+  skinField,
   tabDocument,
   tabsJson,
   uguiActionFromEvent
@@ -42,8 +43,28 @@ describe('catalyst UGUI client', () => {
     await mountDocument(root, document)
 
     expect(root.getAttribute('data-ugui-painter')).toBe('rust-wasm')
+    expect(root.classList.contains('ugui-application-document')).toBe(true)
+    expect(root.getAttribute('data-ugui-document')).toBe('run-home')
+    expect(root.querySelector(':scope > [data-ugui-region="header"]')).not.toBeNull()
     expect(root.textContent).toContain('RUN HOME')
     expect(root.querySelector('[data-ugui-action="shell.tab.dashboard"]')).not.toBeNull()
+  })
+
+  it('composes L2 chrome and content without painting the header twice', async () => {
+    const root = window.document.createElement('div')
+
+    window.document.body.append(root)
+    await mountL2Document(root, document)
+
+    expect(root.classList.contains('ugui-embedded-l2')).toBe(true)
+    expect(root.getAttribute('data-ugui-document')).toBe('run-home')
+    expect(root.querySelector(':scope > .ugui-l2-chrome')).not.toBeNull()
+    expect(root.querySelector('.ugui-l2-title')?.textContent).toContain('RUN HOME')
+    expect(root.querySelector('.ugui-l2-action-dock [data-ugui-action="shell.tab.dashboard"]'))
+      .not.toBeNull()
+    expect(root.querySelector('.ugui-installed-app-close')).not.toBeNull()
+    expect(root.querySelector('.ugui-l2-document > [data-ugui-region="header"]')).toBeNull()
+    expect(root.textContent?.match(/RUN HOME/g)).toHaveLength(1)
   })
 
   it('resolves the action a click landed on', async () => {
@@ -244,12 +265,34 @@ it('applies a Skin Studio field edit and repaints from the edited binding', () =
   // onto `data-ugui-id`, so this is the id a gesture actually carries back.
   const variables = skinField('winxp', 'palette/surface', '#101010', 'light')
 
-  expect(variables?.['--ugui-palette-surface']).toBe('#101010')
+  // The carry is quoted, so a declaration list survives as one CSS token.
+  expect(variables?.['--ugui-palette-surface']).toBe('"#101010"')
   // The vocabulary alias moves with it, so a painted Document repaints too.
   expect(variables?.['--color-surface']).toBe('#101010')
 
   // A token outside the style matrix is refused, not silently written.
   expect(skinField('winxp', 'palette/not-a-role', '#000000', 'light')).toBeNull()
   expect(skinField('winxp', 'not-a-slot/surface', '#000000', 'light')).toBeNull()
+})
+
+it('spends a translucency edit in the unit the glass sheet reads', () => {
+  // Dragging the slider emits a bare ratio. `color-mix()` takes a percentage, so
+  // carrying the ratio through makes the declaration invalid at computed-value
+  // time and the glass stops answering the slider at all.
+  const variables = skinField('glassmorphism', 'palette/translucency', '0.4', 'light')
+
+  expect(variables?.['--skin-surface-opacity-percent']).toBe('60%')
+  expect(variables?.['--skin-window-glass-color']).toBe(
+    'color-mix(in srgb, var(--color-surface) 60%, transparent)'
+  )
+
+  // Each step of the travel reads back as its own surface, both ends included.
+  const percent = (authored: string) =>
+    skinField('glassmorphism', 'palette/translucency', authored, 'light')?.[
+      '--skin-surface-opacity-percent'
+    ]
+
+  expect(percent('0')).toBe('100%')
+  expect(percent('1')).toBe('0%')
 })
 

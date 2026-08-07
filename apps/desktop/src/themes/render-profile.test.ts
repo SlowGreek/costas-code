@@ -1,11 +1,12 @@
-// @vitest-environment jsdom
-import { beforeAll, describe, expect, it } from 'vitest'
-
-import { applyRenderProfile, parseRenderProfileCatalog, type RenderProfile, renderProfileCss } from './render-profile'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+// @vitest-environment jsdom
+import { beforeAll, describe, expect, it } from 'vitest'
+
 import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
+
+import { applyRenderProfile, parseRenderProfileCatalog, type RenderProfile, renderProfileCss } from './render-profile'
 
 // The shell's variables come from the engine, so tests seat it like the app does.
 beforeAll(async () => {
@@ -73,12 +74,31 @@ describe('render profile admission and projection', () => {
     const glass = renderProfileCss(profile('glassmorphism'))
 
     expect(Object.keys(windows)).toEqual(Object.keys(glass))
-    expect(Object.keys(windows)).toHaveLength(129)
+    expect(Object.keys(windows)).toHaveLength(162)
     expect(windows['--morph-radius-lg']).toBe('0px')
     expect(windows['--morph-control-height']).toBe('23px')
     expect(windows['--morph-motion-duration']).toBe('0ms')
     expect(glass['--morph-radius-lg']).toBe('20px')
     expect(glass['--morph-backdrop-blur']).toBe('20px')
+    // Glass is one lever: the surface a Document paints and the blur behind it
+    // both answer `palette.translucency`, so the Skin Studio slider moves them
+    // together instead of leaving the blur pinned to what the skin shipped.
+    expect(glass['--skin-surface-opacity-percent']).toBe('25%')
+    expect(glass['--skin-backdrop-blur']).toBe('18px')
+    expect(glass['--skin-window-glass-color']).toBe(
+      'color-mix(in srgb, var(--color-surface) 25%, transparent)'
+    )
+    expect(windows['--skin-surface-opacity-percent']).toBe('100%')
+    expect(windows['--skin-backdrop-blur']).toBe('0px')
+    // `ugui-web.css` paints window furniture from these, so a host that never
+    // received them rendered every skin's frame as the sheet's own fallback.
+    expect(windows['--skin-titlebar-height']).toBe('18px')
+    expect(windows['--skin-titlebar-background']).toBe('#000181')
+    expect(windows['--skin-control-cluster-width']).toBe('16px')
+    expect(windows['--skin-scrollbar-width']).toBe('16px')
+    expect(windows['--skin-close-glyph']).toBe('"×"')
+    // Furniture one skin omits must not survive into the next skin's window.
+    expect(glass['--skin-titlebar-height']).toBe('initial')
     // The shell and a painted Document read one projection, so a skin reaches
     // the vocabulary names too rather than only the shell's own.
     expect(windows['--color-surface']).toBe('#c0c0c0')

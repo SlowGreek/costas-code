@@ -14,15 +14,16 @@ import initWasm, {
   catalyst_controller_select_tab,
   catalyst_document_action,
   catalyst_document_source,
-  catalyst_mount_document,
   catalyst_global_key,
+  catalyst_mount_document,
+  catalyst_mount_l2_document,
   catalyst_preference_selection,
   catalyst_preference_vocabulary,
   catalyst_profile_css,
-  catalyst_skin_field,
-  catalyst_skin_variables,
   catalyst_projects_input,
   catalyst_set_asset_base,
+  catalyst_skin_field,
+  catalyst_skin_variables,
   catalyst_tab_document,
   catalyst_tabs
 } from '../../../public/wasm/catalyst_wasm.js'
@@ -282,6 +283,13 @@ export function mountDocument(element: Element, document: unknown): Promise<void
   })
 }
 
+/** Paint a nested Document with the engine's title chrome and content partition. */
+export function mountL2Document(element: Element, document: unknown): Promise<void> {
+  return start().then(() => {
+    check(catalyst_mount_l2_document(element, JSON.stringify(document)))
+  })
+}
+
 /** The authored tab set from catalyst/TABS.json. */
 export function tabsJson(): Promise<string> {
   return start().then(() => catalyst_tabs())
@@ -386,23 +394,28 @@ export function projectsInput(handler: string, nodeId: string, value: unknown): 
   ) as ProjectsFrame
 }
 
-/** A nested-card names another authored Document; the host fetches and paints it. */
-export function openDocumentSource(element: Element, source: string): Promise<void> {
+/** Resolve one engine-carried nested Document without choosing its presentation. */
+export function loadDocumentSource(source: string): Promise<unknown> {
   if (!/^\/apps\/[a-z0-9-]+\.json$/.test(source)) {
     return Promise.reject(new Error(`document source is not admitted: ${source}`))
   }
 
   // The engine carries these documents, so opening one is neither a fetch nor a
   // read of a staged copy of the projects folder.
-  return start().then(() => {
+  return start().then((): unknown => {
     const carried = JSON.parse(catalyst_document_source(source)) as { error?: string }
 
     if (carried.error) {
       throw new Error(`document source is not carried: ${source}`)
     }
 
-    return mountDocument(element, carried)
+    return carried
   })
+}
+
+/** A nested-card names another authored Document; paint it as ordinary content. */
+export function openDocumentSource(element: Element, source: string): Promise<void> {
+  return loadDocumentSource(source).then(document => mountDocument(element, document))
 }
 
 async function enact(effects: readonly CatalystEffect[] = []): Promise<void> {

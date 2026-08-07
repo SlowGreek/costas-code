@@ -231,15 +231,45 @@ pub fn catalyst_mount_document(root: web_sys::Element, document_json: &str) -> S
     let Some(document) = json::parse(document_json) else {
         return refusal("E_CATALYST_UGUI_DOCUMENT", "document is not valid JSON");
     };
-    let host = match ugui_render::native_webview::WebSysHost::for_root(root.clone()) {
-        Ok(host) => host,
-        Err(error) => return refusal("E_CATALYST_UGUI_HOST", &error.to_string()),
-    };
-    let mut painter = ugui_render::native_webview::WebviewPainter::new(host);
-    match painter.mount_regions(
-        "",
+    match ugui_render::native_webview::WebSysHost::mount_application_document(
+        root.clone(),
         &document,
-        ugui_render::native_webview::WebviewRegions::content(true, true),
+    ) {
+        Ok(receipt) => {
+            let _ = root.set_attribute("data-ugui-painter", "rust-wasm");
+            json::canonical_string(&json::obj(vec![
+                ("schema", json::s("catalyst-ugui-render/1")),
+                ("kindCounts", receipt_counts(&receipt)),
+                (
+                    "actionIds",
+                    Json::Arr(receipt.action_ids.iter().map(|id| json::s(id)).collect::<Vec<_>>()),
+                ),
+                (
+                    "accessibleNames",
+                    Json::Arr(
+                        receipt
+                            .accessible_names
+                            .iter()
+                            .map(|name| json::s(name))
+                            .collect::<Vec<_>>(),
+                    ),
+                ),
+            ]))
+        }
+        Err(error) => refusal("E_CATALYST_UGUI_PAINT", &error.to_string()),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn catalyst_mount_l2_document(root: web_sys::Element, document_json: &str) -> String {
+    let Some(document) = json::parse(document_json) else {
+        return refusal("E_CATALYST_UGUI_DOCUMENT", "document is not valid JSON");
+    };
+    match ugui_render::native_webview::WebSysHost::mount_embedded_l2_document(
+        root.clone(),
+        &document,
+        "Close dialog",
     ) {
         Ok(receipt) => {
             let _ = root.set_attribute("data-ugui-painter", "rust-wasm");

@@ -5,21 +5,21 @@
     {
       "totals": {
         "branches": {
-          "count": 26031,
-          "covered": 13596
+          "count": 26091,
+          "covered": 13635
         },
         "lines": {
-          "count": 32216,
-          "covered": 18835
+          "count": 32377,
+          "covered": 19093
         }
       }
     }
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:75c6fc40d79e27f7b1c0761754ea863be9aed741e086361a08766b83454932a2",
+      "sha256": "sha256:76b5e07bd5ee7c17752530861a467617fbcd6fa0c4e8c90cebeae8f8d8749ece",
       "files": 1190,
-      "bytes": 9333535
+      "bytes": 9359415
     },
     "tools": {
       "@vitest/coverage-v8": "4.1.9",

@@ -197,6 +197,7 @@ export function applyRenderProfile(
     profile.axes.palette.surface,
     profile.axes.palette.desktop ?? '#101010'
   )
+
   const foreground = opaqueNativeColor(profile.axes.palette.on_surface, '#ffffff')
 
   if (background && foreground) {window.hermesDesktop?.setTitleBarTheme?.({ background, foreground })}

@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 // @vitest-environment jsdom
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
 import { parseRenderProfileCatalog, type RenderProfileCatalog } from '@/themes/render-profile'
 
 import {
@@ -13,11 +17,6 @@ import {
   previewRenderProfile,
   revertRenderProfilePreview
 } from './render-profile'
-
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-
-import { setWasmInputForTests } from '@/app/ae-executive/catalyst-wasm'
 
 // The shell's variables come from the engine, so tests seat it like the app does.
 beforeAll(async () => {

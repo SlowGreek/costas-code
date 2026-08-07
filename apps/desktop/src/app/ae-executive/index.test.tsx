@@ -7,7 +7,6 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import settings from '../../../../../../projects/apps/settings.json'
-import skins from '../../../../../../projects/apps/skins.json'
 
 import { resetForTests, setWasmInputForTests } from './catalyst-wasm'
 import {
@@ -241,10 +240,27 @@ describe('authored L2 documents', () => {
       expect(window.document.querySelector('[data-ae-l2-overlay]')).not.toBeNull()
     })
     expect(global.fetch).not.toHaveBeenCalled()
+
+    const overlay = await waitFor(() => {
+      const found = window.document.querySelector('[data-ae-l2-overlay]')
+
+      expect(found?.textContent).toContain('Settings')
+
+      return found as Element
+    })
+
+    // The dialog wrapper is this host's; the engine paints the surface inside it.
+    const painted = overlay.querySelector('[data-ugui-surface]') as Element
+
+    expect(painted.classList.contains('ugui-embedded-l2')).toBe(true)
+    expect(painted.querySelector(':scope > .ugui-l2-chrome')).not.toBeNull()
+    expect(painted.querySelector('.ugui-l2-title')?.textContent).toBe('Settings')
+    // Engine chrome carries the title, so the Document must not repaint its own.
+    expect(painted.querySelector('.ugui-l2-document > [data-ugui-region="header"]')).toBeNull()
+
+    fireEvent.click(overlay.querySelector('.ugui-installed-app-close') as Element)
     await waitFor(() => {
-      expect(window.document.querySelector('[data-ae-l2-overlay]')?.textContent).toContain(
-        'Settings'
-      )
+      expect(window.document.querySelector('[data-ae-l2-overlay]')).toBeNull()
     })
   })
 
@@ -267,7 +283,11 @@ describe('authored L2 documents', () => {
     })
 
     const overlay = window.document.querySelector('[data-ae-l2-overlay]') as Element
-    const button = overlay.querySelector('[data-ugui-action^="projects."]') as Element
+
+    // Scoped to the Document: engine chrome carries actions of its own.
+    const button = overlay.querySelector(
+      '.ugui-l2-document [data-ugui-action="projects.theme"]'
+    ) as Element
 
     // A Document action is answered by the engine's web vocabulary, never by the
     // RUN intent set this host uses for executive tabs. The first authored

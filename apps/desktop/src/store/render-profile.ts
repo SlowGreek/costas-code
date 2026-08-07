@@ -1,6 +1,6 @@
-import { startEngine } from '@/app/ae-executive/catalyst-wasm'
 import { atom, computed } from 'nanostores'
 
+import { startEngine } from '@/app/ae-executive/catalyst-wasm'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
   applyRenderProfile,

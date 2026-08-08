@@ -1,6 +1,6 @@
 {
   "schema": "lint/1",
-  "signal": "🟢",
+  "signal": "🔴",
   "command": "node scripts/quality/lint.mjs",
   "checks": [
     {
@@ -25,14 +25,39 @@
       "id": "eslint",
       "name": "desktop ESLint",
       "level": "error",
-      "findings": []
+      "findings": [
+        {
+          "id": "eslint:apps/desktop/electron/git-worktree-ops.ts:26:11:padding-line-between-statements:0",
+          "severity": "warning",
+          "file": "apps/desktop/electron/git-worktree-ops.ts",
+          "line": 26,
+          "column": 11,
+          "end_line": 28,
+          "end_column": 84,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        },
+        {
+          "id": "eslint:apps/desktop/electron/git-worktree-ops.ts:29:11:padding-line-between-statements:1",
+          "severity": "warning",
+          "file": "apps/desktop/electron/git-worktree-ops.ts",
+          "line": 29,
+          "column": 11,
+          "end_line": 29,
+          "end_column": 58,
+          "rule": "padding-line-between-statements",
+          "message": "Expected blank line before this statement.",
+          "fixable": true
+        }
+      ]
     }
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:d1599b45a23539f0884be5ee7e1f157d760d0f50f2c106ed76249ddc8f4ac017",
+      "sha256": "sha256:70ed78d84d6a354dec8d0e6517cb81d3416acbfceff8363bd589ed33af1ca67c",
       "files": 1190,
-      "bytes": 9373055
+      "bytes": 9373471
     },
     "tools": {
       "eslint": "9.39.4",

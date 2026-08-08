@@ -87,7 +87,7 @@ def test_valid_plan_is_closed_read_only_and_receipt_is_content_free(tmp_path: Pa
     receipt = plan.receipt()
     wire = asdict(receipt)
     assert wire == {
-        "policy_version": "fleet-codex-read-only/v1",
+        "policy_version": "fleet-codex-read-only/1",
         "policy_sha256": receipt.policy_sha256,
         "generated_config_sha256": _CONFIG_DIGEST,
         "read_root_count": 1,

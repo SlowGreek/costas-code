@@ -18,7 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Final
 
-POLICY_VERSION: Final[str] = "fleet-codex-read-only/v1"
+POLICY_VERSION: Final[str] = "fleet-codex-read-only/1"
 _PRIVATE_DIRECTORY_MODE: Final[int] = 0o700
 _ALLOWED_ENVIRONMENT: Final[frozenset[str]] = frozenset(
     {"CODEX_HOME", "RUST_LOG"}

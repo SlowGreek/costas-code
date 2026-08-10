@@ -6,7 +6,7 @@ const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const ATTRIBUTE_RE = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/
 const REQUEST_SCHEMA = 'ae-studio-designer-action/1'
-const RECEIPT_SCHEMA = 'ae-studio-designer-action-receipt/2'
+const RECEIPT_SCHEMA = 'ae-studio-designer-action-receipt/1'
 const MAX_BYTES = 16 * 1024
 const TIMEOUT_MS = 3_000
 const POLL_MS = 25
@@ -46,7 +46,7 @@ export interface StudioDesignerRequest {
 }
 
 export interface StudioDesignerReceipt {
-  schema: 'ae-studio-designer-action-receipt/2'
+  schema: 'ae-studio-designer-action-receipt/1'
   operation_id: string
   status: 'accepted' | 'refused'
   code: string

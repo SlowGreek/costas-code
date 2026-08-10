@@ -102,9 +102,9 @@ Catalyst is the Electron and React desktop product shell that composes, inspects
 | Fact | Value |
 | --- | --- |
 | Source | `catalyst/CANON.json` |
-| Source SHA-256 | `sha256:5dd9028e7d4410d28cd45470986447f8a0450af0bf444bc8496c5847ddc50d4d` |
+| Source SHA-256 | `sha256:2ac936b825e85c33fc0232dcdc34edf616a79a7ab1100004af42494b467374cd` |
 | Generator | `quine/src/project_readmes.rs` |
-| Registry | `quine/canon/repo_map.json#/19` |
+| Registry | `quine/canon/repo_map.json#/18` |
 | Projection schema | `rust-quine-project-readmes/1` |
 | Tool version | `0.1.0` |
 

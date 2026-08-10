@@ -62,7 +62,7 @@ describe('Studio designer resident-owner mailbox', () => {
     fs.writeFileSync(
       path.join(stateRoot, 'studio-actions/receipts', `${operationId}.json`),
       JSON.stringify({
-        schema: 'ae-studio-designer-action-receipt/2',
+        schema: 'ae-studio-designer-action-receipt/1',
         operation_id: operationId,
         status: 'accepted',
         code: 'studio-action-accepted',
@@ -82,7 +82,7 @@ describe('Studio designer resident-owner mailbox', () => {
   it('refuses unknown actions, malformed contexts, and mismatched receipts', () => {
     expect(() => validateStudioDesignerEvent(event('shell.exec'))).toThrow('studio-event-admission')
     expect(() => validateStudioDesignerReceipt({
-      schema: 'ae-studio-designer-action-receipt/2',
+      schema: 'ae-studio-designer-action-receipt/1',
       operation_id: 'wrong',
       status: 'accepted',
       code: 'ok',

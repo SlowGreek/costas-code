@@ -21,11 +21,13 @@ function runGit(gitBin, args, cwd): Promise<string> {
       (err, stdout, stderr) => {
         if (err) {
           err.stderr = String(stderr || '')
+
           // A timeout kill carries no stderr, so the bare message cannot say
           // why; name the cause here or the next failure is undiagnosable.
           const cause = err.killed
             ? `timed out after ${30_000} ms`
             : err.stderr.trim() || `exited ${err.code ?? 'unknown'} with no stderr`
+
           err.message = `git ${args.join(' ')}: ${cause}`
           reject(err)
 

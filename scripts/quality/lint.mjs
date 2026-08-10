@@ -114,6 +114,18 @@ const report = {
 }
 publishReport('lint-report.json', report)
 process.stdout.write(`lint result: ${violations === 0 ? 'ok' : '🔴'}. ${checks.length} checks; ${violations} violations\n`)
+// A count alone is not actionable: the watcher log is the only surface most readers see, and
+// "2 violations" sends them to the report file to learn what failed. Name them here, bounded.
+const MAX_REPORTED_FINDINGS = 20
+const reported = checks.flatMap((check) => check.findings)
+for (const finding of reported.slice(0, MAX_REPORTED_FINDINGS)) {
+  process.stdout.write(
+    `  ${finding.file}:${finding.line}:${finding.column} ${finding.rule} ${finding.message}${finding.fixable ? ' (fixable)' : ''}\n`
+  )
+}
+if (reported.length > MAX_REPORTED_FINDINGS) {
+  process.stdout.write(`  … ${reported.length - MAX_REPORTED_FINDINGS} more in catalyst/quality/lint-report.json\n`)
+}
 process.stdout.write(`${receiptLine(source)}\n`)
 process.stdout.write(`tool receipt: typescript@${typescript.version}; eslint@${eslint.version}; node@${process.versions.node}\n`)
 if (violations > 0 || !eslintResult.ok) process.exitCode = 1

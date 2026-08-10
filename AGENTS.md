@@ -19,6 +19,6 @@ The quine daemon runs these automatically on change — you never invoke them (r
 | **PASS** | **INPUTS** | **OUTPUTS** | **GENERATOR (DAEMON-RUN)** |
 |---|---|---|---|
 | `lint` (receipt) | `SPEC.json`, `package.json`, `package-lock.json`, `scripts/quality/**/*`, `apps/desktop/**/*` | `quality/lint-report.json` | `node catalyst/scripts/quality/lint.mjs` |
-| `test` (receipt) | `SPEC.json`, `package.json`, `package-lock.json`, `scripts/quality/**/*`, `apps/desktop/**/*` | `quality/test-report.json`, `apps/desktop/tsconfig.e2e.tsbuildinfo` | `node catalyst/scripts/quality/test.mjs` |
+| `test` (receipt) | `SPEC.json`, `package.json`, `package-lock.json`, `scripts/quality/**/*`, `apps/desktop/**/*` | `quality/test-report.json` | `node catalyst/scripts/quality/test.mjs` |
 | `coverage` (receipt) | `SPEC.json`, `package.json`, `package-lock.json`, `scripts/quality/**/*`, `apps/desktop/**/*` | `quality/coverage-report.json` | `node catalyst/scripts/quality/coverage.mjs` |
 

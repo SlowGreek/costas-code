@@ -1,10 +1,10 @@
 {
   "schema": "test/1",
-  "signal": "🟢",
+  "signal": "🔴",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2984,
-    "failed": 0,
+    "passed": 2983,
+    "failed": 1,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
@@ -663,13 +663,18 @@
     {
       "id": "apps/desktop/electron/update-relaunch.test.ts",
       "name": "apps/desktop/electron/update-relaunch.test.ts",
-      "passed": 16,
-      "failed": 0,
+      "passed": 15,
+      "failed": 1,
       "skipped": 0,
       "todo": 0,
       "filtered_out": 0,
       "total": 16,
-      "failures": []
+      "failures": [
+        {
+          "id": "buildRelaunchScript with no args/env still lints clean",
+          "message": "Error: Command failed: bash -n /var/folders/tj/j23g7cbs5yng8ykt_m3bq_tc0000gn/T/hermes-relaunch-test2-1786403396178.sh\nbash: /var/folders/tj/j23g7cbs5yng8ykt_m3bq_tc0000gn/T/hermes-relaunch-test2-1786403396178.sh: No such file or directory\n\n    at genericNodeError (node:internal/errors:999:15)\n    at wrappedFn (node:internal/errors:544:14)\n    at checkExecSyncError (node:child_process:942:11)\n    at execFileSync (node:child_process:978:15)\n    at apps/desktop/electron/update-relaunch.test.ts:237:5\n    at fi"
+        }
+      ]
     },
     {
       "id": "apps/desktop/electron/update-remote.test.ts",

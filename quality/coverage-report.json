@@ -6,11 +6,11 @@
       "totals": {
         "branches": {
           "count": 26124,
-          "covered": 13658
+          "covered": 13661
         },
         "lines": {
           "count": 32448,
-          "covered": 19163
+          "covered": 19170
         }
       }
     }

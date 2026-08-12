@@ -48,7 +48,7 @@ if (build.error || build.status !== 0) {
 const aeRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const publicDir = fileURLToPath(new URL("../public", import.meta.url));
 for (const [from, to, filter] of [
-  ["ugui/assets/png", "png", name => name.endsWith(".svg")],
+  ["genui/ugui/assets/png", "png", name => name.endsWith(".svg")],
 ]) {
   const destination = path.join(publicDir, to);
   mkdirSync(destination, { recursive: true });

@@ -5,7 +5,7 @@
 @import '@vscode/codicons/dist/codicon.css';
 /* A painted UGUI Document is styled by the engine's own sheet, not by this host. */
 @import '../../../../projects/css/tokens.css';
-@import '../../../../ugui/css/ugui-web.css';
+@import '../../../../genui/ugui/css/ugui-web.css';
 @custom-variant dark (&:is(.dark *));
 
 /* Blanket reduced-motion override: kill ALL CSS animations and transitions

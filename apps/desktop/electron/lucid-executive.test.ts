@@ -146,7 +146,7 @@ describe('LUCID executive closed intent ingress', () => {
     await handler(request('cancel'))
 
     expect(confirmationFor).toHaveBeenCalledWith(request('cancel'))
-    expect(callBridge.mock.calls[0][0].meta['com.nous.lucid/host-context'].exact_confirmation).toMatchObject({
+    expect(callBridge.mock.calls[0][0].meta['com.asg.lucid/host-context'].exact_confirmation).toMatchObject({
       schema: 'lucid-exact-confirmation/1',
       verb: 'cancel',
       arguments_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)

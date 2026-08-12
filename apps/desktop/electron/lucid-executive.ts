@@ -353,7 +353,7 @@ export function createLucidExecutiveHandler(dependencies: LucidExecutiveDependen
       const result = await dependencies.callBridge({
         toolName: `lucid.${request.verb}`,
         arguments: arguments_,
-        meta: { 'com.nous.lucid/host-context': hostContext }
+        meta: { 'com.asg.lucid/host-context': hostContext }
       })
 
       projected = projectLucidMcpResult(result, request.verb)

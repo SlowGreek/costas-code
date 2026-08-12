@@ -55,7 +55,7 @@ Hermes generic MCP handler
     ▼
 MCP tools/call
     ├── arguments = original model arguments
-    └── _meta.com.nous.lucid/host-context.session_id = host identity
+    └── _meta.com.asg.lucid/host-context.session_id = host identity
             authority = none
     ▼
 Butler
@@ -151,7 +151,7 @@ The generated metadata is exactly:
 
 ```json
 {
-  "com.nous.lucid/host-context": {
+  "com.asg.lucid/host-context": {
     "session_id": "<bounded request-scoped identity>"
   }
 }

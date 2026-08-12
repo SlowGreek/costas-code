@@ -7,7 +7,7 @@ const MAX_ANCESTORS = 64
 const MARKERS: Array<[string, (value: any) => boolean]> = [
   ['SPEC.json', value => value?.schema === 'ae-root-bootstrap-policy/1'],
   ['run/SHELL-BUILDS.json', value => value?.schema === 'ae-shell-build-matrix/1'],
-  ['ugui/json/surface-profiles.json', value => value?.schema === 'ugui-surface-profiles/1']
+  ['genui/ugui/json/surface-profiles.json', value => value?.schema === 'ugui-surface-profiles/1']
 ]
 
 function directDirectory(candidate, label) {

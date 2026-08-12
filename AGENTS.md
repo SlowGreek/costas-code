@@ -1,4 +1,4 @@
-<!-- GENERATED — DO NOT EDIT. The quine daemon regenerates it from AXIOMS.json (the human-in-the-loop canon). Read as SOT. (Also derives from this area's SPEC.) -->
+<!-- GENERATED — DO NOT EDIT. The quine daemon regenerates it from quine/canon/AGENT_INSTRUCTIONS.json (the human-in-the-loop canon). Read as SOT. (Also derives from this area's SPEC.) -->
 
 ---
 applyTo: 'catalyst/**'

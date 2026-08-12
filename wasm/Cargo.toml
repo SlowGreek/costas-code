@@ -9,7 +9,7 @@ description = "Catalyst's thin UGUI client: the shared native_webview engine com
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ugui-render = { package = "ugui", path = "../../ugui" }
+ugui-render = { package = "ugui", path = "../../genui/ugui" }
 wasm-bindgen = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

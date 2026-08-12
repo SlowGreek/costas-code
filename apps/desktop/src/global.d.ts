@@ -52,7 +52,7 @@ declare global {
         event: UguiDocumentEvent
         context: { revision: number; documentHash: string }
       }) => Promise<{
-        schema: 'ae-studio-designer-action-receipt/1'
+        schema: 'ae-studio-designer-action-receipt/2'
         operation_id: string
         status: 'accepted' | 'refused'
         code: string

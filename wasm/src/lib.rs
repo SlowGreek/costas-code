@@ -154,7 +154,7 @@ pub fn catalyst_validate_document(document_json: &str) -> String {
 /// redeclared, so Catalyst can never drift from UGUI's canonical set.
 #[wasm_bindgen]
 pub fn catalyst_document_item_types() -> String {
-    let items = json::parse(include_str!("../../../ugui/json/document-items.json"))
+    let items = json::parse(include_str!("../../../genui/ugui/json/document-items.json"))
         .and_then(|value| value.get("items").cloned())
         .unwrap_or(Json::Null);
     let types = match &items {

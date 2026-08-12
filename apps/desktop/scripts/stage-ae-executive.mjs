@@ -47,7 +47,7 @@ const AE_SOURCE_PATHS = [
   'Cargo.lock',
   'run',
   ':(exclude)run/BUTLER-PACKAGE-LOCK.json',
-  'ugui',
+  'genui',
   'butler',
   'envelope/LUCID.json',
   'envelope/MCP.json',
@@ -56,16 +56,14 @@ const AE_SOURCE_PATHS = [
   'quine/Cargo.lock',
   'quine/canon',
   'quine/mcp/onboarding/index.json',
-  'store',
-  'marketplace',
   // A receipt is evidence *about* this source, not an input to it. The quine
   // daemon rewrites them while we build, which would otherwise read as the
   // source moving underneath the candidate.
   ':(exclude)run/receipts',
-  ':(exclude)ugui/receipts',
+  ':(exclude)genui/ugui/receipts',
   ':(exclude)butler/receipts',
-  ':(exclude)store/receipts',
-  ':(exclude)marketplace/receipts'
+  ':(exclude)genui/store/receipts',
+  ':(exclude)genui/marketplace/receipts'
 ]
 const CATALYST_SOURCE_PATHS = [
   'QUINE-COMPANION.json',
@@ -307,7 +305,7 @@ try {
       if (process.platform !== 'win32') chmodSync(destination, 0o755)
     }
 
-    const skinSource = path.join(aeRoot, 'ugui', 'skins', 'bindings')
+    const skinSource = path.join(aeRoot, 'genui', 'ugui', 'skins', 'bindings')
     if (!existsSync(skinSource)) throw new Error(`[stage-ae-executive] missing generated UGUI skins: ${skinSource}`)
     cpSync(skinSource, path.join(candidateDir, 'skins'), {
       recursive: true,

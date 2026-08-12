@@ -12,7 +12,7 @@ const source = () => ({
   capabilities: JSON.parse(
     fs.readFileSync(path.join(aeRoot, 'envelope/capabilities/generated/SHELL-CAPABILITY-PARITY.json'), 'utf8')
   ),
-  surfaces: JSON.parse(fs.readFileSync(path.join(aeRoot, 'ugui/json/surface-profiles.json'), 'utf8'))
+  surfaces: JSON.parse(fs.readFileSync(path.join(aeRoot, 'genui/ugui/json/surface-profiles.json'), 'utf8'))
 })
 
 describe('UGUI SHELL viewport model', () => {

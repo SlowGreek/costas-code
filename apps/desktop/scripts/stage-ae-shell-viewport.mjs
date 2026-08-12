@@ -12,7 +12,11 @@ export function stageAeShellViewport({ aeRoot, destination }) {
       path.join(aeRoot, 'envelope', 'capabilities', 'generated', 'SHELL-CAPABILITY-PARITY.json'),
       'ae-shell-capability-parity/1.0.0'
     ],
-    ['surface-profiles.json', path.join(aeRoot, 'ugui', 'json', 'surface-profiles.json'), 'ugui-surface-profiles/1']
+    [
+      'surface-profiles.json',
+      path.join(aeRoot, 'genui', 'ugui', 'json', 'surface-profiles.json'),
+      'ugui-surface-profiles/1'
+    ]
   ]
 
   rmSync(destination, { force: true, recursive: true })

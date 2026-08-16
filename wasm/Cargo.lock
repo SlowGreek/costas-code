@@ -54,7 +54,7 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "butler-conversation-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "envelope-conversation-contract",
  "serde_json",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "catalyst-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "js-sys",
  "ugui",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "envelope"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "regex",
  "serde",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "envelope-conversation-contract"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "glasses-envelope"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde_json",
 ]
@@ -265,8 +265,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
-name = "marketplace-core"
-version = "0.1.0"
+name = "marketplace"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "sha2",
@@ -305,7 +305,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "plexus"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "glasses-envelope",
  "quine",
@@ -327,8 +327,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "projects-one-pager"
-version = "0.1.0"
+name = "projects"
+version = "1.0.0"
 dependencies = [
  "quine",
 ]
@@ -341,7 +341,7 @@ checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "envelope",
 ]
@@ -516,7 +516,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "butler-conversation-core",
 ]
@@ -589,9 +589,9 @@ dependencies = [
  "butler-conversation-core",
  "getrandom 0.3.4",
  "js-sys",
- "marketplace-core",
+ "marketplace",
  "plexus",
- "projects-one-pager",
+ "projects",
  "qrcode",
  "quine",
  "rhai",

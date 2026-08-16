@@ -11,10 +11,10 @@ const NONCE_RE = /^[0-9a-f]{32}$/
 const MAX_INPUT_FILES = 50_000
 const MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_READINESS_BYTES = 16 * 1024
-const SOURCE_SCHEMA = 'catalyst-desktop-source/1'
-const POINTER_SCHEMA = 'catalyst-desktop-current/1'
-const READY_SCHEMA = 'catalyst-desktop-readiness/1'
-const PROCESS_SCHEMA = 'catalyst-desktop-process/1'
+const SOURCE_SCHEMA = 'catalyst-source/1'
+const POINTER_SCHEMA = 'catalyst-current/1'
+const READY_SCHEMA = 'catalyst-readiness/1'
+const PROCESS_SCHEMA = 'catalyst-process/1'
 
 export const CATALYST_INPUT_PATHS = ['package.json', 'package-lock.json', 'hermes_cli', 'apps/desktop']
 export const AE_WATCH_PATHS = [
@@ -120,7 +120,7 @@ export function computeSourceSnapshot({ catalystRoot, aeRoot }) {
   const catalyst = hashRepository(digest, 'catalyst', catalystRoot, CATALYST_INPUT_PATHS)
   const ae = hashRepository(digest, 'ae', aeRoot, AE_INPUT_PATHS)
   return {
-    schema: 'catalyst-desktop-inputs/1',
+    schema: 'catalyst-inputs/1',
     source_revision: `sha256:${digest.digest('hex')}`,
     roots: { catalyst: catalystRoot, ae: aeRoot },
     watch: {
@@ -476,17 +476,17 @@ export async function executeLifecycle(op, { environment = process.env, timeoutM
   const snapshot = computeSourceSnapshot(roots)
   if (op === 'inspect') {
     const current = fs.existsSync(path.join(stateRoot, 'CURRENT.json')) ? readCurrent(stateRoot) : null
-    return { schema: 'catalyst-desktop-lifecycle-result/1', op, state_root: stateRoot, snapshot, current }
+    return { schema: 'catalyst-lifecycle-result/1', op, state_root: stateRoot, snapshot, current }
   }
   if (op === 'build' || op === 'run') {
     const build = buildPackage({ roots, stateRoot, snapshot })
-    if (op === 'build') return { schema: 'catalyst-desktop-lifecycle-result/1', op, state_root: stateRoot, snapshot, build }
+    if (op === 'build') return { schema: 'catalyst-lifecycle-result/1', op, state_root: stateRoot, snapshot, build }
   }
   if (op === 'launch' || op === 'run') {
     const launch = await launchCurrent({ stateRoot, timeoutMs, environment })
-    return { schema: 'catalyst-desktop-lifecycle-result/1', op, state_root: stateRoot, snapshot, launch }
+    return { schema: 'catalyst-lifecycle-result/1', op, state_root: stateRoot, snapshot, launch }
   }
   const processReceipt = readJson(path.join(stateRoot, 'PROCESS.json'))
   const readiness = validateReadiness(readJson(path.join(stateRoot, 'READY.json')), processReceipt)
-  return { schema: 'catalyst-desktop-lifecycle-result/1', op, state_root: stateRoot, snapshot, readiness }
+  return { schema: 'catalyst-lifecycle-result/1', op, state_root: stateRoot, snapshot, readiness }
 }

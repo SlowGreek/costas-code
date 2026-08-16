@@ -42,7 +42,7 @@ function gitFixture(label, files) {
 
 function pointer(overrides = {}) {
   return {
-    schema: 'catalyst-desktop-current/1',
+    schema: 'catalyst-current/1',
     package_revision: hash('1'),
     source_revision: hash('2'),
     ae_generation: hash('3'),
@@ -54,7 +54,7 @@ function pointer(overrides = {}) {
 
 function readiness(overrides = {}) {
   return {
-    schema: 'catalyst-desktop-readiness/1',
+    schema: 'catalyst-readiness/1',
     launch_id: 'a'.repeat(32),
     launch_started_ms: 42,
     pid: 123,
@@ -193,7 +193,7 @@ describe('desktop lifecycle launch/readiness admission', () => {
 
   test('refuses a duplicate live process before taking the launch lock', () => {
     const stateRoot = temp('duplicate')
-    write(stateRoot, 'PROCESS.json', `${JSON.stringify({ schema: 'catalyst-desktop-process/1', pid: 77 })}\n`)
+    write(stateRoot, 'PROCESS.json', `${JSON.stringify({ schema: 'catalyst-process/1', pid: 77 })}\n`)
     assert.throws(() => claimLaunch({ stateRoot, isAlive: pid => pid === 77 }), /duplicate-process:77/)
     assert.equal(fs.existsSync(path.join(stateRoot, '.launch.lock')), false)
   })

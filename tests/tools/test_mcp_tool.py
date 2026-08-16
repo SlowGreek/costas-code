@@ -13,6 +13,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tools.lucid_mcp_bridge import HOST_CONTEXT_EXTENSION
+
+LUCID_MCP_URL = "http://127.0.0.1:4176/mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -766,8 +769,7 @@ class TestToolHandler:
         }
         mock_session.call_tool = AsyncMock(return_value=call_result)
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         arguments = {"path": "fleet"}
         tokens = set_session_vars(
@@ -777,12 +779,7 @@ class TestToolHandler:
         )
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), self._patch_mcp_loop():
+            with self._patch_mcp_loop():
                 result = json.loads(handler(arguments, conversation_id="22222222-2222-4222-8222-222222222222"))
             assert result["result"] == "bounded receipt"
             assert arguments == {"path": "fleet"}
@@ -790,7 +787,7 @@ class TestToolHandler:
                 "lucid.get",
                 arguments={"path": "fleet"},
                 meta={
-                    "com.nous.lucid/host-context": {
+                    HOST_CONTEXT_EXTENSION: {
                         "session_id": "22222222-2222-4222-8222-222222222222",
                         "authority": "none",
                     }
@@ -880,18 +877,12 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(return_value=result)
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
 
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), self._patch_mcp_loop():
+            with self._patch_mcp_loop():
                 projected = json.loads(handler({"path": "private/path"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected["error"] == "Butler refused LUCID call (no-capability)"
             assert projected["lucid_receipt"] == {
@@ -923,17 +914,11 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(return_value=result)
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), self._patch_mcp_loop():
+            with self._patch_mcp_loop():
                 projected = json.loads(handler({"path": "private"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "error": "Butler returned an invalid LUCID refusal receipt",
@@ -974,17 +959,11 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(return_value=result)
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), self._patch_mcp_loop():
+            with self._patch_mcp_loop():
                 projected = json.loads(handler({"path": "private/path"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "result": intended_result,
@@ -1019,17 +998,11 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(return_value=result)
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), self._patch_mcp_loop():
+            with self._patch_mcp_loop():
                 projected = json.loads(handler({"path": "private"}, conversation_id="11111111-1111-4111-8111-111111111111"))
             assert projected == {
                 "error": "Butler returned an invalid LUCID success receipt",
@@ -1101,17 +1074,11 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(side_effect=RuntimeError("connection closed after send"))
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.dispatch", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), patch(
+            with patch(
                 "tools.mcp_tool._handle_auth_error_and_retry"
             ) as auth_retry, patch(
                 "tools.mcp_tool._handle_session_expired_and_retry"
@@ -1136,17 +1103,11 @@ class TestToolHandler:
         mock_session = MagicMock()
         mock_session.call_tool = AsyncMock(side_effect=RuntimeError("connection closed"))
         server = _make_mock_server("lucid-quine", session=mock_session)
-        server._config = {"command": "butler", "args": ["--mcp-stdio"]}
-        server._resolved_command = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
+        server._config = {"url": LUCID_MCP_URL}
         _servers["lucid-quine"] = server
         try:
             handler = _make_tool_handler("lucid-quine", "lucid.get", 120)
-            with patch.dict(
-                os.environ,
-                {
-                    "HERMES_LUCID_BUTLER_PATH": "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-                },
-            ), patch(
+            with patch(
                 "tools.mcp_tool._handle_auth_error_and_retry", return_value=None
             ) as auth_retry, patch(
                 "tools.mcp_tool._handle_session_expired_and_retry", return_value=None

@@ -17,12 +17,12 @@ from gateway.session_context import (
 from tools import mcp_tool
 from tools.lucid_mcp_bridge import (
     HOST_CONTEXT_EXTENSION,
+    LUCID_MCP_URL,
     current_lucid_host_context_meta,
     lucid_signin_request,
 )
 
-BUTLER = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-CONFIG = {"command": "butler", "args": ["--mcp-stdio"]}
+CONFIG = {"url": LUCID_MCP_URL}
 AMBIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 EXPLICIT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
@@ -56,7 +56,7 @@ def _server(*results: SimpleNamespace) -> SimpleNamespace:
     return SimpleNamespace(
         session=SimpleNamespace(call_tool=AsyncMock(side_effect=list(results))),
         _config=dict(CONFIG),
-        _resolved_command=BUTLER,
+        _resolved_command=None,
         _rpc_lock=asyncio.Lock(),
         _pending_call_context=None,
         _is_recycled_stdio=lambda: False,
@@ -74,7 +74,6 @@ def _run_direct(coro_or_factory, timeout=30):
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", BUTLER)
     monkeypatch.setenv("HERMES_LUCID_ROLE", "EM")
     token = bind_lucid_conversation_id(AMBIENT)
     try:
@@ -91,7 +90,6 @@ def test_explicit_handler_identity_wins_over_contextvar_fallback():
         "lucid-quine",
         CONFIG,
         conversation_id=EXPLICIT,
-        resolved_command=BUTLER,
     )
     assert meta == {
         HOST_CONTEXT_EXTENSION: {"session_id": EXPLICIT, "authority": "none"}
@@ -99,9 +97,7 @@ def test_explicit_handler_identity_wins_over_contextvar_fallback():
 
 
 def test_contextvar_identity_is_used_when_handler_has_no_explicit_value():
-    meta = current_lucid_host_context_meta(
-        "lucid-quine", CONFIG, resolved_command=BUTLER
-    )
+    meta = current_lucid_host_context_meta("lucid-quine", CONFIG)
     assert meta == {
         HOST_CONTEXT_EXTENSION: {"session_id": AMBIENT, "authority": "none"}
     }
@@ -112,7 +108,6 @@ def test_invalid_explicit_identity_fails_closed_instead_of_using_ambient():
         "lucid-quine",
         CONFIG,
         conversation_id="not-a-uuid",
-        resolved_command=BUTLER,
     ) is None
 
 

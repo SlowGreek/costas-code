@@ -16,7 +16,8 @@ from typing import Any, Mapping, Optional
 from uuid import UUID
 
 LUCID_SERVER_NAME = "lucid-quine"
-HOST_CONTEXT_EXTENSION = "com.nous.lucid/host-context"
+LUCID_MCP_URL = "http://127.0.0.1:4176/mcp"
+HOST_CONTEXT_EXTENSION = "com.asg.lucid/host-context"
 _MAX_SESSION_ID_BYTES = 192
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _RECEIPT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -47,10 +48,9 @@ _HOST_ROLES = frozenset({"EM", "SIDEKICK"})
 def _declared_lucid_transport(server_name: str, config: Mapping[str, Any]) -> bool:
     return (
         server_name == LUCID_SERVER_NAME
-        and "url" not in config
-        and os.path.basename(str(config.get("command", "")))
-        in {"butler", "butler.exe"}
-        and config.get("args") == ["--mcp-stdio"]
+        and config.get("url") == LUCID_MCP_URL
+        and "command" not in config
+        and "args" not in config
     )
 
 
@@ -60,17 +60,10 @@ def _canonical_lucid_transport(
     *,
     resolved_command: object = None,
 ) -> bool:
-    """True only for the enrolled packaged Butler stdio invocation."""
+    """True only for the canonical RUN-supervised Butler endpoint."""
 
-    if not _declared_lucid_transport(server_name, config):
-        return False
-    admitted = os.environ.get("HERMES_LUCID_BUTLER_PATH", "")
-    if not admitted or not isinstance(resolved_command, str) or not resolved_command:
-        return False
-    try:
-        return os.path.realpath(resolved_command) == os.path.realpath(admitted)
-    except OSError:
-        return False
+    del resolved_command
+    return _declared_lucid_transport(server_name, config)
 
 
 def _bounded_session_id(value: object) -> Optional[str]:
@@ -256,13 +249,7 @@ def public_lucid_bridge_status(
     """Content-free declared posture safe for UI/logging."""
 
     declared = _declared_lucid_transport(server_name, config)
-    runtime_path = os.environ.get("HERMES_LUCID_BUTLER_PATH", "")
-    runtime_admitted = bool(
-        declared
-        and runtime_path
-        and os.path.isfile(runtime_path)
-        and os.access(runtime_path, os.X_OK)
-    )
+    runtime_admitted = declared
     return {
         "schema": "hermes-lucid-host-bridge/1",
         "server": LUCID_SERVER_NAME,

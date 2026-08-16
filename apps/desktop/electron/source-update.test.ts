@@ -11,7 +11,7 @@ const roots: string[] = []
 const hash = (character: string) => `sha256:${character.repeat(64)}`
 
 const receipt = (source: string, generation: string): LifecycleSourceReceipt => ({
-  schema: 'catalyst-desktop-source/1',
+  schema: 'catalyst-source/1',
   source_revision: hash(source),
   ae_generation: hash(generation)
 })
@@ -22,7 +22,7 @@ function fixture() {
 
   return {
     root,
-    requestPath: path.join(root, 'restart-catalyst-desktop.request')
+    requestPath: path.join(root, 'restart-catalyst.request')
   }
 }
 
@@ -50,7 +50,7 @@ describe('RUN restart request', () => {
     const value = fixture()
 
     const environment = {
-      AE_RUN_CHILD_ID: 'catalyst-desktop',
+      AE_RUN_CHILD_ID: 'catalyst',
       AE_RUN_LAUNCH_HASH: hash('e'),
       AE_RUN_RESTART_REQUEST_PATH: value.requestPath
     }
@@ -59,7 +59,7 @@ describe('RUN restart request', () => {
     expect(requestRunSourceRestart(environment)).toEqual({ ok: true })
     expect(JSON.parse(fs.readFileSync(value.requestPath, 'utf8'))).toEqual({
       schema: 'ae-run-child-restart/1',
-      child_id: 'catalyst-desktop',
+      child_id: 'catalyst',
       launch_hash: hash('e')
     })
   })
@@ -72,7 +72,7 @@ describe('RUN restart request', () => {
     })
     fs.writeFileSync(value.requestPath, '{}\n')
     expect(requestRunSourceRestart({
-      AE_RUN_CHILD_ID: 'catalyst-desktop',
+      AE_RUN_CHILD_ID: 'catalyst',
       AE_RUN_LAUNCH_HASH: hash('f'),
       AE_RUN_RESTART_REQUEST_PATH: value.requestPath
     })).toEqual({

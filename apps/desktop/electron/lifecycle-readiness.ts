@@ -3,8 +3,8 @@ import path from 'node:path'
 
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const NONCE_RE = /^[0-9a-f]{32}$/
-const SOURCE_SCHEMA = 'catalyst-desktop-source/1'
-const READY_SCHEMA = 'catalyst-desktop-readiness/1'
+const SOURCE_SCHEMA = 'catalyst-source/1'
+const READY_SCHEMA = 'catalyst-readiness/1'
 
 export interface LifecycleSourceReceipt {
   schema: typeof SOURCE_SCHEMA

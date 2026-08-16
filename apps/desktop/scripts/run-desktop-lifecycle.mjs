@@ -11,7 +11,7 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`)
 } catch (error) {
   process.stdout.write(`${JSON.stringify({
-    schema: 'catalyst-desktop-lifecycle-error/1',
+    schema: 'catalyst-lifecycle-error/1',
     op: typeof op === 'string' ? op : null,
     code: error instanceof Error ? error.message.slice(0, 512) : 'desktop-lifecycle-error'
   })}\n`)

@@ -204,6 +204,21 @@ _MCP_SAMPLING_TYPES = False
 _MCP_NOTIFICATION_TYPES = False
 _MCP_ELICITATION_TYPES = False
 _MCP_MESSAGE_HANDLER_SUPPORTED = False
+
+
+class _CompatSamplingType:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+CreateMessageResult = _CompatSamplingType
+CreateMessageResultWithTools = _CompatSamplingType
+ErrorData = _CompatSamplingType
+SamplingCapability = _CompatSamplingType
+SamplingToolsCapability = _CompatSamplingType
+TextContent = _CompatSamplingType
+ToolUseContent = _CompatSamplingType
+
 # Conservative fallback for SDK builds that don't export LATEST_PROTOCOL_VERSION.
 # Streamable HTTP was introduced by 2025-03-26, so this remains valid for the
 # HTTP transport path even on older-but-supported SDK versions.
@@ -234,20 +249,33 @@ try:
     except ImportError:
         sse_client = None
         logger.debug("mcp.client.sse.sse_client not available -- SSE transport disabled")
-    # Sampling types -- separated so older SDK versions don't break MCP support
+    # Sampling types -- separated so older SDK versions don't break MCP support.
     try:
         from mcp.types import (
             CreateMessageResult,
-            CreateMessageResultWithTools,
             ErrorData,
             SamplingCapability,
-            SamplingToolsCapability,
             TextContent,
-            ToolUseContent,
         )
         _MCP_SAMPLING_TYPES = True
     except ImportError:
+        CreateMessageResult = _CompatSamplingType
+        ErrorData = _CompatSamplingType
+        SamplingCapability = _CompatSamplingType
+        TextContent = _CompatSamplingType
         logger.debug("MCP sampling types not available -- sampling disabled")
+    try:
+        from mcp.types import CreateMessageResultWithTools
+    except ImportError:
+        CreateMessageResultWithTools = _CompatSamplingType
+    try:
+        from mcp.types import SamplingToolsCapability
+    except ImportError:
+        SamplingToolsCapability = _CompatSamplingType
+    try:
+        from mcp.types import ToolUseContent
+    except ImportError:
+        ToolUseContent = _CompatSamplingType
     # Elicitation types -- gated separately for the same reason as sampling.
     # Added in mcp Python SDK 1.11.0 (Jul 2025); servers use elicitation to
     # ask the client for structured input mid-tool-call (e.g. payment

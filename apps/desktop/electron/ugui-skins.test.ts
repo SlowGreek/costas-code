@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { loadUguiSkinCatalog, normalizeUguiSkinBinding } from './ugui-skins'
 
 const aeRoot = path.resolve(import.meta.dirname, '../../../..')
-const bindingsDir = path.join(aeRoot, 'ugui', 'skins', 'bindings')
+const bindingsDir = path.join(aeRoot, 'genui', 'ugui', 'skins', 'bindings')
 
 describe('UGUI generated skin catalog admission', () => {
   it('admits every generated binding without narrowing the catalog', () => {

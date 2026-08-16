@@ -14,7 +14,7 @@ function fixture() {
   roots.push(root)
   const executable = path.join(root, 'Catalyst')
   fs.writeFileSync(executable, 'binary')
-  const source = { schema: 'catalyst-desktop-source/1' as const, source_revision: hash('1'), ae_generation: hash('2') }
+  const source = { schema: 'catalyst-source/1' as const, source_revision: hash('1'), ae_generation: hash('2') }
   fs.writeFileSync(path.join(root, 'lifecycle-source.json'), `${JSON.stringify(source)}\n`)
 
   const environment = {

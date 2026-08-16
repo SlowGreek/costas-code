@@ -44,7 +44,7 @@ export function requestRunSourceRestart(environment: NodeJS.ProcessEnv = process
   const launchHash = environment.AE_RUN_LAUNCH_HASH
 
   if (
-    childId !== 'catalyst-desktop' ||
+    childId !== 'catalyst' ||
     !requestPath || !path.isAbsolute(requestPath) || requestPath.includes('\0') ||
     !launchHash || !/^sha256:[0-9a-f]{64}$/.test(launchHash)
   ) {

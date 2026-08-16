@@ -6003,7 +6003,7 @@ def cmd_gui(args: argparse.Namespace):
         timeout_ms = getattr(args, "readiness_timeout_ms", 30000)
         if not isinstance(timeout_ms, int) or timeout_ms < 100 or timeout_ms > 120000:
             print(json.dumps({
-                "schema": "catalyst-desktop-lifecycle-error/1",
+                "schema": "catalyst-lifecycle-error/1",
                 "op": machine_op,
                 "code": "desktop-lifecycle-timeout",
             }, separators=(",", ":")))
@@ -6011,7 +6011,7 @@ def cmd_gui(args: argparse.Namespace):
         node = find_node_executable("node")
         if not node:
             print(json.dumps({
-                "schema": "catalyst-desktop-lifecycle-error/1",
+                "schema": "catalyst-lifecycle-error/1",
                 "op": machine_op,
                 "code": "desktop-lifecycle-node-unavailable",
             }, separators=(",", ":")))

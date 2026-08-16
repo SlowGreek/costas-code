@@ -1,7 +1,6 @@
-import sys
-
 from tools.lucid_mcp_bridge import (
     HOST_CONTEXT_EXTENSION,
+    LUCID_MCP_URL,
     lucid_exact_confirmation,
     lucid_host_context_meta,
     lucid_outcome_unknown,
@@ -12,15 +11,12 @@ from tools.lucid_mcp_bridge import (
 )
 
 
-def test_exact_first_party_lucid_stdio_receives_bounded_host_identity(monkeypatch):
+def test_exact_first_party_lucid_endpoint_receives_bounded_host_identity():
     args = {"path": "fleet"}
-    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
     meta = lucid_host_context_meta(
         "lucid-quine",
-        {"command": "butler", "args": ["--mcp-stdio"]},
+        {"url": LUCID_MCP_URL},
         session_id="11111111-1111-4111-8111-111111111111",
-        resolved_command=butler,
     )
 
     assert meta == {
@@ -32,50 +28,40 @@ def test_exact_first_party_lucid_stdio_receives_bounded_host_identity(monkeypatc
     assert args == {"path": "fleet"}, "host enrichment must not mutate model arguments"
 
 
-def test_non_lucid_or_noncanonical_transports_never_receive_metadata(monkeypatch):
-    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
+def test_non_lucid_or_noncanonical_transports_never_receive_metadata():
     cases = [
         ("other", {"command": "butler", "args": ["--mcp-stdio"]}),
         ("lucid-quine", {"command": "python", "args": ["server.py"]}),
-        ("lucid-quine", {"command": "butler", "args": ["--mcp-stdio", "--extra"]}),
+        ("lucid-quine", {"command": "butler", "args": ["--mcp-stdio"]}),
+        ("lucid-quine", {"url": "http://localhost:4176/mcp"}),
         ("lucid-quine", {"url": "https://example.test/mcp"}),
     ]
     for name, config in cases:
         assert lucid_host_context_meta(
-            name, config, session_id="33333333-3333-4333-8333-333333333333", resolved_command=butler
+            name, config, session_id="33333333-3333-4333-8333-333333333333"
         ) is None
 
 
-def test_same_name_path_impersonation_fails_closed(monkeypatch):
-    admitted = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", admitted)
+def test_canonical_url_with_process_fields_fails_closed():
     assert lucid_host_context_meta(
         "lucid-quine",
-        {"command": "butler", "args": ["--mcp-stdio"]},
+        {"url": LUCID_MCP_URL, "command": "butler"},
         session_id="33333333-3333-4333-8333-333333333333",
-        resolved_command="/tmp/attacker/butler",
     ) is None
 
 
-def test_malformed_or_unbounded_session_identity_fails_closed(monkeypatch):
-    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
-    config = {"command": "butler", "args": ["--mcp-stdio"]}
+def test_malformed_or_unbounded_session_identity_fails_closed():
+    config = {"url": LUCID_MCP_URL}
     for value in (None, "", " leading", "contains space", "x" * 193, "💥"):
         assert lucid_host_context_meta(
             "lucid-quine",
             config,
             session_id=value,
-            resolved_command=butler,
         ) is None
 
 
-def test_public_status_is_content_free_and_names_authority_owner(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", sys.executable)
-    status = public_lucid_bridge_status(
-        "lucid-quine", {"command": "butler", "args": ["--mcp-stdio"]}
-    )
+def test_public_status_is_content_free_and_names_authority_owner():
+    status = public_lucid_bridge_status("lucid-quine", {"url": LUCID_MCP_URL})
     assert status == {
         "schema": "hermes-lucid-host-bridge/1",
         "server": "lucid-quine",
@@ -178,15 +164,11 @@ def test_lucid_receipt_projection_rejects_malformed_or_open_shapes():
         assert project_lucid_receipt(candidate) is None
 
 
-def test_retry_disposition_is_read_only_and_exact_provenance(monkeypatch):
-    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
-    config = {"command": "butler", "args": ["--mcp-stdio"]}
+def test_retry_disposition_is_read_only_and_exact_provenance():
+    config = {"url": LUCID_MCP_URL}
 
     assert (
-        lucid_retry_disposition(
-            "lucid-quine", config, "lucid.get", resolved_command=butler
-        )
+        lucid_retry_disposition("lucid-quine", config, "lucid.get")
         == "retry-safe-read"
     )
     for verb in ("show", "set", "morph", "dispatch", "steer", "cancel"):
@@ -195,30 +177,24 @@ def test_retry_disposition_is_read_only_and_exact_provenance(monkeypatch):
                 "lucid-quine",
                 config,
                 f"lucid.{verb}",
-                resolved_command=butler,
             )
             == "outcome-unknown"
         )
     assert (
-        lucid_retry_disposition(
-            "foreign", config, "lucid.dispatch", resolved_command=butler
-        )
+        lucid_retry_disposition("foreign", config, "lucid.dispatch")
         is None
     )
     assert (
         lucid_retry_disposition(
             "lucid-quine",
-            config,
+            {"url": "http://localhost:4176/mcp"},
             "lucid.dispatch",
-            resolved_command="/tmp/attacker/butler",
         )
         is None
     )
 
 
-def test_exact_confirmation_is_host_bound_and_never_accepts_a_caller_digest(monkeypatch):
-    butler = "/Applications/Catalyst.app/Contents/Resources/ae/butler"
-    monkeypatch.setenv("HERMES_LUCID_BUTLER_PATH", butler)
+def test_exact_confirmation_is_host_bound_and_never_accepts_a_caller_digest():
     arguments = {"id": "dispatch:" + "a" * 64, "mode": "graceful"}
     confirmation = lucid_exact_confirmation("cancel", arguments, confirmed=True)
 
@@ -230,9 +206,8 @@ def test_exact_confirmation_is_host_bound_and_never_accepts_a_caller_digest(monk
     assert lucid_exact_confirmation("dispatch", arguments, confirmed=True) is None
     assert lucid_host_context_meta(
         "lucid-quine",
-        {"command": "butler", "args": ["--mcp-stdio"]},
+        {"url": LUCID_MCP_URL},
         session_id="44444444-4444-4444-8444-444444444444",
-        resolved_command=butler,
         exact_confirmation=confirmation,
     ) == {
         HOST_CONTEXT_EXTENSION: {

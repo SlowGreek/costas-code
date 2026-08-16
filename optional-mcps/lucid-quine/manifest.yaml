@@ -1,6 +1,6 @@
 # Nous-approved first-party MCP catalog entry.
-# The command resolves the packaged AgentExperiments LUCID contract through
-# Butler's package owner; no workspace path or model-visible authority material.
+# RUN owns the one packaged Butler service. Hermes is a thin MCP client of its
+# loopback endpoint; no private child process or model-visible authority material.
 manifest_version: 1
 
 name: lucid-quine
@@ -8,11 +8,9 @@ description: AgentExperiments LUCID — seven closed verbs for QUINE-governed pr
 source: https://github.com/microsoft/AgentExperiments
 
 transport:
-  type: stdio
-  command: "butler"
-  args:
-    - "--mcp-stdio"
-  version: "0.1.0"
+  type: http
+  url: http://127.0.0.1:4176/mcp
+  version: "1.0.0"
 
 auth:
   type: none
@@ -28,11 +26,11 @@ tools:
     - lucid.cancel
 
 post_install: |
-  LUCID is a local stdio MCP backed by the packaged AgentExperiments Butler.
+  LUCID is the shared local MCP service hosted by RUN-supervised Butler.
   It exposes the closed show/get/set/morph/dispatch/steer/cancel grammar plus
   read-only onboarding and current-system resources. Resources and prompts grant
   no authority. Consequential calls still require Butler/Envelope capability and
   confirmation checks, and QUINE remains the acceptance owner.
 
-  The Butler executable must be installed on the Desktop backend PATH. Open the
-  MCP tab to test the connection and inspect the exact seven tools.
+  RUN must be active on the Desktop backend. Open the MCP tab to test the shared
+  loopback connection and inspect the exact seven tools.

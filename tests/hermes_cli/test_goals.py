@@ -1584,3 +1584,74 @@ class TestExtractRecentToolEvidence:
 
         assert "99 passed" in (captured.get("user") or ""), "foreground evidence must reach the verifier"
         assert d["verdict"] == "done"
+
+
+class TestStaleGoalExpiry:
+    """A goal abandoned weeks ago must not re-arm when its session is resumed.
+
+    Field bug: ~/.hermes/state.db accumulated 10 goal rows, one set on
+    2026-07-22 (``dont stup until you figure it out``) still reporting
+    ``active`` with ``turns_used=0`` — the session was abandoned seconds after
+    the goal was set. ``is_active()`` keyed on status alone, so resuming that
+    conversation weeks later silently re-armed the loop and it started
+    judging/continuing against a goal the user had long forgotten.
+    """
+
+    def test_abandoned_goal_does_not_rearm_after_the_staleness_window(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        import hermes_cli.goals as goals
+
+        old = time.time() - (goals.GOAL_STALE_AFTER_SECONDS + 86400)
+        goals.save_goal(
+            "ancient",
+            goals.GoalState(
+                goal="dont stup until you figure it out",
+                status="active",
+                turns_used=0,
+                max_turns=20,
+                created_at=old,
+                last_turn_at=0.0,
+            ),
+        )
+
+        mgr = goals.GoalManager(session_id="ancient")
+
+        assert mgr.is_active() is False
+        assert "No active goal" in mgr.status_line()
+
+    def test_a_goal_that_took_a_turn_recently_still_counts_as_active(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        import hermes_cli.goals as goals
+
+        old = time.time() - (goals.GOAL_STALE_AFTER_SECONDS + 86400)
+        goals.save_goal(
+            "worked-on",
+            goals.GoalState(
+                goal="long-running but live",
+                status="active",
+                turns_used=3,
+                max_turns=20,
+                created_at=old,
+                # Age is measured from the LAST TURN, not creation: a genuinely
+                # long-running goal that is still being worked must survive.
+                last_turn_at=time.time() - 60,
+            ),
+        )
+
+        assert goals.GoalManager(session_id="worked-on").is_active() is True
+
+    def test_expiry_is_persisted_so_the_row_stops_accumulating(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        import hermes_cli.goals as goals
+
+        old = time.time() - (goals.GOAL_STALE_AFTER_SECONDS + 86400)
+        goals.save_goal(
+            "ancient2",
+            goals.GoalState(goal="g", status="active", turns_used=0,
+                            max_turns=20, created_at=old, last_turn_at=0.0),
+        )
+
+        goals.GoalManager(session_id="ancient2").is_active()
+
+        # Reaped in the DB, not just masked in memory.
+        assert goals.load_goal("ancient2").status == "cleared"

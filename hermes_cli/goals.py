@@ -99,6 +99,20 @@ DEFAULT_MAX_PARK_SECONDS = 1800
 # fingerprint of the reason, never an exact-string match (small wording
 # changes must not reset the streak).
 DEFAULT_MAX_NO_PROGRESS = 4
+# A goal is a live instruction, not a permanent property of a conversation.
+# Field bug: ~/.hermes/state.db accumulated goal rows going back weeks, one of
+# them ("dont stup until you figure it out", 2026-07-22) still reporting
+# ``active`` with ``turns_used=0`` — the session was abandoned seconds after
+# the goal was set. Because ``is_active()`` keyed on status alone, resuming
+# that conversation weeks later silently re-armed the loop: it began judging
+# and continuing against an instruction the user had long forgotten, which is
+# a large part of why goals felt "glitchy".
+#
+# Age is measured from the LAST TURN (falling back to creation for a goal that
+# never took one), never from creation alone — a genuinely long-running goal
+# that is still being worked must survive indefinitely. Only abandonment
+# expires a goal, not longevity.
+GOAL_STALE_AFTER_SECONDS = 7 * 86400
 # Second-stage completion verifier. When the first-stage judge returns DONE we
 # run one cheap, cache-safe corroboration pass over the ACTUAL tool/command
 # evidence available (background-process output, recent tool results) before
@@ -118,6 +132,9 @@ _VERIFY_EVIDENCE_CHARS = 6000
 # resurrected by a fresh GoalManager. ``blocked`` is deliberately NOT terminal:
 # it is a control state the user can resume once they have unblocked it.
 _TERMINAL_STATUSES = frozenset({"done", "cleared"})
+# The live counterpart: statuses that mean "there is a goal on this session".
+# An allow-list, so a corrupt/unknown status is never mistaken for a live goal.
+_LIVE_STATUSES = frozenset({"active", "paused", "blocked"})
 # Quality gates: deterministic shell commands that must pass before the goal
 # judge may declare the goal done. Defaults mirror the bounded-autonomy
 # pattern (per-gate retry limit + timeout, bounded output fed back to the
@@ -1777,6 +1794,33 @@ class GoalManager:
         self.session_id = session_id
         self.default_max_turns = int(default_max_turns or DEFAULT_MAX_TURNS)
         self._state: Optional[GoalState] = load_goal(session_id)
+        self._expire_if_stale()
+
+    def _expire_if_stale(self) -> None:
+        """Retire a goal whose conversation was abandoned (GOAL_STALE_AFTER_SECONDS).
+
+        Runs at load, not inside ``is_active``, so every consumer agrees:
+        ``is_active`` / ``has_goal`` / ``status_line`` all read ``self._state``,
+        and reaping in one would leave the others contradicting it.
+        """
+        s = self._state
+        if s is None or s.status not in _LIVE_STATUSES:
+            return
+
+        # From the last turn, falling back to creation for a goal that never
+        # took one. Longevity never expires a goal — only the absence of work.
+        last_touch = s.last_turn_at or s.created_at
+        if not last_touch or (time.time() - last_touch) <= GOAL_STALE_AFTER_SECONDS:
+            return
+
+        s.status = "cleared"
+        s.last_reason = "expired: session abandoned"
+        # Persist so the row stops resurfacing, but advisory only: a read-only
+        # DB must not invalidate the answer already computed in memory.
+        try:
+            save_goal(self.session_id, s)
+        except Exception:  # pragma: no cover - persistence is advisory here
+            logger.debug("could not persist goal expiry for %s", self.session_id)
 
     # --- introspection ------------------------------------------------
 
@@ -1791,7 +1835,7 @@ class GoalManager:
         # active / paused / blocked all count as "there is a goal here" (so
         # /subgoal, /goal show, etc. work). done + cleared are terminal — no
         # live goal.
-        return self._state is not None and self._state.status in {"active", "paused", "blocked"}
+        return self._state is not None and self._state.status in _LIVE_STATUSES
 
     def has_contract(self) -> bool:
         return self._state is not None and self._state.has_contract()

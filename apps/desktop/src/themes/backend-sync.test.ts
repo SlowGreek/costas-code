@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { $backendThemes, $pendingSkinApply, __resetBackendSkinSync, ingestBackendSkin } from './backend-sync'
+import {
+  $backendThemes,
+  $pendingSkinApply,
+  __resetBackendSkinSync,
+  ingestBackendSkin,
+  ingestBackendSkinCatalog
+} from './backend-sync'
 
 const skin = (name: string) => ({
   name,
@@ -105,5 +111,48 @@ describe('ingestBackendSkin', () => {
     ingestBackendSkin({ name: '' }, { apply: true })
 
     expect($pendingSkinApply.get()).toBeNull()
+  })
+})
+
+describe('ingestBackendSkinCatalog', () => {
+  beforeEach(() => __resetBackendSkinSync())
+
+  it('registers every skin in the catalog as a selectable theme', () => {
+    ingestBackendSkinCatalog([skin('neon'), skin('forest'), skin('sorbet')])
+
+    expect(Object.keys($backendThemes.get()).sort()).toEqual(['forest', 'neon', 'sorbet'])
+  })
+
+  it('never applies a theme — a catalog pull must not repaint the app', () => {
+    ingestBackendSkinCatalog([skin('neon'), skin('forest')])
+
+    expect($pendingSkinApply.get()).toBeNull()
+  })
+
+  it('does not let a catalog pull cancel a pending apply from the active skin', () => {
+    ingestBackendSkin(skin('neon'), { apply: true })
+    ingestBackendSkinCatalog([skin('neon'), skin('forest')])
+
+    expect($pendingSkinApply.get()).toBe('neon')
+  })
+
+  it('skips default and built-in names so hand-tuned desktop palettes survive', () => {
+    ingestBackendSkinCatalog([skin('default'), skin('mono'), skin('neon')])
+
+    expect(Object.keys($backendThemes.get())).toEqual(['neon'])
+  })
+
+  it('merges into skins already registered by the active-skin path', () => {
+    ingestBackendSkin(skin('neon'), { apply: false })
+    ingestBackendSkinCatalog([skin('forest')])
+
+    expect(Object.keys($backendThemes.get()).sort()).toEqual(['forest', 'neon'])
+  })
+
+  it('tolerates junk entries and non-array payloads', () => {
+    ingestBackendSkinCatalog(undefined)
+    ingestBackendSkinCatalog([{ name: '' }, { name: 'nocolors' }, skin('neon')])
+
+    expect(Object.keys($backendThemes.get())).toEqual(['neon'])
   })
 })

@@ -790,6 +790,17 @@ def _skins_dir() -> Path:
     return get_hermes_home() / "skins"
 
 
+def _bundled_skins_dir() -> Path:
+    """Skins shipped inside the package (`hermes_cli/skins/*.yaml`).
+
+    These are data, not code: a themes pack lives as YAML next to the module so
+    adding a skin never touches `_BUILTIN_SKINS`. Precedence is user file →
+    bundled file → `_BUILTIN_SKINS`, so a user can always shadow a shipped skin
+    by dropping their own `<name>.yaml` in `$HERMES_HOME/skins/`.
+    """
+    return Path(__file__).parent / "skins"
+
+
 def _load_skin_from_yaml(path: Path) -> Optional[Dict[str, Any]]:
     """Load a skin definition from a YAML file."""
     try:
@@ -859,45 +870,56 @@ def _build_skin_config(data: Dict[str, Any]) -> SkinConfig:
 
 
 def list_skins() -> List[Dict[str, str]]:
-    """List all available skins (built-in + user-installed).
+    """List all available skins (built-in + bundled pack + user-installed).
 
-    Returns list of {"name": ..., "description": ..., "source": "builtin"|"user"}.
+    Returns list of {"name", "description", "source"} where source is
+    "builtin" | "bundled" | "user". A name is reported once, attributed to the
+    source `load_skin` would actually resolve it from — user file, then bundled
+    file, then the hardcoded built-in — so the two functions can never disagree
+    about where a skin comes from.
     """
-    result = []
+    result: List[Dict[str, str]] = []
+
+    def _collect(directory: Path, source: str) -> None:
+        if not directory.is_dir():
+            return
+        for f in sorted(directory.glob("*.yaml")):
+            data = _load_skin_from_yaml(f)
+            if not data:
+                continue
+            skin_name = data.get("name", f.stem)
+            # Skip if it shadows an already-listed skin
+            if any(s["name"] == skin_name for s in result):
+                continue
+            result.append({
+                "name": skin_name,
+                "description": data.get("description", ""),
+                "source": source,
+            })
+
+    _collect(_skins_dir(), "user")
+    _collect(_bundled_skins_dir(), "bundled")
+
     for name, data in _BUILTIN_SKINS.items():
+        if any(s["name"] == name for s in result):
+            continue
         result.append({
             "name": name,
             "description": data.get("description", ""),
             "source": "builtin",
         })
 
-    skins_path = _skins_dir()
-    if skins_path.is_dir():
-        for f in sorted(skins_path.glob("*.yaml")):
-            data = _load_skin_from_yaml(f)
-            if data:
-                skin_name = data.get("name", f.stem)
-                # Skip if it shadows a built-in
-                if any(s["name"] == skin_name for s in result):
-                    continue
-                result.append({
-                    "name": skin_name,
-                    "description": data.get("description", ""),
-                    "source": "user",
-                })
-
     return result
 
 
 def load_skin(name: str) -> SkinConfig:
-    """Load a skin by name. Checks user skins first, then built-in."""
-    # Check user skins directory
-    skins_path = _skins_dir()
-    user_file = skins_path / f"{name}.yaml"
-    if user_file.is_file():
-        data = _load_skin_from_yaml(user_file)
-        if data:
-            return _build_skin_config(data)
+    """Load a skin by name. User skins win, then bundled, then built-in."""
+    for directory in (_skins_dir(), _bundled_skins_dir()):
+        candidate = directory / f"{name}.yaml"
+        if candidate.is_file():
+            data = _load_skin_from_yaml(candidate)
+            if data:
+                return _build_skin_config(data)
 
     # Check built-in skins
     if name in _BUILTIN_SKINS:

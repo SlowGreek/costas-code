@@ -330,6 +330,11 @@ include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*",
 # topic-setup image disappears. Loaded via Path(__file__).parent / "assets"
 # in gateway/status_phrases.py and gateway/run.py.
 gateway = ["assets/**/*"]
+# hermes_cli/skins/ ships the bundled skin pack as YAML data. Without this,
+# installed/sealed venvs lose every bundled theme and `list_skins()` falls back
+# to the four hardcoded `_BUILTIN_SKINS`. Loaded via Path(__file__).parent /
+# "skins" in hermes_cli/skin_engine.py.
+hermes_cli = ["skins/*.yaml", "skins/LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

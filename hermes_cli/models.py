@@ -4350,6 +4350,34 @@ def _copilot_catalog_ids(
     }
 
 
+def _copilot_catalog_endpoints(
+    model_id: str,
+    *,
+    catalog: Optional[list[dict[str, Any]]] = None,
+    api_key: Optional[str] = None,
+) -> set[str]:
+    """Return the ``supported_endpoints`` the live catalog lists for a model.
+
+    Empty set when the catalog is unavailable or the model omits the field —
+    callers must treat that as "no signal", not "no endpoints".
+    """
+    if catalog is None and api_key:
+        catalog = fetch_github_model_catalog(api_key=api_key)
+    if not catalog:
+        return set()
+    wanted = str(model_id or "").strip()
+    if not wanted:
+        return set()
+    for item in catalog:
+        if str(item.get("id") or "").strip() != wanted:
+            continue
+        endpoints = item.get("supported_endpoints")
+        if isinstance(endpoints, list):
+            return {str(e).strip() for e in endpoints if str(e).strip()}
+        return set()
+    return set()
+
+
 def normalize_copilot_model_id(
     model_id: Optional[str],
     *,
@@ -4441,6 +4469,17 @@ def copilot_model_api_mode(
 
     # Primary: model ID pattern (matches opencode's shouldUseCopilotResponsesApi)
     if _should_use_copilot_responses_api(normalized):
+        return "codex_responses"
+
+    # Secondary: the live catalog's supported_endpoints. Copilot ships non-GPT
+    # models that are Responses-only — e.g. grok-4.5 / grok-4.6 advertise
+    # ["/responses"] and reject /chat/completions with
+    # ``HTTP 400: model "grok-4.6" is not accessible via the /chat/completions
+    # endpoint``. Only route to codex_responses when the catalog says
+    # /chat/completions is NOT offered, so every model that speaks chat stays on
+    # the well-trodden path.
+    endpoints = _copilot_catalog_endpoints(normalized, catalog=catalog, api_key=api_key)
+    if endpoints and "/chat/completions" not in endpoints and "/responses" in endpoints:
         return "codex_responses"
 
     # Copilot's Claude models are exposed through its OpenAI-compatible chat

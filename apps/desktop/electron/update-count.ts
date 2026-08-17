@@ -144,4 +144,4 @@ function resolveBackendDrift({ appCommit, backendCommit }) {
   return same ? { drifted: false, reason: 'match' } : { drifted: true, reason: 'mismatch' }
 }
 
-export { compareApiUrl, parseCompareBehindCount, resolveBehindCount, resolveCommitLogSelection, shouldCountCommits, resolveClientUpdateBaseline, resolveBackendDrift }
+export { compareApiUrl, parseCompareBehindCount, resolveBackendDrift, resolveBehindCount, resolveClientUpdateBaseline, resolveCommitLogSelection, shouldCountCommits }

@@ -26,9 +26,11 @@ function silentlyDroppingGet() {
   const get = (_url: string, _cb: (res: any) => void) => {
     const req: any = new EventEmitter()
     req.destroyed = false
+
     req.destroy = () => {
       req.destroyed = true
     }
+
     // Emulate Node's semantics: setTimeout actually schedules the callback
     // against an idle socket. The fake never delivers a response, so the
     // timer is what must rescue the promise.
@@ -37,6 +39,7 @@ function silentlyDroppingGet() {
 
       return req
     }
+
     calls.push(req)
 
     // Never invokes the response callback, never emits 'error'.
@@ -70,11 +73,13 @@ test('the timed-out request is destroyed so the socket is not leaked', async () 
 test('a normal successful response still resolves with the body', async () => {
   const get = (_url: string, cb: (res: any) => void) => {
     const req: any = new EventEmitter()
+
     req.destroy = () => {}
     req.setTimeout = () => req
 
     const res: any = new EventEmitter()
     res.statusCode = 200
+
     res.resume = () => {}
 
     setImmediate(() => {
@@ -98,11 +103,13 @@ test('a normal successful response still resolves with the body', async () => {
 test('a non-200 response still rejects with a status-bearing error', async () => {
   const get = (_url: string, cb: (res: any) => void) => {
     const req: any = new EventEmitter()
+
     req.destroy = () => {}
     req.setTimeout = () => req
 
     const res: any = new EventEmitter()
     res.statusCode = 404
+
     res.resume = () => {}
 
     setImmediate(() => cb(res))

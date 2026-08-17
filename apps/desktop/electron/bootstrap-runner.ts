@@ -322,10 +322,12 @@ function httpGetBuffer(
     // connected" and "connected then went silent mid-body".
     req.setTimeout(timeoutMs, () => {
       req.destroy()
+
       const err: any = new Error(
         `Timed out after ${timeoutMs}ms fetching ${url}. A proxy or firewall may be ` +
           'silently dropping the connection.'
       )
+
       err.timeout = true
       reject(err)
     })
@@ -1019,6 +1021,7 @@ async function runBootstrap(opts) {
       emit,
       forceRefresh
     })
+
     const installerKind = scriptInfo.kind || 'powershell'
 
     // 2. Fetch manifest

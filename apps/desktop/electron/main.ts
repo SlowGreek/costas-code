@@ -10,7 +10,6 @@ import { pathToFileURL } from 'node:url'
 
 import {
   app,
-  nativeImage,
   BrowserWindow,
   clipboard,
   dialog,
@@ -18,6 +17,7 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeImage,
   nativeTheme,
   Notification,
   powerMonitor,
@@ -2754,6 +2754,7 @@ async function checkUpdates() {
   // later fetch ("Unable to create '.git/shallow.lock': File exists") and this
   // check reports 'fetch-failed' forever — git never removes these itself.
   await clearStaleGitLocks(updateRoot)
+
   const fetched = await runGit(
     ['fetch', '--quiet', 'origin', remoteTrackingRefspec(branch)],
     { cwd: updateRoot }
@@ -3454,6 +3455,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
     }
 
     const handoffConflict = updateHandoffConflict(HERMES_HOME)
+
     if (handoffConflict) {
       // A different updater already owns the marker — most often a previous
       // "Update" click whose updater is still alive and parked mid-run.

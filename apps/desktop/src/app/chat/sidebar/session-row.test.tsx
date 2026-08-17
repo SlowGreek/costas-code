@@ -154,14 +154,14 @@ const renderRow = (session: SessionInfo) =>
   render(
     <SidebarSessionRow
       isPinned={false}
-      unread={false}
-      onToggleUnread={vi.fn()}
       isSelected={false}
       onArchive={noop}
       onDelete={noop}
       onPin={noop}
       onResume={noop}
+      onToggleUnread={vi.fn()}
       session={session}
+      unread={false}
     />
   )
 
@@ -199,15 +199,15 @@ describe('SidebarSessionRow running arc', () => {
         {[makeSession({ id: 's1', title: 'One' }), makeSession({ id: 's2', title: 'Two' })].map(session => (
           <SidebarSessionRow
             isPinned={false}
-            unread={false}
-            onToggleUnread={vi.fn()}
             isSelected={false}
             key={session.id}
             onArchive={noop}
             onDelete={noop}
             onPin={noop}
             onResume={noop}
+            onToggleUnread={vi.fn()}
             session={session}
+            unread={false}
           />
         ))}
       </>
@@ -228,14 +228,14 @@ describe('SidebarSessionRow', () => {
     render(
       <SidebarSessionRow
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({ title: 'Hermes doctor health check results' })}
+        unread={false}
       />
     )
 
@@ -320,14 +320,14 @@ describe('SidebarSessionRow', () => {
     render(
       <SidebarSessionRow
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({ started_at: startedAt, title: 'Timestamped session' })}
+        unread={false}
       />
     )
 
@@ -344,14 +344,14 @@ describe('SidebarSessionRow', () => {
     const { container } = render(
       <SidebarSessionRow
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({ title: 'Local session' })}
+        unread={false}
       />
     )
 
@@ -362,18 +362,18 @@ describe('SidebarSessionRow', () => {
     const { container } = render(
       <SidebarSessionRow
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({
           handoff_platform: 'telegram',
           handoff_state: 'active',
           title: 'Continued from Telegram'
         })}
+        unread={false}
       />
     )
 
@@ -396,20 +396,21 @@ describe('SidebarSessionRow', () => {
       <SidebarSessionRow
         branchStem="└─ "
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({ title: 'Branched child session' })}
+        unread={false}
       />
     )
 
     const stem = [...container.querySelectorAll('span')].find(
       el => el.textContent === '└─ ' && el.children.length === 0
     )
+
     expect(stem).toBeTruthy()
 
     // The trailing space in the stem is what separates it from the dot; a
@@ -426,14 +427,14 @@ describe('SidebarSessionRow', () => {
     const { container } = render(
       <SidebarSessionRow
         isPinned={false}
-        unread={false}
-        onToggleUnread={vi.fn()}
         isSelected={false}
         onArchive={noop}
         onDelete={noop}
         onPin={noop}
         onResume={noop}
+        onToggleUnread={vi.fn()}
         session={makeSession({ title: 'Top level session' })}
+        unread={false}
       />
     )
 

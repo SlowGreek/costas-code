@@ -29,7 +29,6 @@ import { clearClarifyRequest, normalizeChoices, setClarifyRequest, warnDroppedCh
 import { setSessionCompacting } from '@/store/compaction'
 import { refreshBackgroundProcesses, refreshGoalStatus, setGoalJudging } from '@/store/composer-status'
 import { $gateway, activeGatewayConnectionId } from '@/store/gateway'
-import { applyGoalStatusText } from '@/store/goals'
 import {
   notifyCronChanged,
   notifyPairingChanged,

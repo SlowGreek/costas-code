@@ -450,7 +450,11 @@ py-modules = [
 include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
 
 [tool.setuptools.package-data]
-hermes_cli = ["observability/schemas/*.json", "data/*.json"]
+# skins/*.yaml is the bundled skin pack (data, not code). Without it,
+# installed/sealed venvs lose every bundled theme and `list_skins()` falls
+# back to the four hardcoded `_BUILTIN_SKINS`. Loaded via
+# Path(__file__).parent / "skins" in hermes_cli/skin_engine.py.
+hermes_cli = ["observability/schemas/*.json", "data/*.json", "skins/*.yaml", "skins/LICENSE"]
 # gateway/assets/ ships status_phrases.yaml and the Telegram BotFather
 # screenshot. Without this, sealed venvs (uv2nix) silently lose both —
 # status phrases fall back to the tiny hardcoded set and the Telegram

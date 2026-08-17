@@ -3546,27 +3546,62 @@ def _clear_pending(sid: str | None = None) -> None:
 # ── Agent factory ────────────────────────────────────────────────────
 
 
+def _skin_payload(skin) -> dict:
+    """Serialize a `SkinConfig` into the wire shape every surface consumes."""
+    return {
+        "name": skin.name,
+        "description": skin.description,
+        "colors": skin.colors,
+        # Paired palettes: the TUI detects the terminal's polarity and
+        # prefers the matching hand-tuned block over adapting `colors`.
+        "light_colors": skin.light_colors,
+        "dark_colors": skin.dark_colors,
+        "branding": skin.branding,
+        "banner_logo": skin.banner_logo,
+        "banner_hero": skin.banner_hero,
+        "tool_prefix": skin.tool_prefix,
+        "help_header": (skin.branding or {}).get("help_header", ""),
+    }
+
+
 def resolve_skin() -> dict:
     try:
         from hermes_cli.skin_engine import init_skin_from_config, get_active_skin
 
         init_skin_from_config(_load_cfg())
-        skin = get_active_skin()
-        return {
-            "name": skin.name,
-            "colors": skin.colors,
-            # Paired palettes: the TUI detects the terminal's polarity and
-            # prefers the matching hand-tuned block over adapting `colors`.
-            "light_colors": skin.light_colors,
-            "dark_colors": skin.dark_colors,
-            "branding": skin.branding,
-            "banner_logo": skin.banner_logo,
-            "banner_hero": skin.banner_hero,
-            "tool_prefix": skin.tool_prefix,
-            "help_header": (skin.branding or {}).get("help_header", ""),
-        }
+        return _skin_payload(get_active_skin())
     except Exception:
         return {}
+
+
+@method("skin.list")
+def _(rid, params: dict) -> dict:
+    """Every available skin, fully resolved.
+
+    ``gateway.ready`` / ``skin.changed`` only ever announce the ACTIVE skin, so
+    a GUI surface that wants a picker (desktop Appearance settings) has no way
+    to see the rest. This returns the same payload shape as ``resolve_skin`` for
+    each entry, plus its ``source`` (builtin / bundled / user), so the desktop
+    can register them all as selectable themes.
+    """
+    try:
+        from hermes_cli.skin_engine import list_skins, load_skin
+    except Exception:
+        return {"skins": []}
+
+    skins = []
+    for entry in list_skins():
+        try:
+            payload = _skin_payload(load_skin(entry["name"]))
+        except Exception:
+            continue
+        payload["source"] = entry.get("source", "")
+        # list_skins() reads the raw YAML description; keep it when the
+        # resolved config inherited an empty one from the default skin.
+        payload["description"] = payload.get("description") or entry.get("description", "")
+        skins.append(payload)
+
+    return {"skins": skins}
 
 
 # Signature of the last skin broadcast: (name, active user-file mtime). Lets the

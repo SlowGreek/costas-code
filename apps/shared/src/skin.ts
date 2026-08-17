@@ -107,4 +107,7 @@ export interface HermesSkin {
   banner_hero?: string
   tool_prefix?: string
   help_header?: string
+  /** Where the skin came from: a hardcoded built-in, the bundled YAML pack, or
+   *  a user file in `$HERMES_HOME/skins/`. Only set by `skin.list`. */
+  source?: 'builtin' | 'bundled' | 'user'
 }

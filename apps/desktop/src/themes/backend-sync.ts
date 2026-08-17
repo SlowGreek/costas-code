@@ -45,6 +45,48 @@ export function __resetBackendSkinSync(): void {
 }
 
 /**
+ * Register every skin the backend knows about, WITHOUT applying any of them.
+ *
+ * `gateway.ready` / `skin.changed` only announce the ACTIVE skin, so on its own
+ * the desktop picker would show exactly one backend theme. The `skin.list` RPC
+ * returns the whole catalog (built-ins + the bundled YAML pack + user files);
+ * folding it into `$backendThemes` makes all of them selectable in Appearance,
+ * Cmd-K, and `/skin` through the same `listAllThemes()` merge.
+ *
+ * Purely additive: it never touches `lastSynced` or `$pendingSkinApply`, so
+ * seeding the catalog can't repaint over the user's persisted desktop theme.
+ */
+export function ingestBackendSkinCatalog(skins: readonly HermesSkin[] | undefined | null): void {
+  if (!Array.isArray(skins)) {
+    return
+  }
+
+  const next: Record<string, DesktopTheme> = { ...$backendThemes.get() }
+  let changed = false
+
+  for (const skin of skins) {
+    const name = (skin && typeof skin === 'object' ? (skin.name ?? '') : '').trim()
+
+    // Same exclusions as the single-skin path: `default` means "no opinion" on
+    // the palette, and built-in names keep the desktop's hand-tuned version.
+    if (!name || name === 'default' || BUILTIN_THEMES[name]) {
+      continue
+    }
+
+    const theme = skinToDesktopTheme(skin)
+
+    if (theme && JSON.stringify(next[name]) !== JSON.stringify(theme)) {
+      next[name] = theme
+      changed = true
+    }
+  }
+
+  if (changed) {
+    $backendThemes.set(next)
+  }
+}
+
+/**
  * Fold a resolved skin into the desktop. `apply: false` (connect-time seed) only
  * records the baseline; `apply: true` (runtime change / poll) repaints on a name
  * change. Built-in names keep the desktop's own palette but can still be applied.

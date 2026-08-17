@@ -95,7 +95,11 @@ class TestSkinManagement:
         assert "warm-lightmode" in names
         for s in skins:
             assert "source" in s
-            assert s["source"] == "builtin"
+            assert s["source"] in {"builtin", "bundled", "user"}
+        # The hardcoded built-ins are still attributed as such.
+        by_name = {s["name"]: s for s in skins}
+        assert by_name["default"]["source"] == "builtin"
+        assert by_name["ares"]["source"] == "builtin"
 
 
 
@@ -175,6 +179,60 @@ class TestUserSkins:
         assert "pirate" in names
         pirate = [s for s in skins if s["name"] == "pirate"][0]
         assert pirate["source"] == "user"
+
+
+class TestBundledSkins:
+    """The shipped `hermes_cli/skins/*.yaml` pack (a third skin source)."""
+
+    def test_bundled_skins_are_listed_and_loadable(self):
+        from hermes_cli.skin_engine import _bundled_skins_dir, list_skins, load_skin
+
+        bundled_files = sorted(_bundled_skins_dir().glob("*.yaml"))
+        assert bundled_files, "expected the bundled skin pack to ship YAML files"
+
+        listed = {s["name"]: s for s in list_skins()}
+
+        for path in bundled_files:
+            entry = listed.get(path.stem)
+            assert entry is not None, f"bundled skin {path.stem} missing from list_skins()"
+            assert entry["source"] == "bundled"
+            # Every listed skin must actually resolve — not silently fall back
+            # to `default`, which is what a malformed YAML would produce.
+            assert load_skin(path.stem).name == path.stem
+
+    def test_bundled_skins_declare_a_usable_palette(self):
+        """A skin with no colors converts to junk on every GUI surface."""
+        from hermes_cli.skin_engine import _bundled_skins_dir, _load_skin_from_yaml
+
+        for path in sorted(_bundled_skins_dir().glob("*.yaml")):
+            data = _load_skin_from_yaml(path)
+            assert data is not None, f"{path.name} failed to parse"
+            # Filename and declared name must agree: load_skin() resolves by
+            # filename, list_skins() reports the declared name.
+            assert data["name"] == path.stem
+            colors = data.get("colors") or {}
+            assert colors.get("background"), f"{path.name} has no background color"
+            assert colors.get("ui_text"), f"{path.name} has no ui_text color"
+
+    def test_user_skin_shadows_a_bundled_skin_of_the_same_name(self, tmp_path, monkeypatch):
+        import yaml
+
+        from hermes_cli.skin_engine import _bundled_skins_dir, list_skins, load_skin
+
+        target = sorted(_bundled_skins_dir().glob("*.yaml"))[0].stem
+
+        skins_dir = tmp_path / "skins"
+        skins_dir.mkdir()
+        (skins_dir / f"{target}.yaml").write_text(
+            yaml.dump({"name": target, "description": "mine", "colors": {"background": "#123456"}})
+        )
+        monkeypatch.setattr("hermes_cli.skin_engine._skins_dir", lambda: skins_dir)
+
+        assert load_skin(target).get_color("background") == "#123456"
+
+        entries = [s for s in list_skins() if s["name"] == target]
+        assert len(entries) == 1
+        assert entries[0]["source"] == "user"
 
 
 class TestDisplayIntegration:

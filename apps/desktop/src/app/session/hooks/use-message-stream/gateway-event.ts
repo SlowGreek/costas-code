@@ -90,7 +90,7 @@ import { reportInstallMethodWarning } from '@/store/updates'
 import { notifyWorkspaceChanged, toolChangedPath, toolMayMutateFiles } from '@/store/workspace-events'
 // Leaf import (not the `@/themes` barrel) to avoid pulling the ThemeProvider
 // module graph into the gateway event hot path.
-import { ingestBackendSkin } from '@/themes/backend-sync'
+import { ingestBackendSkin, ingestBackendSkinCatalog } from '@/themes/backend-sync'
 import type { RpcEvent } from '@/types/hermes'
 
 import type { ClientSessionState } from '../../../types'
@@ -432,6 +432,16 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         // Backends with the change watcher broadcast pet/cron/sessions change
         // events; consumers demote their legacy polls to slow backstops.
         setChangeEventsAvailable(Boolean((payload as { change_events?: boolean } | undefined)?.change_events))
+
+        // ...then register the REST of the backend's skins as selectable themes.
+        // `gateway.ready` only carries the active one, so without this pull the
+        // Appearance grid would offer exactly one backend skin. Best-effort and
+        // apply-free: an older backend without `skin.list` just keeps the seed.
+        void $gateway
+          .get()
+          ?.request('skin.list', {})
+          .then(result => ingestBackendSkinCatalog((result as { skins?: HermesSkin[] } | undefined)?.skins))
+          .catch(() => {})
 
         return
       } else if (event.type === 'skin.changed') {

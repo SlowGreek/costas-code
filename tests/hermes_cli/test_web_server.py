@@ -7,6 +7,7 @@ import shutil
 import sys
 import threading
 import time
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -4804,3 +4805,54 @@ class TestSessionPatchUnread:
         # a string outside the accepted set to prove validation rejects it.
         resp = self.auth_client.patch("/api/sessions/s1", json={"unread": "maybe"})
         assert resp.status_code == 422  # pydantic validation
+
+
+class TestAuxTaskSlotsMatchTheDesktopUI:
+    """Every task the desktop settings UI offers must be assignable.
+
+    Field bug: `goal_judge` was added to the desktop Auxiliary models list
+    but not to `_AUX_TASK_SLOTS`, so the row rendered, the dropdowns worked,
+    and Apply silently did nothing — POST /api/model/set rejected it with
+    ``400 unknown auxiliary task: goal_judge``. The read path is gated on the
+    same tuple, so the row also always displayed "auto · use main model"
+    regardless of what was actually configured.
+
+    This is an invariant, not a snapshot: it asserts the two lists agree,
+    so adding a task to one side without the other fails here rather than
+    in the user's hands.
+    """
+
+    def _desktop_aux_tasks(self):
+        """Parse AUX_TASKS out of the desktop settings source."""
+        src = (
+            Path(__file__).resolve().parents[2]
+            / "apps/desktop/src/app/settings/model-settings.tsx"
+        )
+        if not src.exists():  # desktop tree not present in this checkout
+            pytest.skip("desktop source not available")
+        text = src.read_text(encoding="utf-8")
+        block = re.search(
+            r"const AUX_TASKS:\s*readonly AuxTaskMeta\[\]\s*=\s*\[(.*?)\]",
+            text,
+            re.S,
+        )
+        assert block, "could not locate AUX_TASKS in model-settings.tsx"
+        return re.findall(r"key:\s*'([^']+)'", block.group(1))
+
+    def test_every_ui_task_is_an_assignable_backend_slot(self):
+        from hermes_cli.web_server import _AUX_TASK_SLOTS
+
+        ui_tasks = self._desktop_aux_tasks()
+        assert ui_tasks, "AUX_TASKS parsed empty"
+
+        missing = [t for t in ui_tasks if t not in _AUX_TASK_SLOTS]
+        assert not missing, (
+            f"desktop settings offers {missing} but /api/model/set rejects them "
+            "— Apply would silently fail"
+        )
+
+    def test_goal_judge_is_assignable(self):
+        """The specific slot the field bug was reported against."""
+        from hermes_cli.web_server import _AUX_TASK_SLOTS
+
+        assert "goal_judge" in _AUX_TASK_SLOTS

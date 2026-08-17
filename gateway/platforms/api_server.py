@@ -4706,9 +4706,8 @@ class APIServerAdapter(BasePlatformAdapter):
     def _lucid_role_for_session(self, session_id: object) -> Optional[str]:
         """Resolve one durable, observation-only AE role assignment.
 
-        ``None`` means no binding and preserves the enrolled Desktop default.
-        An invalid/foreign binding returns ``""`` so the request fails closed
-        instead of inheriting process-global EM authority.
+        A missing, invalid, or foreign binding returns ``""`` so the request
+        remains unsigned until the human explicitly selects a role.
         """
 
         if not isinstance(session_id, str) or not session_id:
@@ -4721,7 +4720,7 @@ class APIServerAdapter(BasePlatformAdapter):
         except (TypeError, ValueError):
             return ""
         if binding is None:
-            return None
+            return ""
         if (
             binding.get("namespace") != "agent-experiments"
             or binding.get("authority") != "observe"

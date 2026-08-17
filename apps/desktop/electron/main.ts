@@ -7806,7 +7806,6 @@ async function spawnPoolBackend(profile, entry) {
         // can still point at the install dir even when spawn cwd is home.
         TERMINAL_CWD: hermesCwd,
         HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
-        HERMES_LUCID_ROLE: 'EM',
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         // Marks this dashboard backend as desktop-spawned so it runs the cron
         // scheduler tick loop (the gateway isn't running under the app).
@@ -8079,7 +8078,6 @@ async function startHermes() {
           ),
           TERMINAL_CWD: hermesCwd,
           HERMES_LUCID_BUTLER_PATH: LUCID_BUTLER_PATH,
-          HERMES_LUCID_ROLE: 'EM',
           HERMES_DASHBOARD_SESSION_TOKEN: token,
           // Marks this dashboard backend as desktop-spawned so it runs the cron
           // scheduler tick loop (the gateway isn't running under the app).

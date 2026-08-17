@@ -4660,6 +4660,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
         from tools.lucid_mcp_bridge import (
             current_lucid_host_context_meta,
             lucid_bootstrap_decision,
+            lucid_role_choice_response,
             lucid_retry_disposition,
             lucid_unsigned_posture,
         )
@@ -4682,20 +4683,18 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             and args.get("path") == "role-session"
             and lifecycle_action in {"signin", "recover"}
         ):
-            bootstrap = lucid_bootstrap_decision(
-                explicit_conversation,
-                action="recover" if lifecycle_action == "recover" else "signin",
-            )
-            if bootstrap is None:
-                return json.dumps(
-                    {
-                        "error": "LUCID host role or conversation identity is unavailable",
-                        "code": "lucid-role-unconfigured",
-                        "retryable": False,
-                        "authority": "none",
-                    },
-                    ensure_ascii=False,
+            from gateway.session_context import bind_lucid_role, reset_lucid_role
+
+            role_token = bind_lucid_role(lifecycle.get("target_role"))
+            try:
+                bootstrap = lucid_bootstrap_decision(
+                    explicit_conversation,
+                    action="recover" if lifecycle_action == "recover" else "signin",
                 )
+            finally:
+                reset_lucid_role(role_token)
+            if bootstrap is None:
+                return json.dumps(lucid_role_choice_response(), ensure_ascii=False)
         host_meta = current_lucid_host_context_meta(
             server_name,
             server._config,
@@ -4972,7 +4971,9 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
     return _handler
 
 
-def invoke_lucid_bootstrap_signin(*, conversation_id: object = None) -> str:
+def invoke_lucid_bootstrap_signin(
+    *, role: object = None, conversation_id: object = None
+) -> str:
     """Invoke Butler's host-owned bootstrap/signin path over admitted MCP.
 
     Hermes sends only the closed lifecycle arguments plus its conversation UUID.
@@ -4980,7 +4981,16 @@ def invoke_lucid_bootstrap_signin(*, conversation_id: object = None) -> str:
     authorization for later calls; this helper never reads a token/key/path.
     """
 
-    from tools.lucid_mcp_bridge import LUCID_SERVER_NAME, lucid_signin_request
+    from gateway.session_context import bind_lucid_role, reset_lucid_role
+    from tools.lucid_mcp_bridge import (
+        LUCID_SERVER_NAME,
+        lucid_role_choice_response,
+        lucid_signin_request,
+    )
+
+    request = lucid_signin_request(role)
+    if request is None:
+        return json.dumps(lucid_role_choice_response(), ensure_ascii=False)
 
     server = _get_connected_server_for_call(LUCID_SERVER_NAME)
     timeout = server.tool_timeout if server is not None else _DEFAULT_TOOL_TIMEOUT
@@ -4988,7 +4998,11 @@ def invoke_lucid_bootstrap_signin(*, conversation_id: object = None) -> str:
     kwargs = {}
     if conversation_id is not None:
         kwargs["conversation_id"] = conversation_id
-    return handler(lucid_signin_request(), **kwargs)
+    role_token = bind_lucid_role(role)
+    try:
+        return handler(request, **kwargs)
+    finally:
+        reset_lucid_role(role_token)
 
 
 def _make_list_resources_handler(server_name: str, tool_timeout: float):

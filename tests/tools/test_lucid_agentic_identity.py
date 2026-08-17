@@ -9,10 +9,8 @@ import pytest
 
 from gateway.session_context import (
     bind_lucid_conversation_id,
-    bind_lucid_role,
     get_lucid_conversation_id,
     reset_lucid_conversation_id,
-    reset_lucid_role,
 )
 from tools import mcp_tool
 from tools.lucid_mcp_bridge import (
@@ -74,7 +72,7 @@ def _run_direct(coro_or_factory, timeout=30):
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_ROLE", "EM")
+    monkeypatch.delenv("HERMES_LUCID_ROLE", raising=False)
     token = bind_lucid_conversation_id(AMBIENT)
     try:
         yield
@@ -139,8 +137,12 @@ def test_missing_identity_returns_typed_unsigned_posture_without_calling_butler(
 
 
 def test_signin_request_is_closed_and_contains_no_authority_material():
-    request = lucid_signin_request()
-    assert request == {"action": "signin", "path": "role-session"}
+    request = lucid_signin_request("SIDEKICK")
+    assert request == {
+        "action": "signin",
+        "path": "role-session",
+        "target_role": "SIDEKICK",
+    }
     wire = json.dumps(request).lower()
     for forbidden in (
         "capability",
@@ -155,13 +157,37 @@ def test_signin_request_is_closed_and_contains_no_authority_material():
         assert forbidden not in wire
 
 
+def test_missing_role_returns_typed_nonretryable_choice_without_calling_butler(
+    monkeypatch,
+):
+    server = _server(_result("set", {"status": "should-not-run"}))
+    mcp_tool._servers["lucid-quine"] = server  # type: ignore[assignment]
+    monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", _run_direct)
+
+    output = json.loads(
+        mcp_tool.invoke_lucid_bootstrap_signin(conversation_id=EXPLICIT)
+    )
+
+    assert output == {
+        "schema": "hermes-lucid-role-choice/1",
+        "error": "LUCID sign-in requires an explicit host role selection",
+        "code": "lucid-role-choice-required",
+        "retryable": False,
+        "authority": "none",
+        "choices": ["EM", "SIDEKICK"],
+    }
+    server.session.call_tool.assert_not_awaited()
+
+
 def test_host_signin_then_ordinary_call_crosses_only_identity_metadata(monkeypatch):
     server = _server(_result("set", {"status": "signed-in"}), _result("get", {"ok": True}))
     mcp_tool._servers["lucid-quine"] = server  # type: ignore[assignment]
     monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", _run_direct)
 
     signed_in = json.loads(
-        mcp_tool.invoke_lucid_bootstrap_signin(conversation_id=EXPLICIT)
+        mcp_tool.invoke_lucid_bootstrap_signin(
+            role="EM", conversation_id=EXPLICIT
+        )
     )
     ordinary = json.loads(
         mcp_tool._make_tool_handler("lucid-quine", "lucid.get", 30.0)(
@@ -174,7 +200,11 @@ def test_host_signin_then_ordinary_call_crosses_only_identity_metadata(monkeypat
     calls = server.session.call_tool.await_args_list
     assert calls[0].args == ("lucid.set",)
     assert calls[0].kwargs == {
-        "arguments": {"action": "signin", "path": "role-session"},
+        "arguments": {
+            "action": "signin",
+            "path": "role-session",
+            "target_role": "EM",
+        },
         "meta": {
             HOST_CONTEXT_EXTENSION: {
                 "session_id": EXPLICIT,
@@ -203,19 +233,22 @@ def test_host_signin_then_ordinary_call_crosses_only_identity_metadata(monkeypat
         assert forbidden not in crossing
 
 
-def test_explicit_sidekick_binding_overrides_process_em_for_bootstrap(monkeypatch):
+def test_explicit_sidekick_selection_drives_request_and_bootstrap(monkeypatch):
     server = _server(_result("set", {"status": "signed-in"}))
     mcp_tool._servers["lucid-quine"] = server  # type: ignore[assignment]
     monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", _run_direct)
-    role_token = bind_lucid_role("SIDEKICK")
-    try:
-        result = json.loads(
-            mcp_tool.invoke_lucid_bootstrap_signin(conversation_id=EXPLICIT)
+    result = json.loads(
+        mcp_tool.invoke_lucid_bootstrap_signin(
+            role="SIDEKICK", conversation_id=EXPLICIT
         )
-    finally:
-        reset_lucid_role(role_token)
+    )
 
     assert result["result"] == {"status": "signed-in"}
+    assert server.session.call_tool.await_args.kwargs["arguments"] == {
+        "action": "signin",
+        "path": "role-session",
+        "target_role": "SIDEKICK",
+    }
     bootstrap = server.session.call_tool.await_args.kwargs["meta"][
         HOST_CONTEXT_EXTENSION
     ]["bootstrap"]
@@ -225,3 +258,26 @@ def test_explicit_sidekick_binding_overrides_process_em_for_bootstrap(monkeypatc
         "role": "SIDEKICK",
         "role_session_id": EXPLICIT,
     }
+
+
+def test_direct_set_sidekick_choice_drives_bootstrap_without_ambient_default(monkeypatch):
+    server = _server(_result("set", {"status": "signed-in"}))
+    mcp_tool._servers["lucid-quine"] = server  # type: ignore[assignment]
+    monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", _run_direct)
+
+    result = json.loads(
+        mcp_tool._make_tool_handler("lucid-quine", "lucid.set", 30.0)(
+            {
+                "path": "role-session",
+                "action": "signin",
+                "target_role": "SIDEKICK",
+            },
+            conversation_id=EXPLICIT,
+        )
+    )
+
+    assert result["result"] == {"status": "signed-in"}
+    bootstrap = server.session.call_tool.await_args.kwargs["meta"][
+        HOST_CONTEXT_EXTENSION
+    ]["bootstrap"]
+    assert bootstrap["role"] == "SIDEKICK"

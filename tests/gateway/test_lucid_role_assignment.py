@@ -43,9 +43,9 @@ def test_exact_sidekick_binding_projects_request_local_role():
         clear_session_vars(tokens)
 
 
-def test_unbound_session_preserves_enrolled_default_without_minting_a_role():
+def test_unbound_session_remains_unsigned_until_role_selection():
     adapter = _adapter(None)
-    assert adapter._lucid_role_for_session("session-1") is None
+    assert adapter._lucid_role_for_session("session-1") == ""
 
 
 def test_foreign_wrong_authority_and_engineer_bindings_fail_closed():

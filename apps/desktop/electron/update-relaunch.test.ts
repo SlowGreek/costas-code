@@ -211,13 +211,14 @@ test('buildRelaunchScript embeds pid/exec/args/env/cwd and is valid bash', () =>
   assert.match(script, /exec '.*\/linux-unpacked\/Hermes' 'hermes:\/\/open\/agent\/42' '--note=it'\\''s fine'/)
 
   // It must be syntactically valid bash (`bash -n`). Write to a temp file and lint.
-  const tmp = path.join(os.tmpdir(), `hermes-relaunch-test-${Date.now()}.sh`)
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-relaunch-test-'))
+  const tmp = path.join(tmpDir, 'relaunch.sh')
   fs.writeFileSync(tmp, script)
 
   try {
     execFileSync('bash', ['-n', tmp], { stdio: 'pipe' })
   } finally {
-    fs.rmSync(tmp, { force: true })
+    fs.rmSync(tmpDir, { force: true, recursive: true })
   }
 })
 
@@ -230,13 +231,14 @@ test('buildRelaunchScript with no args/env still lints clean', () => {
     cwd: ''
   })
 
-  const tmp = path.join(os.tmpdir(), `hermes-relaunch-test2-${Date.now()}.sh`)
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-relaunch-test2-'))
+  const tmp = path.join(tmpDir, 'relaunch.sh')
   fs.writeFileSync(tmp, script)
 
   try {
     execFileSync('bash', ['-n', tmp], { stdio: 'pipe' })
   } finally {
-    fs.rmSync(tmp, { force: true })
+    fs.rmSync(tmpDir, { force: true, recursive: true })
   }
 
   // exec line has no trailing args.

@@ -12,8 +12,7 @@ class _Database:
         return self.binding
 
 
-def test_durable_sidekick_binding_wins_over_em_default(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_ROLE", "EM")
+def test_durable_sidekick_binding_is_the_explicit_role():
     binding = {
         "namespace": "agent-experiments",
         "authority": "observe",
@@ -25,15 +24,13 @@ def test_durable_sidekick_binding_wins_over_em_default(monkeypatch):
     ) == "SIDEKICK"
 
 
-def test_unbound_desktop_session_uses_enrolled_em_default(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_ROLE", "EM")
+def test_unbound_desktop_session_remains_unsigned():
     assert subject.resolve_role(
         {"session_key": "durable-session"}, _Database(None)
-    ) == "EM"
+    ) == ""
 
 
-def test_foreign_binding_fails_closed(monkeypatch):
-    monkeypatch.setenv("HERMES_LUCID_ROLE", "EM")
+def test_foreign_binding_fails_closed():
     binding = {
         "namespace": "foreign",
         "authority": "observe",

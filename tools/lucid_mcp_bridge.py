@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from typing import Any, Mapping, Optional
 from uuid import UUID
@@ -171,22 +170,39 @@ def current_lucid_host_context_meta(
     )
 
 
-def lucid_signin_request() -> dict[str, str]:
-    """Return Butler's closed host lifecycle request with no authority material."""
+def lucid_signin_request(role: object) -> Optional[dict[str, str]]:
+    """Return one explicitly selected closed host lifecycle request."""
 
-    return {"action": "signin", "path": "role-session"}
+    admitted = role.strip().upper() if isinstance(role, str) else ""
+    if admitted not in _HOST_ROLES:
+        return None
+    return {
+        "action": "signin",
+        "path": "role-session",
+        "target_role": admitted,
+    }
+
+
+def lucid_role_choice_response() -> dict[str, object]:
+    """Return the typed, terminal CYOA when no host role was selected."""
+
+    return {
+        "schema": "hermes-lucid-role-choice/1",
+        "error": "LUCID sign-in requires an explicit host role selection",
+        "code": "lucid-role-choice-required",
+        "retryable": False,
+        "authority": "none",
+        "choices": ["EM", "SIDEKICK"],
+    }
 
 
 def lucid_host_role() -> Optional[str]:
-    """Return the host-selected AE role; model arguments can never select it."""
+    """Return the request-scoped role admitted for this exact lifecycle call."""
 
     from gateway.session_context import get_lucid_role
 
     bound = get_lucid_role()
-    if bound is not None:
-        return bound if bound in _HOST_ROLES else None
-    role = os.environ.get("HERMES_LUCID_ROLE", "").strip().upper()
-    return role if role in _HOST_ROLES else None
+    return bound if bound in _HOST_ROLES else None
 
 
 def lucid_bootstrap_decision(

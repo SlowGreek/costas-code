@@ -3,12 +3,12 @@
   "signal": "🟢",
   "command": "node scripts/quality/test.mjs",
   "summary": {
-    "passed": 2984,
+    "passed": 2985,
     "failed": 0,
     "skipped": 0,
     "todo": 0,
     "filtered_out": 0,
-    "total": 2984
+    "total": 2985
   },
   "suites": [
     {
@@ -361,6 +361,17 @@
       "todo": 0,
       "filtered_out": 0,
       "total": 16,
+      "failures": []
+    },
+    {
+      "id": "apps/desktop/electron/lucid-role-selection.test.ts",
+      "name": "apps/desktop/electron/lucid-role-selection.test.ts",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "filtered_out": 0,
+      "total": 1,
       "failures": []
     },
     {
@@ -3721,9 +3732,9 @@
   ],
   "provenance": {
     "source": {
-      "sha256": "sha256:38413301851442e4c62023a7ce6eb169b93142abba5a162723d52c822122e5c0",
-      "files": 1190,
-      "bytes": 9374013
+      "sha256": "sha256:e8c5bde81c37d1b04b9f35d7b6e8e90ae0da5f4d91d8c28c67d41129d1d99444",
+      "files": 1191,
+      "bytes": 9374415
     },
     "tools": {
       "node": "26.5.0",

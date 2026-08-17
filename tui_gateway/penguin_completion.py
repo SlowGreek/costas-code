@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import socket
 from typing import Any, Callable
 
@@ -42,8 +41,7 @@ def resolve_role(session: dict[str, Any], database: Any) -> str:
             return {"em": "EM", "sidekick": "SIDEKICK"}.get(
                 str(binding.get("role") or ""), ""
             )
-    default = os.environ.get("HERMES_LUCID_ROLE", "").strip().upper()
-    return default if default in _CODEWORDS else ""
+    return ""
 
 
 def prepare_request(*, role: str, output: object, status: object) -> tuple[dict[str, Any] | None, dict[str, Any]]:

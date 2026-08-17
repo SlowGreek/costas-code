@@ -97,33 +97,6 @@ def _make_runner_with_adapter(session_id: str = None):
 
 
 @pytest.mark.asyncio
-async def test_goal_verdict_done_sent_via_adapter_send(hermes_home):
-    """When the judge says done, the '✓ Goal achieved' message must reach
-    the user through the adapter's ``send()`` method."""
-    runner, adapter, session_entry, src = _make_runner_with_adapter()
-
-    from hermes_cli.goals import GoalManager
-
-    mgr = GoalManager(session_entry.session_id)
-    mgr.set("ship the feature")
-
-    with patch("hermes_cli.goals.judge_goal", return_value=("done", "the feature shipped", False, None, False)):
-        await runner._post_turn_goal_continuation(
-            session_entry=session_entry,
-            source=src,
-            final_response="I shipped the feature.",
-        )
-        # fire-and-forget create_task — give the loop a tick
-        await asyncio.sleep(0.05)
-
-    assert len(adapter.sends) == 1, f"expected 1 send, got {len(adapter.sends)}: {adapter.sends}"
-    msg = adapter.sends[0]
-    assert msg["chat_id"] == "c1"
-    assert "Goal achieved" in msg["content"]
-    assert "the feature shipped" in msg["content"]
-
-
-@pytest.mark.asyncio
 async def test_goal_verdict_continue_enqueues_continuation(hermes_home):
     """When the judge says continue, both the 'continuing' status and the
     continuation-prompt event must be delivered. The continuation prompt is

@@ -20,6 +20,7 @@ from agent.credential_pool import (
 )
 from agent.secret_scope import get_secret as _get_secret
 from hermes_cli.auth import (
+    ACTUAL_LOCAL_NOAUTH_PLACEHOLDER,
     AuthError,
     DEFAULT_CODEX_BASE_URL,
     DEFAULT_QWEN_BASE_URL,
@@ -36,13 +37,17 @@ from hermes_cli.auth import (
     resolve_api_key_provider_credentials,
     resolve_external_process_provider_credentials,
     has_usable_secret,
+    is_actual_local_base_url,
+    normalize_actual_base_url,
 )
 from hermes_cli.config import (
     get_compatible_custom_providers,
     load_config,
     normalize_extra_headers,
 )
+from hermes_cli.providers import custom_provider_aliases, custom_provider_slug
 from hermes_constants import OPENROUTER_BASE_URL
+from hermes_cli.providers import is_official_openai_host
 from utils import base_url_host_matches, base_url_hostname, env_int
 
 
@@ -123,7 +128,13 @@ def _detect_api_mode_for_url(base_url: str) -> Optional[str]:
     hostname = base_url_hostname(base_url)
     if hostname == "api.x.ai":
         return "codex_responses"
-    if hostname == "api.openai.com":
+    # Official OpenAI host family: canonical api.openai.com plus the
+    # data-residency regional hosts (us./eu.api.openai.com). Same API
+    # surface, same Responses-API mandate. Shared predicate — see
+    # providers.is_official_openai_host for the spoof-rejection contract.
+    if is_official_openai_host(base_url):
+        return "codex_responses"
+    if hostname == "api.actual.inc":
         return "codex_responses"
     # Direct native Anthropic host: realign with providers.determine_api_mode,
     # which already maps this host to anthropic_messages. The exact-hostname
@@ -137,6 +148,31 @@ def _detect_api_mode_for_url(base_url: str) -> Optional[str]:
     if hostname == "api.kimi.com" and "/coding" in normalized:
         return "anthropic_messages"
     return None
+
+
+def _fallback_api_mode(provider: str, base_url: str, model: str = "") -> str:
+    """Resolve api_mode when no explicit/persisted mode applies.
+
+    Precedence: URL detection (host-mandated wire shapes) first, then the
+    transport the provider overlay itself declares via
+    ``providers.determine_api_mode`` — which already handles host mandates,
+    dual-wire providers, and the registry transport map — and only then the
+    ``chat_completions`` default for genuinely unknown providers/endpoints.
+
+    Before this helper the runtime paths consulted URL detection ONLY and
+    silently landed reasoning providers on ``chat_completions`` whenever the
+    hostname wasn't literally recognized. That is how ``openai-api`` pointed
+    at OpenAI's data-residency hosts (``us.api.openai.com``) 400'd on every
+    tool-calling turn: the provider declares ``codex_responses`` but the
+    declaration was never consulted. Same latent class covered the other
+    non-chat overlays (MiniMax family, copilot-acp).
+    """
+    detected = _detect_api_mode_for_url(base_url)
+    if detected:
+        return detected
+    from hermes_cli.providers import determine_api_mode
+
+    return determine_api_mode(provider, base_url, model) or "chat_completions"
 
 
 def _resolve_plain_custom_api_mode(model_cfg: Dict[str, Any], base_url: str) -> str:
@@ -286,9 +322,19 @@ def _get_model_config() -> Dict[str, Any]:
         # Accept "model" as alias for "default" (users intuitively write model.model)
         if not cfg.get("default") and cfg.get("model"):
             cfg["default"] = cfg["model"]
-        default = (cfg.get("default") or "").strip()
+        # Handle model.default being a dict {provider: ..., model: ...} rather than a string
+        _default = cfg.get("default")
+        if isinstance(_default, dict):
+            from hermes_cli.config import split_model_config_default
+            cfg_model, cfg_provider = split_model_config_default(_default)
+            cfg_provider = cfg_provider or str(model_cfg.get("provider") or "")
+            cfg["default"] = cfg_model
+            if cfg_provider and not cfg.get("provider"):
+                cfg["provider"] = cfg_provider
+            _default = cfg_model
+        default = (str(_default or "")).strip()
         base_url = (cfg.get("base_url") or "").strip()
-        is_local = "localhost" in base_url or "127.0.0.1" in base_url
+        is_local = base_url_hostname(base_url) in ("localhost", "127.0.0.1")
         is_fallback = not default
         if is_local and is_fallback and base_url:
             detected = _auto_detect_local_model(base_url)
@@ -361,9 +407,17 @@ _VALID_API_MODES = {
 
 
 def _parse_api_mode(raw: Any) -> Optional[str]:
-    """Validate an api_mode value from config. Returns None if invalid."""
+    """Validate an api_mode value from config. Returns None if invalid.
+
+    Legacy/alias spellings (``openai``, ``anthropic``, ``responses``, …) are
+    canonicalized via the shared alias map before validation, so configs
+    written against older releases keep selecting the transport they named
+    instead of silently falling through to hostname-based detection.
+    """
     if isinstance(raw, str):
-        normalized = raw.strip().lower()
+        from hermes_cli.config import _canonical_api_mode
+
+        normalized = _canonical_api_mode(raw).lower()
         if normalized in _VALID_API_MODES:
             return normalized
     return None
@@ -518,12 +572,10 @@ def _resolve_runtime_from_pool_entry(
         elif configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
             api_mode = configured_mode
         else:
-            # Auto-detect Anthropic-compatible endpoints (/anthropic suffix,
-            # Kimi /coding, api.openai.com → codex_responses, api.x.ai →
-            # codex_responses).
-            detected = _detect_api_mode_for_url(base_url)
-            if detected:
-                api_mode = detected
+            # URL detection first (Anthropic /anthropic suffix, Kimi /coding,
+            # official OpenAI hosts → codex_responses, api.x.ai →
+            # codex_responses), then the provider's own declared transport.
+            api_mode = _fallback_api_mode(provider, base_url, effective_model)
 
     # OpenCode base URLs end with /v1 for OpenAI-compatible models, but the
     # Anthropic SDK prepends its own /v1/messages to the base_url.  Normalize
@@ -594,6 +646,18 @@ def _try_resolve_from_custom_pool(
         pool_api_key = getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "")
         if not pool_api_key:
             return None
+        if not has_usable_secret(pool_api_key) and _loopback_hostname(base_url_hostname(base_url)):
+            # Legacy configs commonly used short/placeholder keys ('123',
+            # 'm', ...) for local no-auth services like Ollama -- fine for
+            # the endpoint itself, but has_usable_secret's 4-char floor
+            # (added after these configs were written) now rejects them
+            # here with no migration path. Every OTHER resolution path in
+            # this file already substitutes "no-key-required" for a
+            # loopback endpoint with no usable secret (the config-based
+            # custom_providers fallback a few hundred lines below, and the
+            # "actual" provider's local-offline exemption further down) --
+            # this pool path was the one gap (issue #86864).
+            pool_api_key = "no-key-required"
         return {
             "provider": provider_label,
             "api_mode": api_mode_override or _detect_api_mode_for_url(base_url) or "chat_completions",
@@ -686,8 +750,6 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
             # they're not configured.
             if not is_provider_enabled(entry):
                 continue
-            # Match exact name or normalized name
-            name_norm = _normalize_custom_provider_name(ep_name)
             # Resolve the API key from the env var name stored in key_env
             key_env = str(entry.get("key_env", "") or "").strip()
             resolved_api_key = _getenv(key_env, "").strip() if key_env else ""
@@ -695,7 +757,11 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
             if not resolved_api_key:
                 resolved_api_key = str(entry.get("api_key", "") or "").strip()
 
-            if requested_norm in {ep_name, name_norm, f"custom:{name_norm}"}:
+            display_name = entry.get("name", "")
+            if requested_norm in custom_provider_aliases(
+                str(display_name or ep_name),
+                str(ep_name),
+            ):
                 # Found match by provider key
                 base_url = entry.get("api") or entry.get("url") or entry.get("base_url") or ""
                 if base_url:
@@ -709,6 +775,13 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                     if isinstance(extra_body, dict):
                         result["extra_body"] = dict(extra_body)
                     _lift_extra_headers(entry, result)
+                    # Command that PRINTS a credential, for gateways issuing
+                    # short-lived bearers instead of static keys. Propagated
+                    # raw; wrapped in a per-request token provider at
+                    # resolution.
+                    key_cmd = str(entry.get("key_cmd", "") or "").strip()
+                    if key_cmd:
+                        result["key_cmd"] = key_cmd
                     # The v11→v12 migration writes the API mode under the new
                     # ``transport`` field, but hand-edited configs may still
                     # use the legacy ``api_mode`` spelling.  Accept both —
@@ -721,29 +794,6 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                         result["api_mode"] = api_mode
                     _lift_max_output_tokens(entry, result)
                     return result
-            # Also check the 'name' field if present
-            display_name = entry.get("name", "")
-            if display_name:
-                display_norm = _normalize_custom_provider_name(display_name)
-                if requested_norm in {display_name, display_norm, f"custom:{display_norm}"}:
-                    # Found match by display name
-                    base_url = entry.get("api") or entry.get("url") or entry.get("base_url") or ""
-                    if base_url:
-                        result = {
-                            "name": display_name,
-                            "base_url": base_url.strip(),
-                            "api_key": resolved_api_key,
-                            "model": entry.get("default_model", ""),
-                        }
-                        extra_body = entry.get("extra_body")
-                        if isinstance(extra_body, dict):
-                            result["extra_body"] = dict(extra_body)
-                        _lift_extra_headers(entry, result)
-                        api_mode = _parse_api_mode(entry.get("api_mode") or entry.get("transport"))
-                        if api_mode:
-                            result["api_mode"] = api_mode
-                        _lift_max_output_tokens(entry, result)
-                        return result
 
     # Fall back to custom_providers: list (legacy format)
     custom_providers = config.get("custom_providers")
@@ -766,12 +816,8 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
         base_url = entry.get("base_url")
         if not isinstance(name, str) or not isinstance(base_url, str):
             continue
-        name_norm = _normalize_custom_provider_name(name)
-        menu_key = f"custom:{name_norm}"
         provider_key = str(entry.get("provider_key", "") or "").strip()
-        provider_key_norm = _normalize_custom_provider_name(provider_key) if provider_key else ""
-        provider_menu_key = f"custom:{provider_key_norm}" if provider_key_norm else ""
-        if requested_norm not in {name_norm, menu_key, provider_key_norm, provider_menu_key}:
+        if requested_norm not in custom_provider_aliases(name, provider_key):
             continue
         result = {
             "name": name.strip(),
@@ -846,7 +892,7 @@ def find_custom_provider_identity(base_url: str) -> Optional[str]:
                 entry.get("api") or entry.get("url") or entry.get("base_url") or ""
             )
             if _normalize_base_url_for_match(entry_url) == target:
-                return f"custom:{_normalize_custom_provider_name(str(ep_name))}"
+                return custom_provider_slug(str(ep_name), str(ep_name))
 
     try:
         custom_providers = get_compatible_custom_providers(config)
@@ -859,7 +905,10 @@ def find_custom_provider_identity(base_url: str) -> Optional[str]:
         if not isinstance(name, str) or not name.strip():
             continue
         if _normalize_base_url_for_match(entry.get("base_url")) == target:
-            return f"custom:{_normalize_custom_provider_name(name)}"
+            return custom_provider_slug(
+                name,
+                str(entry.get("provider_key", "") or ""),
+            )
 
     return None
 
@@ -913,7 +962,7 @@ def find_custom_provider_identity_by_model(model: str) -> Optional[str]:
             if not isinstance(entry, dict):
                 continue
             if _entry_serves_model(entry):
-                return f"custom:{_normalize_custom_provider_name(str(ep_name))}"
+                return custom_provider_slug(str(ep_name), str(ep_name))
 
     try:
         custom_providers = get_compatible_custom_providers(config)
@@ -926,7 +975,10 @@ def find_custom_provider_identity_by_model(model: str) -> Optional[str]:
         if not isinstance(name, str) or not name.strip():
             continue
         if _entry_serves_model(entry):
-            return f"custom:{_normalize_custom_provider_name(name)}"
+            return custom_provider_slug(
+                name,
+                str(entry.get("provider_key", "") or ""),
+            )
 
     return None
 
@@ -999,7 +1051,19 @@ def canonical_custom_identity(
     # Only return it when it actually resolves to a configured custom entry,
     # so we never invent a `custom:<x>` that resolution can't honor.
     try:
-        if _get_named_custom_provider(candidate) is not None:
+        entry = _get_named_custom_provider(candidate)
+        if entry is not None:
+            # ``candidate`` matched, but it may be the entry's DISPLAY NAME —
+            # ``_get_named_custom_provider`` accepts either spelling. For a
+            # keyed ``providers:`` entry the display name is not the durable
+            # identity, so re-resolve through the endpoint the matched entry
+            # owns and return the same config-key slug every other path
+            # returns (7b5a18817). Without this, a display name that differs
+            # from its key heals to ``custom:<display-name>`` and stops
+            # matching the persisted identity.
+            identity = find_custom_provider_identity(str(entry.get("base_url") or ""))
+            if identity:
+                return identity
             if candidate_norm.startswith("custom:"):
                 return candidate_norm
             return f"custom:{candidate_norm}"
@@ -1125,6 +1189,22 @@ def _resolve_named_custom_runtime(
         _host_derived_api_key(base_url),
     ]
     api_key = next((candidate for candidate in api_key_candidates if has_usable_secret(candidate)), "")
+
+    # A ``key_cmd`` credential is minted per request rather than resolved once:
+    # gateways that issue short-lived bearers would otherwise go stale
+    # mid-session and 401. Both wire clients already accept a callable api_key
+    # (the Entra ID contract) and invoke it per request. An explicit --api-key
+    # still wins — it is the one-off recovery escape hatch.
+    key_cmd = str(custom_provider.get("key_cmd", "") or "").strip()
+    if key_cmd and not has_usable_secret((explicit_api_key or "").strip()):
+        from agent.command_token_source import build_command_token_provider
+
+        token_provider = build_command_token_provider(
+            key_cmd,
+            str(custom_provider.get("name", requested_provider) or "custom"),
+        )
+        if token_provider is not None:
+            api_key = token_provider
 
     result = {
         "provider": "custom",
@@ -1585,12 +1665,17 @@ def _resolve_explicit_runtime(
             else:
                 base_url = env_url or pconfig.inference_base_url
 
+        if provider == "actual":
+            base_url = normalize_actual_base_url(base_url)
+
         api_key = explicit_api_key
         if not api_key:
             creds = resolve_api_key_provider_credentials(provider)
             api_key = creds.get("api_key", "")
             if not base_url:
                 base_url = creds.get("base_url", "").rstrip("/")
+                if provider == "actual":
+                    base_url = normalize_actual_base_url(base_url)
 
         api_mode = "chat_completions"
         if provider == "copilot":
@@ -1601,16 +1686,22 @@ def _resolve_explicit_runtime(
             )
         elif provider == "xai":
             api_mode = "codex_responses"
+        elif provider == "actual":
+            api_mode = "codex_responses"
         else:
+            configured_provider = str(model_cfg.get("provider") or "").strip().lower()
             configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
-            if configured_mode:
+            if configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
                 api_mode = configured_mode
             else:
-                # Auto-detect from URL (Anthropic /anthropic suffix,
-                # api.openai.com → Responses, Kimi /coding, etc.).
-                detected = _detect_api_mode_for_url(base_url)
-                if detected:
-                    api_mode = detected
+                # URL detection first, then the provider's declared transport
+                # (fixes regional OpenAI hosts and other non-chat overlays).
+                api_mode = _fallback_api_mode(
+                    provider, base_url, target_model or model_cfg.get("default", "")
+                )
+
+        if provider == "actual" and not api_key and is_actual_local_base_url(base_url):
+            api_key = ACTUAL_LOCAL_NOAUTH_PLACEHOLDER
 
         return {
             "provider": provider,
@@ -1679,7 +1770,7 @@ def resolve_runtime_provider(
     # return provider="custom" with chat_completions api_mode and no valid key).
     # Instead, use the Azure key directly with anthropic_messages api_mode.
     _eff_base = (explicit_base_url or "").strip()
-    if requested_provider == "anthropic" and "azure.com" in _eff_base:
+    if requested_provider == "anthropic" and base_url_host_matches(_eff_base, "azure.com"):
         _azure_key = (
             (explicit_api_key or "").strip()
             or _getenv("AZURE_ANTHROPIC_KEY", "").strip()
@@ -2019,8 +2110,8 @@ def resolve_runtime_provider(
         # would find the Claude Code OAuth token first (priority 3) and return
         # that instead, causing 401s. Detect Azure endpoints and use the env
         # key directly to bypass the OAuth priority chain.
-        _is_azure_endpoint = "azure.com" in base_url.lower() or (
-            cfg_base_url and "azure.com" in cfg_base_url.lower()
+        _is_azure_endpoint = base_url_host_matches(base_url, "azure.com") or (
+            cfg_base_url and base_url_host_matches(cfg_base_url, "azure.com")
         )
         if _is_azure_endpoint:
             # Honor user-specified env var hints on the model config before
@@ -2150,6 +2241,22 @@ def resolve_runtime_provider(
     pconfig = PROVIDER_REGISTRY.get(provider)
     if pconfig and pconfig.auth_type == "api_key":
         creds = resolve_api_key_provider_credentials(provider)
+        # Actual Computer: a loopback base_url configured in model_cfg (not
+        # just env) selects the daemon's local offline API, which requires no
+        # auth. Inject the placeholder BEFORE the usable-secret gate below,
+        # mirroring the env-driven path inside the credential resolver.
+        if provider == "actual" and not has_usable_secret(creds.get("api_key")):
+            _cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
+            _cfg_url = ""
+            if _cfg_provider == provider:
+                _cfg_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
+            _effective_url = normalize_actual_base_url(
+                _cfg_url or creds.get("base_url", "").rstrip("/")
+            )
+            if is_actual_local_base_url(_effective_url):
+                creds = dict(creds)
+                creds["api_key"] = ACTUAL_LOCAL_NOAUTH_PLACEHOLDER
+                creds["source"] = creds.get("source") or "local-offline"
         # An explicitly selected API-key provider is authoritative. Returning
         # a runtime with an empty key defers failure until the first request and
         # can make a later fallback look like a silent provider switch. Fail at
@@ -2173,6 +2280,8 @@ def resolve_runtime_provider(
         if cfg_provider == provider:
             cfg_base_url = (model_cfg.get("base_url") or "").strip().rstrip("/")
         base_url = cfg_base_url or creds.get("base_url", "").rstrip("/")
+        if provider == "actual":
+            base_url = normalize_actual_base_url(base_url)
         api_mode = "chat_completions"
         if provider == "copilot":
             api_mode = _copilot_runtime_api_mode(
@@ -2181,6 +2290,8 @@ def resolve_runtime_provider(
                 target_model=target_model,
             )
         elif provider == "xai":
+            api_mode = "codex_responses"
+        elif provider == "actual":
             api_mode = "codex_responses"
         else:
             configured_provider = str(model_cfg.get("provider") or "").strip().lower()
@@ -2201,23 +2312,26 @@ def resolve_runtime_provider(
             elif configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
                 api_mode = configured_mode
             else:
-                # Auto-detect Anthropic-compatible endpoints by URL convention
-                # (e.g. https://api.minimax.io/anthropic, https://dashscope.../anthropic)
-                # plus api.openai.com → codex_responses and api.x.ai → codex_responses.
-                detected = _detect_api_mode_for_url(base_url)
-                if detected:
-                    api_mode = detected
+                # URL detection first (e.g. https://api.minimax.io/anthropic,
+                # official OpenAI hosts → codex_responses, api.x.ai →
+                # codex_responses), then the provider's declared transport.
+                api_mode = _fallback_api_mode(
+                    provider, base_url, target_model or model_cfg.get("default", "")
+                )
         # Normalize the /v1 suffix for OpenCode by API mode (see comment above).
         if provider in {"opencode-zen", "opencode-go"}:
             from hermes_cli.models import normalize_opencode_base_url
             base_url = normalize_opencode_base_url(provider, api_mode, base_url)
         if provider == "lmstudio":
             base_url = auth_mod._normalize_lmstudio_runtime_base_url(base_url)
+        api_key = creds.get("api_key", "")
+        if provider == "actual" and not api_key and is_actual_local_base_url(base_url):
+            api_key = ACTUAL_LOCAL_NOAUTH_PLACEHOLDER
         return {
             "provider": provider,
             "api_mode": api_mode,
             "base_url": base_url,
-            "api_key": creds.get("api_key", ""),
+            "api_key": api_key,
             "source": creds.get("source", "env"),
             "requested_provider": requested_provider,
         }

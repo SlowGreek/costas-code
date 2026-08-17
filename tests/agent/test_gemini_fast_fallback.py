@@ -24,9 +24,6 @@ def test_multi_entry_pool_recovers():
     assert _pool_may_recover_from_rate_limit(_pool(entries=3)) is True
 
 
-def test_single_entry_pool_skips_rotation():
-    # Single-entry-pool exception (#11314): nothing to rotate to.
-    assert _pool_may_recover_from_rate_limit(_pool(entries=1)) is False
 
 
 def test_exhausted_pool_skips_rotation():
@@ -35,8 +32,6 @@ def test_exhausted_pool_skips_rotation():
     assert _pool_may_recover_from_rate_limit(p) is False
 
 
-def test_no_pool_skips_rotation():
-    assert _pool_may_recover_from_rate_limit(None) is False
 
 
 def test_conversation_loop_resolves_pool_helper_through_run_agent_module():

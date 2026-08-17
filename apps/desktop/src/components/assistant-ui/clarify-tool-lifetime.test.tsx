@@ -58,6 +58,7 @@ describe('ClarifyTool lifetime is owned by the request, not the running turn', (
     $gateway.set({ request: vi.fn().mockResolvedValue({ ok: true }) } as never)
     setClarifyRequest({
       choices: ['staging', 'production'],
+      multiSelect: false,
       question: 'Which deployment target?',
       requestId: 'req-live',
       sessionId: 'session-1'
@@ -84,6 +85,7 @@ describe('ClarifyTool lifetime is owned by the request, not the running turn', (
     $activeSessionId.set('session-1')
     setClarifyRequest({
       choices: ['staging', 'production'],
+      multiSelect: false,
       question: 'Which deployment target?',
       requestId: 'req-other',
       sessionId: 'session-2'
@@ -102,6 +104,7 @@ describe('ClarifyTool lifetime is owned by the request, not the running turn', (
     $activeSessionId.set('session-1')
     setClarifyRequest({
       choices: ['yes', 'no'],
+      multiSelect: false,
       question: 'A completely different question?',
       requestId: 'req-new',
       sessionId: 'session-1'

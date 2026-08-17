@@ -6,6 +6,8 @@ import { hasClarifyRequest, skipClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, type ComposerAttachment } from '@/store/composer'
 import { resetBrowseState } from '@/store/composer-input-history'
 import { enqueueQueuedPrompt, type QueuedPromptEntry } from '@/store/composer-queue'
+import { hasMcpSetupRequest, skipMcpSetupRequest } from '@/store/mcp-setup'
+import { hasBlockingPromptRequest } from '@/store/prompts'
 
 import { cloneAttachments, type QueueEditState } from '../composer-utils'
 import { onComposerSubmitRequest } from '../focus'
@@ -161,6 +163,21 @@ export function useComposerSubmit({
       void skipClarifyRequest(sessionId)
     }
 
+    // Same deal for a pending MCP setup card: the agent is blocked on
+    // mcp.setup.respond, so a typed message declines the card and rides on.
+    if (payloadPresent && !queueEdit && hasMcpSetupRequest(sessionId)) {
+      void skipMcpSetupRequest(sessionId)
+    }
+
+    // Approval / sudo / secret prompts also park the turn inside a tool batch,
+    // but typing CANNOT answer them (no message text approves a command or
+    // supplies a password), so there is no skip-and-steer path: a steer would
+    // sit undelivered behind the blocked prompt, and stopping the turn to force
+    // it through resolves the prompt to empty and ends the turn as "Operation
+    // interrupted." — the message looks eaten. Queue the words as the next turn
+    // instead; the prompt stays answerable and the queue drains on settle.
+    const blockingPrompt = !queueEdit && hasBlockingPromptRequest(sessionId)
+
     if (queueEdit) {
       exitQueuedEdit('save')
     } else if (busy) {
@@ -175,7 +192,12 @@ export function useComposerSubmit({
         triggerHaptic('submit')
         clearDraft()
         dispatchSubmit(text)
-      } else if (!compacting && attachments.every(a => a.kind === 'image') && text.trim()) {
+      } else if (
+        !compacting &&
+        !blockingPrompt &&
+        attachments.every(a => a.kind === 'image') &&
+        (text.trim() || attachments.length)
+      ) {
         // Cursor-style stop-and-correct: interrupt the live turn and redirect
         // it with this text. redirect() preserves the shown reasoning/work; if
         // the turn already ended, steerDraft re-queues so nothing is lost.
@@ -184,8 +206,10 @@ export function useComposerSubmit({
         // bypasses — those fall through to the queue below.
         steerDraft()
       } else if (payloadPresent) {
-        // A non-image attachment (or a compacting turn) — queue the whole
-        // payload for the next turn.
+        // Attachments can't ride a redirect (no tool-result image carriage) —
+        // queue the whole payload for the next turn. Same for a turn parked on
+        // an approval/sudo/secret prompt: a steer can't reach the model while
+        // the tool batch is blocked, so the message runs as the next turn.
         queueCurrentDraft()
       } else {
         // Stop button (the only way to reach here while busy with an empty

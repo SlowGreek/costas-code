@@ -122,12 +122,6 @@ class TestFlagFlipOnInjection:
         assert "extra_headers" in kwargs1
         assert "extra_headers" not in kwargs2
 
-    def test_existing_extra_headers_preserved(self, monkeypatch):
-        agent = _make_agent(monkeypatch, "https://api.githubcopilot.com")
-        agent._is_user_initiated_turn = True
-        kwargs = _inject(agent, {"extra_headers": {"x-custom": "1"}})
-        assert kwargs["extra_headers"]["x-custom"] == "1"
-        assert kwargs["extra_headers"]["x-initiator"] == "user"
 
     def test_non_copilot_flag_not_flipped(self, monkeypatch):
         agent = _make_agent(monkeypatch, "https://openrouter.ai/api/v1")

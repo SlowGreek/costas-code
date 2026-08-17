@@ -138,8 +138,8 @@ def is_paused() -> bool:
 def _load_config() -> Dict[str, Any]:
     """Read curator.* config from ~/.hermes/config.yaml. Tolerates missing file."""
     try:
-        from hermes_cli.config import load_config
-        cfg = load_config()
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
     except Exception as e:
         logger.debug("Failed to load config for curator: %s", e)
         return {}
@@ -369,7 +369,22 @@ def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int
             continue
 
         if anchor <= archive_cutoff and current != _u.STATE_ARCHIVED:
-            ok, _msg = _u.archive_skill(name)
+            # Tag the ledger entry with the curator actor: this archive is an
+            # autonomous curator transition, not a foreground agent/user call.
+            try:
+                from tools.skill_ledger import reset_ledger_actor, set_ledger_actor
+                _tok = set_ledger_actor("curator")
+            except Exception:
+                _tok = None
+                reset_ledger_actor = None  # type: ignore[assignment]
+            try:
+                ok, _msg = _u.archive_skill(name)
+            finally:
+                if _tok is not None and reset_ledger_actor is not None:
+                    try:
+                        reset_ledger_actor(_tok)
+                    except Exception:
+                        pass
             if ok:
                 counts["archived"] += 1
         elif anchor <= stale_cutoff and current == _u.STATE_ACTIVE:
@@ -1875,9 +1890,9 @@ def _run_llm_review(prompt: str) -> Dict[str, Any]:
     _acp_args = None
     _model_name = ""
     try:
-        from hermes_cli.config import load_config
+        from hermes_cli.config import load_config_readonly
         from hermes_cli.runtime_provider import resolve_runtime_provider
-        _cfg = load_config()
+        _cfg = load_config_readonly()
         _binding = _resolve_review_runtime(_cfg)
         _provider, _model_name = _binding.provider, _binding.model
         _rp = resolve_runtime_provider(
@@ -1923,6 +1938,7 @@ def _run_llm_review(prompt: str) -> Dict[str, Any]:
             credential_pool=_credential_pool,
             request_overrides=_request_overrides,
             **_agent_kwargs,
+            enabled_toolsets=["skills", "terminal"],
             # Umbrella-building over a large skill collection is worth a
             # high iteration ceiling — the pass typically takes 50-100
             # API calls against hundreds of candidate skills. The

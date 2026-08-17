@@ -1,12 +1,14 @@
 ---
 name: super-goal
-description: Use when one substantial objective should be delegated to a single background worker while the parent session defines acceptance criteria, remains accountable, independently verifies evidence, and reports criterion-based progress.
+description: Delegate one big objective to a verified background worker.
 version: 1.0.0
 author: Costas Panay + Hermes Agent
 license: Apache-2.0
+platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [delegation, supervision, goals, verification, multi-agent]
+    category: autonomous-ai-agents
     related_skills: [hermes-agent, requesting-code-review, test-driven-development]
 ---
 

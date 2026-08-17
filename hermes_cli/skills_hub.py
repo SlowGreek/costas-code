@@ -23,7 +23,6 @@ from rich.table import Table
 # Lazy imports to avoid circular dependencies and slow startup.
 # tools.skills_hub and tools.skills_guard are imported inside functions.
 from hermes_constants import display_hermes_home
-from agent.skill_utils import is_excluded_skill_path
 
 _console = Console()
 
@@ -184,29 +183,18 @@ def _existing_categories() -> List[str]:
     Used to suggest reusable categories when interactively installing from a
     URL. Hidden dirs (``.hub``, ``.trash``) are skipped.
     """
-    from tools.skills_hub import SKILLS_DIR
-    out: List[str] = []
+    from tools.skills_hub import SKILLS_DIR, _category_skill_dirs
     try:
-        for entry in SKILLS_DIR.iterdir():
-            if not entry.is_dir() or entry.name.startswith("."):
-                continue
-            # Only count as a category if it contains skills, not if it IS a skill.
-            # Heuristic: if ``<entry>/SKILL.md`` exists, it's a skill at the
-            # top level (no category); otherwise treat as a category bucket.
-            if (entry / "SKILL.md").exists():
-                continue
-            # Has at least one nested SKILL.md (excluding dependency/cache dirs)?
-            try:
-                if any(
-                    not is_excluded_skill_path(p)
-                    for p in entry.rglob("SKILL.md")
-                ):
-                    out.append(entry.name)
-            except OSError:
-                continue
+        # _category_skill_dirs returns children containing any active
+        # SKILL.md — including top-level skills themselves. Only children
+        # WITHOUT their own SKILL.md are category buckets.
+        return sorted(
+            name
+            for name in set(_category_skill_dirs(SKILLS_DIR))
+            if not (SKILLS_DIR / name / "SKILL.md").exists()
+        )
     except (FileNotFoundError, OSError):
         return []
-    return sorted(set(out))
 
 
 def _prompt_for_skill_name(c: Console, url: str, default: str = "") -> Optional[str]:
@@ -749,7 +737,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
                          bundle.trust_level, "invalid_path", str(exc))
         return
     from tools.skills_hub import SKILLS_DIR
-    c.print(f"[bold green]Installed:[/] {install_dir.relative_to(SKILLS_DIR)}")
+    c.print(f"[bold green]Installed:[/] {install_dir.resolve().relative_to(Path(SKILLS_DIR).resolve()).as_posix()}")
     c.print(f"[dim]Files: {', '.join(bundle.files.keys())}[/]\n")
 
     # Blueprint detection: if the installed skill declares a
@@ -1064,9 +1052,21 @@ def do_check(name: Optional[str] = None, console: Optional[Console] = None) -> N
     c.print(f"[dim]{update_count} update(s) available across {len(results)} checked skill(s)[/]\n")
 
 
-def do_update(name: Optional[str] = None, console: Optional[Console] = None) -> None:
-    """Update hub-installed skills with upstream changes."""
-    from tools.skills_hub import HubLockFile, check_for_skill_updates
+def do_update(name: Optional[str] = None, console: Optional[Console] = None,
+              force: bool = False) -> None:
+    """Update hub-installed skills with upstream changes.
+
+    Skills whose on-disk content no longer matches the hash recorded at
+    install time have been edited locally; updating them would silently
+    destroy the user's work (``do_install(force=True)`` rmtree-replaces the
+    directory). Those are skipped by default and only overwritten when
+    ``force=True``. Mirrors the user-modified protection bundled skills
+    already get from ``hermes update`` (ported from
+    paperclipai/paperclip#10978's explicit-merge-mode rule: destructive
+    replacement must be an explicit caller choice, never a rerun default).
+    """
+    from tools.skills_hub import SKILLS_DIR, HubLockFile, check_for_skill_updates
+    from tools.skills_guard import content_hash
 
     c = console or _console
     lock = HubLockFile()
@@ -1075,9 +1075,25 @@ def do_update(name: Optional[str] = None, console: Optional[Console] = None) -> 
         c.print("[dim]No updates available.[/]\n")
         return
 
+    skipped_local: list[str] = []
     for entry in updates:
         installed = lock.get_installed(entry["name"])
         category = _derive_category_from_install_path(installed.get("install_path", "")) if installed else ""
+        if installed and not force:
+            recorded_hash = installed.get("content_hash", "")
+            skill_path = SKILLS_DIR / installed.get("install_path", "")
+            if recorded_hash and skill_path.is_dir():
+                try:
+                    disk_hash = content_hash(skill_path)
+                except OSError:
+                    disk_hash = recorded_hash
+                if disk_hash != recorded_hash:
+                    skipped_local.append(entry["name"])
+                    c.print(
+                        f"[yellow]Skipping:[/] {entry['name']} — you have local edits "
+                        "(update would overwrite them)."
+                    )
+                    continue
         c.print(f"[bold]Updating:[/] {entry['name']}")
         # Pin the update to the source registry recorded in the lockfile.
         # Without this, a bare (slash-less) identifier such as "reddit" falls
@@ -1094,7 +1110,15 @@ def do_update(name: Optional[str] = None, console: Optional[Console] = None) -> 
             source_id=entry.get("source", "") or None,
         )
 
-    c.print(f"[bold green]Updated {len(updates)} skill(s).[/]\n")
+    updated_count = len(updates) - len(skipped_local)
+    if updated_count:
+        c.print(f"[bold green]Updated {updated_count} skill(s).[/]\n")
+    if skipped_local:
+        c.print(
+            f"[dim]{len(skipped_local)} skill(s) kept your local edits: "
+            f"{', '.join(sorted(skipped_local))}.[/]"
+        )
+        c.print("[dim]Overwrite with: hermes skills update <name> --force[/]\n")
 
 
 def do_audit(name: Optional[str] = None, console: Optional[Console] = None,
@@ -1757,7 +1781,8 @@ def skills_command(args) -> None:
     elif action == "check":
         do_check(name=getattr(args, "name", None))
     elif action == "update":
-        do_update(name=getattr(args, "name", None))
+        do_update(name=getattr(args, "name", None),
+                  force=getattr(args, "force", False))
     elif action == "audit":
         do_audit(name=getattr(args, "name", None),
                  deep=getattr(args, "deep", False))
@@ -1941,8 +1966,10 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
         do_check(name=name, console=c)
 
     elif action == "update":
-        name = args[0] if args else None
-        do_update(name=name, console=c)
+        force = "--force" in args
+        pos = [a for a in args if not a.startswith("--")]
+        name = pos[0] if pos else None
+        do_update(name=name, console=c, force=force)
 
     elif action == "audit":
         name = args[0] if args and not args[0].startswith("--") else None

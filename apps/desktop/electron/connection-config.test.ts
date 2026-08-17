@@ -15,12 +15,14 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  apiRequestRegistryConnectionId,
   AT_COOKIE_VARIANTS,
   authModeFromStatus,
   buildGatewayWsUrl,
   buildGatewayWsUrlWithTicket,
   connectionScopeKey,
   cookiesHaveLiveSession,
+  cookiesHavePrivyAccessToken,
   cookiesHavePrivySession,
   cookiesHaveSession,
   gatewayTicketFailure,
@@ -29,18 +31,22 @@ import {
   localProfileEntry,
   modeIsRemoteLike,
   normalizeRemoteBaseUrl,
+  normalizeRemoteHeaders,
   normalizeSshConfig,
   normAuthMode,
   pathWithGlobalRemoteProfile,
+  pathWithProfileScope,
   profileHasRemoteConnection,
   profileRemoteOverride,
   profileSshOverride,
+  remoteRequestMatchesBaseUrl,
   resolveAuthMode,
   resolveProfileBackendRoute,
   resolveTestWsUrl,
   RT_COOKIE_VARIANTS,
   savedProfileSsh,
-  tokenPreview
+  tokenPreview,
+  translateSelfProfileQuery
 } from './connection-config'
 
 // --- connectionScopeKey / normAuthMode ---
@@ -57,6 +63,44 @@ test('normAuthMode coerces to token unless explicitly oauth', () => {
   assert.equal(normAuthMode('token'), 'token')
   assert.equal(normAuthMode(undefined), 'token')
   assert.equal(normAuthMode('weird'), 'token')
+})
+
+test('normalizeRemoteHeaders keeps safe proxy headers and drops transport/auth headers', () => {
+  assert.deepEqual(
+    normalizeRemoteHeaders({
+      ' CF-Access-Client-Id ': { encoding: 'plain', value: 'id' },
+      'CF-Access-Client-Secret': 'secret',
+      Authorization: { encoding: 'plain', value: 'bearer' },
+      Cookie: { encoding: 'plain', value: 'a=b' },
+      Host: { encoding: 'plain', value: 'example.com' },
+      'X-Hermes-Session-Token': { encoding: 'plain', value: 'token' },
+      'Bad Header': { encoding: 'plain', value: 'bad' },
+      Empty: { encoding: 'plain', value: '' }
+    }),
+    {
+      'CF-Access-Client-Id': { encoding: 'plain', value: 'id' },
+      'CF-Access-Client-Secret': { encoding: 'plain', value: 'secret' }
+    }
+  )
+})
+
+test('remoteRequestMatchesBaseUrl treats HTTPS and WSS as the same gateway origin', () => {
+  assert.equal(
+    remoteRequestMatchesBaseUrl(
+      'wss://hermes.example.com/gateway/api/ws?ticket=abc',
+      'https://hermes.example.com/gateway'
+    ),
+    true
+  )
+  assert.equal(remoteRequestMatchesBaseUrl('ws://hermes.example.com/api/ws', 'http://hermes.example.com'), true)
+  assert.equal(
+    remoteRequestMatchesBaseUrl('wss://hermes.example.com/other/api/ws', 'https://hermes.example.com/gateway'),
+    false
+  )
+  assert.equal(
+    remoteRequestMatchesBaseUrl('wss://other.example.com/gateway/api/ws', 'https://hermes.example.com/gateway'),
+    false
+  )
 })
 
 // --- modeIsRemoteLike ---
@@ -111,6 +155,30 @@ test('profileRemoteOverride preserves an explicit oauth auth mode', () => {
   assert.equal(profileRemoteOverride(config, 'coder').authMode, 'oauth')
 })
 
+test('profileRemoteOverride preserves normalized remote headers', () => {
+  const config = {
+    profiles: {
+      coder: {
+        mode: 'remote',
+        url: 'https://x',
+        headers: {
+          'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'encrypted-id' },
+          Authorization: { encoding: 'plain', value: 'blocked' }
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(profileRemoteOverride(config, 'coder'), {
+    url: 'https://x',
+    authMode: 'token',
+    token: undefined,
+    headers: {
+      'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'encrypted-id' }
+    }
+  })
+})
+
 test('profileRemoteOverride treats a cloud entry as a remote override', () => {
   // A 'cloud' per-profile entry resolves to the same remote backend a 'remote'
   // entry would (Q6) — the override must be returned, not dropped.
@@ -133,16 +201,47 @@ test('profileRemoteOverride tolerates a missing/!object profiles map', () => {
   assert.equal(profileRemoteOverride(null, 'coder'), null)
 })
 
-test('SSH remains separate from URL-shaped remote modes', () => {
+test('SSH remains separate from URL-shaped remote modes and preserves an explicit remote profile', () => {
   assert.equal(modeIsRemoteLike('ssh'), false)
-  const config = { profiles: { coder: { mode: 'ssh', host: 'alice@box:2222', keyPath: '/key' } } }
+
+  const config = {
+    profiles: { coder: { mode: 'ssh', host: 'alice@box:2222', keyPath: '/key', remoteProfile: 'default' } }
+  }
+
   assert.equal(profileRemoteOverride(config, 'coder'), null)
+
   assert.deepEqual(profileSshOverride(config, 'coder'), {
     mode: 'ssh',
     host: 'box',
     user: 'alice',
     port: 2222,
-    keyPath: '/key'
+    keyPath: '/key',
+    remoteProfile: 'default'
+  })
+})
+
+test('normalizeSshConfig rejects unsafe remote profile mappings', () => {
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', remoteProfile: 'writer_2' }), {
+    mode: 'ssh',
+    host: 'box',
+    remoteProfile: 'writer_2'
+  })
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', remoteProfile: 'bad profile' }), {
+    mode: 'ssh',
+    host: 'box'
+  })
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', remoteProfile: '' }), {
+    mode: 'ssh',
+    host: 'box'
+  })
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', remoteProfile: 'root' }), {
+    mode: 'ssh',
+    host: 'box'
+  })
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', remoteProfile: 'default' }), {
+    mode: 'ssh',
+    host: 'box',
+    remoteProfile: 'default'
   })
 })
 
@@ -163,6 +262,27 @@ test('normalizeSshConfig handles IPv6 and strict port bounds', () => {
   assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'box', port: 65536 }), {
     mode: 'ssh',
     host: 'box'
+  })
+})
+
+test('normalizeSshConfig strips a pasted "ssh " command prefix', () => {
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'ssh root@box' }), {
+    mode: 'ssh',
+    host: 'box',
+    user: 'root'
+  })
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'SSH root@box:2222' }), {
+    mode: 'ssh',
+    host: 'box',
+    user: 'root',
+    port: 2222
+  })
+  // "ssh " with no destination trims to a bare "ssh" host — same as the
+  // legitimately-named case below; the strip only fires on "ssh <dest>".
+  // A host legitimately named "ssh" (no space) is untouched.
+  assert.deepEqual(normalizeSshConfig({ mode: 'ssh', host: 'ssh' }), {
+    mode: 'ssh',
+    host: 'ssh'
   })
 })
 
@@ -247,6 +367,37 @@ test('resolveProfileBackendRoute only tags a descriptor when the backend is shar
   }
 })
 
+// --- registry-pinned REST routing (cron run history on remote gateways, #87882) ---
+
+test('apiRequestRegistryConnectionId extracts a genuinely non-local connection id', () => {
+  assert.equal(apiRequestRegistryConnectionId({ connectionId: 'gw-tailscale', path: '/api/cron/jobs' }), 'gw-tailscale')
+  assert.equal(apiRequestRegistryConnectionId({ connectionId: '  gw-1  ', path: '/x' }), 'gw-1')
+})
+
+test('apiRequestRegistryConnectionId resolves null for the legacy/local routes', () => {
+  assert.equal(apiRequestRegistryConnectionId({ path: '/api/cron/jobs' }), null)
+  assert.equal(apiRequestRegistryConnectionId({ connectionId: '', path: '/x' }), null)
+  assert.equal(apiRequestRegistryConnectionId({ connectionId: 'local', path: '/x' }), null)
+  assert.equal(apiRequestRegistryConnectionId({ connectionId: null, path: '/x' }), null)
+  assert.equal(apiRequestRegistryConnectionId(null), null)
+  assert.equal(apiRequestRegistryConnectionId(undefined), null)
+})
+
+test('pathWithProfileScope scopes shared-remote requests to the profile unconditionally', () => {
+  // A sharedRemote registry gateway serves every profile from one host; the
+  // run-history read must land on the profile that owns the job's sessions.
+  assert.equal(
+    pathWithProfileScope('/api/cron/jobs/job-1/runs?limit=20', 'research'),
+    '/api/cron/jobs/job-1/runs?limit=20&profile=research'
+  )
+})
+
+test('pathWithProfileScope keeps an explicit profile query and no-ops on empty profile', () => {
+  assert.equal(pathWithProfileScope('/api/cron/jobs?profile=all', 'research'), '/api/cron/jobs?profile=all')
+  assert.equal(pathWithProfileScope('/api/cron/jobs', ''), '/api/cron/jobs')
+  assert.equal(pathWithProfileScope('/api/cron/jobs', null), '/api/cron/jobs')
+})
+
 // --- pathWithGlobalRemoteProfile ---
 
 test('pathWithGlobalRemoteProfile appends profile in global remote mode', () => {
@@ -307,6 +458,59 @@ test('pathWithGlobalRemoteProfile skips local and per-profile remote override pa
   )
 })
 
+test('pathWithGlobalRemoteProfile translates a desktop SSH alias in an explicit profile query', () => {
+  assert.equal(
+    pathWithGlobalRemoteProfile('/api/cron/jobs?profile=mara', 'mara', {
+      globalRemote: false,
+      profileRemoteOverride: true,
+      backendProfile: 'default'
+    }),
+    '/api/cron/jobs?profile=default'
+  )
+})
+
+test('pathWithGlobalRemoteProfile preserves cross-profile selectors when translating an SSH alias', () => {
+  const opts = {
+    globalRemote: false,
+    profileRemoteOverride: true,
+    backendProfile: 'default'
+  }
+
+  assert.equal(pathWithGlobalRemoteProfile('/api/cron/jobs?profile=all', 'mara', opts), '/api/cron/jobs?profile=all')
+  assert.equal(
+    pathWithGlobalRemoteProfile('/api/cron/jobs?profile=worker', 'mara', opts),
+    '/api/cron/jobs?profile=worker'
+  )
+})
+
+// --- translateSelfProfileQuery (registry SSH-scoped hermes:api contract) ---
+
+test('translateSelfProfileQuery rewrites the self-profile filter into the backend namespace', () => {
+  assert.equal(
+    translateSelfProfileQuery('/api/cron/jobs?profile=mara', 'mara', 'default'),
+    '/api/cron/jobs?profile=default'
+  )
+  assert.equal(
+    translateSelfProfileQuery('/api/cron/blueprints/instantiate?profile=mara', 'mara', 'default'),
+    '/api/cron/blueprints/instantiate?profile=default'
+  )
+})
+
+test('translateSelfProfileQuery leaves cross-profile and unfiltered paths untouched', () => {
+  assert.equal(translateSelfProfileQuery('/api/cron/jobs?profile=all', 'mara', 'default'), '/api/cron/jobs?profile=all')
+  assert.equal(
+    translateSelfProfileQuery('/api/cron/jobs?profile=worker', 'mara', 'default'),
+    '/api/cron/jobs?profile=worker'
+  )
+  assert.equal(translateSelfProfileQuery('/api/cron/jobs', 'mara', 'default'), '/api/cron/jobs')
+})
+
+test('translateSelfProfileQuery no-ops when alias and backend profile agree or are missing', () => {
+  assert.equal(translateSelfProfileQuery('/api/cron/jobs?profile=mara', 'mara', 'mara'), '/api/cron/jobs?profile=mara')
+  assert.equal(translateSelfProfileQuery('/api/cron/jobs?profile=mara', 'mara', ''), '/api/cron/jobs?profile=mara')
+  assert.equal(translateSelfProfileQuery('/api/cron/jobs?profile=mara', '', 'default'), '/api/cron/jobs?profile=mara')
+})
+
 test('pathWithGlobalRemoteProfile skips empty profile/path safely', () => {
   assert.equal(
     pathWithGlobalRemoteProfile('/api/model/info', '', {
@@ -348,6 +552,19 @@ test('normalizeRemoteBaseUrl rejects non-http(s) protocols', () => {
 
 test('normalizeRemoteBaseUrl rejects garbage', () => {
   assert.throws(() => normalizeRemoteBaseUrl('not a url'), /not valid/)
+})
+
+test('normalizeRemoteBaseUrl auto-prepends http:// for scheme-less host:port input', () => {
+  assert.equal(normalizeRemoteBaseUrl('100.64.0.1:9119'), 'http://100.64.0.1:9119')
+  assert.equal(normalizeRemoteBaseUrl('mini.tailnet-1234.ts.net:9119'), 'http://mini.tailnet-1234.ts.net:9119')
+  assert.equal(normalizeRemoteBaseUrl('localhost:9119'), 'http://localhost:9119')
+  assert.equal(normalizeRemoteBaseUrl('gw.example.com'), 'http://gw.example.com')
+  assert.equal(normalizeRemoteBaseUrl('gw.example.com/hermes/'), 'http://gw.example.com/hermes')
+})
+
+test('normalizeRemoteBaseUrl still rejects explicit non-http(s) schemes after scheme-less handling', () => {
+  assert.throws(() => normalizeRemoteBaseUrl('ws://host:9119'), /http:\/\/ or https:\/\//)
+  assert.throws(() => normalizeRemoteBaseUrl('ftp://host:21'), /http:\/\/ or https:\/\//)
 })
 
 // --- buildGatewayWsUrl (token) ---
@@ -525,6 +742,42 @@ test('cookiesHavePrivySession is false for unrelated cookies and non-arrays', ()
   assert.equal(cookiesHavePrivySession(null), false)
   assert.equal(cookiesHavePrivySession(undefined), false)
   assert.equal(cookiesHavePrivySession([]), false)
+})
+
+test('cookiesHavePrivySession treats refresh-token material as a (renewable) session', () => {
+  // #73495: after a restart the ~1h `privy-token` is often gone while the
+  // 30-day renewal cookies survive. That jar is still SIGNED IN (renewable),
+  // so the session check must accept it — the access check below is what
+  // distinguishes "can discovery succeed right now".
+  assert.equal(cookiesHavePrivySession([{ name: 'privy-refresh-token', value: 'x' }]), true)
+})
+
+// --- cookiesHavePrivyAccessToken (short-lived access state for /api/agents) ---
+
+test('cookiesHavePrivyAccessToken detects privy-token and its secured prefixes', () => {
+  assert.equal(cookiesHavePrivyAccessToken([{ name: 'privy-token', value: 'jwt' }]), true)
+  assert.equal(cookiesHavePrivyAccessToken([{ name: '__Host-privy-token', value: 'x' }]), true)
+  assert.equal(cookiesHavePrivyAccessToken([{ name: '__Secure-privy-token', value: 'x' }]), true)
+})
+
+test('cookiesHavePrivyAccessToken rejects renewal-only jars (the #73495 cold-start state)', () => {
+  // Session/refresh material present, access token absent: signed in but
+  // discovery would 401 → the silent-renewal path must trigger, not re-login.
+  const renewalOnly = [
+    { name: 'privy-session', value: 'x' },
+    { name: 'privy-refresh-token', value: 'x' }
+  ]
+
+  assert.equal(cookiesHavePrivySession(renewalOnly), true)
+  assert.equal(cookiesHavePrivyAccessToken(renewalOnly), false)
+})
+
+test('cookiesHavePrivyAccessToken is false for empty values, gateway cookies, and non-arrays', () => {
+  assert.equal(cookiesHavePrivyAccessToken([{ name: 'privy-token', value: '' }]), false)
+  assert.equal(cookiesHavePrivyAccessToken([{ name: 'hermes_session_at', value: 'x' }]), false)
+  assert.equal(cookiesHavePrivyAccessToken(null), false)
+  assert.equal(cookiesHavePrivyAccessToken(undefined), false)
+  assert.equal(cookiesHavePrivyAccessToken([]), false)
 })
 
 // --- tokenPreview ---

@@ -90,6 +90,9 @@ export interface ConfigDisplayConfig {
   show_reasoning?: boolean
   streaming?: boolean
   thinking_mode?: string
+  /** Show [HH:MM] timestamps on transcript rows — same key the classic CLI
+   *  honors on its user/assistant labels (#41531). */
+  timestamps?: boolean
   /**
    * Nudge the user toward the /agents spawn-tree dashboard the first time a
    * turn starts delegating, via a one-time transient activity hint.  Opens
@@ -113,13 +116,20 @@ export interface ConfigDisplayConfig {
 }
 
 export interface ConfigVoiceConfig {
-  // Raw `yaml.safe_load()` value from config; may be non-string if hand-edited.
-  // Callers must normalize/validate at runtime (parseVoiceRecordKey()).
+  // Raw `yaml.safe_load()` values from config may be non-string if hand-edited.
+  // Callers must normalize/validate at runtime.
   record_key?: unknown
+  submit_mode?: unknown
+}
+
+export interface ConfigApprovalsConfig {
+  // Raw config value: only the explicit boolean false disables the safety gate.
+  destructive_slash_confirm?: unknown
 }
 
 export interface ConfigFullResponse {
   config?: {
+    approvals?: ConfigApprovalsConfig
     display?: ConfigDisplayConfig
     voice?: ConfigVoiceConfig
     paste_collapse_threshold?: number
@@ -144,6 +154,9 @@ export interface ConfigSetResponse {
   confirm_message?: string
   confirm_required?: boolean
   credential_warning?: string
+  // A model pick made mid-turn is queued and applied at the next turn start,
+  // not live yet — the handler says "next turn" instead of "model → X".
+  deferred?: boolean
   history_reset?: boolean
   info?: SessionInfo
   value?: string
@@ -735,4 +748,5 @@ export type GatewayEvent =
       session_id?: string
       type: 'message.complete'
     }
+  | { payload?: { usage?: Usage }; session_id?: string; type: 'session.usage' }
   | { payload?: { message?: string }; session_id?: string; type: 'error' }

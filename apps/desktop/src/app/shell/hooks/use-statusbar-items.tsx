@@ -1,14 +1,16 @@
 import { useStore } from '@nanostores/react'
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 
 import type { CommandCenterSection } from '@/app/command-center'
-import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { useApprovalModeStatusbarItem } from '@/app/shell/approval-mode-menu'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
+import { useContextBreakdown } from '@/app/shell/hooks/use-context-breakdown'
+import { $paneVisible, togglePaneVisible } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { useI18n } from '@/i18n'
+import { displayPath, pathLeaf } from '@/lib/display-path'
 import { Activity, AlertCircle, Clock, Command, FolderOpen, Globe, Hash, Loader2, Terminal } from '@/lib/icons'
 import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { contextBarLabel, LiveDuration, usageContextLabel } from '@/lib/statusbar'
@@ -29,10 +31,11 @@ import {
   $sessions,
   $sessionStartedAt,
   $turnStartedAt,
-  sessionMatchesStoredId,
-  setCurrentUsage
+  idsShareLineage,
+  sessionMatchesStoredId
 } from '@/store/session'
 import { $focusedRuntimeId, $focusedSessionState, $focusedStoredSessionId } from '@/store/session-states'
+import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
 import { $subagentsBySession, activeSubagentCount, failedSubagentCount } from '@/store/subagents'
 import { $gatewayRestarting } from '@/store/system-actions'
 import {
@@ -48,14 +51,7 @@ import type { StatusResponse, UsageStats } from '@/types/hermes'
 import { CRON_ROUTE, SETTINGS_ROUTE, WEBHOOKS_ROUTE } from '../../routes'
 import type { StatusbarItem } from '../statusbar-controls'
 
-const EMPTY_USAGE = { calls: 0, input: 0, output: 0, total: 0 } as const
-
-function workspaceLabel(cwd: string): string {
-  const normalized = cwd.replace(/[\\/]+$/, '')
-  const leaf = normalized.split(/[\\/]/).filter(Boolean).pop()
-
-  return leaf || cwd
-}
+const EMPTY_USAGE: UsageStats = { calls: 0, input: 0, output: 0, total: 0 }
 
 interface StatusbarItemsOptions {
   agentsOpen: boolean
@@ -92,15 +88,15 @@ export function useStatusbarItems({
   const fileMenu = t.fileMenu
   const primaryActiveSessionId = useStore($activeSessionId)
   const activeGatewayProfile = useStore($activeGatewayProfile)
-  const terminalTakeover = useStore($terminalTakeover)
+  // What the button paints and flips is whether the terminal is ON SCREEN —
+  // the takeover store alone stays true behind a stacked sibling tab or a
+  // minimized zone, which lit the button for a pane the user couldn't see.
+  const terminalShowing = useStore($paneVisible('terminal'))
   const primaryBusy = useStore($busy)
-  const currentCwd = useStore($currentCwd)
-  // Derive the workspace's project name from the already-cached project tree
-  // (backend truth via projects.*), so the status item labels by project without
-  // a second per-session copy of the same fact. Re-derives whenever the cwd or
-  // the tree changes; null (no named project) falls back to the cwd leaf below.
-  const projectTree = useStore($projectTree)
-  const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd, projectTree])
+  // Draft / primary composer atom — used only while the focused surface is the
+  // primary (or a draft with no runtime slice yet). A focused TILE keeps its
+  // own cwd in `$sessionStates` and must not paint the primary's workspace.
+  const primaryCwd = useStore($currentCwd)
   const primaryUsage = useStore($currentUsage)
   const gatewayRestarting = useStore($gatewayRestarting)
   const primarySessionStartedAt = useStore($sessionStartedAt)
@@ -128,15 +124,14 @@ export function useStatusbarItems({
 
   // The FOCUSED session (interacted tile, else the primary — the same
   // derivation the titlebar title follows): every session-scoped readout
-  // below (context count, timers, busy pulse) tracks it, so clicking into a
-  // tile makes the statusbar describe THAT session.
+  // below (workspace cwd, context count, timers, busy pulse) tracks it, so
+  // clicking into a tile makes the statusbar describe THAT session.
   const focusedStoredSessionId = useStore($focusedStoredSessionId)
   const focusedRuntimeId = useStore($focusedRuntimeId)
   // `$focusedSessionState` is a projection of `$sessionStates`, which is
   // republished on EVERY message delta — tens of times a second during a turn.
-  // Only three fields are read off it here, so subscribing to the whole object
-  // re-ran this hook (and re-created all ~9 statusbar items) per token. Select
-  // each field individually so an unchanged readout bails out instead.
+  // Only the fields read here are selected, so an unchanged readout bails out
+  // instead of rebuilding all ~9 statusbar items per token.
   const focusedBusy = useStoreSelector($focusedSessionState, state => Boolean(state?.busy))
   const focusedTurnStartedAt = useStoreSelector($focusedSessionState, state => state?.turnStartedAt ?? null)
   // `usage` is an object, so it can't be compared as a scalar. It IS however
@@ -144,6 +139,14 @@ export function useStatusbarItems({
   // reports new usage — far rarer than a delta — so its reference is a valid
   // bail-out key on its own.
   const focusedUsage = useStoreSelector($focusedSessionState, state => state?.usage ?? null)
+  const focusedStateCwd = useStoreSelector($focusedSessionState, state => state?.cwd?.trim() || '')
+
+  // Runtime slices carry the stored id they were bound for. During a primary
+  // tab switch the runtime id can lag a frame behind the new selection — the
+  // slice still describes the PREVIOUS chat. Gate live cwd on ownership so we
+  // never paint session A's workspace while the tab already shows session B.
+  const focusedStateStoredId = useStoreSelector($focusedSessionState, state => state?.storedSessionId?.trim() || null)
+
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const primaryFocused = !focusedStoredSessionId || focusedStoredSessionId === selectedStoredSessionId
 
@@ -156,15 +159,64 @@ export function useStatusbarItems({
 
   const turnStartedAt = primaryFocused ? primaryTurnStartedAt : focusedTurnStartedAt
 
-  // A tile's session-start comes from its stored row (the cache only knows
-  // runtime state); seconds → ms. Only this ONE scalar is read off
-  // `$sessions`, so select it — a whole-list `useStore` re-ran the hook on
-  // every session-list write (title updates, poll refreshes, archives).
+  // A tile's session-start + cold cwd come from its stored row (the cache only
+  // knows runtime state). Only these scalars are read off `$sessions`, so
+  // select them — a whole-list `useStore` re-ran the hook on every session-list
+  // write (title updates, poll refreshes, archives).
   const focusedRowStartedAt = useStoreSelector($sessions, sessions =>
     focusedStoredSessionId
       ? (sessions.find(s => sessionMatchesStoredId(s, focusedStoredSessionId))?.started_at ?? null)
       : null
   )
+
+  const focusedRowCwd = useStoreSelector($sessions, sessions => {
+    if (!focusedStoredSessionId) {
+      return ''
+    }
+
+    const row = sessions.find(s => sessionMatchesStoredId(s, focusedStoredSessionId))
+
+    return row?.cwd?.trim() || ''
+  })
+
+  // Live runtime cwd is authoritative once it belongs to the focused chat
+  // (agent can relocate mid-turn). Until then — cold tabs, mid-switch lag —
+  // the stored session row is the selection's project. Primary drafts fall
+  // through to `$currentCwd`. A focused TILE must never inherit the primary's
+  // workspace — an empty tile cwd stays empty rather than lying about another
+  // project's path.
+  //
+  // Lineage match is a pure derivation of ($sessions + the two ids). Select it
+  // so a session-list write only re-renders when the answer actually flips —
+  // not on every title/archive refresh of an unrelated row.
+  const liveCwdSharesFocusLineage = useStoreSelector($sessions, sessions => {
+    if (!focusedStoredSessionId || !focusedStateStoredId) {
+      return false
+    }
+
+    return idsShareLineage(focusedStoredSessionId, focusedStateStoredId, sessions)
+  })
+
+  const liveCwdBelongsToFocus =
+    Boolean(focusedStateCwd) &&
+    (!focusedStoredSessionId ||
+      !focusedStateStoredId ||
+      focusedStateStoredId === focusedStoredSessionId ||
+      liveCwdSharesFocusLineage)
+
+  const currentCwd = (
+    (liveCwdBelongsToFocus ? focusedStateCwd : '') ||
+    focusedRowCwd ||
+    (primaryFocused ? primaryCwd : '') ||
+    ''
+  ).trim()
+
+  // Derive the workspace's project name from the already-cached project tree
+  // (backend truth via projects.*), so the status item labels by project without
+  // a second per-session copy of the same fact. Re-derives whenever the cwd or
+  // the tree changes; null (no named project) falls back to the cwd leaf below.
+  const projectTree = useStore($projectTree)
+  const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd, projectTree])
 
   const sessionStartedAt = primaryFocused
     ? primarySessionStartedAt
@@ -172,15 +224,44 @@ export function useStatusbarItems({
       ? focusedRowStartedAt * 1000
       : null
 
-  const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage])
-  const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
+  // The backend only knows a session's MEASURED occupancy once a turn has run
+  // in this process, so a resumed conversation reports none and the gauge had
+  // nothing to paint — turning it on looked like it did nothing until you sent
+  // a message. Estimate from the live prompt + transcript instead, on the same
+  // read-only RPC the popover uses, so the readout is right the moment it's on
+  // screen. Gated on the gauge being shown — the bar itself is unmounted while
+  // toggled off, so this covers the rest.
+  const contextItemHidden = useStore($statusbarHiddenIds).includes('context-usage')
 
-  const publishContextUsage = useCallback(
-    (snapshot: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => {
-      setCurrentUsage(current => ({ ...current, ...snapshot }))
-    },
-    []
+  const { breakdown: contextBreakdown, loading: contextBreakdownLoading } = useContextBreakdown({
+    busy,
+    enabled: !contextItemHidden,
+    requestGateway,
+    sessionId: activeSessionId
+  })
+
+  // The breakdown wins whenever we have one, for two reasons: it reports the
+  // MEASURED occupancy once the backend has it (falling back to the estimate
+  // only before that), and it is keyed to the session it describes. The global
+  // `$currentUsage` is neither — a resumed session reports no context fields,
+  // and the store merges rather than replaces, so the PREVIOUS session's gauge
+  // numbers survive the switch. Mid-turn there's no breakdown by design and
+  // the streamed usage carries the gauge.
+  const gaugeUsage = useMemo<UsageStats>(
+    () =>
+      contextBreakdown
+        ? {
+            ...currentUsage,
+            context_max: contextBreakdown.context_max,
+            context_percent: contextBreakdown.context_percent,
+            context_used: contextBreakdown.context_used
+          }
+        : currentUsage,
+    [contextBreakdown, currentUsage]
   )
+
+  const contextUsage = useMemo(() => usageContextLabel(gaugeUsage), [gaugeUsage])
+  const contextBar = useMemo(() => contextBarLabel(gaugeUsage), [gaugeUsage])
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
 
@@ -231,6 +312,7 @@ export function useStatusbarItems({
       restarting: updateApply.stage === 'restart',
       sha: updateStatus?.currentSha?.slice(0, 7) ?? null,
       target: 'client',
+      updateAvailable: updateStatus?.updateAvailable,
       version: desktopVersion?.appVersion
     })
 
@@ -258,7 +340,8 @@ export function useStatusbarItems({
     updateApply.stage,
     updateStatus?.behind,
     updateStatus?.branch,
-    updateStatus?.currentSha
+    updateStatus?.currentSha,
+    updateStatus?.updateAvailable
   ])
 
   const backendVersionItem = useMemo<StatusbarItem | null>(() => {
@@ -366,33 +449,33 @@ export function useStatusbarItems({
         hidden: !currentCwd,
         icon: <FolderOpen className="size-3" />,
         id: 'workspace-cwd',
-        // Prefer the named project; fall back to the cwd leaf. The full cwd is
-        // always in the tooltip (`title` below), so hovering reveals where the
-        // session actually sits — the worktree/subfolder, not just the project.
-        label: projectName || (currentCwd ? workspaceLabel(currentCwd) : undefined),
+        // Prefer the named project; fall back to the cwd leaf. Hover tip uses
+        // the shared display formatter (home → ~) so statusbar and branch bar
+        // agree on how a path looks.
+        label: projectName || (currentCwd ? pathLeaf(currentCwd) : undefined),
         menuItems: currentCwd
           ? [
               {
                 id: 'copy-workspace-path',
                 label: fileMenu.copyPath,
                 onSelect: () => void copyFilePath(currentCwd),
-                title: currentCwd
+                title: displayPath(currentCwd)
               },
               {
                 id: 'reveal-workspace-finder',
                 label: fileMenu.revealFileManager,
                 onSelect: () => void revealFile(currentCwd),
-                title: currentCwd
+                title: displayPath(currentCwd)
               },
               {
                 id: 'reveal-workspace-sidebar',
                 label: fileMenu.revealInSidebar,
                 onSelect: () => revealFileInTree(currentCwd),
-                title: currentCwd
+                title: displayPath(currentCwd)
               }
             ]
           : undefined,
-        title: currentCwd || undefined,
+        title: currentCwd ? displayPath(currentCwd) : undefined,
         toggleLabel: copy.toggleWorkspace,
         variant: 'menu'
       },
@@ -481,12 +564,7 @@ export function useStatusbarItems({
         menuAlign: 'end',
         menuClassName: 'w-auto border-(--ui-stroke-secondary) p-0',
         menuContent: (
-          <ContextUsagePanel
-            currentUsage={currentUsage}
-            onUsageSnapshot={publishContextUsage}
-            requestGateway={requestGateway}
-            sessionId={activeSessionId}
-          />
+          <ContextUsagePanel breakdown={contextBreakdown} loading={contextBreakdownLoading} usage={gaugeUsage} />
         ),
         toggleLabel: copy.toggleContextUsage,
         variant: 'menu'
@@ -506,12 +584,12 @@ export function useStatusbarItems({
       },
       {
         actionId: 'view.showTerminal',
-        className: `w-7 justify-center px-0${terminalTakeover ? ' bg-accent/55 text-foreground' : ''}`,
+        className: `w-7 justify-center px-0${terminalShowing ? ' bg-accent/55 text-foreground' : ''}`,
         hidden: !chatOpen,
         icon: <Terminal className="size-3.5" />,
         id: 'terminal',
-        onSelect: () => setTerminalTakeover(!$terminalTakeover.get()),
-        title: terminalTakeover ? copy.hideTerminal : copy.showTerminal,
+        onSelect: () => togglePaneVisible('terminal'),
+        title: terminalShowing ? copy.hideTerminal : copy.showTerminal,
         toggleLabel: copy.toggleTerminal,
         variant: 'action'
       },
@@ -519,21 +597,20 @@ export function useStatusbarItems({
       ...(backendVersionItem ? [backendVersionItem] : [])
     ],
     [
-      activeSessionId,
       approvalModeItem,
       backendVersionItem,
       busy,
       chatOpen,
       clientVersionItem,
       contextBar,
+      contextBreakdown,
+      contextBreakdownLoading,
       contextUsage,
       copy,
-      currentUsage,
-      publishContextUsage,
-      requestGateway,
+      gaugeUsage,
       sessionStartedAt,
       gatewayState,
-      terminalTakeover,
+      terminalShowing,
       turnStartedAt
     ]
   )

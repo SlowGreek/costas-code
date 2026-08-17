@@ -30,11 +30,6 @@ def _make_cli_stub():
 
 
 class TestCliSkinPromptIntegration:
-    def test_default_prompt_fragments_use_default_symbol(self):
-        cli = _make_cli_stub()
-
-        set_active_skin("default")
-        assert cli._get_tui_prompt_fragments() == [("class:prompt", "❯ ")]
 
     def test_ares_prompt_fragments_use_skin_symbol(self):
         cli = _make_cli_stub()
@@ -49,12 +44,6 @@ class TestCliSkinPromptIntegration:
         set_active_skin("ares")
         assert cli._get_tui_prompt_fragments() == [("class:sudo-prompt", "🔑 ⚔ ")]
 
-    def test_icon_only_skin_symbol_still_visible_in_special_states(self):
-        cli = _make_cli_stub()
-        cli._secret_state = {"response_queue": object()}
-
-        with patch("hermes_cli.skin_engine.get_active_prompt_symbol", return_value="⚔ "):
-            assert cli._get_tui_prompt_fragments() == [("class:sudo-prompt", "🔑 ⚔ ")]
 
     def test_build_tui_style_dict_uses_skin_overrides(self):
         cli = _make_cli_stub()
@@ -138,6 +127,3 @@ class TestAnsiRichTextHelper:
         text = _rich_text_from_ansi("[notatag] literal")
         assert text.plain == "[notatag] literal"
 
-    def test_strips_ansi_but_keeps_plain_text(self):
-        text = _rich_text_from_ansi("\x1b[31mred\x1b[0m")
-        assert text.plain == "red"

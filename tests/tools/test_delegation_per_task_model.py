@@ -249,8 +249,8 @@ def test_bad_model_is_rejected_by_delegate_task_before_any_child(hermes_home, mo
     parent = type("P", (), {"session_id": "s1", "provider": "openrouter"})()
     out = dt.delegate_task(
         tasks=[
-            {"goal": "first", "model": "openrouter:openai/gpt-5.1"},
-            {"goal": "second", "model": "openrouter:nope/nope"},
+            {"goal": "first task with enough detail", "model": "openrouter:openai/gpt-5.1"},
+            {"goal": "second task with enough detail", "model": "openrouter:nope/nope"},
         ],
         parent_agent=parent,
     )

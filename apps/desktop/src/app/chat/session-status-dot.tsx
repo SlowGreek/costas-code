@@ -3,18 +3,13 @@ import { useStore } from '@nanostores/react'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
-import { $backgroundRunningSessionIds } from '@/store/composer-status'
-import { $erroredSessionIds, $unreadFinishedSessionIds } from '@/store/session'
 import { $sessionColorById, sessionColorFor } from '@/store/session-color'
-import { $attentionSessionIds, $stalledSessionIds, $workingSessionIds } from '@/store/session-states'
-import { $subagentWaitingSessionIds } from '@/store/subagents'
+import { $sessionDotStateById, type SessionDotState } from '@/store/session-dot-state'
 import type { SessionInfo } from '@/types/hermes'
 
-import { type SessionDotState, sessionDotState } from './sidebar/session-row-state'
-
 // A pure lookup table: each state maps to its className, aria-label, and title.
-// No priority resolution here — sessionDotState already picked one. Label/title
-// resolve from sidebar.row translations, keyed by name.
+// No priority resolution here — $sessionDotStateById already picked one.
+// Label/title resolve from sidebar.row translations, keyed by name.
 type DotVariant = {
   ariaLabel?: (r: Translations['sidebar']['row']) => string
   className: string
@@ -23,100 +18,104 @@ type DotVariant = {
 }
 
 // Shared base for every active dot; idle is smaller and uses its own class.
-const DOT_BASE = 'relative size-1.5 rounded-full'
+const DOT_BASE = 'size-1.5 rounded-full'
 
-// Pseudo-element ping ring that scales outward and fades — shared scaffold for
-// the two pulsing dots. The `before:bg-*` color is written inline per variant
-// (NOT interpolated here): Tailwind only generates utilities it can see as
-// complete static strings, so a `before:bg-${color}` template never emits.
-const PING = "before:absolute before:inset-0 before:animate-ping before:rounded-full before:content-['']"
-
-// Status colours are FIXED, never themed. `--ui-accent` follows the user's
-// theme (blue on Nous, but orange, grey, or green on others), so a "working"
-// dot changed colour with the skin and stopped meaning anything — the reported
-// "sometimes blue, sometimes white, and flashing" confusion. A status signal
-// has to mean the same thing in every theme, so these are literal:
-//
-//   blue    working      pulsing, a turn is running
-//   pink    subagent     pulsing + glow, waiting on delegated work
-//   amber   needs-input  steady, blocked on you (question or permission)
-//   red     error        steady, the turn failed
-//   green   unread       steady, finished and you haven't looked
-//   grey    background   pulsing, a detached process while the turn is idle
-//
-// Only `idle` still inherits the project colour, since it carries no status.
+// Three colors and one fill/hollow axis, none of it moving. Motion on a 6px
+// circle can only say "something is happening" — which the row's arc already
+// says, better — while costing a repaint per frame on every row at once. What
+// the dot is for is telling states APART, and that is a job for color and fill:
+// filled means producing, hollow means open but quiet. The two states this
+// replaces differed by 30% opacity and were, in practice, the same dot.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
-  // Amber steady — a clarify/approval is blocking the turn. Steady (not
-  // pulsing) reads as "your turn", distinct from the pulse of a running turn.
+  // Amber — a clarify/approval is blocking the turn. The one "act now" color,
+  // and the only state the user is required to do something about.
   'needs-input': {
     ariaLabel: r => r.needsInput,
-    className: `${DOT_BASE} quest-glow bg-amber-500`,
+    className: `${DOT_BASE} bg-amber-500`,
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Red steady — the turn ended in an error. Steady because it is over:
-  // pulsing would suggest work still in flight.
-  error: {
-    ariaLabel: r => r.sessionError,
-    className: `${DOT_BASE} bg-red-500 shadow-[0_0_0.5rem_rgb(239_68_68_/_0.5)]`,
-    role: 'status',
-    title: r => r.sessionError
-  },
-  // Blue pulse — the LLM turn is actively running.
+  // Accent — the turn is running. The row's arc carries the motion.
   working: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-blue-500 shadow-[0_0_0.625rem_rgb(59_130_246_/_0.55)] ${PING} before:bg-blue-500 before:opacity-70`,
+    className: `${DOT_BASE} bg-(--ui-accent)`,
     role: 'status'
   },
-  // Pink pulse with a wider glow — the turn is running, but the wait is
-  // delegated work rather than the model thinking. Distinct from the grey
-  // background dot on purpose: that one means a detached process is alive while
-  // the turn is IDLE, which is a different situation and shouldn't share a
-  // colour. The extra glow radius is what makes it readable at a glance in a
-  // long sidebar.
-  subagent: {
-    ariaLabel: r => r.subagentRunning,
-    className: `${DOT_BASE} bg-pink-500 shadow-[0_0_0.75rem_rgb(236_72_153_/_0.7)] ${PING} before:bg-pink-500 before:opacity-75`,
-    role: 'status',
-    title: r => r.subagentRunning
-  },
-  // Quiet blue pulse — still authoritatively running, but no stream activity
-  // has arrived for the watchdog window. Same colour, lower intensity: it is
-  // the same state, not a different one.
+  // Hollow accent — still authoritatively running, but nothing has arrived for
+  // the watchdog window. Same color as working because it IS working; hollow
+  // because nothing is coming out of it right now.
   stalled: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-blue-500 opacity-70 ${PING} before:bg-blue-500 before:opacity-40`,
+    className: `${DOT_BASE} border border-(--ui-accent)`,
     role: 'status',
     title: r => r.sessionRunning
   },
-  // Pulsing grey — a terminal(background=true) process is alive while the LLM
-  // is idle. Grey (not blue) reads as "something chugging along" without
-  // claiming the agent is thinking.
+  // Hollow muted — a terminal(background=true) process outlived the turn. An
+  // outline reads as "still open" without claiming the model is working; a
+  // filled grey dot read as finished, the opposite of what this means.
   background: {
     ariaLabel: r => r.backgroundRunning,
-    className: `${DOT_BASE} bg-muted-foreground/80 ${PING} before:bg-muted-foreground/80 before:opacity-60`,
+    className: `${DOT_BASE} border border-(--ui-text-tertiary)`,
     role: 'status',
     title: r => r.backgroundRunning
   },
-  // Steady green — the turn completed and the user hasn't opened it since.
-  // "Something new here, go look."
+  // Red — the turn ended in an error and the user hasn't opened it since.
+  // Steady (never pulsing): the turn is over, so motion would lie about work
+  // still being in flight. Fork-only state.
+  error: {
+    ariaLabel: r => r.sessionError,
+    className: `${DOT_BASE} bg-red-500`,
+    role: 'status',
+    title: r => r.sessionError
+  },
+  // Accent, hollow with a ring — running, and waiting on delegated subagent
+  // work. Strictly more specific than `working`; same color because it IS
+  // working. Fork-only state.
+  subagent: {
+    ariaLabel: r => r.sessionRunning,
+    className: `${DOT_BASE} border-2 border-(--ui-accent)`,
+    role: 'status',
+    title: r => r.sessionRunning
+  },
+  // Emerald — the turn finished while the user was looking elsewhere.
   unread: {
     ariaLabel: r => r.finishedUnread,
     className: `${DOT_BASE} bg-emerald-500`,
     role: 'status',
     title: r => r.finishedUnread
   },
+  // Hollow grey, the faintest ink the app has — nothing has ever run here. It
+  // shares the outline with `background` because both mean "open, not
+  // producing", and sits a shade dimmer because a draft is the one state that
+  // has yet to do anything at all.
+  draft: {
+    ariaLabel: r => r.draftSession,
+    className: `${DOT_BASE} border border-(--ui-text-quaternary)`,
+    title: r => r.draftSession
+  },
+  // Settled: the project color when there is one, else the faintest filled
+  // grey. Every session shows SOME mark — a row with nothing in the lead slot
+  // reads as broken next to its neighbours, so "no color" falls back to the
+  // quietest ink rather than to an invisible dot.
   idle: {
-    className: 'size-1 rounded-full bg-(--ui-text-quaternary) opacity-80'
+    className: 'size-1 rounded-full bg-(--ui-text-quaternary)'
   }
 }
+
+/** The dot a state paints, for surfaces that describe a status rather than
+ *  render a session — the sidebar's status filter, say. Idle carries no color
+ *  of its own (it inherits the project's), so callers supply one. */
+export const sessionDotClassName = (state: SessionDotState): string => DOT_VARIANTS[state].className
 
 export interface SessionStatusDotProps {
   /** The STORED session id — the key every live-state atom (working /
    *  attention / stalled / unread / background) is keyed by, on BOTH surfaces:
    *  the sidebar row's `session.id` and a pane tile's `storedSessionId` are the
-   *  same stored id (`$workingSessionIds` et al. map `storedSessionId`). */
-  storedSessionId: string
+   *  same stored id (`$workingSessionIds` et al. map `storedSessionId`).
+   *
+   *  Null on a new chat that has yet to reach the backend — no id to key by,
+   *  and no turn behind it, which is the draft state by definition. */
+  storedSessionId: null | string
   /** The session row for color resolution — recents OR the project tree. Both
    *  call sites already hold it; passing it lets the idle dot inherit the
    *  project color even for a session older than the paginated recents page
@@ -130,14 +129,13 @@ export interface SessionStatusDotProps {
 }
 
 /**
- * SESSION STATUS DOT — the ONE primitive both the sidebar row and the pane tab
- * render, so a session's status/color can never disagree between the two
- * surfaces. It reads every signal itself from the shared stores keyed by the
- * stored session id: live state (working / needs-input / stalled / unread /
- * background, mutually exclusive via `sessionDotState`) and the resolved color
- * (override → project color, via `sessionColorFor`). An idle session shows its
- * project color; the active states own the dot with their semantic color so an
- * attention cue is never masked by the inherited tint.
+ * SESSION STATUS DOT — the ONE primitive the sidebar row, the pane tabs, and
+ * the session switcher render, so a session's status can never disagree
+ * between surfaces. It resolves everything itself from the stored session id:
+ * the live state (via `$sessionDotStateById`, already reduced to one mutually
+ * exclusive answer) and the color (override → project, via `sessionColorFor`).
+ * An idle session shows its project color; the active states own the dot with
+ * their semantic color so an attention cue is never masked by the tint.
  */
 export function SessionStatusDot({ storedSessionId, session, branchStem, className }: SessionStatusDotProps) {
   const { t } = useI18n()
@@ -148,19 +146,13 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
   useStore($sessionColorById)
   const color = sessionColorFor(session) ?? null
 
-  // Per-session membership as booleans via useStoreSelector: these arrays tick
-  // on every stream delta (any session working/stalled/etc changes the array
-  // reference), but a given dot only repaints when ITS OWN membership flips.
-  // A plain useStore(array).includes(id) re-rendered every dot on every tick.
-  const needsInput = useStoreSelector($attentionSessionIds, ids => ids.includes(storedSessionId))
-  const isWorking = useStoreSelector($workingSessionIds, ids => ids.includes(storedSessionId))
-  const isStalled = useStoreSelector($stalledSessionIds, ids => ids.includes(storedSessionId))
-  const isUnread = useStoreSelector($unreadFinishedSessionIds, ids => ids.includes(storedSessionId))
-  const hasBackground = useStoreSelector($backgroundRunningSessionIds, ids => ids.includes(storedSessionId))
-  const hasError = useStoreSelector($erroredSessionIds, ids => ids.includes(storedSessionId))
-  const hasSubagents = useStoreSelector($subagentWaitingSessionIds, ids => ids.includes(storedSessionId))
+  // Selector, not a plain useStore: the map is rebuilt whenever any session's
+  // status changes, but a given dot only repaints when ITS OWN state flips.
+  const dotState = useStoreSelector($sessionDotStateById, states =>
+    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
+  )
 
-  const dotState = sessionDotState({ hasBackground, hasError, hasSubagents, isStalled, isUnread, isWorking, needsInput })
+  const variant = DOT_VARIANTS[dotState]
 
   return (
     <span className={cn('flex items-center', branchStem ? 'gap-1' : 'gap-0.5', className)}>
@@ -180,14 +172,17 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
           {branchStem}
         </span>
       ) : null}
-      {dotState === 'idle' && color ? (
-        <span aria-hidden="true" className="size-1 rounded-full" style={{ backgroundColor: color }} />
+      {dotState === 'idle' ? (
+        // Rendered even with no color to paint: an empty dot of the same size
+        // keeps every row's title on one left edge, so a session finishing
+        // can't shift the list under the pointer.
+        <span aria-hidden="true" className={variant.className} style={color ? { backgroundColor: color } : undefined} />
       ) : (
         <span
-          aria-label={DOT_VARIANTS[dotState].ariaLabel?.(r)}
-          className={DOT_VARIANTS[dotState].className}
-          role={DOT_VARIANTS[dotState].role}
-          title={DOT_VARIANTS[dotState].title?.(r)}
+          aria-label={variant.ariaLabel?.(r)}
+          className={variant.className}
+          role={variant.role}
+          title={variant.title?.(r)}
         />
       )}
     </span>

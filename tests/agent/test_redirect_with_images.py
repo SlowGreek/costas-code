@@ -146,7 +146,13 @@ class TestApplyActiveTurnRedirect:
         _apply_active_turn_redirect(_FakeAgent(), messages, "just words")
 
         assert messages[-2]["role"] == "assistant"
-        assert messages[-1] == {"role": "user", "content": "just words"}
+        # Upstream (#81841) splits the correction row: `content` stays the
+        # user's own words (what the transcript shows) while `api_content`
+        # carries the interrupted-response scaffold the provider replays. The
+        # contract this pins is that the VISIBLE text is untouched.
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"] == "just words"
+        assert "[Context from the interrupted assistant response]" in messages[-1]["api_content"]
 
 
 class TestAgentRedirectAcceptsParts:

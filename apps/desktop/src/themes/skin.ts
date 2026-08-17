@@ -24,6 +24,14 @@ import type { DesktopTheme, DesktopThemeColors } from './types'
 // for normal text or section headers go invisible — mirrors the VS Code importer.
 const ACCENT_MIN_CONTRAST = 4.5
 
+// `banner_dim` / `session_border` are terminal *dim* tokens — deliberately near
+// the background, because a terminal only uses them for hairlines and inactive
+// chrome. The desktop spends `mutedForeground` on real secondary text (timestamps,
+// descriptions, empty states), so seeding it raw makes that text unreadable: the
+// bundled pack converted to a median 2.5:1 against a 4.5–7.0 built-in baseline.
+// AA (4.5) would flatten the skin's intent, so we hold a legibility floor instead.
+const MUTED_MIN_CONTRAST = 3
+
 /** First normalizable hex among `keys`, alpha flattened over `backdrop`. */
 const pick = (colors: SkinColors, keys: string[], backdrop: string): string | null => {
   for (const key of keys) {
@@ -71,8 +79,11 @@ export function skinToDesktopTheme(skin: HermesSkin): DesktopTheme | null {
   const border =
     pick(colors, ['ui_border', 'banner_border'], background) ?? mix(background, foreground, dark ? 0.16 : 0.14)
 
-  const mutedForeground =
-    pick(colors, ['banner_dim', 'session_border'], background) ?? mix(foreground, background, 0.45)
+  const mutedForeground = ensureContrast(
+    pick(colors, ['banner_dim', 'session_border'], background) ?? mix(foreground, background, 0.45),
+    background,
+    MUTED_MIN_CONTRAST
+  )
 
   const destructive = pick(colors, ['ui_error'], background) ?? '#e25563'
 

@@ -149,12 +149,17 @@ export async function waitForHermesReady(baseUrl: string, options: HermesReadyOp
       }
 
       // An explicitly missing route means the backend predates /api/health.
-      // So does a gate-shaped 401 on an ANONYMOUS probe: the dashboard auth
-      // gate runs ahead of the SPA catch-all, so a pre-/api/health backend
-      // rejects the unknown path as unauthenticated instead of 404 and a
-      // credential-free probe can never observe the 404. Timeouts, 5xx, 429,
-      // and non-gate 401s keep polling health.
-      if (!useStatusFallback && (isMissingHealthEndpointError(error) || isGatedMissingHealthError(error))) {
+      // Older gated middleware returns the no_cookie shape. Older loopback
+      // middleware returns a plain 401, but only that path has a local session
+      // token available for the legacy /api/status retry. Keep polling a plain
+      // anonymous 401 with no token because it may be a misconfigured route.
+      // Credentialed 401/403 responses already fail fast above.
+      if (
+        !useStatusFallback &&
+        (isMissingHealthEndpointError(error) ||
+          isGatedMissingHealthError(error) ||
+          (!probeIsCredentialed && Boolean(options.token) && isAuthRejectionError(error)))
+      ) {
         useStatusFallback = true
 
         continue

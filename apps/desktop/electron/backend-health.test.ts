@@ -177,6 +177,31 @@ test('anonymous gate-shaped 401 falls back to /api/status (backend predates /api
   ])
 })
 
+test('anonymous plain 401 falls back to /api/status for an old loopback backend', async () => {
+  const calls: string[][] = []
+
+  await waitForHermesReady('http://127.0.0.1:50420', {
+    token: 'local-session-token',
+    fetchPublicJson: async url => {
+      calls.push(['public', url])
+      throw new Error('401: {"detail":"Unauthorized"}')
+    },
+    fetchJson: async (url, token) => {
+      calls.push(['token', url, token ?? ''])
+
+      return { version: 'old' }
+    },
+    sleep: async () => {},
+    timeoutMs: 100,
+    pollMs: 1
+  })
+
+  assert.deepEqual(calls, [
+    ['public', 'http://127.0.0.1:50420/api/health'],
+    ['token', 'http://127.0.0.1:50420/api/status', 'local-session-token']
+  ])
+})
+
 test('a credentialed 401 fails fast for reauth instead of reporting a dead session ready', async () => {
   // The regression a blanket 401->fallback introduces: /api/status is public,
   // so an expired session would answer 200 and boot would report "ready",

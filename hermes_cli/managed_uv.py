@@ -144,7 +144,7 @@ def _report_runtime_repair_failure(repair: RuntimeRepairResult) -> None:
             f"the existing venv is unchanged ({repair.detail})."
         )
         print(
-            "    Sessions stay protected meanwhile: Hermes keeps databases "
+            "    Sessions stay protected meanwhile: Catalyst keeps databases "
             "out of WAL mode on this SQLite build. The next `hermes update` "
             "will retry."
         )
@@ -1223,7 +1223,7 @@ def repair_vulnerable_runtime(
             )
 
         print(
-            "  ⚠ Hermes venv links SQLite "
+            "  ⚠ Catalyst venv links SQLite "
             f"{current.sqlite_version_string}, which has the WAL-reset bug."
         )
         provisioned = _install_safe_python_generation(

@@ -227,7 +227,7 @@ def _reject_denylisted_env_var(key: str) -> None:
         raise ValueError(
             f"Environment variable {key!r} is on the writer denylist. "
             "Names that influence subprocess execution (LD_PRELOAD, "
-            "PYTHONPATH, PATH, EDITOR, ...) or Hermes runtime location "
+            "PYTHONPATH, PATH, EDITOR, ...) or Catalyst runtime location "
             "(HERMES_HOME, HERMES_PROFILE, ...) cannot be persisted via "
             "the env writer. If you really need this, edit "
             "~/.hermes/.env directly."
@@ -4476,7 +4476,7 @@ def show_config():
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│              ⚕ Hermes Configuration                    │", Colors.CYAN))
+    print(color("│              ⚕ Catalyst Configuration                    │", Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
 
     # Managed scope: surface that some settings are administrator-pinned so the
@@ -5518,7 +5518,7 @@ def set_config_value(key: str, value: str, force: bool = False):
     if not is_known and not force:
         print(color(
             f"⚠ '{key}' is not a recognized config key — it was saved anyway, "
-            "but Hermes may not read it.",
+            "but Catalyst may not read it.",
             Colors.YELLOW,
         ))
         if suggestion:

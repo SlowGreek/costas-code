@@ -133,5 +133,5 @@ def _run_awaitable(value: Any) -> Any:
     except RuntimeError:
         return asyncio.run(value)
     raise RuntimeError(
-        "Synchronous Hermes Relay tool execution cannot run on an active event-loop thread"
+        "Synchronous Catalyst Relay tool execution cannot run on an active event-loop thread"
     )

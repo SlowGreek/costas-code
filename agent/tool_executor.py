@@ -571,7 +571,7 @@ def _run_agent_tool_execution_middleware(
         with dispatch_lock:
             if state["dispatched"]:
                 raise RuntimeError(
-                    "Hermes tool execution callback invoked more than once"
+                    "Catalyst tool execution callback invoked more than once"
                 )
             state["dispatched"] = True
             state["blocked"] = False

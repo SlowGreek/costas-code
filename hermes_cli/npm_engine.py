@@ -182,7 +182,7 @@ def upgrade_managed_npm(
     """
     if not quiet:
         print(
-            f"→ Upgrading Hermes-managed npm to satisfy {npm_range}…",
+            f"→ Upgrading Catalyst-managed npm to satisfy {npm_range}…",
             flush=True,
         )
     # The managed npm lives inside the very tree the desktop app's Node
@@ -193,7 +193,7 @@ def upgrade_managed_npm(
     if managed_node_tree_in_use():
         if not quiet:
             print(
-                "  ⚠ deferred: the Hermes-managed Node.js tree is in use by a "
+                "  ⚠ deferred: the Catalyst-managed Node.js tree is in use by a "
                 "running app; the npm upgrade will apply on a later update "
                 "once the app is closed.",
                 file=sys.stderr,
@@ -264,7 +264,7 @@ def _print_manual_fix(npm: str, npm_range: str, actual: str | None) -> None:
     print(
         f"\n✗ {have}does not satisfy the range this project requires: {npm_range}\n"
         f"  Resolved npm: {npm}\n"
-        "  Hermes could not provision its own Node.js runtime and never\n"
+        "  Catalyst could not provision its own Node.js runtime and never\n"
         "  modifies a system/nvm/brew/Nix npm. Upgrade yours yourself with:\n"
         f'      npm install -g npm@"{npm_range}"',
         file=sys.stderr,
@@ -284,7 +284,7 @@ def _provision_managed_npm(npm_range: str | None, *, quiet: bool = False) -> str
     """
     if not quiet:
         print(
-            "→ Provisioning a Hermes-managed Node.js runtime "
+            "→ Provisioning a Catalyst-managed Node.js runtime "
             "(the resolved npm belongs to your system and is left alone)…",
             flush=True,
         )

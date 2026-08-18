@@ -264,7 +264,7 @@ class CLICommandsMixin:
         stat = result.get("stat", "")
         diff = result.get("diff", "")
         if result.get("empty") or (not stat and not diff):
-            print("  No changes — Hermes hasn't edited any files here yet.")
+            print("  No changes — Catalyst hasn't edited any files here yet.")
             return
 
         if stat:
@@ -3735,7 +3735,7 @@ class CLICommandsMixin:
         from hermes_cli.config import is_managed, format_managed_message
 
         if is_managed():
-            print(f"  ✗ {format_managed_message('update Hermes Agent')}")
+            print(f"  ✗ {format_managed_message('update Catalyst')}")
             return False
 
         # Use the prompt_toolkit-native modal so the confirmation panel

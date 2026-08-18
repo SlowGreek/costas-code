@@ -182,7 +182,7 @@ def _backup_operation_lock(hermes_home: Path, timeout_seconds: float = 0.25):
                     break
                 except (OSError, PermissionError):
                     if time.monotonic() >= deadline:
-                        raise BackupInProgressError("another Hermes backup is already running")
+                        raise BackupInProgressError("another Catalyst backup is already running")
                     time.sleep(0.05)
         else:
             import fcntl
@@ -194,7 +194,7 @@ def _backup_operation_lock(hermes_home: Path, timeout_seconds: float = 0.25):
                     break
                 except (BlockingIOError, OSError):
                     if time.monotonic() >= deadline:
-                        raise BackupInProgressError("another Hermes backup is already running")
+                        raise BackupInProgressError("another Catalyst backup is already running")
                     time.sleep(0.05)
 
         yield
@@ -630,7 +630,7 @@ def run_backup(args) -> None:
     hermes_root = get_default_hermes_root()
 
     if not hermes_root.is_dir():
-        print(f"Error: Hermes home directory not found at {hermes_root}")
+        print(f"Error: Catalyst home directory not found at {hermes_root}")
         sys.exit(1)
 
     try:
@@ -1057,7 +1057,7 @@ def run_import(args) -> None:
 
         if (has_config or has_env) and not args.force:
             print()
-            print("Warning: Target directory already has Hermes configuration.")
+            print("Warning: Target directory already has Catalyst configuration.")
             print("Importing will overwrite existing files with backup contents.")
             print()
             try:
@@ -1254,7 +1254,7 @@ def run_import(args) -> None:
             print("\nStart the gateway to activate cron jobs and messaging:")
             print("  hermes gateway install")
 
-        print("Done. Your Hermes configuration has been restored.")
+        print("Done. Your Catalyst configuration has been restored.")
 
 
 # ---------------------------------------------------------------------------

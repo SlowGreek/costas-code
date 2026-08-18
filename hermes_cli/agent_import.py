@@ -880,7 +880,7 @@ def import_agent_command(args) -> None:
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.MAGENTA))
-    print(color("│          ⚕ Hermes — Import From Another Agent          │", Colors.MAGENTA))
+    print(color("│          ⚕ Catalyst — Import From Another Agent          │", Colors.MAGENTA))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.MAGENTA))
 
     if not source_dir.is_dir():

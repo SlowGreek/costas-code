@@ -3482,7 +3482,7 @@ def login_spotify_command(args) -> None:
     print(f"Redirect URI: {redirect_uri}")
     print("Make sure this redirect URI is allow-listed in your Spotify app settings.")
     print()
-    print("Open this URL to authorize Hermes:")
+    print("Open this URL to authorize Catalyst:")
     print(authorize_url)
     print()
     print(f"Full setup guide: {SPOTIFY_DOCS_URL}")
@@ -3691,7 +3691,7 @@ def _print_loopback_ssh_hint(redirect_uri: str, *, docs_url: str | None = None) 
     print(divider)
     print("Remote session detected — SSH tunnel required")
     print(divider)
-    print(f"Hermes is waiting for the OAuth callback on {redirect_uri}")
+    print(f"Catalyst is waiting for the OAuth callback on {redirect_uri}")
     print("but your browser is on a different machine. Run this command")
     print("in a NEW terminal on your local machine BEFORE opening the URL:")
     print()
@@ -6023,7 +6023,7 @@ def resolve_nous_access_token(
 
         if not state:
             raise AuthError(
-                "Hermes is not logged into Nous Portal.",
+                "Catalyst is not logged into Nous Portal.",
                 provider="nous",
                 relogin_required=True,
             )
@@ -6368,7 +6368,7 @@ def resolve_nous_runtime_credentials(
     ):
 
         if not state:
-            raise AuthError("Hermes is not logged into Nous Portal.",
+            raise AuthError("Catalyst is not logged into Nous Portal.",
                             provider="nous", relogin_required=True)
 
         persisted_state = dict(state)
@@ -7930,7 +7930,7 @@ def _login_openai_codex(
             # the user "Login successful!".
             _resolved_key = existing.get("api_key", "")
             if isinstance(_resolved_key, str) and _resolved_key and not _codex_access_token_is_expiring(_resolved_key, 60):
-                print("Existing Codex credentials found in Hermes auth store.")
+                print("Existing Codex credentials found in Catalyst auth store.")
                 try:
                     reuse = input("Use existing credentials? [Y/n]: ").strip().lower()
                 except (EOFError, KeyboardInterrupt):
@@ -7951,7 +7951,7 @@ def _login_openai_codex(
         cli_tokens = _import_codex_cli_tokens()
         if cli_tokens:
             print("Found existing Codex CLI credentials at ~/.codex/auth.json")
-            print("Hermes will create its own session to avoid conflicts with Codex CLI / VS Code.")
+            print("Catalyst will create its own session to avoid conflicts with Codex CLI / VS Code.")
             try:
                 do_import = input("Import these credentials? (a separate login is recommended) [y/N]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
@@ -7962,14 +7962,14 @@ def _login_openai_codex(
                 config_path = _update_config_for_provider("openai-codex", base_url)
                 print()
                 print("Credentials imported. Note: if Codex CLI refreshes its token,")
-                print("Hermes will keep working independently with its own session.")
+                print("Catalyst will keep working independently with its own session.")
                 print(f"  Config updated: {config_path} (model.provider=openai-codex)")
                 return
 
     # Run a fresh device code flow — Hermes gets its own OAuth session
     print()
     print("Signing in to OpenAI Codex...")
-    print("(Hermes creates its own session — won't affect Codex CLI or VS Code)")
+    print("(Catalyst creates its own session — won't affect Codex CLI or VS Code)")
     print()
 
     creds = _codex_device_code_login()
@@ -7997,7 +7997,7 @@ def _login_xai_oauth(
             existing = resolve_xai_oauth_runtime_credentials()
             api_key = existing.get("api_key", "")
             if isinstance(api_key, str) and api_key and not _xai_access_token_is_expiring(api_key, 60):
-                print("Existing xAI OAuth credentials found in Hermes auth store.")
+                print("Existing xAI OAuth credentials found in Catalyst auth store.")
                 try:
                     reuse = input("Use existing credentials? [Y/n]: ").strip().lower()
                 except (EOFError, KeyboardInterrupt):
@@ -8016,7 +8016,7 @@ def _login_xai_oauth(
 
     print()
     print("Signing in to xAI Grok OAuth (SuperGrok / Premium+)...")
-    print("(Hermes creates its own local OAuth session)")
+    print("(Catalyst creates its own local OAuth session)")
     print()
 
     timeout_seconds = float(getattr(args, "timeout", None) or 20.0)
@@ -8662,7 +8662,7 @@ def _minimax_oauth_login(
     if _is_remote_session():
         open_browser = False
 
-    print(f"Starting Hermes login via MiniMax ({region}) OAuth...")
+    print(f"Starting Catalyst login via MiniMax ({region}) OAuth...")
     print(f"Portal: {portal_base_url}")
 
     with httpx.Client(timeout=httpx.Timeout(timeout_seconds),
@@ -8977,7 +8977,7 @@ def _nous_device_code_login(
     if _is_remote_session():
         open_browser = False
 
-    print(f"Starting Hermes login via {pconfig.name}...")
+    print(f"Starting Catalyst login via {pconfig.name}...")
     print(f"Portal: {portal_base_url}")
     if insecure:
         print("TLS verification: disabled (--insecure)")
@@ -9396,9 +9396,9 @@ def logout_command(args) -> None:
             _reset_config_provider()
         print(f"Logged out of {provider_name}.")
         if should_reset_config and os.getenv("OPENROUTER_API_KEY"):
-            print("Hermes will use OpenRouter for inference.")
+            print("Catalyst will use OpenRouter for inference.")
         elif should_reset_config:
-            print("Run `hermes model` or configure an API key to use Hermes.")
+            print("Run `hermes model` or configure an API key to use Catalyst.")
         else:
             print("Model provider configuration was unchanged.")
     else:

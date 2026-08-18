@@ -1430,7 +1430,7 @@ def _restore_stashed_changes(
         print(
             "  Restoring them may reapply local customizations onto the updated codebase."
         )
-        print("  Review the result afterward if Hermes behaves unexpectedly.")
+        print("  Review the result afterward if Catalyst behaves unexpectedly.")
         print("Restore local changes now? [Y/n]")
         if input_fn is not None:
             response = input_fn("Restore local changes now? [Y/n]", "y")
@@ -1514,7 +1514,7 @@ def _restore_stashed_changes(
     stash_selector = _resolve_stash_selector(git_cmd, cwd, stash_ref)
     if stash_selector is None:
         print(
-            "⚠ Local changes were restored, but Hermes couldn't find the stash entry to drop."
+            "⚠ Local changes were restored, but Catalyst couldn't find the stash entry to drop."
         )
         print(
             "  The stash was left in place. You can remove it manually after checking the result."
@@ -1529,7 +1529,7 @@ def _restore_stashed_changes(
         )
         if drop.returncode != 0:
             print(
-                "⚠ Local changes were restored, but Hermes couldn't drop the saved stash entry."
+                "⚠ Local changes were restored, but Catalyst couldn't drop the saved stash entry."
             )
             if drop.stdout.strip():
                 print(drop.stdout.strip())
@@ -1541,7 +1541,7 @@ def _restore_stashed_changes(
             _print_stash_cleanup_guidance(stash_ref, stash_selector)
 
     print("⚠ Local changes were restored on top of the updated codebase.")
-    print("  Review `git diff` / `git status` if Hermes behaves unexpectedly.")
+    print("  Review `git diff` / `git status` if Catalyst behaves unexpectedly.")
     return True
 
 def _discard_stashed_changes(
@@ -1567,7 +1567,7 @@ def _discard_stashed_changes(
     if stash_selector is None:
         print(
             "⚠ Configured to discard local changes on non-interactive update, "
-            "but Hermes couldn't find the stash entry to drop."
+            "but Catalyst couldn't find the stash entry to drop."
         )
         _print_stash_cleanup_guidance(stash_ref)
         return False
@@ -1580,7 +1580,7 @@ def _discard_stashed_changes(
     )
     if drop.returncode != 0:
         print(
-            "⚠ Configured to discard local changes, but Hermes couldn't drop "
+            "⚠ Configured to discard local changes, but Catalyst couldn't drop "
             "the saved stash entry."
         )
         if drop.stderr.strip():
@@ -1735,7 +1735,7 @@ def _sync_with_upstream_if_needed(
 
         # Ask user if they want to add upstream
         print()
-        print("ℹ Your fork is not tracking the official Hermes repository.")
+        print("ℹ Your fork is not tracking the official Catalyst repository.")
         print("  This means you may miss updates from NousResearch/hermes-agent.")
         print()
         try:
@@ -2001,7 +2001,7 @@ def _restore_active_tool_dependencies(
         return
 
     print()
-    print(f"→ Restoring {len(missing)} Hermes Tools dependency set(s)...")
+    print(f"→ Restoring {len(missing)} Catalyst Tools dependency set(s)...")
     restored: list[str] = []
     failed: list[tuple[str, str]] = []
     for name, install_args in missing:
@@ -3812,7 +3812,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
     # update even though the gateway itself is stopped.
     launcher_pids = _m()._venv_launcher_ancestors(mapped_pids)
 
-    print("→ Stopping Windows gateway process(es) before updating Hermes...")
+    print("→ Stopping Windows gateway process(es) before updating Catalyst...")
     try:
         drain_timeout = max(float(_get_restart_drain_timeout()), 1.0)
     except Exception:
@@ -4494,7 +4494,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("Could not read updates.non_interactive_local_changes: %s", exc)
             discard_local_changes = False
 
-    print("⚕ Updating Hermes Agent...")
+    print("⚕ Updating Catalyst...")
     print()
 
     # On Windows, abort early if another hermes.exe is holding the venv shim
@@ -4930,7 +4930,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     _print_update_completion("✓ Update complete!")
                 else:
                     print(f"⚠ Venv still unhealthy after repair: {detail_after}")
-                    print("  Close all Hermes windows/gateways and re-run: hermes update")
+                    print("  Close all Catalyst windows/gateways and re-run: hermes update")
             else:
                 _repair_node_deps_on_current_checkout(_print_update_completion)
             if runtime_repaired is not None and not _m()._is_windows():
@@ -4939,7 +4939,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     "⚠ Restart required to finish the managed Python runtime repair."
                 )
                 print(
-                    "  Any running Hermes gateways, Desktop backends, or other "
+                    "  Any running Catalyst gateways, Desktop backends, or other "
                     "long-lived processes still use the previous runtime."
                 )
                 # FORK: name the parked venv. The repair leaves the old venv on
@@ -6542,7 +6542,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
             if supports_systemd_services() and has_legacy_hermes_units():
                 print()
-                print("⚠ Legacy Hermes gateway unit(s) detected:")
+                print("⚠ Legacy Catalyst gateway unit(s) detected:")
                 for name, path, is_sys in _find_legacy_hermes_units():
                     scope = "system" if is_sys else "user"
                     print(f"    {path}  ({scope} scope)")

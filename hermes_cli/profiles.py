@@ -350,7 +350,7 @@ def validate_profile_name(name: str) -> None:
     if name in _RESERVED_NAMES:
         raise ValueError(
             f"Profile name {name!r} is reserved — it collides with either "
-            f"the Hermes installation itself or a common system binary.  "
+            f"the Catalyst installation itself or a common system binary.  "
             f"Pick a different name."
         )
 

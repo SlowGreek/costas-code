@@ -286,11 +286,11 @@ def auto_setup_telegram_bot_result(
     _ = manager_bot, profile_name
     resolved_api_url = _api_url(api_url)
     print()
-    print(f"  Contacting Hermes Telegram onboarding service: {resolved_api_url}")
+    print(f"  Contacting Catalyst Telegram onboarding service: {resolved_api_url}")
     sys.stdout.flush()
     pairing = create_pairing(resolved_api_url)
     if not pairing:
-        print("  ✗ Could not reach the Hermes Telegram onboarding service.")
+        print("  ✗ Could not reach the Catalyst Telegram onboarding service.")
         print("    Try the manual setup instead, or check your network.")
         return None
 

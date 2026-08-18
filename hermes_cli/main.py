@@ -2297,11 +2297,11 @@ def _ensure_tui_workspace(tui_dir: Path) -> None:
         return
 
     print(
-        "Error: the TUI workspace is missing from this Hermes checkout.\n"
+        "Error: the TUI workspace is missing from this Catalyst checkout.\n"
         f"Expected directory: {tui_dir}\n"
         "This usually means `hermes update` left tracked ui-tui files deleted.\n"
         "Recovery:\n"
-        "  1. From the Hermes checkout, run `git restore -- ui-tui`\n"
+        "  1. From the Catalyst checkout, run `git restore -- ui-tui`\n"
         "  2. Run `npm install --silent --no-fund --no-audit --progress=false`\n"
         "  3. Retry `hermes --tui`\n"
         "If the checkout is still inconsistent, run `hermes update --force`.",
@@ -3069,7 +3069,7 @@ def cmd_chat(args):
     if not _has_any_provider_configured():
         print()
         print(
-            "It looks like Hermes isn't configured yet -- no API keys or providers found."
+            "It looks like Catalyst isn't configured yet -- no API keys or providers found."
         )
         print()
         print("  Run:  hermes setup")
@@ -3243,7 +3243,7 @@ def cmd_whatsapp(args):
     current_mode = get_env_value("WHATSAPP_MODE") or ""
     if not current_mode:
         print()
-        print("How will you use WhatsApp with Hermes?")
+        print("How will you use WhatsApp with Catalyst?")
         print()
         print("  1. Separate bot number (recommended)")
         print("     People message the bot's number directly — cleanest experience.")
@@ -4216,7 +4216,7 @@ def _aux_config_menu() -> None:
         print()
         print("  Side tasks (vision, compression, web extraction, etc.) default")
         print('  to your main chat model.  "auto" means "use my main model" —')
-        print("  Hermes only falls back to a lightweight backend (OpenRouter,")
+        print("  Catalyst only falls back to a lightweight backend (OpenRouter,")
         print("  Nous Portal) if the main model is unavailable.  Override a")
         print("  task below if you want it pinned to a specific provider/model.")
         print()
@@ -5190,7 +5190,7 @@ def _run_anthropic_oauth_flow(save_env_value):
             from hermes_constants import display_hermes_home as _dhh_fn
 
             print(
-                f"    Hermes will use Claude's credential store directly instead of copying a setup-token into {_dhh_fn()}/.env."
+                f"    Catalyst will use Claude's credential store directly instead of copying a setup-token into {_dhh_fn()}/.env."
             )
             return True
         return False
@@ -7017,7 +7017,7 @@ def _ensure_desktop_exe_launchable(
     if error is None:
         return packaged_executable, False
 
-    print(f"✗ The built Hermes.exe failed its integrity check: {error}")
+    print(f"✗ The built Catalyst.exe failed its integrity check: {error}")
     print(f"    at: {packaged_executable}")
 
     # Self-heal setup for the retry: drop the (likely corrupt) cached Electron
@@ -7031,13 +7031,13 @@ def _ensure_desktop_exe_launchable(
 
     restored = _rollback_desktop_from_backup(packaged_executable)
     if restored is not None:
-        print("  ↩ Update aborted — restored the previous working Hermes.exe from backup.")
+        print("  ↩ Update aborted — restored the previous working Catalyst.exe from backup.")
         print("    Your existing version was kept and still works. Run `hermes desktop`")
         print("    (or the in-app update) again to retry with a fresh Electron download.")
         return restored, True
 
     print("  ✗ No usable backup was found to restore.")
-    print("    Run `hermes desktop --force-build` to rebuild, or re-run the Hermes")
+    print("    Run `hermes desktop --force-build` to rebuild, or re-run the Catalyst")
     print("    installer to repair the install.")
     return None, False
 
@@ -8698,8 +8698,8 @@ def _recover_core_update_marker_locked() -> None:
         print("✗ Could not auto-recover the interrupted install.")
         if self_locked:
             print(
-                "  Hermes is still running from the launcher that needs "
-                "replacing. Close other Hermes windows, restart from a "
+                "  Catalyst is still running from the launcher that needs "
+                "replacing. Close other Catalyst windows, restart from a "
                 "different terminal, then run:"
             )
             print(f'    cd /d "{PROJECT_ROOT}"')
@@ -10626,7 +10626,7 @@ def cmd_profile(args):
         if data.get("license"):
             print(f"License:      {data['license']}")
         if data.get("hermes_requires"):
-            print(f"Requires:     Hermes {data['hermes_requires']}")
+            print(f"Requires:     Catalyst {data['hermes_requires']}")
         if data.get("source"):
             print(f"Source:       {data['source']}")
         if data.get("installed_at"):
@@ -10655,7 +10655,7 @@ def _render_distribution_plan(plan) -> None:
     if mf.author:
         print(f"  Author:   {mf.author}")
     if mf.hermes_requires:
-        print(f"  Requires: Hermes {mf.hermes_requires}")
+        print(f"  Requires: Catalyst {mf.hermes_requires}")
     print(f"  Source:   {plan.provenance}")
     print(f"  Target:   {plan.target_dir}")
     if plan.existing:

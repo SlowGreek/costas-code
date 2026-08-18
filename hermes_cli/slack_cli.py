@@ -266,7 +266,7 @@ def slack_manifest_command(args) -> int:
         print(f"Slack manifest written to: {target}", file=sys.stderr)
         print(
             "\nNext steps:\n"
-            "  1. Open https://api.slack.com/apps and pick your Hermes app\n"
+            "  1. Open https://api.slack.com/apps and pick your Catalyst app\n"
             "     (or create a new one: Create New App → From an app manifest).\n"
             f"  2. Features → App Manifest → paste the contents of\n"
             f"     {target}\n"

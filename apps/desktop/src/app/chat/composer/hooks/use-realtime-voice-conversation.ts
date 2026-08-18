@@ -200,6 +200,10 @@ export function useRealtimeVoiceConversation({
     })
   }, [])
 
+  const stopTurn = useCallback(() => {
+    connectionRef.current?.stopTurn()
+  }, [])
+
   useEffect(
     () =>
       $workbenchArtifact.subscribe(artifact => {
@@ -229,7 +233,7 @@ export function useRealtimeVoiceConversation({
     muted,
     start,
     status,
-    stopTurn: undefined,
+    stopTurn,
     toggleMute
   }
 }

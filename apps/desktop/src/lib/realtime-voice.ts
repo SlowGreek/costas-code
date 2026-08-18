@@ -8,6 +8,10 @@ export type RealtimeVoiceStatus = 'listening' | 'speaking'
 
 export interface RealtimeServerEventDeps {
   beforeToolCall?: () => Promise<void>
+  /** Flush assistant audio already buffered in the browser (barge-in). */
+  clearAssistantAudio?: () => void
+  onAssistantAudioEnded?: () => void
+  onAssistantAudioStarted?: () => void
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
   pendingTranscription?: PendingTranscriptionTracker
@@ -83,13 +87,17 @@ interface RealtimeTokenResponse {
   expires_at?: number
   model: string
   voice: string
+  /** Host that issued the secret; Azure secrets are not valid at OpenAI. */
+  webrtc_url?: string
 }
 
 export interface RealtimeVoiceConnection {
-  close: () => void
   /** Settles when in-flight input transcriptions have landed. */
   awaitPendingTranscription: (timeoutMs?: number) => Promise<void>
+  close: () => void
   setMuted: (muted: boolean) => void
+  /** Manual interrupt: cancel generation and flush buffered assistant audio. */
+  stopTurn: () => void
   updateWorkbenchContext: (summary: string) => void
 }
 
@@ -112,11 +120,28 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it.'
 
+/**
+ * Server-side turn taking. Sent on every `session.update` so a later context
+ * update can never silently drop barge-in if the API replaces (rather than
+ * merges) the session object.
+ */
+const REALTIME_AUDIO_CONFIG = {
+  input: {
+    turn_detection: {
+      type: 'semantic_vad',
+      eagerness: 'auto',
+      create_response: true,
+      interrupt_response: true
+    }
+  }
+}
+
 const sessionUpdateEvent = (instructions: string) => ({
   type: 'session.update',
   session: {
     type: 'realtime',
     instructions,
+    audio: REALTIME_AUDIO_CONFIG,
     tools: [
       {
         type: 'function',
@@ -178,6 +203,10 @@ export async function startRealtimeVoiceConnection(
   let channelOpen = false
   let closed = false
   let workbenchContext = ''
+  // Tracks whether OpenAI currently has audio in the browser's output buffer.
+  // output_audio_buffer.clear errors if the buffer is empty, so barge-in must
+  // only fire while the assistant is actually speaking.
+  let assistantSpeaking = false
 
   const instructions = () =>
     workbenchContext
@@ -185,6 +214,21 @@ export async function startRealtimeVoiceConnection(
       : baseInstructions
 
   const send = (event: Record<string, unknown>) => channel.send(JSON.stringify(event))
+
+  /**
+   * Flush assistant audio already buffered in the browser. `interrupt_response`
+   * only stops server-side generation; without this the tail keeps playing over
+   * the user. Guarded on assistantSpeaking because clearing an empty buffer is
+   * an API error.
+   */
+  const clearAssistantAudio = () => {
+    if (!channelOpen || closed || !assistantSpeaking) {
+      return
+    }
+
+    assistantSpeaking = false
+    send({ type: 'output_audio_buffer.clear' })
+  }
 
   const close = () => {
     if (closed) {
@@ -220,6 +264,13 @@ export async function startRealtimeVoiceConnection(
 
         void routeRealtimeServerEvent(serverEvent, {
           beforeToolCall: options.beforeToolCall,
+          clearAssistantAudio,
+          onAssistantAudioEnded: () => {
+            assistantSpeaking = false
+          },
+          onAssistantAudioStarted: () => {
+            assistantSpeaking = true
+          },
           onStatus: options.onStatus,
           onTranscript: options.onTranscript,
           pendingTranscription,
@@ -239,14 +290,17 @@ export async function startRealtimeVoiceConnection(
       throw new Error('Browser created an empty WebRTC offer')
     }
 
-    const response = await fetchFn('https://api.openai.com/v1/realtime/calls', {
-      method: 'POST',
-      body: offer.sdp,
-      headers: {
-        Authorization: ['Bearer', token.client_secret].join(' '),
-        'Content-Type': 'application/sdp'
+    const response = await fetchFn(
+      token.webrtc_url || 'https://api.openai.com/v1/realtime/calls',
+      {
+        method: 'POST',
+        body: offer.sdp,
+        headers: {
+          Authorization: ['Bearer', token.client_secret].join(' '),
+          'Content-Type': 'application/sdp'
+        }
       }
-    })
+    )
 
     if (!response.ok) {
       throw new Error(`OpenAI Realtime WebRTC negotiation failed (HTTP ${response.status})`)
@@ -265,6 +319,15 @@ export async function startRealtimeVoiceConnection(
       tracks.forEach(track => {
         track.enabled = !muted
       })
+    },
+    stopTurn: () => {
+      if (!channelOpen || closed) {
+        return
+      }
+
+      // Cancel generation first, then flush what already reached the browser.
+      send({ type: 'response.cancel' })
+      clearAssistantAudio()
     },
     updateWorkbenchContext: summary => {
       workbenchContext = summary.trim().slice(0, 4_000)
@@ -310,8 +373,34 @@ export async function routeRealtimeServerEvent(
     return
   }
 
-  if (type === 'response.done' || type === 'input_audio_buffer.speech_started') {
+  if (type === 'response.done') {
     deps.onStatus?.('listening')
+    // The response finished on its own, so nothing is left to flush.
+    deps.onAssistantAudioEnded?.()
+
+    return
+  }
+
+  if (type === 'input_audio_buffer.speech_started') {
+    deps.onStatus?.('listening')
+    // Barge-in. `interrupt_response` stops the SERVER generating, but audio
+    // already pushed over WebRTC is sitting in the browser's jitter/playback
+    // buffer and would keep talking over the user. Only the WebRTC-specific
+    // output_audio_buffer.clear flushes that tail — and only if the assistant
+    // is actually speaking, since clearing an empty buffer is an API error.
+    deps.clearAssistantAudio?.()
+
+    return
+  }
+
+  if (type === 'output_audio_buffer.started') {
+    deps.onAssistantAudioStarted?.()
+
+    return
+  }
+
+  if (type === 'output_audio_buffer.stopped' || type === 'output_audio_buffer.cleared') {
+    deps.onAssistantAudioEnded?.()
 
     return
   }

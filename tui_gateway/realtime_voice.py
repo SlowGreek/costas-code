@@ -8,7 +8,7 @@ import urllib.request
 from typing import Any, Callable
 
 
-_REALTIME_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
+_OPENAI_REALTIME_BASE_URL = "https://api.openai.com/v1"
 _MAX_RESPONSE_BYTES = 128 * 1024
 
 
@@ -22,14 +22,24 @@ def create_realtime_client_secret(
     model: str,
     voice: str,
     transcription_model: str,
+    base_url: str = "",
     opener: Callable[..., Any] | None = None,
     timeout: int = 15,
 ) -> dict[str, Any]:
-    """Mint a short-lived WebRTC credential without exposing the standard key."""
+    """Mint a short-lived WebRTC credential without exposing the standard key.
+
+    ``base_url`` points at an Azure OpenAI / AI Foundry resource
+    (``https://<resource>.openai.azure.com/openai/v1``). Azure exposes the same
+    realtime surface as OpenAI and accepts an Entra bearer, so only the host
+    changes. The minting host is returned as ``webrtc_url`` because an
+    ephemeral secret is only valid against the resource that issued it.
+    """
     if not api_key.strip():
         raise RealtimeCredentialError(
             "OpenAI Realtime requires VOICE_TOOLS_OPENAI_KEY or OPENAI_API_KEY"
         )
+
+    root = (base_url or _OPENAI_REALTIME_BASE_URL).strip().rstrip("/")
 
     session = {
         "type": "realtime",
@@ -48,7 +58,7 @@ def create_realtime_client_secret(
         },
     }
     request = urllib.request.Request(
-        _REALTIME_CLIENT_SECRETS_URL,
+        f"{root}/realtime/client_secrets",
         data=json.dumps({"session": session}).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -84,4 +94,5 @@ def create_realtime_client_secret(
         "expires_at": payload.get("expires_at"),
         "model": model,
         "voice": voice,
+        "webrtc_url": f"{root}/realtime/calls",
     }

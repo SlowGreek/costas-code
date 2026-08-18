@@ -27,16 +27,32 @@ def _(rid, params: dict) -> dict:
     transcription_model = str(
         realtime_cfg.get("transcription_model") or "gpt-live-transcribe"
     ).strip()
+    # Azure OpenAI / AI Foundry: same realtime surface, different host, and an
+    # Entra bearer instead of a static key. key_cmd reuses Hermes's existing
+    # short-lived-credential machinery (e.g. `az account get-access-token`),
+    # so the token is minted fresh and cached until just before expiry.
+    base_url = str(realtime_cfg.get("base_url") or "").strip()
+    key_cmd = str(realtime_cfg.get("key_cmd") or "").strip()
 
     try:
-        from tools.tool_backend_helpers import resolve_openai_audio_api_key
         from tui_gateway.realtime_voice import create_realtime_client_secret
 
+        if key_cmd:
+            from agent.command_token_source import build_command_token_provider
+
+            token_provider = build_command_token_provider(key_cmd, "voice.realtime")
+            api_key = token_provider() if token_provider else ""
+        else:
+            from tools.tool_backend_helpers import resolve_openai_audio_api_key
+
+            api_key = resolve_openai_audio_api_key()
+
         token = create_realtime_client_secret(
-            api_key=resolve_openai_audio_api_key(),
+            api_key=api_key,
             model=model,
             voice=voice,
             transcription_model=transcription_model,
+            base_url=base_url,
         )
         return _ok(rid, token)
     except Exception as exc:

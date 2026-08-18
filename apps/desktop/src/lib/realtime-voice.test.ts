@@ -71,6 +71,46 @@ describe('createPendingTranscriptionTracker', () => {
   })
 })
 
+describe('barge-in audio flushing', () => {
+  const deps = (overrides: Record<string, unknown> = {}) => ({
+    request: vi.fn(),
+    runtimeSessionId: 'runtime-session',
+    send: vi.fn(),
+    ...overrides
+  })
+
+  it('flushes buffered assistant audio when the user starts speaking', async () => {
+    const clearAssistantAudio = vi.fn()
+
+    await routeRealtimeServerEvent(
+      { type: 'input_audio_buffer.speech_started' },
+      deps({ clearAssistantAudio })
+    )
+
+    expect(clearAssistantAudio).toHaveBeenCalled()
+  })
+
+  it('tracks assistant speaking state from output buffer events', async () => {
+    const onAssistantAudioStarted = vi.fn()
+    const onAssistantAudioEnded = vi.fn()
+    const shared = deps({ onAssistantAudioEnded, onAssistantAudioStarted })
+
+    await routeRealtimeServerEvent({ type: 'output_audio_buffer.started' }, shared)
+    expect(onAssistantAudioStarted).toHaveBeenCalled()
+
+    await routeRealtimeServerEvent({ type: 'output_audio_buffer.stopped' }, shared)
+    expect(onAssistantAudioEnded).toHaveBeenCalled()
+  })
+
+  it('treats a completed response as the end of assistant audio', async () => {
+    const onAssistantAudioEnded = vi.fn()
+
+    await routeRealtimeServerEvent({ type: 'response.done' }, deps({ onAssistantAudioEnded }))
+
+    expect(onAssistantAudioEnded).toHaveBeenCalled()
+  })
+})
+
 describe('routeRealtimeServerEvent', () => {
   it('marks a committed utterance pending and settles it on transcription', async () => {
     const pendingTranscription = createPendingTranscriptionTracker()
@@ -270,6 +310,59 @@ describe('routeRealtimeServerEvent', () => {
 })
 
 describe('startRealtimeVoiceConnection', () => {
+  /** Boot a connection over fake WebRTC and expose its data-channel traffic. */
+  const connectHarness = async () => {
+    const sent: string[] = []
+    const listeners = new Map<string, (event: { data?: string }) => void>()
+
+    const channel = {
+      addEventListener: vi.fn((type: string, handler: (event: { data?: string }) => void) => {
+        listeners.set(type, handler)
+      }),
+      close: vi.fn(),
+      send: vi.fn((payload: string) => sent.push(payload))
+    }
+
+    const peer = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      createDataChannel: vi.fn(() => channel),
+      createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'offer-sdp' })),
+      ontrack: null,
+      setLocalDescription: vi.fn(async () => undefined),
+      setRemoteDescription: vi.fn(async () => undefined)
+    }
+
+    const track = { enabled: true, stop: vi.fn() }
+
+    const connection = await startRealtimeVoiceConnection({
+      audioFactory: () =>
+        ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
+      fetchFn: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => 'answer-sdp'
+      })) as never,
+      mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
+      peerConnectionFactory: () => peer as never,
+      request: vi.fn(async () => ({
+        client_secret: 'ek_short',
+        model: 'gpt-realtime-2.1',
+        voice: 'marin'
+      })),
+      runtimeSessionId: 'runtime-session'
+    })
+
+    return {
+      connection,
+      emit: (event: Record<string, unknown>) =>
+        listeners.get('message')?.({ data: JSON.stringify(event) }),
+      open: () => listeners.get('open')?.({}),
+      sent,
+      sentTypes: () => sent.map(payload => JSON.parse(payload).type as string)
+    }
+  }
+
   it('connects WebRTC with an ephemeral key and cleans up owned media', async () => {
     const sent: string[] = []
     const channelListeners = new Map<string, (event: { data?: string }) => void>()
@@ -360,6 +453,48 @@ describe('startRealtimeVoiceConnection', () => {
     expect(audio.remove).toHaveBeenCalledOnce()
   })
 
+  it('negotiates SDP against the host that issued the credential', async () => {
+    const fetchFn = vi.fn(async (_url: string, _init?: unknown) => ({
+      ok: true,
+      status: 200,
+      text: async () => 'answer-sdp'
+    }))
+
+    const channel = { addEventListener: vi.fn(), close: vi.fn(), send: vi.fn() }
+
+    const peer = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      createDataChannel: vi.fn(() => channel),
+      createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'offer-sdp' })),
+      ontrack: null,
+      setLocalDescription: vi.fn(async () => undefined),
+      setRemoteDescription: vi.fn(async () => undefined)
+    }
+
+    await startRealtimeVoiceConnection({
+      audioFactory: () =>
+        ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
+      fetchFn: fetchFn as never,
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => ({ getTracks: () => [{ enabled: true, stop: vi.fn() }] }))
+      } as never,
+      peerConnectionFactory: () => peer as never,
+      request: vi.fn(async () => ({
+        client_secret: 'ek_azure',
+        model: 'gpt-realtime-2.1',
+        voice: 'marin',
+        webrtc_url: 'https://victo-m40le98w-eastus2.openai.azure.com/openai/v1/realtime/calls'
+      })),
+      runtimeSessionId: 'runtime-session'
+    })
+
+    // An Azure-issued ephemeral secret is rejected at api.openai.com.
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      'https://victo-m40le98w-eastus2.openai.azure.com/openai/v1/realtime/calls'
+    )
+  })
+
   it('does not open the microphone when credential minting fails', async () => {
     const getUserMedia = vi.fn()
 
@@ -374,5 +509,57 @@ describe('startRealtimeVoiceConnection', () => {
     ).rejects.toThrow('OpenAI key missing')
 
     expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('keeps barge-in turn detection on every session update', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    const initial = JSON.parse(harness.sent[0])
+
+    expect(initial.session.audio.input.turn_detection).toEqual({
+      type: 'semantic_vad',
+      eagerness: 'auto',
+      create_response: true,
+      interrupt_response: true
+    })
+
+    // A context update must not silently drop VAD if the API replaces rather
+    // than merges the session object.
+    harness.connection.updateWorkbenchContext('Nodes: voice, canvas.')
+    expect(JSON.parse(harness.sent.at(-1) ?? '{}').session.audio.input.turn_detection).toEqual(
+      initial.session.audio.input.turn_detection
+    )
+  })
+
+  it('clears buffered assistant audio on barge-in, but only while speaking', async () => {
+    const harness = await connectHarness()
+    harness.open()
+
+    // Not speaking yet: clearing an empty buffer is an API error.
+    harness.emit({ type: 'input_audio_buffer.speech_started' })
+    expect(harness.sentTypes()).not.toContain('output_audio_buffer.clear')
+
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({ type: 'input_audio_buffer.speech_started' })
+    expect(harness.sentTypes()).toContain('output_audio_buffer.clear')
+
+    // A second barge-in with an already-flushed buffer must not re-clear.
+    const clears = harness.sentTypes().filter(type => type === 'output_audio_buffer.clear').length
+    harness.emit({ type: 'input_audio_buffer.speech_started' })
+    expect(
+      harness.sentTypes().filter(type => type === 'output_audio_buffer.clear')
+    ).toHaveLength(clears)
+  })
+
+  it('cancels generation and flushes audio on a manual stopTurn', async () => {
+    const harness = await connectHarness()
+    harness.open()
+    harness.emit({ type: 'output_audio_buffer.started' })
+
+    harness.connection.stopTurn()
+
+    expect(harness.sentTypes()).toContain('response.cancel')
+    expect(harness.sentTypes()).toContain('output_audio_buffer.clear')
   })
 })

@@ -1750,6 +1750,16 @@ DEFAULT_CONFIG = {
             "voice": "marin",
             "transcription_model": "gpt-live-transcribe",
             "vad": {"type": "semantic_vad", "eagerness": "auto"},
+            # Azure OpenAI / AI Foundry resource root, e.g.
+            # "https://<resource>.openai.azure.com/openai/v1". Empty = OpenAI.
+            "base_url": "",
+            # Command printing a bearer token, for resources using Entra ID
+            # instead of a static key (e.g.
+            # "az account get-access-token --resource
+            #  https://cognitiveservices.azure.com --query accessToken -o tsv").
+            # Cached until shortly before expiry; takes precedence over the
+            # OPENAI_API_KEY / VOICE_TOOLS_OPENAI_KEY fallback.
+            "key_cmd": "",
         },
         # Saying EXACTLY one of these phrases (and nothing else) ends the
         # voice chat instead of being sent to the agent. Case-insensitive,

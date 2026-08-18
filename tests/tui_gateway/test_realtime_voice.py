@@ -27,7 +27,59 @@ def test_realtime_voice_defaults_are_provider_specific():
         "voice": "marin",
         "transcription_model": "gpt-live-transcribe",
         "vad": {"type": "semantic_vad", "eagerness": "auto"},
+        "base_url": "",
+        "key_cmd": "",
     }
+
+
+def test_client_secret_request_targets_azure_when_a_resource_is_configured():
+    """Azure Foundry mints at the resource, authenticated with an Entra token."""
+    captured = {}
+
+    def opener(request, timeout):
+        captured.update(
+            url=request.full_url,
+            headers=dict(request.header_items()),
+            body=json.loads(request.data),
+        )
+        return _Response({"value": "ek_azure_short", "expires_at": 4321})
+
+    result = create_realtime_client_secret(
+        api_key="entra-access-token",
+        model="gpt-realtime-2.1",
+        voice="marin",
+        transcription_model="gpt-live-transcribe",
+        base_url="https://victo-m40le98w-eastus2.openai.azure.com/openai/v1",
+        opener=opener,
+    )
+
+    assert captured["url"] == (
+        "https://victo-m40le98w-eastus2.openai.azure.com/openai/v1/realtime/client_secrets"
+    )
+    # Azure Entra auth is still a bearer, so the header shape does not change.
+    assert captured["headers"]["Authorization"] == "Bearer " + "entra-access-token"
+    assert captured["body"]["session"]["model"] == "gpt-realtime-2.1"
+    # The renderer must negotiate SDP against the SAME host that minted the
+    # credential; an Azure secret is not valid at api.openai.com.
+    assert result["webrtc_url"] == (
+        "https://victo-m40le98w-eastus2.openai.azure.com/openai/v1/realtime/calls"
+    )
+    assert result["client_secret"] == "ek_azure_short"
+
+
+def test_client_secret_defaults_to_openai_webrtc_url():
+    def opener(_request, timeout):
+        return _Response({"value": "ek_live_short", "expires_at": 1234})
+
+    result = create_realtime_client_secret(
+        api_key="sk-test",
+        model="gpt-realtime-2.1",
+        voice="marin",
+        transcription_model="gpt-live-transcribe",
+        opener=opener,
+    )
+
+    assert result["webrtc_url"] == "https://api.openai.com/v1/realtime/calls"
 
 
 def test_client_secret_request_uses_current_realtime_session_schema():
@@ -83,4 +135,5 @@ def test_client_secret_request_uses_current_realtime_session_schema():
         "expires_at": 1234,
         "model": "gpt-realtime-2.1",
         "voice": "marin",
+        "webrtc_url": "https://api.openai.com/v1/realtime/calls",
     }

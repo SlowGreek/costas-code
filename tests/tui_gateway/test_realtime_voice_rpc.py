@@ -43,8 +43,43 @@ def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch)
         "model": "gpt-realtime-2.1",
         "voice": "marin",
         "transcription_model": "gpt-live-transcribe",
+        "base_url": "",
     }
     assert "voice.realtime.token" in server._LONG_HANDLERS
+
+
+def test_realtime_token_rpc_mints_an_entra_token_for_azure(monkeypatch):
+    """Azure resources use key_cmd (Entra) instead of a static OpenAI key."""
+    import copy
+
+    runtime_id = "runtime-session"
+    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    captured = {}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["base_url"] = "https://res.openai.azure.com/openai/v1"
+    cfg["voice"]["realtime"]["key_cmd"] = "printf entra-token"
+
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+
+    def _unexpected():
+        raise AssertionError("static OpenAI key must not be consulted when key_cmd is set")
+
+    monkeypatch.setattr(tool_backend_helpers, "resolve_openai_audio_api_key", _unexpected)
+
+    def mint(**kwargs):
+        captured.update(kwargs)
+        return {"client_secret": "ek_azure", "webrtc_url": "https://res/openai/v1/realtime/calls"}
+
+    monkeypatch.setattr(realtime_voice, "create_realtime_client_secret", mint)
+    try:
+        envelope = server._methods["voice.realtime.token"]("request-1", {"session_id": runtime_id})
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    assert "error" not in envelope
+    assert captured["api_key"] == "entra-token"
+    assert captured["base_url"] == "https://res.openai.azure.com/openai/v1"
+    assert envelope["result"]["webrtc_url"] == "https://res/openai/v1/realtime/calls"
 
 
 def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):

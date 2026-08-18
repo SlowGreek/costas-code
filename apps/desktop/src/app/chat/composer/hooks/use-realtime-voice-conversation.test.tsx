@@ -11,12 +11,14 @@ const close = vi.fn()
 const setMuted = vi.fn()
 const updateWorkbenchContext = vi.fn()
 const awaitPendingTranscription = vi.fn(async () => {})
+const stopTurn = vi.fn()
 
 vi.mock('@/lib/realtime-voice', () => ({
   startRealtimeVoiceConnection: vi.fn(async () => ({
     awaitPendingTranscription,
     close,
     setMuted,
+    stopTurn,
     updateWorkbenchContext
   }))
 }))
@@ -65,6 +67,22 @@ describe('useRealtimeVoiceConversation', () => {
       await Promise.resolve()
     })
     expect(settled).toHaveBeenCalled()
+  })
+
+  it('exposes a manual stop-turn interrupt to the composer controls', async () => {
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    act(() => {
+      hook.result.current.stopTurn?.()
+    })
+
+    expect(stopTurn).toHaveBeenCalled()
   })
 
   it('starts and ends the WebRTC session from the existing conversation controls', async () => {

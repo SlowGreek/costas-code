@@ -1,8 +1,53 @@
 import json
 
+import pytest
+
 from hermes_state import SessionDB
 from hermes_state_artifacts import MAX_GRAPH_EDGES, MAX_GRAPH_NODES
+from workbench_sketch import MAX_SKETCH_HTML_BYTES
 from workbench_visualizer import visualize_session
+
+
+def test_visualize_session_routes_a_sketch_through_sandboxed_validation(tmp_path):
+    """The diagrammer can reach for `sketch` when no typed kind fits.
+
+    Without this the sketch renderer is unreachable dead code: the model is
+    never told the kind exists, so it can never emit one.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript(
+            "voice-session", item_id="u1", role="user", text="Show me a spinning cube."
+        )
+
+        html = "<canvas id='c'></canvas><script>/* three.js */</script>"
+
+        def run_oneshot(**_kwargs):
+            return json.dumps({"kind": "sketch", "html": html})
+
+        artifact = visualize_session(db, "voice-session", run_oneshot_fn=run_oneshot)
+
+        assert artifact["kind"] == "sketch"
+        assert artifact["payload"] == {"html": html}
+    finally:
+        db.close()
+
+
+def test_visualize_session_rejects_an_oversized_sketch(tmp_path):
+    """A sketch is atomic: truncating HTML yields a broken document, so an
+    over-cap sketch must fail rather than silently render garbage."""
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+
+        def run_oneshot(**_kwargs):
+            return json.dumps({"kind": "sketch", "html": "x" * (MAX_SKETCH_HTML_BYTES + 1)})
+
+        with pytest.raises(Exception, match="exceeds"):
+            visualize_session(db, "voice-session", run_oneshot_fn=run_oneshot)
+    finally:
+        db.close()
 
 
 def test_visualize_session_trims_an_oversized_graph_instead_of_failing(tmp_path):

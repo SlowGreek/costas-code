@@ -13,6 +13,7 @@ from hermes_state_artifacts import (
     trim_payload_for_kind,
     validate_semantic_payload,
 )
+from workbench_sketch import MAX_SKETCH_HTML_BYTES, validate_sketch_payload
 
 
 _MAX_TRANSCRIPT_CHARS = 64_000
@@ -21,7 +22,7 @@ _MAX_DIRECTION_CHARS = 1_000
 # The kind is the diagrammer's own choice. `map` stays the default so an older
 # model, a malformed reply, or an unrecognised name never regresses behaviour.
 DEFAULT_KIND = "map"
-SUPPORTED_KINDS = ("map", "timeline", "quadrant")
+SUPPORTED_KINDS = ("map", "timeline", "quadrant", "sketch")
 
 _VISUALIZER_INSTRUCTIONS = f"""You are the mute diagrammer for a live voice ideation workbench.
 Choose the ONE visual form that actually fits what the conversation needs right now, then return ONLY JSON.
@@ -35,7 +36,13 @@ Choose the ONE visual form that actually fits what the conversation needs right 
 "quadrant" — trade-offs and comparisons along two named axes:
 {{"kind":"quadrant","axes":{{"x":{{"low":"...","high":"..."}},"y":{{"low":"...","high":"..."}}}},"items":[{{"id":"stable-id","label":"short label","x":0.5,"y":0.5}}]}}
 
-Pick the form by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map.
+"sketch" — self-contained HTML/CSS/JS (canvas, WebGL, SVG, animation) rendered in a locked-down sandbox:
+{{"kind":"sketch","html":"<canvas id=\\"c\\"></canvas><style>...</style><script>...</script>"}}
+Reach for it when the idea is visual, spatial, dynamic, or illustrative rather than structural — a rendered 3D object, a simulation, a chart, a custom visual metaphor, an animated concept.
+Trade-off to weigh honestly: a sketch is redrawn whole and has no stable ids, so the user cannot point at its parts the way they can with a map. Worth it when the picture itself is the point.
+The sandbox has NO network: everything must be inline and self-contained, no CDN scripts, no remote images or fonts. Keep it under {MAX_SKETCH_HTML_BYTES} bytes.
+
+All four forms are equally available — pick by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map, something you need to actually SEE is a sketch.
 Keep the current kind unless the conversation has genuinely moved to a different shape; switching redraws everything.
 Read the transcript as a whole and update the current artifact rather than redrawing from scratch.
 Preserve existing ids for the same concept. Draw only what materially helps the shared idea.
@@ -49,6 +56,8 @@ def _empty_payload(kind: str) -> Dict[str, Any]:
         return {"items": []}
     if kind == "quadrant":
         return {"axes": {}, "items": []}
+    if kind == "sketch":
+        return {"html": ""}
     return {"nodes": [], "edges": []}
 
 
@@ -104,6 +113,12 @@ def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
     kind = declared if isinstance(declared, str) and declared in SUPPORTED_KINDS else None
     if kind is None:
         kind = _infer_kind(parsed)
+
+    # A sketch is arbitrary model-authored HTML, not a semantic graph: it has
+    # its own validator and its own (sandboxed) renderer, and it is atomic —
+    # trimming HTML at a byte offset would yield a broken document.
+    if kind == "sketch":
+        return kind, validate_sketch_payload(parsed)
 
     # Bound the payload to what the canvas can show BEFORE validating, so an
     # over-eager diagram degrades to its core instead of failing the update

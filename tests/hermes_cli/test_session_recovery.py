@@ -300,6 +300,33 @@ def _corrupt_table_root(path: Path, root_page: int) -> None:
     path.write_bytes(data)
 
 
+def test_recovery_preserves_session_artifacts(tmp_path: Path) -> None:
+    source = tmp_path / "artifact-source.db"
+    output = tmp_path / "artifact-recovered.db"
+    db = SessionDB(db_path=source)
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.create_session_artifact(
+            "voice-session",
+            "map.main",
+            kind="map",
+            payload={"nodes": [], "edges": []},
+            view_state={"positions": {}, "pinned": []},
+            updated_by="ambient",
+        )
+    finally:
+        db.close()
+
+    report = recover_session_database(source, output, work_dir=tmp_path)
+    assert report["verified"] is True
+
+    recovered = SessionDB(db_path=output)
+    try:
+        assert recovered.list_session_artifacts("voice-session")[0]["artifact_id"] == "map.main"
+    finally:
+        recovered.close()
+
+
 def test_snapshot_blocks_connections_opened_during_the_copy(
     tmp_path: Path,
 ) -> None:

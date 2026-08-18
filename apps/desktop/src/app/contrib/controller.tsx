@@ -6,6 +6,7 @@ import { SessionDraftTitle } from '@/app/chat/session-draft-title'
 import { SessionStatusDot } from '@/app/chat/session-status-dot'
 import { PALETTE_AREA, type PaletteContribution, paletteToggle } from '@/app/command-palette/contrib'
 import { type StatusbarItem } from '@/app/shell/statusbar-controls'
+import { WorkbenchPane } from '@/app/workbench/pane'
 import { IdleMount } from '@/components/idle-mount'
 import { $layoutEditMode, toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { allPaneIds, group, groupLeafIds, split } from '@/components/pane-shell/tree/model'
@@ -61,6 +62,7 @@ import { watchSessionPins } from '@/store/session-pin-sync'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
+import { $workbenchVoiceActive } from '@/store/workbench'
 
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
@@ -585,6 +587,42 @@ registry.register(
     set: () => togglePaneVisible('terminal')
   })
 )
+
+// The ideation canvas is a posture, not permanent chrome: it joins the layout
+// when a main Realtime conversation starts and leaves when that conversation
+// ends. Re-registering on the next start intentionally clears a prior tab-close
+// dismissal and reveals a fresh, session-scoped workbench.
+let unregisterWorkbenchPane: (() => void) | null = null
+
+const syncWorkbenchPane = (active: boolean) => {
+  if (active) {
+    unregisterWorkbenchPane ??= registry.register({
+      id: 'workbench',
+      area: 'panes',
+      title: 'workbench',
+      data: {
+        placement: 'right',
+        dock: { pane: 'workspace', pos: 'right' },
+        width: '38vw',
+        minWidth: '320px',
+        maxWidth: '72vw'
+      },
+      render: () => <WorkbenchPane />
+    })
+    revealTreePane('workbench')
+  } else {
+    unregisterWorkbenchPane?.()
+    unregisterWorkbenchPane = null
+
+    const tree = $layoutTree.get()
+
+    if (tree && allPaneIds(tree).includes('workbench')) {
+      removeTreePane('workbench')
+    }
+  }
+}
+
+$workbenchVoiceActive.subscribe(syncWorkbenchPane)
 
 // Logs are ⌘K-ONLY chrome: the pane contribution EXISTS only while $logsOpen
 // is on. Off (the default) keeps logs out of the registry and the tree

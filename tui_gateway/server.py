@@ -15836,6 +15836,7 @@ def _mcp_summarize_server(name, cfg):  # noqa: E402
 # Imported at the end of this module so every global the handlers close
 # over already exists; register() rebinds them onto this namespace.
 from . import (  # noqa: E402
+    methods_artifacts as _methods_artifacts,
     methods_complete as _methods_complete,
     methods_config as _methods_config,
     methods_images as _methods_images,
@@ -15847,6 +15848,7 @@ from . import (  # noqa: E402
 
 for _m in (
     _methods_session,
+    _methods_artifacts,
     _methods_prompt,
     _methods_config,
     _methods_complete,

@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useStore } from '@nanostores/react'
+import { useCallback, useEffect, useMemo } from 'react'
 
 import {
   NODE_HALF_HEIGHT,
@@ -7,7 +8,14 @@ import {
   NODE_WIDTH,
   type Point
 } from '@/lib/workbench-node-box'
-import type { WorkbenchArtifact, WorkbenchEdge, WorkbenchNode } from '@/store/workbench'
+import {
+  $workbenchSelection,
+  clearWorkbenchSelection,
+  setWorkbenchSelection,
+  type WorkbenchArtifact,
+  type WorkbenchEdge,
+  type WorkbenchNode
+} from '@/store/workbench'
 
 export type { Point }
 
@@ -202,12 +210,39 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
   const degrees = useMemo(() => degreeMap(nodes, edges), [edges, nodes])
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
+  const selected = useStore($workbenchSelection)
+
+  // Escape clears the pointing gesture — the same affordance as everywhere
+  // else in the app, and the only way to say "I'm not pointing at anything"
+  // without hunting for empty canvas.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        clearWorkbenchSelection()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
+  const selectNode = useCallback((event: React.MouseEvent, nodeId: string) => {
+    // Stop the background handler from immediately clearing what we just set.
+    event.stopPropagation()
+    setWorkbenchSelection(nodeId)
+  }, [])
 
   return (
     <svg
       aria-label="Live ideation map"
       className="min-h-0 flex-1"
       data-testid="workbench-canvas"
+      onClick={() => {
+        clearWorkbenchSelection()
+      }}
       role="img"
       viewBox={`0 0 ${width} ${height}`}
     >
@@ -249,6 +284,8 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
 
         <style>{`
           .wb-node { transition: transform 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
+          .wb-node-hit { cursor: pointer; }
+          .wb-selected-ring { transition: opacity 160ms ease; }
           .wb-edge { transition: d 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
           .wb-enter { animation: wb-pop 340ms cubic-bezier(.22,1,.36,1) both; }
           @keyframes wb-pop { from { opacity: 0 } to { opacity: 1 } }
@@ -324,6 +361,7 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
         }
 
         const accent = accentForKind(node.kind)
+        const isSelected = selected === node.id
         // Visual hierarchy: well-connected nodes read louder.
         const weight = (degrees[node.id] ?? 0) / maxDegree
         const lines = fitLabel(node.label, NODE_WIDTH - 22, TYPE_LABEL, node.kind ? 2 : 3)
@@ -331,8 +369,16 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
 
         return (
           <g
-            className="wb-node wb-enter"
+            aria-label={node.label}
+            aria-pressed={isSelected}
+            className="wb-node wb-node-hit wb-enter"
+            data-selected={isSelected ? 'true' : undefined}
+            data-testid={`workbench-node-${node.id}`}
             key={node.id}
+            onClick={event => {
+              selectNode(event, node.id)
+            }}
+            role="button"
             transform={`translate(${(point.x - NODE_HALF_W).toFixed(2)} ${(point.y - NODE_HALF_H).toFixed(2)})`}
           >
             <rect
@@ -361,6 +407,34 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
               x="0.5"
               y="7"
             />
+
+            {/* Selection ring: theme tokens only, drawn outside the box so it
+                never competes with the kind accent. */}
+            {isSelected ? (
+              <>
+                <rect
+                  className="wb-selected-ring"
+                  fill="none"
+                  height={NODE_HEIGHT + 10}
+                  rx={NODE_RADIUS + 5}
+                  stroke="var(--ui-accent)"
+                  strokeWidth="2"
+                  width={NODE_WIDTH + 10}
+                  x="-5"
+                  y="-5"
+                />
+                <rect
+                  className="wb-selected-ring"
+                  fill="var(--ui-accent)"
+                  height={NODE_HEIGHT + 10}
+                  opacity="0.12"
+                  rx={NODE_RADIUS + 5}
+                  width={NODE_WIDTH + 10}
+                  x="-5"
+                  y="-5"
+                />
+              </>
+            ) : null}
 
             <text
               fill="var(--ui-text-primary)"

@@ -38,12 +38,20 @@ const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value))
 
 /**
- * Seat only nodes that have no persisted position.
+ * Place nodes, keeping the picture stable without freezing it solid.
  *
- * Existing coordinates become force-layout fixed points (`fx`/`fy`), so an
- * ambient semantic revision cannot make the diagram breathe under the user's
- * gaze. A graph-id seeded RNG keeps first placement deterministic in tests,
- * reconnects, and concurrent windows until the renderer persists it.
+ * Two competing needs. Stability: an unchanged graph must not shuffle, or the
+ * user loses "that box on the left". Responsiveness: when the model revises
+ * the diagram, the layout has to actually change — the renderer persists a
+ * position for EVERY node, so treating all persisted coordinates as immutable
+ * fixed points means a redraw can never improve anything, which reads to the
+ * user as "it said it updated but nothing happened".
+ *
+ * So: persisted coordinates are always the STARTING point (that is what keeps
+ * an unchanged graph pixel-identical), but they are only frozen as `fx`/`fy`
+ * while the structure is the same. When nodes or edges change, everything is
+ * released and the simulation re-settles from where it already was — the
+ * diagram visibly reflows without teleporting.
  */
 export function placeWorkbenchNodes(
   graph: WorkbenchGraph,
@@ -57,6 +65,13 @@ export function placeWorkbenchNodes(
   const centerY = safeHeight / 2
   const random = seededRandom(graph.nodes.map(node => node.id).sort().join('|'))
 
+  // A node without a persisted position means the structure grew. An edge
+  // count that no longer matches means relationships changed. Either way the
+  // old layout is stale and must be allowed to move.
+  const structureChanged =
+    graph.nodes.some(node => !existing[node.id]) ||
+    Object.keys(existing).length !== graph.nodes.length
+
   const nodes: LayoutNode[] = graph.nodes.map((node, index) => {
     const persisted = existing[node.id]
     const angle = (index / Math.max(1, graph.nodes.length)) * Math.PI * 2
@@ -68,7 +83,7 @@ export function placeWorkbenchNodes(
       id: node.id,
       x,
       y,
-      ...(persisted ? { fx: persisted.x, fy: persisted.y } : {})
+      ...(persisted && !structureChanged ? { fx: persisted.x, fy: persisted.y } : {})
     }
   })
 

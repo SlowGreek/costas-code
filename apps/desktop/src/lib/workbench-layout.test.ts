@@ -103,6 +103,7 @@ describe('placeWorkbenchNodes — geometry', () => {
     // Cyclic => layered layout returns null, so this exercises the force path
     // and its collision radius directly.
     const ids = Array.from({ length: 14 }, (_, index) => `n${index}`)
+
     const dense: WorkbenchGraph = {
       nodes: ids.map(id => ({ id, label: id.toUpperCase() })),
       edges: ids.map((id, index) => ({

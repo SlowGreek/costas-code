@@ -1057,6 +1057,19 @@ DEFAULT_CONFIG = {
             "reasoning_effort": "",  # per-task thinking level: none|minimal|low|medium|high|xhigh|max|ultra (empty = provider default)
             "language": "",
         },
+        # Mute diagrammer for GPT Realtime ideation. Kept on the auxiliary
+        # routing plane so a cheap/fast model can update the canvas without
+        # spending the coding model every few seconds.
+        "ideation_workbench": {
+            "provider": "auto",
+            "model": "",
+            "prefer_fast_model": True,
+            "base_url": "",
+            "api_key": "",
+            "timeout": 45,
+            "extra_body": {},
+            "reasoning_effort": "",
+        },
         "memory_query_rewrite": {
             "provider": "auto",
             "model": "",
@@ -1729,6 +1742,25 @@ DEFAULT_CONFIG = {
         "barge_in": True,             # Interrupt the agent / stop TTS when the user starts talking
         "barge_in_grace_seconds": 0.5,  # Trip suppression right after TTS playback starts (onset transient); the mic itself is live for the whole turn
         "barge_in_threshold_multiplier": 3.0,  # Speech trigger = quiet-room floor x this (floor is calibrated BEFORE playback, never against speaker bleed)
+        # First-class desktop conversation transport. This is intentionally
+        # separate from the text-agent model/provider and from STT/TTS config.
+        "realtime": {
+            "enabled": True,
+            "model": "gpt-realtime-2.1",
+            "voice": "marin",
+            "transcription_model": "gpt-live-transcribe",
+            "vad": {"type": "semantic_vad", "eagerness": "auto"},
+            # Azure OpenAI / AI Foundry resource root, e.g.
+            # "https://<resource>.openai.azure.com/openai/v1". Empty = OpenAI.
+            "base_url": "",
+            # Command printing a bearer token, for resources using Entra ID
+            # instead of a static key (e.g.
+            # "az account get-access-token --resource
+            #  https://cognitiveservices.azure.com --query accessToken -o tsv").
+            # Cached until shortly before expiry; takes precedence over the
+            # OPENAI_API_KEY / VOICE_TOOLS_OPENAI_KEY fallback.
+            "key_cmd": "",
+        },
         # Saying EXACTLY one of these phrases (and nothing else) ends the
         # voice chat instead of being sent to the agent. Case-insensitive,
         # surrounding punctuation ignored. Set [] to disable.

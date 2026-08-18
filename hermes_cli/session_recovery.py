@@ -33,6 +33,7 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 _CANONICAL_TABLES = (
     "system_prompts",
     "sessions",
+    "session_artifacts",
     "messages",
     "session_model_usage",
     "compression_locks",

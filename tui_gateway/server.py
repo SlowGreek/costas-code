@@ -294,6 +294,10 @@ _LONG_HANDLERS = frozenset(
         "voice.toggle",
         "voice.record",
         "voice.tts",
+        # Mints an ephemeral OpenAI credential over a blocking HTTPS request.
+        "voice.realtime.token",
+        # Runs a bounded auxiliary-model call over transcript + current graph.
+        "workbench.visualize",
         # wake.start calls check_wake_word_requirements() → _stt_ready() →
         # _get_provider() → _try_lazy_install_stt() → ensure("stt.faster_whisper")
         # (same synchronous subprocess install chain as the voice RPCs above).
@@ -15836,17 +15840,23 @@ def _mcp_summarize_server(name, cfg):  # noqa: E402
 # Imported at the end of this module so every global the handlers close
 # over already exists; register() rebinds them onto this namespace.
 from . import (  # noqa: E402
+    methods_artifacts as _methods_artifacts,
     methods_complete as _methods_complete,
     methods_config as _methods_config,
     methods_images as _methods_images,
     methods_profiles as _methods_profiles,
     methods_prompt as _methods_prompt,
+    methods_realtime as _methods_realtime,
     methods_session as _methods_session,
     methods_tools as _methods_tools,
+    methods_workbench as _methods_workbench,
 )
 
 for _m in (
     _methods_session,
+    _methods_artifacts,
+    _methods_realtime,
+    _methods_workbench,
     _methods_prompt,
     _methods_config,
     _methods_complete,

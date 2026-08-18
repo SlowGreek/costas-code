@@ -1,0 +1,502 @@
+export interface RealtimeTranscript {
+  id: string
+  role: 'assistant' | 'user'
+  text: string
+}
+
+export type RealtimeVoiceStatus = 'listening' | 'speaking'
+
+export interface RealtimeServerEventDeps {
+  beforeToolCall?: () => Promise<void>
+  /** Flush assistant audio already buffered in the browser (barge-in). */
+  clearAssistantAudio?: () => void
+  onAssistantAudioEnded?: () => void
+  onAssistantAudioStarted?: () => void
+  onStatus?: (status: RealtimeVoiceStatus) => void
+  onTranscript?: (entry: RealtimeTranscript) => void
+  pendingTranscription?: PendingTranscriptionTracker
+  request: (method: string, params: Record<string, unknown>) => Promise<unknown>
+  runtimeSessionId: string
+  send: (event: Record<string, unknown>) => void
+}
+
+export interface PendingTranscriptionTracker {
+  /**
+   * Resolve once every utterance that has stopped has produced (or failed to
+   * produce) its transcription. The timeout is a *bound*, not the mechanism:
+   * a normal turn settles on the real event with no added latency.
+   */
+  awaitSettled: (timeoutMs?: number) => Promise<void>
+  markPending: () => void
+  settle: () => void
+}
+
+/** Fallback bound for a transcription event that never arrives. */
+export const PENDING_TRANSCRIPTION_TIMEOUT_MS = 4_000
+
+export function createPendingTranscriptionTracker(): PendingTranscriptionTracker {
+  let pending = 0
+  let waiters: Array<() => void> = []
+
+  const release = () => {
+    const settled = waiters
+    waiters = []
+    settled.forEach(resolve => resolve())
+  }
+
+  return {
+    awaitSettled: (timeoutMs = PENDING_TRANSCRIPTION_TIMEOUT_MS) => {
+      if (pending <= 0) {
+        return Promise.resolve()
+      }
+
+      return new Promise<void>(resolve => {
+        let done = false
+
+        const finish = () => {
+          if (done) {
+            return
+          }
+
+          done = true
+          window.clearTimeout(timer)
+          resolve()
+        }
+
+        // The timer only bounds a lost/slow transcription event; it never
+        // paces a healthy turn.
+        const timer = window.setTimeout(finish, timeoutMs)
+        waiters.push(finish)
+      })
+    },
+    markPending: () => {
+      pending += 1
+    },
+    settle: () => {
+      pending = Math.max(0, pending - 1)
+
+      if (pending === 0) {
+        release()
+      }
+    }
+  }
+}
+
+interface RealtimeTokenResponse {
+  client_secret: string
+  expires_at?: number
+  model: string
+  voice: string
+  /** Host that issued the secret; Azure secrets are not valid at OpenAI. */
+  webrtc_url?: string
+}
+
+export interface RealtimeVoiceConnection {
+  /** Settles when in-flight input transcriptions have landed. */
+  awaitPendingTranscription: (timeoutMs?: number) => Promise<void>
+  close: () => void
+  setMuted: (muted: boolean) => void
+  /** Manual interrupt: cancel generation and flush buffered assistant audio. */
+  stopTurn: () => void
+  updateWorkbenchContext: (summary: string) => void
+}
+
+export interface StartRealtimeVoiceOptions {
+  audioFactory?: () => HTMLAudioElement
+  beforeToolCall?: () => Promise<void>
+  fetchFn?: typeof fetch
+  instructions?: string
+  mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  onStatus?: (status: RealtimeVoiceStatus) => void
+  onTranscript?: (entry: RealtimeTranscript) => void
+  peerConnectionFactory?: () => RTCPeerConnection
+  request: (method: string, params: Record<string, unknown>) => Promise<unknown>
+  runtimeSessionId: string
+}
+
+const DEFAULT_REALTIME_INSTRUCTIONS =
+  'You are Hermes in realtime ideation mode. Collaborate naturally and concisely. ' +
+  'Call visualize when the shared picture materially changes, at semantic milestones rather than every turn; the mute diagrammer does the drawing. ' +
+  'Use session_snapshot before explaining or referring to the workbench canvas. ' +
+  'Do not claim the canvas changed unless the visualize result or Hermes state confirms it.'
+
+/**
+ * Server-side turn taking. Sent on every `session.update` so a later context
+ * update can never silently drop barge-in if the API replaces (rather than
+ * merges) the session object.
+ */
+const REALTIME_AUDIO_CONFIG = {
+  input: {
+    turn_detection: {
+      type: 'semantic_vad',
+      eagerness: 'auto',
+      create_response: true,
+      interrupt_response: true
+    }
+  }
+}
+
+const sessionUpdateEvent = (instructions: string) => ({
+  type: 'session.update',
+  session: {
+    type: 'realtime',
+    instructions,
+    audio: REALTIME_AUDIO_CONFIG,
+    tools: [
+      {
+        type: 'function',
+        name: 'session_snapshot',
+        description: 'Read the current Hermes workbench artifacts and their revisions.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'visualize',
+        description:
+          'Delegate a meaningful new idea, relationship, correction, or stale canvas to the mute diagrammer. Call at semantic milestones, not on every turn.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'Optional direction for what the diagrammer should emphasize or correct.'
+            }
+          },
+          additionalProperties: false
+        }
+      }
+    ],
+    tool_choice: 'auto'
+  }
+})
+
+export async function startRealtimeVoiceConnection(
+  options: StartRealtimeVoiceOptions
+): Promise<RealtimeVoiceConnection> {
+  const token = (await options.request('voice.realtime.token', {
+    session_id: options.runtimeSessionId
+  })) as RealtimeTokenResponse
+
+  if (!token?.client_secret) {
+    throw new Error('Hermes returned no GPT Realtime credential')
+  }
+
+  const mediaDevices = options.mediaDevices ?? navigator.mediaDevices
+  const createPeer = options.peerConnectionFactory ?? (() => new RTCPeerConnection())
+  const createAudio = options.audioFactory ?? (() => document.createElement('audio'))
+  const fetchFn = options.fetchFn ?? fetch
+  const peer = createPeer()
+  const audio = createAudio()
+
+  const stream = await mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  })
+
+  const tracks = stream.getTracks()
+  const channel = peer.createDataChannel('oai-events')
+  const baseInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
+  const pendingTranscription = createPendingTranscriptionTracker()
+  let channelOpen = false
+  let closed = false
+  let workbenchContext = ''
+  // Tracks whether OpenAI currently has audio in the browser's output buffer.
+  // output_audio_buffer.clear errors if the buffer is empty, so barge-in must
+  // only fire while the assistant is actually speaking.
+  let assistantSpeaking = false
+
+  const instructions = () =>
+    workbenchContext
+      ? `${baseInstructions}\n\nCurrent workbench state (authoritative summary):\n${workbenchContext}`
+      : baseInstructions
+
+  const send = (event: Record<string, unknown>) => channel.send(JSON.stringify(event))
+
+  /**
+   * Flush assistant audio already buffered in the browser. `interrupt_response`
+   * only stops server-side generation; without this the tail keeps playing over
+   * the user. Guarded on assistantSpeaking because clearing an empty buffer is
+   * an API error.
+   */
+  const clearAssistantAudio = () => {
+    if (!channelOpen || closed || !assistantSpeaking) {
+      return
+    }
+
+    assistantSpeaking = false
+    send({ type: 'output_audio_buffer.clear' })
+  }
+
+  const close = () => {
+    if (closed) {
+      return
+    }
+
+    closed = true
+    channelOpen = false
+    tracks.forEach(track => track.stop())
+    channel.close()
+    peer.close()
+    audio.pause()
+    audio.srcObject = null
+    audio.remove()
+  }
+
+  try {
+    audio.autoplay = true
+
+    peer.ontrack = event => {
+      audio.srcObject = event.streams[0] ?? null
+    }
+
+    tracks.forEach(track => peer.addTrack(track, stream))
+
+    channel.addEventListener('open', () => {
+      channelOpen = true
+      send(sessionUpdateEvent(instructions()))
+    })
+    channel.addEventListener('message', event => {
+      try {
+        const serverEvent = JSON.parse(event.data) as unknown
+
+        void routeRealtimeServerEvent(serverEvent, {
+          beforeToolCall: options.beforeToolCall,
+          clearAssistantAudio,
+          onAssistantAudioEnded: () => {
+            assistantSpeaking = false
+          },
+          onAssistantAudioStarted: () => {
+            assistantSpeaking = true
+          },
+          onStatus: options.onStatus,
+          onTranscript: options.onTranscript,
+          pendingTranscription,
+          request: options.request,
+          runtimeSessionId: options.runtimeSessionId,
+          send
+        })
+      } catch {
+        // A malformed data-channel frame must not tear down live audio.
+      }
+    })
+
+    const offer = await peer.createOffer()
+    await peer.setLocalDescription(offer)
+
+    if (!offer.sdp) {
+      throw new Error('Browser created an empty WebRTC offer')
+    }
+
+    const response = await fetchFn(
+      token.webrtc_url || 'https://api.openai.com/v1/realtime/calls',
+      {
+        method: 'POST',
+        body: offer.sdp,
+        headers: {
+          Authorization: ['Bearer', token.client_secret].join(' '),
+          'Content-Type': 'application/sdp'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`OpenAI Realtime WebRTC negotiation failed (HTTP ${response.status})`)
+    }
+
+    await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() })
+  } catch (error) {
+    close()
+    throw error
+  }
+
+  return {
+    awaitPendingTranscription: timeoutMs => pendingTranscription.awaitSettled(timeoutMs),
+    close,
+    setMuted: muted => {
+      tracks.forEach(track => {
+        track.enabled = !muted
+      })
+    },
+    stopTurn: () => {
+      if (!channelOpen || closed) {
+        return
+      }
+
+      // Cancel generation first, then flush what already reached the browser.
+      send({ type: 'response.cancel' })
+      clearAssistantAudio()
+    },
+    updateWorkbenchContext: summary => {
+      workbenchContext = summary.trim().slice(0, 4_000)
+
+      if (channelOpen && !closed) {
+        send(sessionUpdateEvent(instructions()))
+      }
+    }
+  }
+}
+
+type RealtimeEvent = {
+  arguments?: unknown
+  call_id?: unknown
+  item_id?: unknown
+  name?: unknown
+  transcript?: unknown
+  type?: unknown
+}
+
+const asTrimmedString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Route server events that cross the Hermes/Realtime boundary.
+ *
+ * Audio stays on the peer connection. This function owns only durable
+ * transcript notifications and the deliberately tiny voice tool facade.
+ */
+export async function routeRealtimeServerEvent(
+  rawEvent: unknown,
+  deps: RealtimeServerEventDeps
+): Promise<void> {
+  if (!rawEvent || typeof rawEvent !== 'object') {
+    return
+  }
+
+  const event = rawEvent as RealtimeEvent
+  const type = asTrimmedString(event.type)
+
+  if (type === 'response.created') {
+    deps.onStatus?.('speaking')
+
+    return
+  }
+
+  if (type === 'response.done') {
+    deps.onStatus?.('listening')
+    // The response finished on its own, so nothing is left to flush.
+    deps.onAssistantAudioEnded?.()
+
+    return
+  }
+
+  if (type === 'input_audio_buffer.speech_started') {
+    deps.onStatus?.('listening')
+    // Barge-in. `interrupt_response` stops the SERVER generating, but audio
+    // already pushed over WebRTC is sitting in the browser's jitter/playback
+    // buffer and would keep talking over the user. Only the WebRTC-specific
+    // output_audio_buffer.clear flushes that tail — and only if the assistant
+    // is actually speaking, since clearing an empty buffer is an API error.
+    deps.clearAssistantAudio?.()
+
+    return
+  }
+
+  if (type === 'output_audio_buffer.started') {
+    deps.onAssistantAudioStarted?.()
+
+    return
+  }
+
+  if (type === 'output_audio_buffer.stopped' || type === 'output_audio_buffer.cleared') {
+    deps.onAssistantAudioEnded?.()
+
+    return
+  }
+
+  if (type === 'input_audio_buffer.committed') {
+    // Exactly one committed event per utterance, and it is the point where
+    // transcription becomes in flight. `speech_stopped` is deliberately NOT
+    // used too: both fire for the same utterance, so marking on each would
+    // leave a permanently unbalanced counter.
+    deps.pendingTranscription?.markPending()
+
+    return
+  }
+
+  if (type === 'conversation.item.input_audio_transcription.failed') {
+    deps.pendingTranscription?.settle()
+
+    return
+  }
+
+  if (type === 'conversation.item.input_audio_transcription.completed') {
+    const text = asTrimmedString(event.transcript)
+
+    if (text) {
+      deps.onTranscript?.({
+        id: asTrimmedString(event.item_id),
+        role: 'user',
+        text
+      })
+    }
+
+    deps.pendingTranscription?.settle()
+
+    return
+  }
+
+  if (type === 'response.output_audio_transcript.done') {
+    const text = asTrimmedString(event.transcript)
+
+    if (text) {
+      deps.onTranscript?.({
+        id: asTrimmedString(event.item_id),
+        role: 'assistant',
+        text
+      })
+    }
+
+    return
+  }
+
+  if (type !== 'response.function_call_arguments.done') {
+    return
+  }
+
+  const callId = asTrimmedString(event.call_id)
+  const name = asTrimmedString(event.name)
+
+  if (!callId) {
+    return
+  }
+
+  let output: unknown
+
+  try {
+    await deps.beforeToolCall?.()
+
+    if (name === 'session_snapshot') {
+      output = await deps.request('artifact.list', { session_id: deps.runtimeSessionId })
+    } else if (name === 'visualize') {
+      let prompt = ''
+
+      try {
+        const parsed = JSON.parse(asTrimmedString(event.arguments) || '{}') as { prompt?: unknown }
+        prompt = asTrimmedString(parsed.prompt).slice(0, 1_000)
+      } catch {
+        // Invalid optional arguments degrade to transcript-only visualization.
+      }
+
+      output = await deps.request('workbench.visualize', {
+        session_id: deps.runtimeSessionId,
+        prompt
+      })
+    } else {
+      output = { error: `Unsupported voice tool: ${name || '<missing>'}` }
+    }
+  } catch (error) {
+    output = { error: error instanceof Error ? error.message : String(error) }
+  }
+
+  deps.send({
+    type: 'conversation.item.create',
+    item: {
+      type: 'function_call_output',
+      call_id: callId,
+      output: JSON.stringify(output)
+    }
+  })
+  deps.send({ type: 'response.create' })
+}

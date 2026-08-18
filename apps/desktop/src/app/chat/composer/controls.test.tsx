@@ -142,4 +142,21 @@ describe('wake-word ear visibility', () => {
     const ear = screen.getByLabelText('Wake word: "hey hermes" — paused during voice chat')
     expect((ear as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('does not show a manual turn button for semantic-VAD Realtime sessions', () => {
+    renderControls({
+      conversation: {
+        active: true,
+        level: 0,
+        muted: false,
+        onEnd: vi.fn(),
+        onStart: vi.fn(),
+        onStopTurn: undefined as never,
+        onToggleMute: vi.fn(),
+        status: 'listening'
+      }
+    })
+
+    expect(screen.queryByLabelText('Stop listening and send')).toBeNull()
+  })
 })

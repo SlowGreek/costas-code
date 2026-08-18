@@ -35,7 +35,7 @@ interface ConversationProps {
   status: ConversationStatus
   onEnd: () => void
   onStart: () => void
-  onStopTurn: () => void
+  onStopTurn?: () => void
   onToggleMute: () => void
 }
 
@@ -193,7 +193,7 @@ function ConversationPill({
           <Codicon name={muted ? 'mic-off' : 'mic'} size="1rem" />
         </Button>
       </Tip>
-      {listening && (
+      {listening && onStopTurn && (
         <Button
           aria-label={c.stopListening}
           className="h-(--composer-control-size) shrink-0 gap-1.5 rounded-full px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"

@@ -628,6 +628,14 @@ const $workbenchPaneVisible = computed(
 )
 
 $workbenchPaneVisible.subscribe(syncWorkbenchPane)
+// An existing artifact keeps the pane registered after voice ends, so the
+// computed visibility may stay true across the next false→true voice edge.
+// Listen to that edge separately to re-reveal a tab the user dismissed.
+$workbenchVoiceActive.listen(active => {
+  if (active) {
+    syncWorkbenchPane(true)
+  }
+})
 
 // Logs are ⌘K-ONLY chrome: the pane contribution EXISTS only while $logsOpen
 // is on. Off (the default) keeps logs out of the registry and the tree

@@ -74,7 +74,7 @@ export function useRealtimeVoiceConversation({
   const connectionRef = useRef<RealtimeVoiceConnection | null>(null)
   const startGenerationRef = useRef(0)
   const transcriptWriteChainRef = useRef(Promise.resolve())
-  const transcriptWriteErrorRef = useRef<unknown>(null)
+  const failedTranscriptsRef = useRef<RealtimeTranscript[]>([])
   const wasEnabledRef = useRef(enabled)
 
   const end = useCallback(() => {
@@ -113,9 +113,25 @@ export function useRealtimeVoiceConversation({
       const connection = await startRealtimeVoiceConnection({
         beforeToolCall: async () => {
           await transcriptWriteChainRef.current
+          // Input transcription events are asynchronous relative to function
+          // calls. Give the corresponding completion event one short grace
+          // window, then wait any write it enqueued before reading the DB.
+          await new Promise<void>(resolve => window.setTimeout(resolve, 500))
+          await transcriptWriteChainRef.current
 
-          if (transcriptWriteErrorRef.current) {
-            throw transcriptWriteErrorRef.current
+          const failed = failedTranscriptsRef.current.splice(0)
+
+          for (const entry of failed) {
+            try {
+              await persistTranscriptWithRetry(
+                (method, params) => gateway.request(method, params),
+                runtimeSessionId,
+                entry
+              )
+            } catch (error) {
+              failedTranscriptsRef.current.push(entry)
+              throw error
+            }
           }
         },
         onStatus: setStatus,
@@ -128,11 +144,11 @@ export function useRealtimeVoiceConversation({
                 entry
               )
             )
-            .then(() => {
-              transcriptWriteErrorRef.current = null
-            })
             .catch(error => {
-              transcriptWriteErrorRef.current = error
+              if (!failedTranscriptsRef.current.some(failed => failed.id === entry.id)) {
+                failedTranscriptsRef.current.push(entry)
+              }
+
               notifyError(error, t.notifications.voice.transcriptionFailed)
             })
           onTranscript?.(entry)

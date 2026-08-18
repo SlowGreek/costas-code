@@ -72,6 +72,9 @@ def validate_semantic_payload(payload: Dict[str, Any]) -> None:
             )
         node_id = _required_graph_text(node.get("id"), "node id", MAX_GRAPH_ID_CHARS)
         _required_graph_text(node.get("label"), "node label", MAX_GRAPH_LABEL_CHARS)
+        kind = node.get("kind")
+        if kind is not None and kind != "":
+            _required_graph_text(kind, "node kind", 64)
         if node_id in node_ids:
             raise ArtifactValidationError(f"artifact graph has duplicate node id: {node_id}")
         node_ids.add(node_id)

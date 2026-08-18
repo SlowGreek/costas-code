@@ -198,6 +198,19 @@ def test_semantic_payload_rejects_oversized_or_disconnected_graphs(tmp_path):
                 updated_by="ambient",
             )
 
+        with pytest.raises(Exception, match="node kind must be a string"):
+            db.create_session_artifact(
+                "voice-session",
+                "map.bad-kind",
+                kind="map",
+                payload={
+                    "nodes": [{"id": "voice", "label": "Voice", "kind": {"bad": True}}],
+                    "edges": [],
+                },
+                view_state={},
+                updated_by="ambient",
+            )
+
         with pytest.raises(Exception, match="unknown node"):
             db.create_session_artifact(
                 "voice-session",

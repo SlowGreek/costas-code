@@ -113,6 +113,53 @@ describe('useRealtimeVoiceConversation', () => {
     vi.useRealTimers()
   })
 
+  it('retries an older failed transcript before allowing visualize', async () => {
+    vi.useFakeTimers()
+    let firstAttempts = 0
+
+    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => {
+      if (params.item_id === 'first') {
+        firstAttempts += 1
+
+        if (firstAttempts <= 3) {
+          throw new Error('gateway reconnecting')
+        }
+      }
+
+      return { inserted: true }
+    })
+
+    $gateway.set({ request } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+    options.onTranscript?.({ id: 'first', role: 'user', text: 'First turn.' })
+    await vi.advanceTimersByTimeAsync(2_000)
+    options.onTranscript?.({ id: 'second', role: 'assistant', text: 'Second turn.' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const barrier = options.beforeToolCall?.()
+    await vi.advanceTimersByTimeAsync(500)
+    await barrier
+
+    expect(firstAttempts).toBe(4)
+    expect(request).toHaveBeenCalledWith('voice.realtime.transcript', {
+      session_id: 'runtime-session',
+      item_id: 'first',
+      role: 'user',
+      text: 'First turn.'
+    })
+    vi.useRealTimers()
+  })
+
   it('waits for the wake listener to release the microphone before connecting', async () => {
     let release!: () => void
     const beforeConnect = vi.fn(() => new Promise<void>(resolve => (release = resolve)))

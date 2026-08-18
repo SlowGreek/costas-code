@@ -2650,6 +2650,15 @@ export const ar = defineLocale({
       timedOut: 'انتهت المهلة في انتظار البوابة. هل `hermes gateway` قيد التشغيل؟'
     }
   },
+  workbench: {
+    title: 'ورشة الأفكار',
+    waiting: 'محيطي · في الانتظار',
+    emptyTitle: 'ابدأ بالحديث. ستبني اللوحة نفسها.',
+    emptyBody: 'تتحول الأفكار إلى خريطة أو خط زمني أو مصفوفة أو رسم — أيها أنسب.',
+    paused: 'تم إيقاف التحديث المحيطي مؤقتًا',
+    drawing: 'جارٍ الرسم…',
+    trimmed: (shown, total) => `عرض ${shown} من ${total}`
+  },
   errors: {
     genericFailure: 'حدث خطأ',
     boundaryTitle: 'تعطل جزء من الواجهة',

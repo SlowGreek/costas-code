@@ -68,6 +68,7 @@ import {
   $workbenchArtifact,
   $workbenchVoiceActive,
   setWorkbenchArtifact,
+  setWorkbenchDrawing,
   shouldShowWorkbenchPane,
   type WorkbenchArtifact
 } from '@/store/workbench'
@@ -654,6 +655,24 @@ const watchWorkbenchArtifacts = () =>
 watchWorkbenchArtifacts()
 
 /**
+ * Track the diagrammer's in-flight state at APP level, for the same reason as
+ * the artifact watcher: the very first `visualize` starts before the pane is
+ * mounted, so a listener inside the pane would miss the start edge.
+ */
+const watchWorkbenchDrawing = () =>
+  onGatewayEvent('artifact.visualizing', event => {
+    if (event.session_id !== $activeSessionId.get()) {
+      return
+    }
+
+    const payload = event.payload as { active?: boolean } | undefined
+
+    setWorkbenchDrawing(payload?.active === true)
+  })
+
+watchWorkbenchDrawing()
+
+/**
  * Hydrate the artifact atom when the active session changes.
  *
  * Same reasoning as the event watcher: the pane cannot fetch its own first
@@ -663,6 +682,8 @@ watchWorkbenchArtifacts()
  */
 $activeSessionId.subscribe(runtimeSessionId => {
   setWorkbenchArtifact(null)
+  // A pending draw belongs to the session that started it.
+  setWorkbenchDrawing(false)
 
   const gateway = $gateway.get()
 

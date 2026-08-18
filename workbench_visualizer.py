@@ -10,6 +10,7 @@ from hermes_state_artifacts import (
     MAX_GRAPH_NODES,
     MAX_QUADRANT_ITEMS,
     MAX_TIMELINE_ITEMS,
+    summarize_trim,
     trim_payload_for_kind,
     validate_semantic_payload,
 )
@@ -93,7 +94,8 @@ def _infer_kind(payload: Dict[str, Any]) -> str:
     return DEFAULT_KIND
 
 
-def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
+def _parse_payload_with_trim(text: str) -> Tuple[str, Dict[str, Any], Dict[str, int] | None]:
+    """Parse the diagrammer reply, returning kind, payload and trim disclosure."""
     stripped = str(text or "").strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
@@ -119,13 +121,18 @@ def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
     # its own validator and its own (sandboxed) renderer, and it is atomic —
     # trimming HTML at a byte offset would yield a broken document.
     if kind == "sketch":
-        return kind, validate_sketch_payload(parsed)
+        return kind, validate_sketch_payload(parsed), None
 
     # Bound the payload to what the canvas can show BEFORE validating, so an
     # over-eager diagram degrades to its core instead of failing the update
     # and surfacing to the user as a broken workbench.
     payload = trim_payload_for_kind(kind, parsed)
     validate_semantic_payload(payload, kind)
+    return kind, payload, summarize_trim(kind, parsed, payload)
+
+
+def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
+    kind, payload, _ = _parse_payload_with_trim(text)
     return kind, payload
 
 
@@ -190,10 +197,10 @@ def visualize_session(
         timeout=45,
         main_runtime=None,
     )
-    kind, payload = _parse_payload(generated)
+    kind, payload, trimmed = _parse_payload_with_trim(generated)
 
     if current:
-        return db.update_artifact_semantics(
+        artifact = db.update_artifact_semantics(
             session_id,
             current["artifact_id"],
             payload=payload,
@@ -201,12 +208,51 @@ def visualize_session(
             updated_by="ambient",
             kind=kind,
         )
+        return _record_trim(db, session_id, artifact, trimmed)
 
+    view_state: Dict[str, Any] = {"positions": {}, "pinned": []}
+    if trimmed:
+        view_state["trimmed"] = trimmed
     return db.create_session_artifact(
         session_id,
         "map.main",
         kind=kind,
         payload=payload,
-        view_state={"positions": {}, "pinned": []},
+        view_state=view_state,
         updated_by="ambient",
     )
+
+
+def _record_trim(
+    db, session_id: str, artifact: Dict[str, Any], trimmed: Dict[str, int] | None
+) -> Dict[str, Any]:
+    """Keep the trim disclosure in ``view_state`` in sync with this revision.
+
+    ``view_state`` (not the semantic payload) is the right home: "showing 40 of
+    57" is a statement about what the canvas can display, and the semantic
+    payload must not carry renderer concerns. It also survives the round trip
+    to the renderer because the artifact row is persisted whole.
+    """
+    view_state = artifact.get("view_state")
+    if not isinstance(view_state, dict):
+        view_state = {}
+    if view_state.get("trimmed") == trimmed or (not trimmed and "trimmed" not in view_state):
+        return artifact
+
+    next_state = dict(view_state)
+    if trimmed:
+        next_state["trimmed"] = trimmed
+    else:
+        next_state.pop("trimmed", None)
+
+    try:
+        return db.update_artifact_view_state(
+            session_id,
+            artifact["artifact_id"],
+            view_state=next_state,
+            expected_rev=artifact["view_rev"],
+            updated_by="ambient",
+        )
+    except Exception:
+        # Disclosure is best-effort: never fail a successful drawing over it.
+        return artifact

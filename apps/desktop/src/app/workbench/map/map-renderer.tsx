@@ -1,8 +1,15 @@
 import { useMemo } from 'react'
 
+import {
+  NODE_HALF_HEIGHT,
+  NODE_HALF_WIDTH,
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  type Point
+} from '@/lib/workbench-node-box'
 import type { WorkbenchArtifact, WorkbenchEdge, WorkbenchNode } from '@/store/workbench'
 
-export type Point = { x: number; y: number }
+export type { Point }
 
 interface MapRendererProps {
   artifact: WorkbenchArtifact
@@ -15,11 +22,14 @@ interface MapRendererProps {
  * Design tokens (geometry + type scale). Colour comes from --ui-*.
  * ------------------------------------------------------------------ */
 
-export const NODE_WIDTH = 152
-export const NODE_HEIGHT = 58
+// Node box geometry lives in one place (`@/lib/workbench-node-box`) so the
+// layout's collision radius and clamp inset are derived from the SAME numbers
+// the renderer draws. Re-exported for existing importers.
+export { NODE_HEIGHT, NODE_WIDTH }
+
 const NODE_RADIUS = 12
-const NODE_HALF_W = NODE_WIDTH / 2
-const NODE_HALF_H = NODE_HEIGHT / 2
+const NODE_HALF_W = NODE_HALF_WIDTH
+const NODE_HALF_H = NODE_HALF_HEIGHT
 
 /** Type scale: 8 / 10 / 12 — one step per hierarchy level. */
 const TYPE_LABEL = 12

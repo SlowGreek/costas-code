@@ -1,14 +1,17 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useI18n } from '@/i18n'
 import { placeWorkbenchNodes } from '@/lib/workbench-layout'
 import { $gateway } from '@/store/gateway'
 import { $activeSessionId } from '@/store/session'
 import {
   $workbenchArtifact,
+  $workbenchDrawing,
   $workbenchError,
   setWorkbenchArtifact,
-  type WorkbenchArtifact
+  type WorkbenchArtifact,
+  workbenchTrimNotice
 } from '@/store/workbench'
 
 import QuadrantRenderer from './kinds/quadrant-renderer'
@@ -26,8 +29,10 @@ const samePositions = (
   Object.entries(left).every(([id, point]) => right[id]?.x === point.x && right[id]?.y === point.y)
 
 export function WorkbenchPane() {
+  const { t } = useI18n()
   const artifact = useStore($workbenchArtifact)
   const error = useStore($workbenchError)
+  const drawing = useStore($workbenchDrawing)
   const runtimeSessionId = useStore($activeSessionId)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState(DEFAULT_SIZE)
@@ -159,31 +164,57 @@ export function WorkbenchPane() {
     }
   })()
 
+  const trimmed = workbenchTrimNotice(artifact)
+
   return (
     <div className="flex size-full min-h-0 flex-col" ref={hostRef}>
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-(--ui-stroke-secondary) px-3 text-xs">
-        <span className="font-medium tracking-tight text-foreground">Ideation workbench</span>
-        <span className="font-mono text-[10px] tracking-wide text-(--ui-text-quaternary)">
-          {artifact
-            ? `${artifact.artifact_id} · ${artifact.kind} · rev ${artifact.semantic_rev}`
-            : 'ambient · waiting'}
+        <span className="font-medium tracking-tight text-foreground">{t.workbench.title}</span>
+        <span className="flex items-center gap-2 font-mono text-[10px] tracking-wide text-(--ui-text-quaternary)">
+          {drawing ? (
+            // Non-blocking: it sits in the header chrome, so the existing
+            // drawing below stays fully visible and interactive while the
+            // diagrammer works.
+            <span
+              aria-live="polite"
+              className="flex items-center gap-1 text-(--ui-text-tertiary)"
+              data-testid="workbench-drawing"
+            >
+              <span
+                aria-hidden="true"
+                className="size-1.5 animate-pulse rounded-full bg-(--ui-text-tertiary)"
+              />
+              {t.workbench.drawing}
+            </span>
+          ) : null}
+          {trimmed ? (
+            <span
+              data-testid="workbench-trimmed"
+              title={t.workbench.trimmed(trimmed.shown, trimmed.total)}
+            >
+              {t.workbench.trimmed(trimmed.shown, trimmed.total)}
+            </span>
+          ) : null}
+          <span>
+            {artifact
+              ? `${artifact.artifact_id} · ${artifact.kind} · rev ${artifact.semantic_rev}`
+              : t.workbench.waiting}
+          </span>
         </span>
       </div>
 
       {error ? (
         <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          Ambient update paused: {error}
+          {t.workbench.paused}: {error}
         </div>
       ) : null}
 
       {isEmpty ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center">
           <span className="text-sm font-medium text-(--ui-text-secondary)">
-            Start talking. The map will build itself.
+            {t.workbench.emptyTitle}
           </span>
-          <span className="text-xs text-(--ui-text-quaternary)">
-            Ideas become nodes; relationships become edges.
-          </span>
+          <span className="text-xs text-(--ui-text-quaternary)">{t.workbench.emptyBody}</span>
         </div>
       ) : (
         renderArtifact()

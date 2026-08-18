@@ -68,6 +68,6 @@ describe('WorkbenchPane', () => {
   it('shows the ideation prompt before the first ambient update', () => {
     render(<WorkbenchPane />)
 
-    expect(screen.getByText('Start talking. The map will build itself.')).toBeTruthy()
+    expect(screen.getByText('Start talking. The canvas will build itself.')).toBeTruthy()
   })
 })

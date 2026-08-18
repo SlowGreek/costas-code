@@ -150,6 +150,35 @@ def trim_payload_for_kind(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return _trim_graph(payload)
 
 
+def _count_for_kind(kind: str, payload: Any) -> int | None:
+    """How many primary items a payload carries, or None if it has no notion."""
+    if not isinstance(payload, dict):
+        return None
+    if kind in ("timeline", "quadrant"):
+        items = payload.get("items")
+        return len(items) if isinstance(items, list) else None
+    nodes = payload.get("nodes")
+    return len(nodes) if isinstance(nodes, list) else None
+
+
+def summarize_trim(
+    kind: str, proposed: Any, trimmed: Any
+) -> Dict[str, int] | None:
+    """Describe what ``trim_payload_for_kind`` dropped, for honest disclosure.
+
+    Returns ``{"shown": kept, "total": proposed}`` when items were dropped, and
+    ``None`` when the payload fit. The caller stores this alongside the
+    artifact (in ``view_state``) rather than inside the semantic payload: the
+    count is a statement about what the CANVAS can show, i.e. a renderer
+    concern, and the semantic payload must stay free of renderer concerns.
+    """
+    total = _count_for_kind(kind, proposed)
+    shown = _count_for_kind(kind, trimmed)
+    if total is None or shown is None or shown >= total:
+        return None
+    return {"shown": shown, "total": total}
+
+
 def _semantic_unit(value: Any, field: str) -> float:
     """Validate a quadrant coordinate: a real number in 0..1.
 

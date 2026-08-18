@@ -62,7 +62,7 @@ import { watchSessionPins } from '@/store/session-pin-sync'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
-import { $workbenchArtifact, $workbenchVoiceActive } from '@/store/workbench'
+import { $workbenchArtifact, $workbenchVoiceActive, shouldShowWorkbenchPane } from '@/store/workbench'
 
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
@@ -622,17 +622,18 @@ const syncWorkbenchPane = (active: boolean) => {
   }
 }
 
-const $workbenchPaneVisible = computed(
-  [$workbenchVoiceActive, $workbenchArtifact],
-  (voiceActive, artifact) => voiceActive || artifact !== null
-)
+// The workbench appears only once there is something to show. Starting a voice
+// conversation must NOT open an empty canvas: the pane is the result of the
+// voice agent deciding to call `visualize`, not a side effect of talking.
+const $workbenchPaneVisible = computed([$workbenchArtifact], shouldShowWorkbenchPane)
 
 $workbenchPaneVisible.subscribe(syncWorkbenchPane)
-// An existing artifact keeps the pane registered after voice ends, so the
-// computed visibility may stay true across the next false→true voice edge.
-// Listen to that edge separately to re-reveal a tab the user dismissed.
+// The artifact survives the end of a voice session, so the computed visibility
+// stays true across a later false→true voice edge. Re-reveal on that edge so a
+// tab the user dismissed comes back when they start talking again — but only
+// when a drawing already exists.
 $workbenchVoiceActive.listen(active => {
-  if (active) {
+  if (active && $workbenchArtifact.get() !== null) {
     syncWorkbenchPane(true)
   }
 })

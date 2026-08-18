@@ -58,3 +58,14 @@ export function resetWorkbenchForTests(): void {
   $workbenchError.set(null)
   $workbenchVoiceActive.set(false)
 }
+
+/**
+ * Whether the workbench pane should be on screen.
+ *
+ * Deliberately independent of voice state: starting a conversation must NOT
+ * open an empty canvas. The pane is the visible result of the voice agent
+ * choosing to call `visualize`, so it appears only once an artifact exists.
+ */
+export function shouldShowWorkbenchPane(artifact: null | WorkbenchArtifact): boolean {
+  return artifact !== null
+}

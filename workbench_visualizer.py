@@ -5,17 +5,23 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict
 
-from hermes_state_artifacts import validate_semantic_payload
+from hermes_state_artifacts import (
+    MAX_GRAPH_EDGES,
+    MAX_GRAPH_NODES,
+    _trim_graph,
+    validate_semantic_payload,
+)
 
 
 _MAX_TRANSCRIPT_CHARS = 64_000
 _MAX_DIRECTION_CHARS = 1_000
-_VISUALIZER_INSTRUCTIONS = """You are the mute diagrammer for a live voice ideation workbench.
+_VISUALIZER_INSTRUCTIONS = f"""You are the mute diagrammer for a live voice ideation workbench.
 Return ONLY JSON with this exact shape:
-{"nodes":[{"id":"stable-id","label":"short label","kind":"optional"}],"edges":[{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}]}.
+{{"nodes":[{{"id":"stable-id","label":"short label","kind":"optional"}}],"edges":[{{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}}]}}.
 Read the transcript as a whole and update the current graph rather than redrawing from scratch.
 Preserve existing ids for the same concept. Draw only what materially helps the shared idea.
-Never emit coordinates, prose, Markdown, more than 12 nodes, or more than 24 edges."""
+Prefer a legible diagram over an exhaustive one.
+Never emit coordinates, prose, Markdown, more than {MAX_GRAPH_NODES} nodes, or more than {MAX_GRAPH_EDGES} edges."""
 
 
 def _bounded_transcript(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -54,6 +60,10 @@ def _parse_graph(text: str) -> Dict[str, Any]:
         graph = json.loads(stripped[start : end + 1])
     except json.JSONDecodeError as exc:
         raise ValueError("workbench visualizer returned invalid JSON") from exc
+    # Bound the graph to what the canvas can show BEFORE validating, so an
+    # over-eager diagram degrades to its core instead of failing the update
+    # and surfacing to the user as a broken workbench.
+    graph = _trim_graph(graph)
     validate_semantic_payload(graph)
     return graph
 

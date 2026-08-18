@@ -3,6 +3,7 @@
 import pytest
 
 from hermes_state import SCHEMA_VERSION, SessionDB
+from hermes_state_artifacts import MAX_GRAPH_NODES
 
 
 def test_artifact_table_advances_schema_version(tmp_path):
@@ -185,13 +186,18 @@ def test_semantic_payload_rejects_oversized_or_disconnected_graphs(tmp_path):
     try:
         db.create_session(session_id="voice-session", source="desktop", model="test")
 
-        with pytest.raises(Exception, match="12 nodes"):
+        # The DB layer still refuses an over-cap write (it is the last guard for
+        # any other client); the visualizer trims before reaching it.
+        with pytest.raises(Exception, match=f"{MAX_GRAPH_NODES} nodes"):
             db.create_session_artifact(
                 "voice-session",
                 "map.too-large",
                 kind="map",
                 payload={
-                    "nodes": [{"id": f"node-{index}", "label": str(index)} for index in range(13)],
+                    "nodes": [
+                        {"id": f"node-{index}", "label": str(index)}
+                        for index in range(MAX_GRAPH_NODES + 1)
+                    ],
                     "edges": [],
                 },
                 view_state={},

@@ -1,7 +1,46 @@
 import json
 
 from hermes_state import SessionDB
+from hermes_state_artifacts import MAX_GRAPH_EDGES, MAX_GRAPH_NODES
 from workbench_visualizer import visualize_session
+
+
+def test_visualize_session_trims_an_oversized_graph_instead_of_failing(tmp_path):
+    """A too-large diagram degrades to the most connected core, never errors.
+
+    The model routinely wants more nodes than the canvas should show. Hard
+    failure surfaces to the user mid-conversation as "couldn't update the
+    workbench", which reads as a broken feature rather than a bounded canvas.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript(
+            "voice-session", item_id="user-1", role="user", text="Map the whole system."
+        )
+
+        # Comfortably over the cap; every node has at least one edge.
+        oversized = MAX_GRAPH_NODES + 18
+        nodes = [{"id": f"n{i}", "label": f"Node {i}"} for i in range(oversized)]
+        edges = [
+            {"id": f"e{i}", "from": f"n{i}", "to": f"n{i + 1}"}
+            for i in range(oversized - 1)
+        ]
+
+        def run_oneshot(**_kwargs):
+            return json.dumps({"nodes": nodes, "edges": edges})
+
+        artifact = visualize_session(db, "voice-session", run_oneshot_fn=run_oneshot)
+
+        payload = artifact["payload"]
+        assert len(payload["nodes"]) == MAX_GRAPH_NODES
+        assert len(payload["edges"]) <= MAX_GRAPH_EDGES
+        kept = {node["id"] for node in payload["nodes"]}
+        # Trimming must not leave edges pointing at dropped nodes.
+        for edge in payload["edges"]:
+            assert edge["from"] in kept and edge["to"] in kept
+    finally:
+        db.close()
 
 
 def test_visualize_session_delegates_full_transcript_and_updates_artifact(tmp_path):

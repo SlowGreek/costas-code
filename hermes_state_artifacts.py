@@ -21,8 +21,11 @@ class ArtifactValidationError(ValueError):
 
 
 MAX_ARTIFACT_JSON_BYTES = 64 * 1024
-MAX_GRAPH_NODES = 12
-MAX_GRAPH_EDGES = 24
+# Canvas legibility bound, not a safety bound. Real ideation sessions outgrow a
+# dozen concepts quickly, so this is generous enough to hold a whole system
+# sketch; the visualizer trims to it rather than failing the update.
+MAX_GRAPH_NODES = 40
+MAX_GRAPH_EDGES = 80
 MAX_GRAPH_ID_CHARS = 128
 MAX_GRAPH_LABEL_CHARS = 200
 
@@ -36,6 +39,60 @@ def _required_graph_text(value: Any, field: str, limit: int) -> str:
     if len(text) > limit:
         raise ArtifactValidationError(f"artifact {field} exceeds {limit} characters")
     return text
+
+
+def _trim_graph(graph: Dict[str, Any]) -> Dict[str, Any]:
+    """Bound a graph to the canvas limits, keeping its most connected core.
+
+    The diagrammer regularly proposes more than the canvas should show. Failing
+    the write would surface mid-conversation as "couldn't update the workbench",
+    so degrade instead: drop the least-connected nodes (they carry the least
+    structure), then drop any edge left dangling.
+    """
+    nodes = graph.get("nodes")
+    edges = graph.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return graph
+    if len(nodes) <= MAX_GRAPH_NODES and len(edges) <= MAX_GRAPH_EDGES:
+        return graph
+
+    degree: Dict[str, int] = {}
+    for node in nodes:
+        if isinstance(node, dict) and isinstance(node.get("id"), str):
+            degree.setdefault(node["id"], 0)
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        for side in ("from", "to"):
+            node_id = edge.get(side)
+            if isinstance(node_id, str) and node_id in degree:
+                degree[node_id] += 1
+
+    # Most connected first; ties keep the model's own ordering, which puts the
+    # concepts it considered most important earliest.
+    order = {
+        node["id"]: index
+        for index, node in enumerate(nodes)
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    ranked = sorted(order, key=lambda nid: (-degree.get(nid, 0), order[nid]))
+    kept_ids = set(ranked[:MAX_GRAPH_NODES])
+
+    kept_nodes = [
+        node for node in nodes
+        if isinstance(node, dict) and node.get("id") in kept_ids
+    ]
+    kept_edges = [
+        edge for edge in edges
+        if isinstance(edge, dict)
+        and edge.get("from") in kept_ids
+        and edge.get("to") in kept_ids
+    ][:MAX_GRAPH_EDGES]
+
+    trimmed = dict(graph)
+    trimmed["nodes"] = kept_nodes
+    trimmed["edges"] = kept_edges
+    return trimmed
 
 
 def validate_semantic_payload(payload: Dict[str, Any]) -> None:

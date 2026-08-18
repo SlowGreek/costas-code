@@ -21,6 +21,18 @@
  *  - `<form>` elements are neutralised (action removed, target defused);
  *    `allow-forms` is not granted either.
  *  - authored CSP metas are stripped (they could only loosen ours).
+ *  - `<meta http-equiv="refresh">` is stripped: it is a navigation primitive
+ *    that does NOT need `allow-top-navigation` to move the sketch frame itself
+ *    to an attacker-chosen URL, and would replace the document with a fresh one
+ *    outside our CSP.
+ *
+ * OFFLINE RUNTIME (sketch-runtime.ts)
+ * A small first-party 3D/animation helper library is inlined into <head>
+ * BEFORE the model's markup, exposed as `window.Sketch`. It is part of the
+ * srcdoc, never fetched, and performs no network access itself — so it adds
+ * capability without touching the CSP or the sandbox tokens. It is injected by
+ * the builder alongside the model's HTML and therefore does NOT count against
+ * MAX_SKETCH_HTML_BYTES, which remains entirely the model's budget.
  *
  * Runaway scripts: nothing injected into the document can stop a blocking
  * `while (true)` — that code owns its own thread of execution. The real
@@ -30,6 +42,8 @@
  * document down and killing whatever it was running. The byte cap bounds the
  * payload before any of that.
  */
+
+import { SKETCH_RUNTIME_SCRIPT } from './sketch-runtime'
 
 /** Matches the python-side MAX_SKETCH_HTML_BYTES. */
 export const MAX_SKETCH_HTML_BYTES = 128 * 1024
@@ -80,6 +94,15 @@ function stripAuthoredCsp(html: string): string {
   )
 }
 
+/**
+ * Remove `<meta http-equiv="refresh">`. Unlike link/form navigation this does
+ * NOT require `allow-top-navigation` to navigate the sketch frame itself, so
+ * it is the one navigation primitive the sandbox flags do not already cover.
+ */
+function stripMetaRefresh(html: string): string {
+  return html.replace(/<meta\b[^>]*http-equiv\s*=\s*("|')?\s*refresh[^>]*>/gi, '')
+}
+
 export interface SketchDocumentResult {
   html: string
   truncated: boolean
@@ -99,6 +122,7 @@ export function buildSketchDocument(raw: unknown): SketchDocumentResult {
   }
 
   body = stripAuthoredCsp(body)
+  body = stripMetaRefresh(body)
   body = stripBaseTags(body)
   body = defuseTopNavigation(body)
   body = neutraliseForms(body)
@@ -115,6 +139,7 @@ export function buildSketchDocument(raw: unknown): SketchDocumentResult {
     '<meta charset="utf-8">' +
     '<meta name="referrer" content="no-referrer">' +
     BASE_STYLE +
+    SKETCH_RUNTIME_SCRIPT +
     '</head><body>' +
     inner +
     '</body></html>'

@@ -12,7 +12,10 @@ import {
   type WorkbenchArtifact
 } from '@/store/workbench'
 
+import QuadrantRenderer from './kinds/quadrant-renderer'
+import TimelineRenderer from './kinds/timeline-renderer'
 import MapRenderer from './map/map-renderer'
+import SketchRenderer from './sketch/sketch-renderer'
 
 const DEFAULT_SIZE = { height: 420, width: 720 }
 
@@ -153,15 +156,16 @@ export function WorkbenchPane() {
       return null
     }
 
-    // TODO(integrator): when Agents B and C land their renderers, add these
-    // imports at the top of this file and uncomment the cases below:
-    //   import TimelineRenderer from './kinds/timeline-renderer'
-    //   import QuadrantRenderer from './kinds/quadrant-renderer'
-    //   import SketchRenderer from './sketch/sketch-renderer'
     switch (artifact.kind) {
-      // case 'timeline': return <TimelineRenderer artifact={artifact} />   // Agent B
-      // case 'quadrant': return <QuadrantRenderer artifact={artifact} />   // Agent B
-      // case 'sketch':   return <SketchRenderer artifact={artifact} />     // Agent C
+      case 'timeline':
+        return <TimelineRenderer artifact={artifact} />
+
+      case 'quadrant':
+        return <QuadrantRenderer artifact={artifact} />
+
+      case 'sketch':
+        return <SketchRenderer artifact={artifact} />
+
       default:
         return (
           <MapRenderer
@@ -174,12 +178,42 @@ export function WorkbenchPane() {
     }
   }
 
+  // Emptiness is per-kind: only `map` has nodes. Reading payload.nodes on a
+  // timeline/quadrant/sketch artifact would wrongly show the waiting state
+  // (or throw), so each kind reports its own emptiness.
+  const isEmpty = (() => {
+    if (!artifact) {
+      return true
+    }
+
+    const payload = artifact.payload as {
+      html?: unknown
+      items?: unknown[]
+      nodes?: unknown[]
+    }
+
+    switch (artifact.kind) {
+      case 'quadrant':
+
+      case 'timeline':
+        return !payload.items?.length
+
+      case 'sketch':
+        return !payload.html
+
+      default:
+        return !payload.nodes?.length
+    }
+  })()
+
   return (
     <div className="flex size-full min-h-0 flex-col" ref={hostRef}>
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-(--ui-stroke-secondary) px-3 text-xs">
         <span className="font-medium tracking-tight text-foreground">Ideation workbench</span>
         <span className="font-mono text-[10px] tracking-wide text-(--ui-text-quaternary)">
-          {artifact ? `map.main · rev ${artifact.semantic_rev}` : 'ambient · waiting'}
+          {artifact
+            ? `${artifact.artifact_id} · ${artifact.kind} · rev ${artifact.semantic_rev}`
+            : 'ambient · waiting'}
         </span>
       </div>
 
@@ -189,7 +223,7 @@ export function WorkbenchPane() {
         </div>
       ) : null}
 
-      {!artifact || artifact.payload.nodes.length === 0 ? (
+      {isEmpty ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center">
           <span className="text-sm font-medium text-(--ui-text-secondary)">
             Start talking. The map will build itself.

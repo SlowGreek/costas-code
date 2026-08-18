@@ -432,7 +432,13 @@ describe('startRealtimeVoiceConnection', () => {
     })
     expect(sessionUpdate.session.tools.map((tool: { name: string }) => tool.name)).toEqual([
       'session_snapshot',
-      'visualize'
+      'visualize',
+      // Surgical tools: one thing, instantly, with no diagrammer round trip.
+      'focus',
+      'rename',
+      'connect',
+      'disconnect',
+      'remove'
     ])
 
     connection.updateWorkbenchContext('Nodes: GPT Realtime, Workbench canvas. Edge: voice sees canvas.')

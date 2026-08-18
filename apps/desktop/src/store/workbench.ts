@@ -139,3 +139,47 @@ export function resetWorkbenchForTests(): void {
 export function shouldShowWorkbenchPane(artifact: null | WorkbenchArtifact): boolean {
   return artifact !== null
 }
+
+// --- direct manipulation state (Track B) ---
+//
+// Drag/pin/hide must paint at pointer speed, so the in-flight state lives in
+// the store and NOT in the artifact: a drag never awaits a gateway round trip.
+// The artifact's `view_state.user_pins` is the durable record, written
+// optimistically after the gesture ends and rolled back if the write fails.
+//
+// Note: `view_state.positions` (and the legacy `view_state.pinned`, which the
+// position-persist path writes as "every node id") are AUTO-POSITION
+// bookkeeping. A user pin is never inferred from them.
+
+/** Node currently under an active drag gesture, or null. */
+export const $workbenchDraggingNode = atom<null | string>(null)
+
+/**
+ * Live drag offsets, keyed by node id, in canvas units. Present only while a
+ * gesture is in flight or a write is pending; the renderer adds these on top
+ * of laid-out positions so the paint is instant and local.
+ */
+export const $workbenchDragOverride = atom<Record<string, { x: number; y: number }>>({})
+
+export function setWorkbenchDragOverride(nodeId: string, point: null | { x: number; y: number }): void {
+  const current = $workbenchDragOverride.get()
+
+  if (point === null) {
+    if (!(nodeId in current)) {
+      return
+    }
+
+    const next = { ...current }
+    delete next[nodeId]
+    $workbenchDragOverride.set(next)
+
+    return
+  }
+
+  $workbenchDragOverride.set({ ...current, [nodeId]: point })
+}
+
+export function clearWorkbenchDragState(): void {
+  $workbenchDraggingNode.set(null)
+  $workbenchDragOverride.set({})
+}

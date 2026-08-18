@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useStore } from '@nanostores/react'
+import { type PointerEvent as ReactPointerEvent, useCallback, useMemo, useRef } from 'react'
 
 import {
   NODE_HALF_HEIGHT,
@@ -7,13 +8,27 @@ import {
   NODE_WIDTH,
   type Point
 } from '@/lib/workbench-node-box'
-import type { WorkbenchArtifact, WorkbenchEdge, WorkbenchNode } from '@/store/workbench'
+import {
+  $workbenchDraggingNode,
+  $workbenchDragOverride,
+  setWorkbenchDragOverride,
+  type WorkbenchArtifact,
+  type WorkbenchEdge,
+  type WorkbenchNode
+} from '@/store/workbench'
 
 export type { Point }
 
 interface MapRendererProps {
   artifact: WorkbenchArtifact
   height: number
+  /**
+   * Called once a drag GESTURE ENDS, with the node's new canvas centre. The
+   * drag itself never waits for this: painting is renderer-local, and the
+   * caller persists the resulting USER PIN optimistically (with rollback).
+   * Omit to keep the canvas read-only.
+   */
+  onNodePinned?: (nodeId: string, point: Point) => void
   positions: Record<string, Point>
   width: number
 }
@@ -196,18 +211,177 @@ const degreeMap = (nodes: WorkbenchNode[], edges: WorkbenchEdge[]): Record<strin
   return degrees
 }
 
-export default function MapRenderer({ artifact, height, positions, width }: MapRendererProps) {
+/**
+ * Map a client (viewport) point into canvas/viewBox units.
+ *
+ * Pure and DOM-free so it is unit-testable: the caller supplies the SVG's
+ * bounding rect. `preserveAspectRatio` defaults to `xMidYMid meet`, so the
+ * viewBox is letterboxed inside the element — the scale is the SMALLER of the
+ * two ratios and the leftover is split evenly as padding.
+ */
+export function clientToCanvas(
+  client: Point,
+  rect: { height: number; left: number; top: number; width: number },
+  viewBox: { height: number; width: number }
+): Point {
+  if (!rect.width || !rect.height || !viewBox.width || !viewBox.height) {
+    return { x: client.x - rect.left, y: client.y - rect.top }
+  }
+
+  const scale = Math.min(rect.width / viewBox.width, rect.height / viewBox.height)
+  const padX = (rect.width - viewBox.width * scale) / 2
+  const padY = (rect.height - viewBox.height * scale) / 2
+
+  return {
+    x: (client.x - rect.left - padX) / scale,
+    y: (client.y - rect.top - padY) / scale
+  }
+}
+
+/** Keep a dragged node's centre fully on canvas. */
+export function clampToCanvas(point: Point, width: number, height: number): Point {
+  return {
+    x: Math.min(Math.max(point.x, NODE_HALF_W), Math.max(NODE_HALF_W, width - NODE_HALF_W)),
+    y: Math.min(Math.max(point.y, NODE_HALF_H), Math.max(NODE_HALF_H, height - NODE_HALF_H))
+  }
+}
+
+export default function MapRenderer({
+  artifact,
+  height,
+  onNodePinned,
+  positions,
+  width
+}: MapRendererProps) {
   const { edges, nodes } = artifact.payload
   const bows = useMemo(() => bowFactors(edges), [edges])
   const degrees = useMemo(() => degreeMap(nodes, edges), [edges, nodes])
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const gestureRef = useRef<null | { grab: Point; nodeId: string; origin: Point }>(null)
+  const dragOverride = useStore($workbenchDragOverride)
+  const draggingNode = useStore($workbenchDraggingNode)
+  const draggable = typeof onNodePinned === 'function'
+
+  // Drag positions are applied at PAINT time, on top of whatever the layout
+  // engine produced. The layout itself is never frozen by a drag.
+  const paintPositions = useMemo(() => {
+    if (Object.keys(dragOverride).length === 0) {
+      return positions
+    }
+
+    const merged: Record<string, Point> = { ...positions }
+
+    for (const [id, point] of Object.entries(dragOverride)) {
+      if (id in merged) {
+        merged[id] = point
+      }
+    }
+
+    return merged
+  }, [dragOverride, positions])
+
+  const toCanvas = useCallback(
+    (clientX: number, clientY: number): Point => {
+      const rect = svgRef.current?.getBoundingClientRect()
+
+      if (!rect) {
+        return { x: clientX, y: clientY }
+      }
+
+      return clientToCanvas({ x: clientX, y: clientY }, rect, { height, width })
+    },
+    [height, width]
+  )
+
+  const handlePointerDown = useCallback(
+    (nodeId: string) => (event: ReactPointerEvent<SVGGElement>) => {
+      if (!draggable || event.button !== 0) {
+        return
+      }
+
+      const origin = paintPositions[nodeId]
+
+      if (!origin) {
+        return
+      }
+
+      // Do NOT preventDefault/stopPropagation on down: Track A's click and
+      // selection handling must still see the event. A drag only asserts
+      // itself once the pointer actually moves.
+      gestureRef.current = {
+        grab: toCanvas(event.clientX, event.clientY),
+        nodeId,
+        origin
+      }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+    },
+    [draggable, paintPositions, toCanvas]
+  )
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<SVGGElement>) => {
+      const gesture = gestureRef.current
+
+      if (!gesture) {
+        return
+      }
+
+      const now = toCanvas(event.clientX, event.clientY)
+
+      const next = clampToCanvas(
+        {
+          x: gesture.origin.x + (now.x - gesture.grab.x),
+          y: gesture.origin.y + (now.y - gesture.grab.y)
+        },
+        width,
+        height
+      )
+
+      // Purely local: no await, no gateway, no model. This is the whole point.
+      if ($workbenchDraggingNode.get() !== gesture.nodeId) {
+        $workbenchDraggingNode.set(gesture.nodeId)
+      }
+
+      setWorkbenchDragOverride(gesture.nodeId, next)
+    },
+    [height, toCanvas, width]
+  )
+
+  const endGesture = useCallback(
+    (event: ReactPointerEvent<SVGGElement>) => {
+      const gesture = gestureRef.current
+
+      gestureRef.current = null
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+
+      if (!gesture) {
+        return
+      }
+
+      const moved = $workbenchDragOverride.get()[gesture.nodeId]
+
+      $workbenchDraggingNode.set(null)
+
+      if (!moved) {
+        // A press with no movement is a click, not a drag: leave it to Track A.
+        return
+      }
+
+      // Persist AFTER the paint; the override stays until the caller confirms
+      // (or rolls back), so the node never snaps back mid-write.
+      onNodePinned?.(gesture.nodeId, moved)
+    },
+    [onNodePinned]
+  )
 
   return (
     <svg
       aria-label="Live ideation map"
       className="min-h-0 flex-1"
       data-testid="workbench-canvas"
+      ref={svgRef}
       role="img"
       viewBox={`0 0 ${width} ${height}`}
     >
@@ -264,8 +438,8 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
       {/* Edges first so nodes always sit above the wiring. */}
       <g fill="none">
         {edges.map(edge => {
-          const from = positions[edge.from]
-          const to = positions[edge.to]
+          const from = paintPositions[edge.from]
+          const to = paintPositions[edge.to]
 
           if (!from || !to) {
             return null
@@ -317,7 +491,7 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
       </g>
 
       {nodes.map(node => {
-        const point = positions[node.id]
+        const point = paintPositions[node.id]
 
         if (!point) {
           return null
@@ -331,8 +505,13 @@ export default function MapRenderer({ artifact, height, positions, width }: MapR
 
         return (
           <g
-            className="wb-node wb-enter"
+            className={draggingNode === node.id ? 'wb-enter' : 'wb-node wb-enter'}
             key={node.id}
+            onPointerCancel={draggable ? endGesture : undefined}
+            onPointerDown={draggable ? handlePointerDown(node.id) : undefined}
+            onPointerMove={draggable ? handlePointerMove : undefined}
+            onPointerUp={draggable ? endGesture : undefined}
+            style={draggable ? { cursor: draggingNode === node.id ? 'grabbing' : 'grab' } : undefined}
             transform={`translate(${(point.x - NODE_HALF_W).toFixed(2)} ${(point.y - NODE_HALF_H).toFixed(2)})`}
           >
             <rect

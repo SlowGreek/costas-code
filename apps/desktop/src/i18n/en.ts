@@ -3198,6 +3198,16 @@ export const en: Translations = {
     }
   },
 
+  workbench: {
+    title: 'Ideation workbench',
+    waiting: 'ambient · waiting',
+    emptyTitle: 'Start talking. The canvas will build itself.',
+    emptyBody: 'Ideas become a map, timeline, quadrant, or sketch — whichever fits.',
+    paused: 'Ambient update paused',
+    drawing: 'Drawing…',
+    trimmed: (shown, total) => `Showing ${shown} of ${total}`
+  },
+
   errors: {
     genericFailure: 'Something went wrong',
     boundaryTitle: 'Something broke in the interface',

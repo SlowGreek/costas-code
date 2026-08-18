@@ -2894,6 +2894,16 @@ export const ja = defineLocale({
     }
   },
 
+  workbench: {
+    title: 'アイデアワークベンチ',
+    waiting: 'アンビエント · 待機中',
+    emptyTitle: '話しかけてください。キャンバスが自動で組み上がります。',
+    emptyBody: 'アイデアはマップ、タイムライン、四象限、スケッチ — 最適な形になります。',
+    paused: 'アンビエント更新を一時停止中',
+    drawing: '描画中…',
+    trimmed: (shown, total) => `${total} 件中 ${shown} 件を表示`
+  },
+
   errors: {
     genericFailure: '問題が発生しました',
     boundaryTitle: 'インターフェイスで問題が発生しました',

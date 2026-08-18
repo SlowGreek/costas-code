@@ -3346,6 +3346,16 @@ export const zh: Translations = {
     }
   },
 
+  workbench: {
+    title: '构思工作台',
+    waiting: '环境感知 · 等待中',
+    emptyTitle: '开始说话，画布会自己生成。',
+    emptyBody: '想法会变成图谱、时间线、四象限或草图 — 哪种合适就用哪种。',
+    paused: '已暂停环境更新',
+    drawing: '绘制中…',
+    trimmed: (shown, total) => `显示 ${total} 项中的 ${shown} 项`
+  },
+
   errors: {
     genericFailure: '发生错误',
     boundaryTitle: '界面出错了',

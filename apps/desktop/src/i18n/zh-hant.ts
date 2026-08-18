@@ -2773,6 +2773,16 @@ export const zhHant = defineLocale({
     }
   },
 
+  workbench: {
+    title: '構思工作檔',
+    waiting: '環境感知 · 等待中',
+    emptyTitle: '開始說話，畫布會自行生成。',
+    emptyBody: '想法會變成圖譜、時間軸、四象限或草圖 — 哪種合適就用哪種。',
+    paused: '已暫停環境更新',
+    drawing: '繪製中…',
+    trimmed: (shown, total) => `顯示 ${total} 項中的 ${shown} 項`
+  },
+
   errors: {
     genericFailure: '發生錯誤',
     boundaryTitle: '介面出現問題',

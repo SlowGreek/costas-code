@@ -29,6 +29,19 @@ MAX_GRAPH_EDGES = 80
 MAX_GRAPH_ID_CHARS = 128
 MAX_GRAPH_LABEL_CHARS = 200
 
+# Timeline/quadrant legibility bounds. Same principle as the graph caps: the
+# visualizer trims to them rather than failing the update.
+MAX_TIMELINE_ITEMS = 24
+MAX_QUADRANT_ITEMS = 32
+MAX_DETAIL_CHARS = 400
+MAX_AXIS_LABEL_CHARS = 80
+
+# Kinds whose payload this module knows how to validate. Anything else falls
+# back to the historical `map` behaviour so unknown kinds never hard-fail.
+KNOWN_ARTIFACT_KINDS = ("map", "timeline", "quadrant")
+
+GEOMETRY_KEYS = frozenset({"x", "y", "position", "positions", "width", "height"})
+
 
 def _required_graph_text(value: Any, field: str, limit: int) -> str:
     if not isinstance(value, str):
@@ -95,7 +108,136 @@ def _trim_graph(graph: Dict[str, Any]) -> Dict[str, Any]:
     return trimmed
 
 
-def validate_semantic_payload(payload: Dict[str, Any]) -> None:
+def _trim_timeline(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Bound a timeline to what the canvas can show, keeping the earliest steps.
+
+    Same degrade-don't-fail contract as ``_trim_graph``: a too-long story loses
+    its tail rather than surfacing as a broken workbench mid-conversation.
+    """
+    items = payload.get("items")
+    if not isinstance(items, list) or len(items) <= MAX_TIMELINE_ITEMS:
+        return payload
+
+    def sort_key(pair):
+        index, item = pair
+        order = item.get("order") if isinstance(item, dict) else None
+        return (order if isinstance(order, int) and not isinstance(order, bool) else index, index)
+
+    ranked = sorted(enumerate(items), key=sort_key)[:MAX_TIMELINE_ITEMS]
+    trimmed = dict(payload)
+    trimmed["items"] = [item for _, item in sorted(ranked, key=lambda pair: pair[0])]
+    return trimmed
+
+
+def _trim_quadrant(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Bound a quadrant plot, keeping the model's earliest (most salient) items."""
+    items = payload.get("items")
+    if not isinstance(items, list) or len(items) <= MAX_QUADRANT_ITEMS:
+        return payload
+    trimmed = dict(payload)
+    trimmed["items"] = items[:MAX_QUADRANT_ITEMS]
+    return trimmed
+
+
+def trim_payload_for_kind(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Degrade an over-cap payload to canvas limits for the given kind."""
+    if not isinstance(payload, dict):
+        return payload
+    if kind == "timeline":
+        return _trim_timeline(payload)
+    if kind == "quadrant":
+        return _trim_quadrant(payload)
+    return _trim_graph(payload)
+
+
+def _semantic_unit(value: Any, field: str) -> float:
+    """Validate a quadrant coordinate: a real number in 0..1.
+
+    Quadrant items are the ONE payload-carried coordinate exemption; the value
+    is the model's judgement of where an idea sits, not a pixel.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ArtifactValidationError(f"artifact {field} must be a number")
+    if not 0.0 <= float(value) <= 1.0:
+        raise ArtifactValidationError(f"artifact {field} must be between 0 and 1")
+    return float(value)
+
+
+def _validate_timeline(payload: Dict[str, Any]) -> None:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ArtifactValidationError("artifact timeline requires an items list")
+    if len(items) > MAX_TIMELINE_ITEMS:
+        raise ArtifactValidationError(
+            f"artifact timeline may contain at most {MAX_TIMELINE_ITEMS} items"
+        )
+
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ArtifactValidationError("artifact timeline items must be objects")
+        if GEOMETRY_KEYS.intersection(item):
+            raise ArtifactValidationError(
+                "semantic artifact payload cannot contain renderer geometry"
+            )
+        item_id = _required_graph_text(item.get("id"), "timeline item id", MAX_GRAPH_ID_CHARS)
+        _required_graph_text(item.get("label"), "timeline item label", MAX_GRAPH_LABEL_CHARS)
+        detail = item.get("detail")
+        if detail is not None and detail != "":
+            _required_graph_text(detail, "timeline item detail", MAX_DETAIL_CHARS)
+        order = item.get("order")
+        if order is not None:
+            if isinstance(order, bool) or not isinstance(order, int):
+                raise ArtifactValidationError("artifact timeline item order must be an integer")
+        if item_id in seen:
+            raise ArtifactValidationError(
+                f"artifact timeline has duplicate item id: {item_id}"
+            )
+        seen.add(item_id)
+
+
+def _validate_quadrant(payload: Dict[str, Any]) -> None:
+    axes = payload.get("axes")
+    if not isinstance(axes, dict):
+        raise ArtifactValidationError("artifact quadrant requires an axes object")
+    for axis_name in ("x", "y"):
+        axis = axes.get(axis_name)
+        if not isinstance(axis, dict):
+            raise ArtifactValidationError(f"artifact quadrant axes.{axis_name} must be an object")
+        for end in ("low", "high"):
+            _required_graph_text(
+                axis.get(end), f"quadrant axes.{axis_name}.{end}", MAX_AXIS_LABEL_CHARS
+            )
+
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ArtifactValidationError("artifact quadrant requires an items list")
+    if len(items) > MAX_QUADRANT_ITEMS:
+        raise ArtifactValidationError(
+            f"artifact quadrant may contain at most {MAX_QUADRANT_ITEMS} items"
+        )
+
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ArtifactValidationError("artifact quadrant items must be objects")
+        forbidden = (GEOMETRY_KEYS - {"x", "y"}).intersection(item)
+        if forbidden:
+            raise ArtifactValidationError(
+                "semantic artifact payload cannot contain renderer geometry"
+            )
+        item_id = _required_graph_text(item.get("id"), "quadrant item id", MAX_GRAPH_ID_CHARS)
+        _required_graph_text(item.get("label"), "quadrant item label", MAX_GRAPH_LABEL_CHARS)
+        _semantic_unit(item.get("x"), f"quadrant item {item_id} x")
+        _semantic_unit(item.get("y"), f"quadrant item {item_id} y")
+        if item_id in seen:
+            raise ArtifactValidationError(
+                f"artifact quadrant has duplicate item id: {item_id}"
+            )
+        seen.add(item_id)
+
+
+def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> None:
     if not isinstance(payload, dict):
         raise ArtifactValidationError("artifact payload must be an object")
     try:
@@ -107,6 +249,14 @@ def validate_semantic_payload(payload: Dict[str, Any]) -> None:
             f"artifact payload exceeds {MAX_ARTIFACT_JSON_BYTES} bytes"
         )
 
+    if kind == "timeline":
+        _validate_timeline(payload)
+        return
+    if kind == "quadrant":
+        _validate_quadrant(payload)
+        return
+
+    # `map` (and any unrecognised kind) keeps the historical graph behaviour.
     if "nodes" not in payload and "edges" not in payload:
         return
     nodes = payload.get("nodes")
@@ -129,9 +279,9 @@ def validate_semantic_payload(payload: Dict[str, Any]) -> None:
             )
         node_id = _required_graph_text(node.get("id"), "node id", MAX_GRAPH_ID_CHARS)
         _required_graph_text(node.get("label"), "node label", MAX_GRAPH_LABEL_CHARS)
-        kind = node.get("kind")
-        if kind is not None and kind != "":
-            _required_graph_text(kind, "node kind", 64)
+        node_kind = node.get("kind")
+        if node_kind is not None and node_kind != "":
+            _required_graph_text(node_kind, "node kind", 64)
         if node_id in node_ids:
             raise ArtifactValidationError(f"artifact graph has duplicate node id: {node_id}")
         node_ids.add(node_id)
@@ -200,7 +350,7 @@ class SessionArtifactMixin:
         view_state: Dict[str, Any],
         updated_by: str,
     ) -> Dict[str, Any]:
-        validate_semantic_payload(payload)
+        validate_semantic_payload(payload, kind)
         now = time.time()
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         view_state_json = json.dumps(view_state, ensure_ascii=False, sort_keys=True)
@@ -242,19 +392,24 @@ class SessionArtifactMixin:
         payload: Dict[str, Any],
         expected_rev: int,
         updated_by: str,
+        kind: str | None = None,
     ) -> Dict[str, Any]:
-        validate_semantic_payload(payload)
+        if kind is None:
+            existing = self.get_session_artifact(session_id, artifact_id)
+            kind = str(existing["kind"]) if existing else "map"
+        validate_semantic_payload(payload, kind)
         now = time.time()
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
         def _write(conn):
             cursor = conn.execute(
                 """UPDATE session_artifacts
-                   SET payload_json = ?, semantic_rev = semantic_rev + 1,
+                   SET payload_json = ?, kind = ?, semantic_rev = semantic_rev + 1,
                        updated_by = ?, updated_at = ?
                    WHERE session_id = ? AND artifact_id = ? AND semantic_rev = ?""",
                 (
                     payload_json,
+                    kind,
                     updated_by,
                     now,
                     session_id,

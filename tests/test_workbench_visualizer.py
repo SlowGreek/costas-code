@@ -8,6 +8,41 @@ from workbench_sketch import MAX_SKETCH_HTML_BYTES
 from workbench_visualizer import visualize_session
 
 
+def test_sketch_turns_get_enough_tokens_to_emit_real_html(tmp_path):
+    """800 tokens truncates a canvas sketch mid-tag; sketch turns need headroom.
+
+    The byte-cap validator accepts truncated HTML happily, so an undersized
+    budget fails silently as a broken document rather than an error.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        budgets = []
+
+        def spy(**kwargs):
+            budgets.append(kwargs["max_tokens"])
+
+            return json.dumps({"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []})
+
+        # A plain diagram turn stays cheap.
+        visualize_session(db, "voice-session", run_oneshot_fn=spy)
+        assert budgets[-1] == 800
+
+        # An explicit visual request gets room to actually draw.
+        visualize_session(db, "voice-session", prompt="render a rotating cube", run_oneshot_fn=spy)
+        assert budgets[-1] > 800
+
+        # Once the artifact IS a sketch, every revision keeps the headroom.
+        def to_sketch(**_kwargs):
+            return json.dumps({"kind": "sketch", "html": "<canvas id='c'></canvas>"})
+
+        visualize_session(db, "voice-session", prompt="draw it", run_oneshot_fn=to_sketch)
+        visualize_session(db, "voice-session", run_oneshot_fn=spy)
+        assert budgets[-1] > 800
+    finally:
+        db.close()
+
+
 def test_visualize_session_routes_a_sketch_through_sandboxed_validation(tmp_path):
     """The diagrammer can reach for `sketch` when no typed kind fits.
 

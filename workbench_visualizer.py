@@ -45,6 +45,7 @@ The sandbox has NO network: everything must be inline and self-contained, no CDN
 All four forms are equally available — pick by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map, something you need to actually SEE is a sketch.
 Keep the current kind unless the conversation has genuinely moved to a different shape; switching redraws everything.
 Read the transcript as a whole and update the current artifact rather than redrawing from scratch.
+You are shown your own previous work as `current_graph` (nodes/edges, items, or html for a sketch) — REVISE it. For a sketch that means editing the HTML you produced last time, not starting over, unless the idea itself changed.
 Preserve existing ids for the same concept. Draw only what materially helps the shared idea.
 Prefer a legible diagram over an exhaustive one.
 Quadrant x/y are meaning, not pixels: numbers from 0 to 1 saying where the idea sits between the low and high labels.
@@ -148,10 +149,15 @@ def visualize_session(
         repair_alternation=False,
     )
     current_kind = str(current["kind"]) if current else DEFAULT_KIND
+    current_payload = current["payload"] if current else _empty_payload(DEFAULT_KIND)
     request = {
         "direction": str(prompt or "").strip()[:_MAX_DIRECTION_CHARS],
         "current_kind": current_kind,
-        "current_graph": current["payload"] if current else _empty_payload(DEFAULT_KIND),
+        # Named `current_graph` for backward compatibility with the original
+        # graph-only contract; it now carries whatever the current kind's
+        # payload is (nodes/edges, items, or html) so the model can revise its
+        # own previous work rather than redrawing blind.
+        "current_graph": current_payload,
         "transcript": _bounded_transcript(messages),
     }
 
@@ -160,11 +166,26 @@ def visualize_session(
 
         run_oneshot_fn = run_oneshot
 
+    # A diagram is a few hundred tokens of JSON; a sketch is a whole HTML
+    # document and needs far more headroom. 800 tokens caps output at ~3KB,
+    # which truncates a real canvas/WebGL sketch mid-tag and yields a broken
+    # document that the byte-cap validator would happily accept.
+    #
+    # The kind is the model's choice AFTER we call it, so we cannot know in
+    # advance whether this turn is a sketch. Budget generously whenever a
+    # sketch is plausible — already sketching, or the voice agent explicitly
+    # asked to see/draw/render/animate something.
+    wants_visual = any(
+        word in request["direction"].lower()
+        for word in ("sketch", "render", "draw", "animate", "simulate", "visual", "3d", "show me")
+    )
+    max_tokens = 6_000 if current_kind == "sketch" or wants_visual else 800
+
     generated = run_oneshot_fn(
         instructions=_VISUALIZER_INSTRUCTIONS,
         user_input=json.dumps(request, ensure_ascii=False),
         task="ideation_workbench",
-        max_tokens=800,
+        max_tokens=max_tokens,
         temperature=0.2,
         timeout=45,
         main_runtime=None,

@@ -250,6 +250,19 @@ export function useRealtimeVoiceConversation({
   useEffect(
     () =>
       startWorkbenchContextSync({
+        // Pin/hide is Track B's concern and lives on the artifact's view_state.
+        // Read lazily so the model is told a node is pinned or hidden rather
+        // than silently describing a canvas the user has already rearranged.
+        overlay: () => {
+          const viewState = $workbenchArtifact.get()?.view_state as
+            | undefined
+            | { hidden?: string[]; user_pins?: Record<string, unknown> }
+
+          return {
+            hidden: viewState?.hidden,
+            pinned: viewState?.user_pins ? Object.keys(viewState.user_pins) : undefined
+          }
+        },
         push: summary => {
           connectionRef.current?.updateWorkbenchContext(summary)
         }

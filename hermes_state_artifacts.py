@@ -332,6 +332,128 @@ def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> Non
         edge_ids.add(edge_id)
 
 
+# --- surgical edits -------------------------------------------------------
+#
+# A surgical edit changes exactly ONE thing in an existing graph without
+# invoking the diagrammer model. It reuses `validate_semantic_payload`
+# verbatim, so every existing invariant (no geometry in the payload, id
+# stability, caps, referential integrity) still holds, and the caller still
+# goes through `update_artifact_semantics`, so revision-conflict handling is
+# unchanged. The trim policy is deliberately NOT applied: a surgical edit can
+# only shrink the graph or add one edge, so it can never exceed a cap that the
+# stored payload already respected.
+
+SURGICAL_EDIT_OPS = ("rename", "connect", "disconnect", "remove")
+
+
+class SurgicalEditError(ValueError):
+    """A surgical edit could not be applied to the stored graph."""
+
+
+def _edit_text(value: Any, field: str, limit: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise SurgicalEditError(f"{field} is required")
+    text = value.strip()
+    if len(text) > limit:
+        raise SurgicalEditError(f"{field} exceeds {limit} characters")
+    return text
+
+
+def _next_edge_id(from_id: str, to_id: str, taken: set[str]) -> str:
+    base = f"e-{from_id}-{to_id}"
+    if base not in taken:
+        return base
+    index = 2
+    while f"{base}-{index}" in taken:
+        index += 1
+    return f"{base}-{index}"
+
+
+def apply_surgical_edit(payload: Dict[str, Any], edit: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a NEW graph payload with one surgical edit applied.
+
+    Raises ``SurgicalEditError`` when the edit does not apply (unknown node or
+    edge, self-edge, empty label). Never mutates the input.
+    """
+    if not isinstance(payload, dict):
+        raise SurgicalEditError("artifact payload must be an object")
+    nodes = payload.get("nodes")
+    edges = payload.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise SurgicalEditError("surgical edits require a graph artifact")
+    if not isinstance(edit, dict):
+        raise SurgicalEditError("edit must be an object")
+
+    op = str(edit.get("op") or "").strip()
+    if op not in SURGICAL_EDIT_OPS:
+        raise SurgicalEditError(f"unsupported surgical edit op: {op or '<missing>'}")
+
+    node_ids = {n.get("id") for n in nodes if isinstance(n, dict)}
+    result = dict(payload)
+
+    if op == "rename":
+        node_id = _edit_text(edit.get("node_id"), "node_id", MAX_GRAPH_ID_CHARS)
+        label = _edit_text(edit.get("label"), "label", MAX_GRAPH_LABEL_CHARS)
+        if node_id not in node_ids:
+            raise SurgicalEditError(f"unknown node: {node_id}")
+        # Node ids are stable; a rename touches the label only.
+        result["nodes"] = [
+            {**n, "label": label} if isinstance(n, dict) and n.get("id") == node_id else n
+            for n in nodes
+        ]
+        return result
+
+    if op == "remove":
+        node_id = _edit_text(edit.get("node_id"), "node_id", MAX_GRAPH_ID_CHARS)
+        if node_id not in node_ids:
+            raise SurgicalEditError(f"unknown node: {node_id}")
+        result["nodes"] = [
+            n for n in nodes if not (isinstance(n, dict) and n.get("id") == node_id)
+        ]
+        # Edges to a removed node would dangle, which validation rejects.
+        result["edges"] = [
+            e
+            for e in edges
+            if not (isinstance(e, dict) and node_id in (e.get("from"), e.get("to")))
+        ]
+        return result
+
+    if op == "disconnect":
+        edge_id = _edit_text(edit.get("edge_id"), "edge_id", MAX_GRAPH_ID_CHARS)
+        if not any(isinstance(e, dict) and e.get("id") == edge_id for e in edges):
+            raise SurgicalEditError(f"unknown edge: {edge_id}")
+        result["edges"] = [
+            e for e in edges if not (isinstance(e, dict) and e.get("id") == edge_id)
+        ]
+        return result
+
+    from_id = _edit_text(edit.get("from_id"), "from_id", MAX_GRAPH_ID_CHARS)
+    to_id = _edit_text(edit.get("to_id"), "to_id", MAX_GRAPH_ID_CHARS)
+    if from_id not in node_ids:
+        raise SurgicalEditError(f"unknown node: {from_id}")
+    if to_id not in node_ids:
+        raise SurgicalEditError(f"unknown node: {to_id}")
+    if from_id == to_id:
+        raise SurgicalEditError("connect requires two different nodes")
+    if len(edges) >= MAX_GRAPH_EDGES:
+        raise SurgicalEditError(f"artifact graph already holds {MAX_GRAPH_EDGES} edges")
+
+    label_raw = edit.get("label")
+    edge: Dict[str, Any] = {
+        "id": _next_edge_id(
+            from_id,
+            to_id,
+            {str(e.get("id")) for e in edges if isinstance(e, dict)},
+        ),
+        "from": from_id,
+        "to": to_id,
+    }
+    if isinstance(label_raw, str) and label_raw.strip():
+        edge["label"] = _edit_text(label_raw, "label", MAX_GRAPH_LABEL_CHARS)
+    result["edges"] = [*edges, edge]
+    return result
+
+
 def _shape_artifact(row: Any) -> Dict[str, Any]:
     shaped = dict(row)
     shaped["payload"] = json.loads(shaped.pop("payload_json"))

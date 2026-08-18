@@ -2,7 +2,15 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useI18n } from '@/i18n'
+import {
+  applyUserPins,
+  type DirectManipulationViewState,
+  pruneViewStateToGraph,
+  visibleGraph,
+  withUserPin
+} from '@/lib/workbench-edits'
 import { placeWorkbenchNodes } from '@/lib/workbench-layout'
+import type { Point } from '@/lib/workbench-node-box'
 import { $gateway } from '@/store/gateway'
 import { $activeSessionId } from '@/store/session'
 import {
@@ -10,6 +18,7 @@ import {
   $workbenchDrawing,
   $workbenchError,
   setWorkbenchArtifact,
+  setWorkbenchDragOverride,
   setWorkbenchLayout,
   type WorkbenchArtifact,
   workbenchTrimNotice
@@ -63,11 +72,14 @@ export function WorkbenchPane() {
   // artifact exists, so a listener here could never observe the FIRST drawing.
   // The pane is a pure consumer of the atom.
 
-  const positions = useMemo(
+  // AUTO-POSITIONS: whatever the layout engine produced. These are what gets
+  // persisted into `view_state.positions`, and the layout stays free to move
+  // them on every payload change.
+  const autoPositions = useMemo(
     () =>
       artifact
         ? placeWorkbenchNodes(
-            artifact.payload,
+            visibleGraph(artifact.payload, artifact.view_state),
             artifact.view_state.positions ?? {},
             size.width,
             size.height
@@ -76,9 +88,18 @@ export function WorkbenchPane() {
     [artifact, size.height, size.width]
   )
 
+  // USER PINS are overlaid AFTER layout (contract section 7). A different
+  // concept from auto-positions, stored in a different key, never inferred
+  // from the presence of a persisted position.
+  const positions = useMemo(
+    () => applyUserPins(autoPositions, artifact?.view_state),
+    [artifact?.view_state, autoPositions]
+  )
+
   // Publish where things actually ended up so the ONE context-freshness owner
   // can describe the canvas to the voice model without recomputing layout.
-   
+  // Deliberately AFTER pins are applied: the model must describe what the user
+  // is actually looking at, not where the layout engine would have put things.
   useEffect(() => {
     setWorkbenchLayout(
       artifact && artifact.kind !== 'sketch' && Object.keys(positions).length > 0
@@ -91,7 +112,7 @@ export function WorkbenchPane() {
     const gateway = $gateway.get()
     const persisted = artifact?.view_state.positions ?? {}
 
-    if (!gateway || !runtimeSessionId || !artifact || samePositions(persisted, positions)) {
+    if (!gateway || !runtimeSessionId || !artifact || samePositions(persisted, autoPositions)) {
       return
     }
 
@@ -103,8 +124,10 @@ export function WorkbenchPane() {
         artifact_id: artifact.artifact_id,
         view_state: {
           ...artifact.view_state,
-          positions,
-          pinned: Object.keys(positions)
+          positions: autoPositions,
+          // Legacy bookkeeping only - NOT user intent. Real user pins live in
+          // `user_pins` and are written by the drag path alone.
+          pinned: Object.keys(autoPositions)
         },
         expected_rev: artifact.view_rev,
         updated_by: 'renderer'
@@ -119,7 +142,44 @@ export function WorkbenchPane() {
     return () => {
       stale = true
     }
-  }, [artifact, positions, runtimeSessionId])
+  }, [artifact, autoPositions, runtimeSessionId])
+
+  // A drag has ALREADY painted by the time this runs. It writes the pin
+  // optimistically and rolls the local override back only if the write fails.
+  const handleNodePinned = (nodeId: string, point: Point) => {
+    const gateway = $gateway.get()
+    const current = $workbenchArtifact.get()
+
+    if (!gateway || !runtimeSessionId || !current) {
+      setWorkbenchDragOverride(nodeId, null)
+
+      return
+    }
+
+    const nextViewState = pruneViewStateToGraph(
+      withUserPin(current.view_state as DirectManipulationViewState, nodeId, point),
+      current.payload
+    )
+
+    void gateway
+      .request<{ artifact: WorkbenchArtifact }>('artifact.update_view', {
+        session_id: runtimeSessionId,
+        artifact_id: current.artifact_id,
+        view_state: nextViewState,
+        expected_rev: current.view_rev,
+        updated_by: 'user-drag'
+      })
+      .then(result => {
+        setWorkbenchArtifact(result.artifact)
+        // The pin is durable now, so the local override is redundant.
+        setWorkbenchDragOverride(nodeId, null)
+      })
+      .catch(() => {
+        // Rollback: drop the optimistic override rather than lying about a
+        // saved pin.
+        setWorkbenchDragOverride(nodeId, null)
+      })
+  }
 
   const renderArtifact = () => {
     if (!artifact) {
@@ -139,8 +199,12 @@ export function WorkbenchPane() {
       default:
         return (
           <MapRenderer
-            artifact={artifact}
+            artifact={{
+              ...artifact,
+              payload: visibleGraph(artifact.payload, artifact.view_state)
+            }}
             height={size.height}
+            onNodePinned={handleNodePinned}
             positions={positions}
             width={size.width}
           />

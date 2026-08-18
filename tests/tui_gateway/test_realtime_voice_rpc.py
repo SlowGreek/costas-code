@@ -3,6 +3,8 @@ from hermes_state import SessionDB
 from tui_gateway import realtime_voice, server
 from tools import tool_backend_helpers
 
+import threading
+
 
 def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch):
     runtime_id = "runtime-session"
@@ -49,7 +51,14 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
     db = SessionDB(db_path=tmp_path / "state.db")
     runtime_id = "runtime-session"
     db.create_session(session_id="stored-session", source="desktop", model="test")
-    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    live_session = {
+        "session_key": "stored-session",
+        "profile_home": None,
+        "history": [],
+        "history_lock": threading.Lock(),
+        "history_version": 0,
+    }
+    server._sessions[runtime_id] = live_session
     monkeypatch.setattr(server, "_db", db)
     emitted = []
     monkeypatch.setattr(server, "_emit", lambda event, sid, payload=None: emitted.append((event, sid, payload)))
@@ -79,6 +88,14 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
 
     assert first["inserted"] is True
     assert duplicate == {"inserted": False, "message_id": first["message_id"]}
+    assert live_session["history"] == [
+        {
+            "role": "user",
+            "content": "Draw the canvas as we talk.",
+            "display_kind": "realtime_transcript",
+        }
+    ]
+    assert live_session["history_version"] == 1
     assert emitted == [
         (
             "voice.realtime.transcript",

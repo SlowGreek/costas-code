@@ -9,7 +9,7 @@ import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
 import { $autoSpeakReplies, setAutoSpeakReplies } from '@/store/voice-prefs'
 import { resumeWakeAfterVoice } from '@/store/wake-word'
-import { recordWorkbenchTranscript, setWorkbenchVoiceActive } from '@/store/workbench'
+import { setWorkbenchVoiceActive } from '@/store/workbench'
 
 import type { ComposerTarget } from '../focus'
 import { onComposerVoiceToggleRequest } from '../focus'
@@ -113,11 +113,6 @@ export function useComposerVoice({
     beforeConnect: () => wakePauseBarrierRef.current ?? undefined,
     enabled: voiceConversationActive,
     onFatalError: () => setVoiceConversationActive(false),
-    onTranscript: entry => {
-      if (sessionId) {
-        recordWorkbenchTranscript(sessionId, entry)
-      }
-    },
     runtimeSessionId: sessionId
   })
 

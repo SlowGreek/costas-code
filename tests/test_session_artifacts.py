@@ -6,11 +6,11 @@ from hermes_state import SCHEMA_VERSION, SessionDB
 
 
 def test_artifact_table_advances_schema_version(tmp_path):
-    assert SCHEMA_VERSION == 28
+    assert SCHEMA_VERSION == 27
     db = SessionDB(db_path=tmp_path / "state.db")
     try:
         stored = db._conn.execute("SELECT version FROM schema_version").fetchone()[0]
-        assert stored == 28
+        assert stored == 27
     finally:
         db.close()
 
@@ -176,6 +176,40 @@ def test_semantic_payload_rejects_renderer_geometry(tmp_path):
         assert caught.type.__name__ == "ArtifactValidationError"
         assert "geometry" in str(caught.value)
         assert db.list_session_artifacts("voice-session") == []
+    finally:
+        db.close()
+
+
+def test_semantic_payload_rejects_oversized_or_disconnected_graphs(tmp_path):
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session(session_id="voice-session", source="desktop", model="test")
+
+        with pytest.raises(Exception, match="12 nodes"):
+            db.create_session_artifact(
+                "voice-session",
+                "map.too-large",
+                kind="map",
+                payload={
+                    "nodes": [{"id": f"node-{index}", "label": str(index)} for index in range(13)],
+                    "edges": [],
+                },
+                view_state={},
+                updated_by="ambient",
+            )
+
+        with pytest.raises(Exception, match="unknown node"):
+            db.create_session_artifact(
+                "voice-session",
+                "map.disconnected",
+                kind="map",
+                payload={
+                    "nodes": [{"id": "voice", "label": "Voice"}],
+                    "edges": [{"id": "bad", "from": "voice", "to": "missing"}],
+                },
+                view_state={},
+                updated_by="ambient",
+            )
     finally:
         db.close()
 

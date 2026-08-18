@@ -1057,6 +1057,19 @@ DEFAULT_CONFIG = {
             "reasoning_effort": "",  # per-task thinking level: none|minimal|low|medium|high|xhigh|max|ultra (empty = provider default)
             "language": "",
         },
+        # Mute diagrammer for GPT Realtime ideation. Kept on the auxiliary
+        # routing plane so a cheap/fast model can update the canvas without
+        # spending the coding model every few seconds.
+        "ideation_workbench": {
+            "provider": "auto",
+            "model": "",
+            "prefer_fast_model": True,
+            "base_url": "",
+            "api_key": "",
+            "timeout": 45,
+            "extra_body": {},
+            "reasoning_effort": "",
+        },
         "memory_query_rewrite": {
             "provider": "auto",
             "model": "",

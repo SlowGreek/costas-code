@@ -40,6 +40,57 @@ describe('routeRealtimeServerEvent', () => {
     expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
   })
 
+  it('delegates visualize calls to the mute workbench agent', async () => {
+    const request = vi.fn(async () => ({
+      artifact: { artifact_id: 'map.main', semantic_rev: 3, payload: { nodes: [], edges: [] } }
+    }))
+
+    const send = vi.fn()
+
+    await routeRealtimeServerEvent(
+      {
+        type: 'response.function_call_arguments.done',
+        call_id: 'call-visualize',
+        name: 'visualize',
+        arguments: JSON.stringify({ prompt: 'Show voice and canvas as separate consumers.' })
+      },
+      { request, runtimeSessionId: 'runtime-session', send }
+    )
+
+    expect(request).toHaveBeenCalledWith('workbench.visualize', {
+      session_id: 'runtime-session',
+      prompt: 'Show voice and canvas as separate consumers.'
+    })
+    expect(JSON.parse(send.mock.calls[0][0].item.output).artifact.semantic_rev).toBe(3)
+  })
+
+  it('returns visualization failures to the voice agent instead of dropping the turn', async () => {
+    const send = vi.fn()
+
+    await expect(
+      routeRealtimeServerEvent(
+        {
+          type: 'response.function_call_arguments.done',
+          call_id: 'call-visualize',
+          name: 'visualize',
+          arguments: '{}'
+        },
+        {
+          request: vi.fn(async () => {
+            throw new Error('diagram JSON was invalid')
+          }),
+          runtimeSessionId: 'runtime-session',
+          send
+        }
+      )
+    ).resolves.toBeUndefined()
+
+    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({
+      error: 'diagram JSON was invalid'
+    })
+    expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
+  })
+
   it('publishes completed user and assistant transcripts', async () => {
     const onTranscript = vi.fn()
 
@@ -159,11 +210,22 @@ describe('startRealtimeVoiceConnection', () => {
     expect(peer.setRemoteDescription).toHaveBeenCalledWith({ type: 'answer', sdp: 'answer-sdp' })
 
     channelListeners.get('open')?.({})
-    expect(JSON.parse(sent[0])).toMatchObject({
+    const sessionUpdate = JSON.parse(sent[0])
+
+    expect(sessionUpdate).toMatchObject({
+      type: 'session.update',
+      session: { tool_choice: 'auto' }
+    })
+    expect(sessionUpdate.session.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      'session_snapshot',
+      'visualize'
+    ])
+
+    connection.updateWorkbenchContext('Nodes: GPT Realtime, Workbench canvas. Edge: voice sees canvas.')
+    expect(JSON.parse(sent.at(-1) ?? '{}')).toMatchObject({
       type: 'session.update',
       session: {
-        tool_choice: 'auto',
-        tools: [{ name: 'session_snapshot', type: 'function' }]
+        instructions: expect.stringContaining('Nodes: GPT Realtime, Workbench canvas')
       }
     })
 

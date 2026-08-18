@@ -2,7 +2,7 @@ from hermes_state import SCHEMA_VERSION, SessionDB
 
 
 def test_realtime_transcript_schema_version_is_current():
-    assert SCHEMA_VERSION == 28
+    assert SCHEMA_VERSION == 27
 
 
 def test_realtime_transcript_is_persisted_once_by_item_id(tmp_path):

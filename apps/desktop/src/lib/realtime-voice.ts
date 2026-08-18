@@ -7,6 +7,7 @@ export interface RealtimeTranscript {
 export type RealtimeVoiceStatus = 'listening' | 'speaking'
 
 export interface RealtimeServerEventDeps {
+  beforeToolCall?: () => Promise<void>
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
@@ -24,10 +25,12 @@ interface RealtimeTokenResponse {
 export interface RealtimeVoiceConnection {
   close: () => void
   setMuted: (muted: boolean) => void
+  updateWorkbenchContext: (summary: string) => void
 }
 
 export interface StartRealtimeVoiceOptions {
   audioFactory?: () => HTMLAudioElement
+  beforeToolCall?: () => Promise<void>
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
@@ -40,8 +43,9 @@ export interface StartRealtimeVoiceOptions {
 
 const DEFAULT_REALTIME_INSTRUCTIONS =
   'You are Hermes in realtime ideation mode. Collaborate naturally and concisely. ' +
+  'Call visualize when the shared picture materially changes, at semantic milestones rather than every turn; the mute diagrammer does the drawing. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
-  'Do not claim the canvas changed unless Hermes state confirms it.'
+  'Do not claim the canvas changed unless the visualize result or Hermes state confirms it.'
 
 const sessionUpdateEvent = (instructions: string) => ({
   type: 'session.update',
@@ -56,6 +60,22 @@ const sessionUpdateEvent = (instructions: string) => ({
         parameters: {
           type: 'object',
           properties: {},
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'visualize',
+        description:
+          'Delegate a meaningful new idea, relationship, correction, or stale canvas to the mute diagrammer. Call at semantic milestones, not on every turn.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'Optional direction for what the diagrammer should emphasize or correct.'
+            }
+          },
           additionalProperties: false
         }
       }
@@ -88,7 +108,15 @@ export async function startRealtimeVoiceConnection(
 
   const tracks = stream.getTracks()
   const channel = peer.createDataChannel('oai-events')
+  const baseInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
+  let channelOpen = false
   let closed = false
+  let workbenchContext = ''
+
+  const instructions = () =>
+    workbenchContext
+      ? `${baseInstructions}\n\nCurrent workbench state (authoritative summary):\n${workbenchContext}`
+      : baseInstructions
 
   const send = (event: Record<string, unknown>) => channel.send(JSON.stringify(event))
 
@@ -98,6 +126,7 @@ export async function startRealtimeVoiceConnection(
     }
 
     closed = true
+    channelOpen = false
     tracks.forEach(track => track.stop())
     channel.close()
     peer.close()
@@ -116,13 +145,15 @@ export async function startRealtimeVoiceConnection(
     tracks.forEach(track => peer.addTrack(track, stream))
 
     channel.addEventListener('open', () => {
-      send(sessionUpdateEvent(options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS))
+      channelOpen = true
+      send(sessionUpdateEvent(instructions()))
     })
     channel.addEventListener('message', event => {
       try {
         const serverEvent = JSON.parse(event.data) as unknown
 
         void routeRealtimeServerEvent(serverEvent, {
+          beforeToolCall: options.beforeToolCall,
           onStatus: options.onStatus,
           onTranscript: options.onTranscript,
           request: options.request,
@@ -166,6 +197,13 @@ export async function startRealtimeVoiceConnection(
       tracks.forEach(track => {
         track.enabled = !muted
       })
+    },
+    updateWorkbenchContext: summary => {
+      workbenchContext = summary.trim().slice(0, 4_000)
+
+      if (channelOpen && !closed) {
+        send(sessionUpdateEvent(instructions()))
+      }
     }
   }
 }
@@ -251,10 +289,30 @@ export async function routeRealtimeServerEvent(
 
   let output: unknown
 
-  if (name === 'session_snapshot') {
-    output = await deps.request('artifact.list', { session_id: deps.runtimeSessionId })
-  } else {
-    output = { error: `Unsupported voice tool: ${name || '<missing>'}` }
+  try {
+    await deps.beforeToolCall?.()
+
+    if (name === 'session_snapshot') {
+      output = await deps.request('artifact.list', { session_id: deps.runtimeSessionId })
+    } else if (name === 'visualize') {
+      let prompt = ''
+
+      try {
+        const parsed = JSON.parse(asTrimmedString(event.arguments) || '{}') as { prompt?: unknown }
+        prompt = asTrimmedString(parsed.prompt).slice(0, 1_000)
+      } catch {
+        // Invalid optional arguments degrade to transcript-only visualization.
+      }
+
+      output = await deps.request('workbench.visualize', {
+        session_id: deps.runtimeSessionId,
+        prompt
+      })
+    } else {
+      output = { error: `Unsupported voice tool: ${name || '<missing>'}` }
+    }
+  } catch (error) {
+    output = { error: error instanceof Error ? error.message : String(error) }
   }
 
   deps.send({

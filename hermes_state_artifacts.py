@@ -20,13 +20,49 @@ class ArtifactValidationError(ValueError):
     """The artifact crossed the semantic/layout ownership boundary."""
 
 
-def _validate_semantic_payload(payload: Dict[str, Any]) -> None:
+MAX_ARTIFACT_JSON_BYTES = 64 * 1024
+MAX_GRAPH_NODES = 12
+MAX_GRAPH_EDGES = 24
+MAX_GRAPH_ID_CHARS = 128
+MAX_GRAPH_LABEL_CHARS = 200
+
+
+def _required_graph_text(value: Any, field: str, limit: int) -> str:
+    if not isinstance(value, str):
+        raise ArtifactValidationError(f"artifact {field} must be a string")
+    text = value.strip()
+    if not text:
+        raise ArtifactValidationError(f"artifact {field} is required")
+    if len(text) > limit:
+        raise ArtifactValidationError(f"artifact {field} exceeds {limit} characters")
+    return text
+
+
+def validate_semantic_payload(payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise ArtifactValidationError("artifact payload must be an object")
-    nodes = payload.get("nodes", [])
-    if not isinstance(nodes, list):
-        raise ArtifactValidationError("artifact nodes must be a list")
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ArtifactValidationError("artifact payload must be JSON serializable") from exc
+    if len(encoded) > MAX_ARTIFACT_JSON_BYTES:
+        raise ArtifactValidationError(
+            f"artifact payload exceeds {MAX_ARTIFACT_JSON_BYTES} bytes"
+        )
+
+    if "nodes" not in payload and "edges" not in payload:
+        return
+    nodes = payload.get("nodes")
+    edges = payload.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ArtifactValidationError("artifact graph requires nodes and edges lists")
+    if len(nodes) > MAX_GRAPH_NODES:
+        raise ArtifactValidationError(f"artifact graph may contain at most {MAX_GRAPH_NODES} nodes")
+    if len(edges) > MAX_GRAPH_EDGES:
+        raise ArtifactValidationError(f"artifact graph may contain at most {MAX_GRAPH_EDGES} edges")
+
     geometry_keys = {"x", "y", "position", "positions", "width", "height"}
+    node_ids: set[str] = set()
     for node in nodes:
         if not isinstance(node, dict):
             raise ArtifactValidationError("artifact nodes must be objects")
@@ -34,6 +70,27 @@ def _validate_semantic_payload(payload: Dict[str, Any]) -> None:
             raise ArtifactValidationError(
                 "semantic artifact payload cannot contain renderer geometry"
             )
+        node_id = _required_graph_text(node.get("id"), "node id", MAX_GRAPH_ID_CHARS)
+        _required_graph_text(node.get("label"), "node label", MAX_GRAPH_LABEL_CHARS)
+        if node_id in node_ids:
+            raise ArtifactValidationError(f"artifact graph has duplicate node id: {node_id}")
+        node_ids.add(node_id)
+
+    edge_ids: set[str] = set()
+    for edge in edges:
+        if not isinstance(edge, dict):
+            raise ArtifactValidationError("artifact edges must be objects")
+        edge_id = _required_graph_text(edge.get("id"), "edge id", MAX_GRAPH_ID_CHARS)
+        source = _required_graph_text(edge.get("from"), "edge from", MAX_GRAPH_ID_CHARS)
+        target = _required_graph_text(edge.get("to"), "edge to", MAX_GRAPH_ID_CHARS)
+        if edge_id in edge_ids:
+            raise ArtifactValidationError(f"artifact graph has duplicate edge id: {edge_id}")
+        if source not in node_ids or target not in node_ids:
+            raise ArtifactValidationError(f"artifact edge {edge_id} references an unknown node")
+        label = edge.get("label")
+        if label is not None and label != "":
+            _required_graph_text(label, "edge label", MAX_GRAPH_LABEL_CHARS)
+        edge_ids.add(edge_id)
 
 
 def _shape_artifact(row: Any) -> Dict[str, Any]:
@@ -83,7 +140,7 @@ class SessionArtifactMixin:
         view_state: Dict[str, Any],
         updated_by: str,
     ) -> Dict[str, Any]:
-        _validate_semantic_payload(payload)
+        validate_semantic_payload(payload)
         now = time.time()
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         view_state_json = json.dumps(view_state, ensure_ascii=False, sort_keys=True)
@@ -126,7 +183,7 @@ class SessionArtifactMixin:
         expected_rev: int,
         updated_by: str,
     ) -> Dict[str, Any]:
-        _validate_semantic_payload(payload)
+        validate_semantic_payload(payload)
         now = time.time()
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 

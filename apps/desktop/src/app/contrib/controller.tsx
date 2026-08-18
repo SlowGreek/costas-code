@@ -62,7 +62,7 @@ import { watchSessionPins } from '@/store/session-pin-sync'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
-import { $workbenchVoiceActive } from '@/store/workbench'
+import { $workbenchArtifact, $workbenchVoiceActive } from '@/store/workbench'
 
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
@@ -622,7 +622,12 @@ const syncWorkbenchPane = (active: boolean) => {
   }
 }
 
-$workbenchVoiceActive.subscribe(syncWorkbenchPane)
+const $workbenchPaneVisible = computed(
+  [$workbenchVoiceActive, $workbenchArtifact],
+  (voiceActive, artifact) => voiceActive || artifact !== null
+)
+
+$workbenchPaneVisible.subscribe(syncWorkbenchPane)
 
 // Logs are ⌘K-ONLY chrome: the pane contribution EXISTS only while $logsOpen
 // is on. Off (the default) keeps logs out of the registry and the tree

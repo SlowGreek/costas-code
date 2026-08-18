@@ -67,6 +67,19 @@ def _(rid, params: dict) -> dict:
                 text=text,
             )
             if result["inserted"]:
+                history_entry = {
+                    "role": role,
+                    "content": text,
+                    "display_kind": "realtime_transcript",
+                }
+                history_lock = session.get("history_lock")
+                if history_lock is not None:
+                    with history_lock:
+                        session.setdefault("history", []).append(history_entry)
+                        session["history_version"] = int(session.get("history_version", 0)) + 1
+                else:
+                    session.setdefault("history", []).append(history_entry)
+                    session["history_version"] = int(session.get("history_version", 0)) + 1
                 _emit(
                     "voice.realtime.transcript",
                     str(params.get("session_id") or ""),

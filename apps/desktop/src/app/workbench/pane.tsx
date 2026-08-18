@@ -12,8 +12,8 @@ import {
   type WorkbenchArtifact
 } from '@/store/workbench'
 
-const NODE_WIDTH = 136
-const NODE_HEIGHT = 52
+import MapRenderer from './map/map-renderer'
+
 const DEFAULT_SIZE = { height: 420, width: 720 }
 
 const samePositions = (
@@ -148,11 +148,37 @@ export function WorkbenchPane() {
     }
   }, [artifact, positions, runtimeSessionId])
 
+  const renderArtifact = () => {
+    if (!artifact) {
+      return null
+    }
+
+    // TODO(integrator): when Agents B and C land their renderers, add these
+    // imports at the top of this file and uncomment the cases below:
+    //   import TimelineRenderer from './kinds/timeline-renderer'
+    //   import QuadrantRenderer from './kinds/quadrant-renderer'
+    //   import SketchRenderer from './sketch/sketch-renderer'
+    switch (artifact.kind) {
+      // case 'timeline': return <TimelineRenderer artifact={artifact} />   // Agent B
+      // case 'quadrant': return <QuadrantRenderer artifact={artifact} />   // Agent B
+      // case 'sketch':   return <SketchRenderer artifact={artifact} />     // Agent C
+      default:
+        return (
+          <MapRenderer
+            artifact={artifact}
+            height={size.height}
+            positions={positions}
+            width={size.width}
+          />
+        )
+    }
+  }
+
   return (
     <div className="flex size-full min-h-0 flex-col" ref={hostRef}>
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-(--ui-stroke-secondary) px-3 text-xs">
-        <span className="font-medium text-foreground">Ideation workbench</span>
-        <span className="text-(--ui-text-quaternary)">
+        <span className="font-medium tracking-tight text-foreground">Ideation workbench</span>
+        <span className="font-mono text-[10px] tracking-wide text-(--ui-text-quaternary)">
           {artifact ? `map.main · rev ${artifact.semantic_rev}` : 'ambient · waiting'}
         </span>
       </div>
@@ -164,86 +190,16 @@ export function WorkbenchPane() {
       ) : null}
 
       {!artifact || artifact.payload.nodes.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-(--ui-text-tertiary)">
-          Start talking. The map will build itself.
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center">
+          <span className="text-sm font-medium text-(--ui-text-secondary)">
+            Start talking. The map will build itself.
+          </span>
+          <span className="text-xs text-(--ui-text-quaternary)">
+            Ideas become nodes; relationships become edges.
+          </span>
         </div>
       ) : (
-        <svg
-          aria-label="Live ideation map"
-          className="min-h-0 flex-1"
-          data-testid="workbench-canvas"
-          role="img"
-          viewBox={`0 0 ${size.width} ${size.height}`}
-        >
-          <defs>
-            <pattern height="32" id="workbench-grid" patternUnits="userSpaceOnUse" width="32">
-              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="var(--ui-stroke-secondary)" strokeWidth="0.5" />
-            </pattern>
-          </defs>
-          <rect fill="url(#workbench-grid)" height="100%" opacity="0.45" width="100%" />
-
-          {artifact.payload.edges.map(edge => {
-            const from = positions[edge.from]
-            const to = positions[edge.to]
-
-            if (!from || !to) {
-              return null
-            }
-
-            return (
-              <g key={edge.id}>
-                <line
-                  stroke="var(--ui-text-quaternary)"
-                  strokeWidth="1.5"
-                  x1={from.x}
-                  x2={to.x}
-                  y1={from.y}
-                  y2={to.y}
-                />
-                {edge.label ? (
-                  <text
-                    fill="var(--ui-text-tertiary)"
-                    fontSize="10"
-                    textAnchor="middle"
-                    x={(from.x + to.x) / 2}
-                    y={(from.y + to.y) / 2 - 6}
-                  >
-                    {edge.label}
-                  </text>
-                ) : null}
-              </g>
-            )
-          })}
-
-          {artifact.payload.nodes.map(node => {
-            const point = positions[node.id]
-
-            if (!point) {
-              return null
-            }
-
-            return (
-              <g key={node.id} transform={`translate(${point.x - NODE_WIDTH / 2} ${point.y - NODE_HEIGHT / 2})`}>
-                <rect
-                  fill="var(--ui-bg-secondary)"
-                  height={NODE_HEIGHT}
-                  rx="9"
-                  stroke="var(--ui-accent)"
-                  strokeWidth="1.5"
-                  width={NODE_WIDTH}
-                />
-                <text fill="var(--ui-text-primary)" fontSize="11" fontWeight="600" textAnchor="middle" x={NODE_WIDTH / 2} y="22">
-                  {node.label}
-                </text>
-                {node.kind ? (
-                  <text fill="var(--ui-text-quaternary)" fontSize="8" textAnchor="middle" x={NODE_WIDTH / 2} y="38">
-                    {node.kind}
-                  </text>
-                ) : null}
-              </g>
-            )
-          })}
-        </svg>
+        renderArtifact()
       )}
     </div>
   )

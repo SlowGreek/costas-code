@@ -10,9 +10,72 @@ export interface RealtimeServerEventDeps {
   beforeToolCall?: () => Promise<void>
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
+  pendingTranscription?: PendingTranscriptionTracker
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
   send: (event: Record<string, unknown>) => void
+}
+
+export interface PendingTranscriptionTracker {
+  /**
+   * Resolve once every utterance that has stopped has produced (or failed to
+   * produce) its transcription. The timeout is a *bound*, not the mechanism:
+   * a normal turn settles on the real event with no added latency.
+   */
+  awaitSettled: (timeoutMs?: number) => Promise<void>
+  markPending: () => void
+  settle: () => void
+}
+
+/** Fallback bound for a transcription event that never arrives. */
+export const PENDING_TRANSCRIPTION_TIMEOUT_MS = 4_000
+
+export function createPendingTranscriptionTracker(): PendingTranscriptionTracker {
+  let pending = 0
+  let waiters: Array<() => void> = []
+
+  const release = () => {
+    const settled = waiters
+    waiters = []
+    settled.forEach(resolve => resolve())
+  }
+
+  return {
+    awaitSettled: (timeoutMs = PENDING_TRANSCRIPTION_TIMEOUT_MS) => {
+      if (pending <= 0) {
+        return Promise.resolve()
+      }
+
+      return new Promise<void>(resolve => {
+        let done = false
+
+        const finish = () => {
+          if (done) {
+            return
+          }
+
+          done = true
+          window.clearTimeout(timer)
+          resolve()
+        }
+
+        // The timer only bounds a lost/slow transcription event; it never
+        // paces a healthy turn.
+        const timer = window.setTimeout(finish, timeoutMs)
+        waiters.push(finish)
+      })
+    },
+    markPending: () => {
+      pending += 1
+    },
+    settle: () => {
+      pending = Math.max(0, pending - 1)
+
+      if (pending === 0) {
+        release()
+      }
+    }
+  }
 }
 
 interface RealtimeTokenResponse {
@@ -24,6 +87,8 @@ interface RealtimeTokenResponse {
 
 export interface RealtimeVoiceConnection {
   close: () => void
+  /** Settles when in-flight input transcriptions have landed. */
+  awaitPendingTranscription: (timeoutMs?: number) => Promise<void>
   setMuted: (muted: boolean) => void
   updateWorkbenchContext: (summary: string) => void
 }
@@ -109,6 +174,7 @@ export async function startRealtimeVoiceConnection(
   const tracks = stream.getTracks()
   const channel = peer.createDataChannel('oai-events')
   const baseInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
+  const pendingTranscription = createPendingTranscriptionTracker()
   let channelOpen = false
   let closed = false
   let workbenchContext = ''
@@ -156,6 +222,7 @@ export async function startRealtimeVoiceConnection(
           beforeToolCall: options.beforeToolCall,
           onStatus: options.onStatus,
           onTranscript: options.onTranscript,
+          pendingTranscription,
           request: options.request,
           runtimeSessionId: options.runtimeSessionId,
           send
@@ -192,6 +259,7 @@ export async function startRealtimeVoiceConnection(
   }
 
   return {
+    awaitPendingTranscription: timeoutMs => pendingTranscription.awaitSettled(timeoutMs),
     close,
     setMuted: muted => {
       tracks.forEach(track => {
@@ -248,6 +316,22 @@ export async function routeRealtimeServerEvent(
     return
   }
 
+  if (type === 'input_audio_buffer.committed') {
+    // Exactly one committed event per utterance, and it is the point where
+    // transcription becomes in flight. `speech_stopped` is deliberately NOT
+    // used too: both fire for the same utterance, so marking on each would
+    // leave a permanently unbalanced counter.
+    deps.pendingTranscription?.markPending()
+
+    return
+  }
+
+  if (type === 'conversation.item.input_audio_transcription.failed') {
+    deps.pendingTranscription?.settle()
+
+    return
+  }
+
   if (type === 'conversation.item.input_audio_transcription.completed') {
     const text = asTrimmedString(event.transcript)
 
@@ -258,6 +342,8 @@ export async function routeRealtimeServerEvent(
         text
       })
     }
+
+    deps.pendingTranscription?.settle()
 
     return
   }

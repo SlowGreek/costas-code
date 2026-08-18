@@ -75,12 +75,17 @@ export function useRealtimeVoiceConversation({
   const startGenerationRef = useRef(0)
   const transcriptWriteChainRef = useRef(Promise.resolve())
   const failedTranscriptsRef = useRef<RealtimeTranscript[]>([])
+  // Populated once the connection exists. `beforeToolCall` closes over the ref
+  // (not the connection) because the callback is passed into the very call that
+  // creates it.
+  const pendingTranscriptionRef = useRef<(() => Promise<void>) | null>(null)
   const wasEnabledRef = useRef(enabled)
 
   const end = useCallback(() => {
     startGenerationRef.current += 1
     connectionRef.current?.close()
     connectionRef.current = null
+    pendingTranscriptionRef.current = null
     setMuted(false)
     setStatus('idle')
   }, [])
@@ -112,11 +117,11 @@ export function useRealtimeVoiceConversation({
 
       const connection = await startRealtimeVoiceConnection({
         beforeToolCall: async () => {
-          await transcriptWriteChainRef.current
-          // Input transcription events are asynchronous relative to function
-          // calls. Give the corresponding completion event one short grace
-          // window, then wait any write it enqueued before reading the DB.
-          await new Promise<void>(resolve => window.setTimeout(resolve, 500))
+          // Wait for the *specific* in-flight transcription events rather than
+          // sleeping a fixed interval: a normal turn adds no latency, and a
+          // slow one is still gated instead of raced. The tracker's internal
+          // timeout only bounds a transcription event that never arrives.
+          await pendingTranscriptionRef.current?.()
           await transcriptWriteChainRef.current
 
           while (failedTranscriptsRef.current.length > 0) {
@@ -160,6 +165,7 @@ export function useRealtimeVoiceConversation({
       }
 
       connectionRef.current = connection
+      pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
       const artifact = $workbenchArtifact.get()
 
       if (artifact) {

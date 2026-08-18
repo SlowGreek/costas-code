@@ -1,8 +1,129 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { routeRealtimeServerEvent, startRealtimeVoiceConnection } from './realtime-voice'
+import {
+  createPendingTranscriptionTracker,
+  routeRealtimeServerEvent,
+  startRealtimeVoiceConnection
+} from './realtime-voice'
+
+describe('createPendingTranscriptionTracker', () => {
+  it('adds no latency when no transcription is in flight', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const settled = vi.fn()
+
+    void tracker.awaitSettled().then(settled)
+    await Promise.resolve()
+
+    // Resolved without any timer having to fire.
+    expect(settled).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('gates until the real transcription event lands, not on a fixed delay', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const settled = vi.fn()
+
+    tracker.markPending()
+    void tracker.awaitSettled().then(settled)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(settled).not.toHaveBeenCalled()
+
+    tracker.settle()
+    await Promise.resolve()
+    expect(settled).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('falls back to a bounded timeout when the event never arrives', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const settled = vi.fn()
+
+    tracker.markPending()
+    void tracker.awaitSettled().then(settled)
+    await vi.advanceTimersByTimeAsync(3_999)
+    expect(settled).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(settled).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('waits for every in-flight utterance before releasing', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const settled = vi.fn()
+
+    tracker.markPending()
+    tracker.markPending()
+    void tracker.awaitSettled().then(settled)
+
+    tracker.settle()
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+
+    tracker.settle()
+    await Promise.resolve()
+    expect(settled).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+})
 
 describe('routeRealtimeServerEvent', () => {
+  it('marks a committed utterance pending and settles it on transcription', async () => {
+    const pendingTranscription = createPendingTranscriptionTracker()
+
+    const deps = {
+      pendingTranscription,
+      request: vi.fn(),
+      runtimeSessionId: 'runtime-session',
+      send: vi.fn()
+    }
+
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed' }, deps)
+    const settled = vi.fn()
+    void pendingTranscription.awaitSettled().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+
+    await routeRealtimeServerEvent(
+      {
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'item-1',
+        transcript: 'Voice and canvas are separate consumers.'
+      },
+      deps
+    )
+    await Promise.resolve()
+    expect(settled).toHaveBeenCalled()
+  })
+
+  it('settles a failed transcription so visualize is never wedged', async () => {
+    const pendingTranscription = createPendingTranscriptionTracker()
+
+    const deps = {
+      pendingTranscription,
+      request: vi.fn(),
+      runtimeSessionId: 'runtime-session',
+      send: vi.fn()
+    }
+
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed' }, deps)
+    const settled = vi.fn()
+    void pendingTranscription.awaitSettled().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+
+    await routeRealtimeServerEvent(
+      { type: 'conversation.item.input_audio_transcription.failed', item_id: 'item-1' },
+      deps
+    )
+    await Promise.resolve()
+    expect(settled).toHaveBeenCalled()
+  })
+
   it('bridges session_snapshot function calls to the Hermes gateway', async () => {
     const request = vi.fn(async () => ({
       artifacts: [{ artifact_id: 'map.main', kind: 'map', semantic_rev: 2, view_rev: 1 }],

@@ -10,9 +10,15 @@ import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
 const close = vi.fn()
 const setMuted = vi.fn()
 const updateWorkbenchContext = vi.fn()
+const awaitPendingTranscription = vi.fn(async () => {})
 
 vi.mock('@/lib/realtime-voice', () => ({
-  startRealtimeVoiceConnection: vi.fn(async () => ({ close, setMuted, updateWorkbenchContext }))
+  startRealtimeVoiceConnection: vi.fn(async () => ({
+    awaitPendingTranscription,
+    close,
+    setMuted,
+    updateWorkbenchContext
+  }))
 }))
 
 vi.mock('@/store/notifications', () => ({
@@ -22,8 +28,43 @@ vi.mock('@/store/notifications', () => ({
 describe('useRealtimeVoiceConversation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    awaitPendingTranscription.mockImplementation(async () => {})
     setWorkbenchArtifact(null)
     $gateway.set({ request: vi.fn(async () => ({})) } as never)
+  })
+
+  it('gates a tool call on the real transcription event, with no fixed sleep', async () => {
+    let releaseTranscription!: () => void
+    awaitPendingTranscription.mockImplementation(
+      () => new Promise<void>(resolve => (releaseTranscription = resolve))
+    )
+
+    const request = vi.fn(async () => ({ inserted: true }))
+    $gateway.set({ request } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+    const settled = vi.fn()
+    void options.beforeToolCall?.().then(settled)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // No amount of waiting releases it; only the transcription event does.
+    expect(settled).not.toHaveBeenCalled()
+
+    releaseTranscription()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(settled).toHaveBeenCalled()
   })
 
   it('starts and ends the WebRTC session from the existing conversation controls', async () => {
@@ -147,7 +188,7 @@ describe('useRealtimeVoiceConversation', () => {
     })
 
     const barrier = options.beforeToolCall?.()
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(2_000)
     await barrier
 
     expect(firstAttempts).toBe(4)
@@ -197,7 +238,7 @@ describe('useRealtimeVoiceConversation', () => {
     await firstRejection
 
     const secondBarrier = options.beforeToolCall?.()
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(2_500)
     await expect(secondBarrier).resolves.toBeUndefined()
 
     expect(attempts).toEqual({ first: 7, second: 4 })

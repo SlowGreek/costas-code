@@ -4748,12 +4748,14 @@ def run_conversation(
                     print(f"{agent.log_prefix}     • Switch providers temporarily: /model <model> --provider openrouter")
                 if (
                     _is_copilot_provider(agent)
-                    and status_code == 401
+                    and status_code in {401, 403}
                     and not _retry.copilot_auth_retry_attempted
                 ):
                     _retry.copilot_auth_retry_attempted = True
                     if agent._try_refresh_copilot_client_credentials():
-                        agent._buffer_vprint("🔐 Copilot credentials refreshed after 401. Retrying request...")
+                        agent._buffer_vprint(
+                            f"🔐 Copilot credentials refreshed after {status_code}. Retrying request..."
+                        )
                         continue
                 if (
                     agent.api_mode == "anthropic_messages"

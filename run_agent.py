@@ -6070,12 +6070,12 @@ class AIAgent:
         The raw GitHub OAuth token (`gh auth token`) is usually stable, but the
         short-TTL *exchanged* IDE token minted from it is what Copilot actually
         authenticates — and it expires mid-session. A heavy/long turn whose
-        request straddles that expiry gets a clean `401 IDE token expired:
-        unauthorized: token expired`. Simply re-resolving the (unchanged) raw
-        token and rebuilding the client leaves the SAME expired IDE token on the
-        wire, so the retry 401s again and the turn aborts as non-retryable —
-        only a gateway restart helped, because a cold process re-runs the
-        exchange. Fix: force a fresh exchange (evict the cached exchanged JWT,
+        request straddles that expiry usually gets a clean `401 IDE token
+        expired`, but GitHub may revoke or rotate an exchanged token before its
+        advertised expiry and return a bare 403 instead. Simply re-resolving the
+        (unchanged) raw token and rebuilding the client leaves the SAME stale IDE
+        token on the wire, so the retry fails again and the turn aborts as
+        non-retryable. Force a fresh exchange (evict the cached exchanged JWT,
         then mint a new one) so the retry carries a valid IDE token. Mirrors the
         400 stale-credential recovery; the caller enforces the single-shot guard.
         """
@@ -6113,7 +6113,7 @@ class AIAgent:
                 if enterprise_base_url:
                     self.base_url = enterprise_base_url.rstrip("/")
         except Exception as exc:
-            logger.debug("Copilot 401 re-exchange failed, using resolved token: %s", exc)
+            logger.debug("Copilot auth re-exchange failed, using resolved token: %s", exc)
 
         self.api_key = new_token
         self._client_kwargs["api_key"] = self.api_key

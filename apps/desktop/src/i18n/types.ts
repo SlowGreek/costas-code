@@ -2730,6 +2730,16 @@ export interface Translations {
     }
   }
 
+  workbench: {
+    title: string
+    waiting: string
+    emptyTitle: string
+    emptyBody: string
+    paused: string
+    drawing: string
+    trimmed: (shown: number, total: number) => string
+  }
+
   errors: {
     genericFailure: string
     boundaryTitle: string

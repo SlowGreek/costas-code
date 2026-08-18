@@ -41,7 +41,9 @@ Choose the ONE visual form that actually fits what the conversation needs right 
 {{"kind":"sketch","html":"<canvas id=\\"c\\"></canvas><style>...</style><script>...</script>"}}
 Reach for it when the idea is visual, spatial, dynamic, or illustrative rather than structural — a rendered 3D object, a simulation, a chart, a custom visual metaphor, an animated concept.
 Trade-off to weigh honestly: a sketch is redrawn whole and has no stable ids, so the user cannot point at its parts the way they can with a map. Worth it when the picture itself is the point.
-The sandbox has NO network: everything must be inline and self-contained, no CDN scripts, no remote images or fonts. Keep it under {MAX_SKETCH_HTML_BYTES} bytes.
+A built-in offline runtime is already injected as `window.Sketch` — never write a <script src> tag or reference a CDN: the sandbox has NO network and any remote load is blocked.
+`Sketch` gives you: `canvas` (fullscreen, DPR-correct) and `fit`; `loop(fn)` for a rAF loop with delta time; `canvas2d()`; `gl`/`program`/`shader`/`buffer` for raw WebGL; `scene3d()` for a lit 3D scene with orbit controls; `box`/`sphere`/`plane` geometry; `mat4`/`vec3` math; `lerp`/`clamp`; `hasWebGL()`; and `error(e)` to surface a failure in-frame.
+Prefer `Sketch.scene3d()` for 3D rather than hand-writing projection matrices. Everything must be inline and self-contained, under {MAX_SKETCH_HTML_BYTES} bytes (the runtime does not count against that).
 
 All four forms are equally available — pick by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map, something you need to actually SEE is a sketch.
 Keep the current kind unless the conversation has genuinely moved to a different shape; switching redraws everything.

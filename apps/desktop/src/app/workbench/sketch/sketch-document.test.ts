@@ -6,6 +6,7 @@ import {
   SKETCH_CSP,
   SKETCH_SANDBOX
 } from './sketch-document'
+import { SKETCH_RUNTIME_BYTES } from './sketch-runtime'
 
 describe('buildSketchDocument', () => {
   it('injects the CSP meta as the first element in head', () => {
@@ -93,7 +94,10 @@ describe('buildSketchDocument', () => {
     const big = 'a'.repeat(MAX_SKETCH_HTML_BYTES + 500)
     const result = buildSketchDocument(big)
     expect(result.truncated).toBe(true)
-    expect(result.html.length).toBeLessThan(big.length + 1000)
+    // Wrapper overhead is the chrome plus the injected offline runtime; the
+    // model's own bytes are still capped at MAX_SKETCH_HTML_BYTES.
+    expect(result.html.length).toBeLessThan(big.length + 1000 + SKETCH_RUNTIME_BYTES)
+    expect(result.html.length).toBeGreaterThan(MAX_SKETCH_HTML_BYTES)
   })
 
   it('does not flag normal payloads as truncated', () => {

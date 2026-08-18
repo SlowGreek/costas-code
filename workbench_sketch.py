@@ -2,7 +2,10 @@
 
 The ``sketch`` kind is the deliberate escape hatch of the ideation workbench:
 the model authors arbitrary HTML/CSS/JS (canvas, WebGL, SVG, whatever fits the
-idea) and the desktop renders it verbatim. It trades away everything the graph
+idea) and the desktop renders it verbatim, on top of a small first-party
+``Sketch`` runtime the renderer inlines into the sandbox document (see
+``apps/desktop/src/app/workbench/sketch/sketch-runtime.ts``) so sketches get
+real 3D/animation with zero network access. It trades away everything the graph
 kinds give -- stable ids, incremental updates, deixis ("that box on the left")
 -- for total expressive freedom. A sketch is regenerated whole; it is never
 patched and never referenced by id.
@@ -40,10 +43,58 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-# Roughly one screenful of generated markup plus a shader/geometry blob. Large
-# enough for real Three.js-style sketches, small enough that a runaway
-# generation cannot blow up the artifact row or the IPC payload.
+# Roughly one screenful of generated markup plus a shader/geometry blob. This
+# caps the MODEL's html only: the offline ``Sketch`` runtime is injected by the
+# desktop document builder alongside this payload and is not charged here, so
+# the full budget stays available for the sketch itself.
 MAX_SKETCH_HTML_BYTES = 128 * 1024
+
+# Guidance text for the diagrammer model, owned by this module so the sketch
+# runtime and the prompt that advertises it cannot drift apart. The integrator
+# wires this into ``workbench_visualizer.py``; nothing here imports it.
+SKETCH_MODEL_GUIDANCE = """\
+A `sketch` renders your raw HTML/CSS/JS inside a locked-down sandboxed iframe.
+It is fully OFFLINE and fully SELF-CONTAINED. There is NO network of any kind:
+you cannot use fetch, XHR, WebSocket, import(), a CDN, Google Fonts, or any
+external image/script/style URL. Every one of those is blocked by CSP and will
+silently fail. Only `data:` URIs work for images and fonts. Do not write a
+`<script src=...>` -- there is nothing to load. Emit ONE self-contained document.
+
+You are NOT limited to static markup. A first-party runtime is already injected
+into every sketch as the global `Sketch` -- do not define it, do not import it,
+just use it. It gives you real animation and real 3D:
+
+  Sketch.canvas()            -> full-bleed <canvas> (creates or reuses #sketch-canvas)
+  Sketch.canvas2d()          -> a DPR-correct 2D context on that canvas
+  Sketch.loop(fn)            -> rAF loop; fn({t, dt}) in seconds. Returns {stop()}
+  Sketch.scene3d(opts)       -> lit WebGL scene:
+                                .add(geometry, {position, rotation, scale, color:[r,g,b],
+                                                opacity, wireframe}) -> mesh
+                                .run(update)      animate + render each frame
+                                .orbitControls()  drag to rotate, wheel to zoom
+                                .camera           {distance, yaw, pitch, target, fov, light}
+                                .gl               the raw WebGLRenderingContext
+  Sketch.box(w,h,d) / Sketch.sphere(r, seg) / Sketch.plane(w,h,seg)  -> geometry
+  Sketch.gl() / Sketch.program(gl, vs, fs) / Sketch.shader / Sketch.buffer
+                             -> raw WebGL with custom GLSL shaders, if you want
+                                full control instead of the built-in renderer
+  Sketch.mat4 (identity, multiply, perspective, lookAt, translation, scaling,
+               rotationX/Y/Z, compose, normalMatrix), Sketch.vec3, lerp, clamp
+
+Colours are 0..1 RGB triples. Mutate a mesh's `.position` / `.rotation` /
+`.color` inside the update callback to animate it. Example:
+
+  <script>
+    const s = Sketch.scene3d({ distance: 7 })
+    const cube = s.add(Sketch.box(2,2,2), { color: [0.35,0.75,1.0] })
+    s.orbitControls()
+    s.run(({t}) => { cube.rotation = [t*0.6, t*0.9, 0] })
+  </script>
+
+There is NO Three.js and no way to obtain it -- use `Sketch` or raw WebGL/canvas.
+Runtime bytes are injected by the host and do NOT count against your budget:
+your HTML must be under 128 KiB (an over-cap sketch is REJECTED, not truncated,
+so keep it compact). Keep the document to a single <style> and <script>."""
 
 
 class SketchValidationError(ValueError):

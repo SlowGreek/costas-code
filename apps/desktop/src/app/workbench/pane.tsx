@@ -1,7 +1,6 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { onGatewayEvent } from '@/contrib/events'
 import { placeWorkbenchNodes } from '@/lib/workbench-layout'
 import { $gateway } from '@/store/gateway'
 import { $activeSessionId } from '@/store/session'
@@ -31,7 +30,6 @@ export function WorkbenchPane() {
   const error = useStore($workbenchError)
   const runtimeSessionId = useStore($activeSessionId)
   const hostRef = useRef<HTMLDivElement | null>(null)
-  const renderedSessionRef = useRef(runtimeSessionId)
   const [size, setSize] = useState(DEFAULT_SIZE)
 
   useEffect(() => {
@@ -54,55 +52,10 @@ export function WorkbenchPane() {
     return () => observer.disconnect()
   }, [])
 
-  useLayoutEffect(() => {
-    if (renderedSessionRef.current !== runtimeSessionId) {
-      // The atom is only a cache; never paint session A's graph while session B
-      // is becoming active. Layout effect clears it before the browser paints.
-      renderedSessionRef.current = runtimeSessionId
-      setWorkbenchArtifact(null)
-    }
-  }, [runtimeSessionId])
-
-  useEffect(() => {
-    const gateway = $gateway.get()
-
-    if (!gateway || !runtimeSessionId) {
-      return
-    }
-
-    let stale = false
-
-    void gateway
-      .request<{ artifacts?: WorkbenchArtifact[] }>('artifact.list', { session_id: runtimeSessionId })
-      .then(result => {
-        const current = result.artifacts?.find(item => item.artifact_id === 'map.main')
-
-        if (!stale && current) {
-          setWorkbenchArtifact(current)
-        }
-      })
-      .catch(() => undefined)
-
-    return () => {
-      stale = true
-    }
-  }, [runtimeSessionId])
-
-  useEffect(
-    () =>
-      onGatewayEvent('artifact.updated', event => {
-        if (event.session_id !== runtimeSessionId) {
-          return
-        }
-
-        const next = (event.payload as { artifact?: WorkbenchArtifact } | undefined)?.artifact
-
-        if (next?.artifact_id === 'map.main') {
-          setWorkbenchArtifact(next)
-        }
-      }),
-    [runtimeSessionId]
-  )
+  // Fetching the artifact and subscribing to `artifact.updated` now live at app
+  // level (see contrib/controller.tsx): the pane is not mounted until an
+  // artifact exists, so a listener here could never observe the FIRST drawing.
+  // The pane is a pure consumer of the atom.
 
   const positions = useMemo(
     () =>

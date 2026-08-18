@@ -33,6 +33,18 @@ describe('shouldShowWorkbenchPane', () => {
     expect(shouldShowWorkbenchPane($workbenchArtifact.get())).toBe(true)
   })
 
+  it('opens on the FIRST drawing, which the pane itself could never observe', () => {
+    // Regression: the artifact.updated listener used to live inside the pane,
+    // but the pane is not mounted until an artifact exists — so the first
+    // visualize wrote a drawing and the canvas stayed shut forever.
+    expect(shouldShowWorkbenchPane($workbenchArtifact.get())).toBe(false)
+
+    // Simulates the app-level watcher receiving the first artifact.updated.
+    setWorkbenchArtifact(artifact)
+
+    expect(shouldShowWorkbenchPane($workbenchArtifact.get())).toBe(true)
+  })
+
   it('keeps a drawing on screen after the voice session ends', () => {
     setWorkbenchVoiceActive(true)
     setWorkbenchArtifact(artifact)

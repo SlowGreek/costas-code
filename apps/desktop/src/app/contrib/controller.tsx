@@ -33,6 +33,7 @@ import {
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { onGatewayEvent } from '@/contrib/events'
 import { discoverBundledPlugins } from '@/contrib/plugins'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -43,6 +44,7 @@ import { Download, FileText, LayoutDashboard, PanelBottom, Terminal, Upload, Zap
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { setYoloEnabled } from '@/lib/yolo-session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
+import { $gateway } from '@/store/gateway'
 import {
   $fileBrowserOpen,
   $panesFlipped,
@@ -57,12 +59,18 @@ import {
 } from '@/store/layout'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
-import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
+import { $activeSessionId, $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
-import { $workbenchArtifact, $workbenchVoiceActive, shouldShowWorkbenchPane } from '@/store/workbench'
+import {
+  $workbenchArtifact,
+  $workbenchVoiceActive,
+  setWorkbenchArtifact,
+  shouldShowWorkbenchPane,
+  type WorkbenchArtifact
+} from '@/store/workbench'
 
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
@@ -621,6 +629,65 @@ const syncWorkbenchPane = (active: boolean) => {
     }
   }
 }
+
+/**
+ * Keep the workbench artifact atom in sync at APP level, not inside the pane.
+ *
+ * The pane only mounts once an artifact exists, so a listener living inside it
+ * can never observe the FIRST `artifact.updated` — the canvas would stay shut
+ * forever even though `visualize` succeeded and wrote a drawing. This watcher
+ * runs for the life of the app so the first drawing is what opens the pane.
+ */
+const watchWorkbenchArtifacts = () =>
+  onGatewayEvent('artifact.updated', event => {
+    if (event.session_id !== $activeSessionId.get()) {
+      return
+    }
+
+    const next = (event.payload as { artifact?: WorkbenchArtifact } | undefined)?.artifact
+
+    if (next?.artifact_id === 'map.main') {
+      setWorkbenchArtifact(next)
+    }
+  })
+
+watchWorkbenchArtifacts()
+
+/**
+ * Hydrate the artifact atom when the active session changes.
+ *
+ * Same reasoning as the event watcher: the pane cannot fetch its own first
+ * artifact, because it is not mounted until one exists. Without this,
+ * reopening a session that already has a drawing shows nothing until the
+ * voice agent happens to call `visualize` again.
+ */
+$activeSessionId.subscribe(runtimeSessionId => {
+  setWorkbenchArtifact(null)
+
+  const gateway = $gateway.get()
+
+  if (!gateway || !runtimeSessionId) {
+    return
+  }
+
+  void gateway
+    .request<{ artifacts?: WorkbenchArtifact[] }>('artifact.list', {
+      session_id: runtimeSessionId
+    })
+    .then(result => {
+      // Ignore a late reply for a session the user already navigated away from.
+      if ($activeSessionId.get() !== runtimeSessionId) {
+        return
+      }
+
+      const current = result.artifacts?.find(item => item.artifact_id === 'map.main')
+
+      if (current) {
+        setWorkbenchArtifact(current)
+      }
+    })
+    .catch(() => undefined)
+})
 
 // The workbench appears only once there is something to show. Starting a voice
 // conversation must NOT open an empty canvas: the pane is the result of the

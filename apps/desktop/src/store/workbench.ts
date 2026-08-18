@@ -38,6 +38,45 @@ export const $workbenchArtifact = atom<null | WorkbenchArtifact>(null)
 export const $workbenchError = atom<null | string>(null)
 export const $workbenchVoiceActive = atom(false)
 
+/* --- shared referent state (Track A: selection + laid-out geometry) --- */
+
+/**
+ * The node the user is currently pointing at, or null.
+ *
+ * This is the whole point of the shared referent: the user clicks a box, and
+ * "this one" / "that one" / "it" become resolvable for the voice model.
+ */
+export const $workbenchSelection = atom<null | string>(null)
+
+export interface WorkbenchLayoutSnapshot {
+  height: number
+  positions: Record<string, { x: number; y: number }>
+  width: number
+}
+
+/**
+ * Where the renderer actually put things, published so non-render consumers
+ * (the voice context pusher) can describe the canvas without recomputing the
+ * layout — and without ever seeing these pixels leave the app.
+ */
+export const $workbenchLayout = atom<null | WorkbenchLayoutSnapshot>(null)
+
+export function setWorkbenchSelection(nodeId: null | string): void {
+  if ($workbenchSelection.get() !== nodeId) {
+    $workbenchSelection.set(nodeId)
+  }
+}
+
+export function clearWorkbenchSelection(): void {
+  setWorkbenchSelection(null)
+}
+
+export function setWorkbenchLayout(snapshot: null | WorkbenchLayoutSnapshot): void {
+  $workbenchLayout.set(snapshot)
+}
+
+/* --- end shared referent state --- */
+
 /**
  * Whether the diagrammer is mid-draw.
  *
@@ -105,6 +144,18 @@ export function setWorkbenchVoiceActive(active: boolean): void {
 export function setWorkbenchArtifact(artifact: null | WorkbenchArtifact): void {
   $workbenchArtifact.set(artifact)
 
+  // A selection that no longer exists is exactly the "confidently wrong"
+  // referent we are trying to avoid, so drop it when the graph loses the node.
+  const selected = $workbenchSelection.get()
+
+  if (selected !== null) {
+    const nodes = (artifact?.payload as undefined | { nodes?: { id: string }[] })?.nodes
+
+    if (!nodes?.some(node => node.id === selected)) {
+      $workbenchSelection.set(null)
+    }
+  }
+
   if (artifact) {
     $workbenchError.set(null)
     // A drawing landing is itself proof the draw finished, even if the
@@ -127,6 +178,8 @@ export function resetWorkbenchForTests(): void {
   $workbenchVoiceActive.set(false)
   clearDrawingTimer()
   $workbenchDrawing.set(false)
+  $workbenchSelection.set(null)
+  $workbenchLayout.set(null)
 }
 
 /**

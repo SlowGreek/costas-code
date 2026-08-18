@@ -10,6 +10,7 @@ import {
   $workbenchDrawing,
   $workbenchError,
   setWorkbenchArtifact,
+  setWorkbenchLayout,
   type WorkbenchArtifact,
   workbenchTrimNotice
 } from '@/store/workbench'
@@ -74,6 +75,17 @@ export function WorkbenchPane() {
         : {},
     [artifact, size.height, size.width]
   )
+
+  // Publish where things actually ended up so the ONE context-freshness owner
+  // can describe the canvas to the voice model without recomputing layout.
+   
+  useEffect(() => {
+    setWorkbenchLayout(
+      artifact && artifact.kind !== 'sketch' && Object.keys(positions).length > 0
+        ? { height: size.height, positions, width: size.width }
+        : null
+    )
+  }, [artifact, positions, size.height, size.width])
 
   useEffect(() => {
     const gateway = $gateway.get()

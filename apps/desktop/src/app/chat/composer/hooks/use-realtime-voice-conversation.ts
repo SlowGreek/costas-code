@@ -6,9 +6,13 @@ import {
   type RealtimeVoiceConnection,
   startRealtimeVoiceConnection
 } from '@/lib/realtime-voice'
+import {
+  startWorkbenchContextSync,
+  summarizeWorkbench
+} from '@/lib/workbench-context-sync'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
-import { $workbenchArtifact, type WorkbenchArtifact } from '@/store/workbench'
+import { $workbenchArtifact, $workbenchLayout, $workbenchSelection } from '@/store/workbench'
 
 import type { ConversationStatus } from './use-voice-conversation'
 
@@ -29,57 +33,6 @@ interface RealtimeVoiceConversationOptions {
  * diagrammer is unaffected by this bound.
  */
 const HISTORY_SEED_TURNS = 20
-
-/**
- * Describe the current canvas to the voice model, per kind.
- *
- * Reading `payload.nodes` unconditionally throws for a timeline, quadrant, or
- * sketch — and because this runs inside connection setup, that failure would
- * silently cost the model all knowledge of what is on screen.
- */
-const summarizeWorkbench = (artifact: WorkbenchArtifact): string => {
-  const payload = artifact.payload as {
-    axes?: unknown
-    edges?: { from: string; label?: string; to: string }[]
-    html?: string
-    items?: { id: string; label?: string }[]
-    nodes?: { id: string; kind?: string; label?: string }[]
-  }
-
-  const head = { kind: artifact.kind, revision: artifact.semantic_rev }
-
-  switch (artifact.kind) {
-    case 'quadrant':
-      return JSON.stringify({
-        ...head,
-        axes: payload.axes,
-        items: payload.items ?? []
-      })
-
-    case 'sketch':
-      // Never ship the raw HTML: it is large, and the model does not need the
-      // markup to talk about what it drew.
-      return JSON.stringify({ ...head, note: 'a rendered visual sketch is on screen' })
-
-    case 'timeline':
-      return JSON.stringify({ ...head, items: payload.items ?? [] })
-
-    default:
-      return JSON.stringify({
-        ...head,
-        nodes: (payload.nodes ?? []).map(node => ({
-          id: node.id,
-          label: node.label,
-          kind: node.kind
-        })),
-        edges: (payload.edges ?? []).map(edge => ({
-          from: edge.from,
-          to: edge.to,
-          label: edge.label
-        }))
-      })
-  }
-}
 
 const persistTranscriptWithRetry = async (
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
@@ -251,7 +204,12 @@ export function useRealtimeVoiceConversation({
       const artifact = $workbenchArtifact.get()
 
       if (artifact) {
-        connection.updateWorkbenchContext(summarizeWorkbench(artifact))
+        connection.updateWorkbenchContext(
+          summarizeWorkbench(artifact, {
+            layout: $workbenchLayout.get(),
+            selection: $workbenchSelection.get()
+          })
+        )
       }
 
       setMuted(false)
@@ -286,11 +244,14 @@ export function useRealtimeVoiceConversation({
     connectionRef.current?.stopTurn()
   }, [])
 
+  // Contract invariant §8: exactly ONE owner of context freshness. Every
+  // source that can change what the model believes about the canvas —
+  // artifact, layout, selection, pin/hide — funnels through this subscription.
   useEffect(
     () =>
-      $workbenchArtifact.subscribe(artifact => {
-        if (artifact) {
-          connectionRef.current?.updateWorkbenchContext(summarizeWorkbench(artifact))
+      startWorkbenchContextSync({
+        push: summary => {
+          connectionRef.current?.updateWorkbenchContext(summary)
         }
       }),
     []

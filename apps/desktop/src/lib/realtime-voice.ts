@@ -122,7 +122,17 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'Continue from there — do not greet the user as if meeting them, and do not re-summarise what was already said unless asked. ' +
   'Call visualize when the shared picture materially changes, at semantic milestones rather than every turn; the mute diagrammer does the drawing. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
-  'Do not claim the canvas changed unless the visualize result or Hermes state confirms it.'
+  'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
+  // Deixis. This is the line that makes the shared referent real: without it
+  // the model has the selection in context and still asks "which one?".
+  'The workbench summary tells you where each node sits on screen in plain terms ' +
+  '("upper left", "centre", "far right", and neighbours like "left of: Planner"), ' +
+  'and `pointing_at` is the node the user has just clicked — the user is literally pointing at it. ' +
+  'When the user says "this one", "that one", "it", "this box", or "that", they mean `pointing_at`; ' +
+  'resolve it to that node id silently and act, do NOT ask which one they mean. ' +
+  'If `pointing_at` is null they are not pointing at anything, so fall back to the spatial ' +
+  'descriptions to work out what "the one on the left" refers to, and ask only if it is genuinely ambiguous. ' +
+  'Speak these locations the way a person would ("the box on the far right"); never read out coordinates.'
 
 /**
  * Server-side turn taking. Sent on every `session.update` so a later context

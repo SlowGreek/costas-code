@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { onGatewayEvent } from '@/contrib/events'
 import { placeWorkbenchNodes } from '@/lib/workbench-layout'
@@ -28,6 +28,7 @@ export function WorkbenchPane() {
   const error = useStore($workbenchError)
   const runtimeSessionId = useStore($activeSessionId)
   const hostRef = useRef<HTMLDivElement | null>(null)
+  const renderedSessionRef = useRef(runtimeSessionId)
   const [size, setSize] = useState(DEFAULT_SIZE)
 
   useEffect(() => {
@@ -49,6 +50,15 @@ export function WorkbenchPane() {
 
     return () => observer.disconnect()
   }, [])
+
+  useLayoutEffect(() => {
+    if (renderedSessionRef.current !== runtimeSessionId) {
+      // The atom is only a cache; never paint session A's graph while session B
+      // is becoming active. Layout effect clears it before the browser paints.
+      renderedSessionRef.current = runtimeSessionId
+      setWorkbenchArtifact(null)
+    }
+  }, [runtimeSessionId])
 
   useEffect(() => {
     const gateway = $gateway.get()

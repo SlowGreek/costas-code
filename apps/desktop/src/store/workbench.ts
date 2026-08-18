@@ -229,6 +229,7 @@ export function recordWorkbenchTranscript(sessionId: string, entry: RealtimeTran
 
   if (pendingSessionId && pendingSessionId !== sessionId) {
     pendingTranscripts = []
+    $workbenchArtifact.set(null)
   }
 
   pendingSessionId = sessionId

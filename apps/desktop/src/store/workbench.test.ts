@@ -7,7 +7,8 @@ import {
   $workbenchArtifact,
   parseWorkbenchGraph,
   recordWorkbenchTranscript,
-  resetWorkbenchForTests
+  resetWorkbenchForTests,
+  setWorkbenchArtifact
 } from './workbench'
 
 vi.mock('@/lib/oneshot', () => ({
@@ -97,6 +98,22 @@ describe('workbench ambient updater', () => {
       })
     )
     expect($workbenchArtifact.get()?.payload.nodes).toHaveLength(2)
+  })
+
+  it('clears a cached graph when Realtime moves to another session', () => {
+    recordWorkbenchTranscript('session-a', { id: 'a1', role: 'user', text: 'Session A' })
+    setWorkbenchArtifact({
+      artifact_id: 'map.main',
+      kind: 'map',
+      semantic_rev: 1,
+      view_rev: 1,
+      payload: { nodes: [{ id: 'a', label: 'A' }], edges: [] },
+      view_state: {}
+    })
+
+    recordWorkbenchTranscript('session-b', { id: 'b1', role: 'user', text: 'Session B' })
+
+    expect($workbenchArtifact.get()).toBeNull()
   })
 
   it('does not hot-loop an expensive ambient inference after failure', async () => {

@@ -19902,7 +19902,7 @@ def main(
     if gateway:
         import asyncio
         from gateway.run import start_gateway
-        print("Starting Hermes Gateway (messaging platforms)...")
+        print("Starting Catalyst Gateway (messaging platforms)...")
         asyncio.run(start_gateway())
         return
 

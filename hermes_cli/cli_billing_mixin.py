@@ -1240,7 +1240,7 @@ class CLIBillingMixin:
             print("  💳 No card on file — top up and manage billing on the portal.")
         elif code in ("cli_billing_disabled", "remote_spending_disabled") or \
                 getattr(exc, "code", None) == "remote_spending_disabled":
-            print("  Remote spending is off for this account — a billing admin can turn it on from the portal's Hermes Agent page.")
+            print("  Remote spending is off for this account — a billing admin can turn it on from the portal's Catalyst page.")
         elif code == "role_required":
             print("  Adding funds needs an org admin/owner. Ask an admin, or manage on the portal.")
         elif code == "idempotency_conflict":
@@ -1317,7 +1317,7 @@ class CLIBillingMixin:
 
         fresh = build_billing_state()
         if not (fresh.logged_in and fresh.cli_billing_enabled):
-            print("  Remote Spending is allowed for this terminal, but it's still off for this org. A billing admin can turn it on from the portal's Hermes Agent page, then run /topup again.")
+            print("  Remote Spending is allowed for this terminal, but it's still off for this org. A billing admin can turn it on from the portal's Catalyst page, then run /topup again.")
             self._billing_portal_hint(fresh)
             return
 

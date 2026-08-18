@@ -199,7 +199,7 @@ class SubagentLifecycleService:
         parent = self._parent_agent_resolver()
         if parent is None:
             raise SubagentLifecycleError(
-                "No active Hermes parent session is available."
+                "No active Catalyst parent session is available."
             )
         self._validate_request(request, parent)
         parent_session_id = str(getattr(parent, "session_id", "") or "") or None
@@ -237,7 +237,7 @@ class SubagentLifecycleService:
         )
         subagent_id = str(getattr(child, "_subagent_id", "") or "")
         if not subagent_id:
-            raise SubagentLifecycleError("Hermes failed to assign a child identity.")
+            raise SubagentLifecycleError("Catalyst failed to assign a child identity.")
         created = time.time()
         handle = SubagentHandle(
             PUBLIC_CONTRACT_VERSION,
@@ -509,11 +509,11 @@ class SubagentLifecycleService:
             )
         if request.working_directory is not None:
             raise SubagentLifecycleError(
-                "working_directory is not supported because Hermes delegates use isolated task environments."
+                "working_directory is not supported because Catalyst delegates use isolated task environments."
             )
         if request.blocked_tools:
             raise SubagentLifecycleError(
-                "Per-tool blocking is not supported; use allowed_toolsets. Hermes always blocks unsafe child tools."
+                "Per-tool blocking is not supported; use allowed_toolsets. Catalyst always blocks unsafe child tools."
             )
         try:
             metadata_bytes = len(

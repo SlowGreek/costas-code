@@ -819,7 +819,7 @@ def _install_plugin_core(
                 raise PluginOperationError(
                     f"Plugin '{plugin_name}' requires manifest_version {mv}, "
                     f"but this installer only supports up to {_SUPPORTED_MANIFEST_VERSION}. "
-                    f"Run {recommended_update_command()} to update Hermes.",
+                    f"Run {recommended_update_command()} to update Catalyst.",
                 ) from None
 
         # Security scan the clone BEFORE anything is moved into place
@@ -1025,7 +1025,7 @@ def cmd_install(
     ).exists():
         console.print(
             f"[yellow]Warning:[/yellow] {installed_name} doesn't contain plugin.yaml, "
-            f"plugin.json, or __init__.py. It may not be a valid Hermes plugin.",
+            f"plugin.json, or __init__.py. It may not be a valid Catalyst plugin.",
         )
 
     _prompt_plugin_env_vars(installed_manifest, console)

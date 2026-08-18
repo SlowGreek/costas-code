@@ -101,13 +101,13 @@ describe('DesktopInstallOverlay first-run setup', () => {
     render(<DesktopInstallOverlay />)
 
     expect(await screen.findByText(en.install.setupChoiceTitle)).toBeTruthy()
-    expect(screen.getByText('Connect to existing Hermes')).toBeTruthy()
-    expect(screen.getByText('Install Hermes locally')).toBeTruthy()
+    expect(screen.getByText('Connect to existing Catalyst')).toBeTruthy()
+    expect(screen.getByText('Install Catalyst locally')).toBeTruthy()
     expect(screen.queryByText(/steps complete/i)).toBeNull()
     expect(screen.queryByText(/Fetching installer manifest/i)).toBeNull()
   })
 
-  it('continues local bootstrap only when Install Hermes locally is selected', async () => {
+  it('continues local bootstrap only when Install Catalyst locally is selected', async () => {
     const desktop = installDesktopMock(
       bootstrapState({
         setupChoice: { platform: 'win32', activeRoot: 'C:\\Users\\me\\AppData\\Local\\hermes\\hermes-agent' }
@@ -116,7 +116,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Install Hermes locally'))
+    fireEvent.click(await screen.findByText('Install Catalyst locally'))
 
     expect(desktop.continueBootstrapLocal).toHaveBeenCalledTimes(1)
     expect(screen.getByText(en.install.setupChoiceTitle)).toBeTruthy()
@@ -139,7 +139,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
     desktop.continueBootstrapLocal = undefined as never
     render(<DesktopInstallOverlay />)
 
-    const install = (await screen.findByText('Install Hermes locally')).closest('button') as HTMLButtonElement
+    const install = (await screen.findByText('Install Catalyst locally')).closest('button') as HTMLButtonElement
     fireEvent.click(install)
 
     expect(
@@ -161,7 +161,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
     // Click the instant the choice paints, before React drains the passive
     // effect that reacts to the first snapshot. A loaded runner hits this
     // window by accident; observing the DOM directly hits it every time.
-    const install = (await whenPresent('Install Hermes locally')).closest('button') as HTMLButtonElement
+    const install = (await whenPresent('Install Catalyst locally')).closest('button') as HTMLButtonElement
     fireEvent.click(install)
 
     await act(async () => {
@@ -181,7 +181,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
     desktop.continueBootstrapLocal = undefined as never
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click((await screen.findByText('Install Hermes locally')).closest('button') as HTMLButtonElement)
+    fireEvent.click((await screen.findByText('Install Catalyst locally')).closest('button') as HTMLButtonElement)
     expect(
       await screen.findByText(en.install.localStartUnavailable)
     ).toBeTruthy()
@@ -207,7 +207,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
 
     expect(await screen.findByText('Gateway URL')).toBeTruthy()
     expect(screen.getByText('Test connection')).toBeTruthy()
@@ -223,13 +223,13 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     expect(await screen.findByText('Gateway URL')).toBeTruthy()
 
     fireEvent.click(screen.getByText('Back'))
 
     expect(await screen.findByText(en.install.setupChoiceTitle)).toBeTruthy()
-    expect(screen.getByText('Install Hermes locally')).toBeTruthy()
+    expect(screen.getByText('Install Catalyst locally')).toBeTruthy()
   })
 
   it('requires a successful token connection test before applying remote config', async () => {
@@ -260,7 +260,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     fireEvent.change(await screen.findByPlaceholderText('https://gateway.example.com/hermes'), {
       target: { value: 'https://gateway.example.com/hermes' }
     })
@@ -319,7 +319,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     const urlInput = await screen.findByPlaceholderText('https://gateway.example.com/hermes')
     fireEvent.change(urlInput, { target: { value: 'https://gateway.example.com/hermes' } })
 
@@ -372,7 +372,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     fireEvent.change(await screen.findByPlaceholderText('https://gateway.example.com/hermes'), {
       target: { value: 'https://gateway.example.com/hermes' }
     })
@@ -423,7 +423,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     fireEvent.change(await screen.findByPlaceholderText('https://gateway.example.com/hermes'), {
       target: { value: 'https://gateway.example.com/hermes' }
     })
@@ -475,7 +475,7 @@ describe('DesktopInstallOverlay first-run setup', () => {
 
     render(<DesktopInstallOverlay />)
 
-    fireEvent.click(await screen.findByText('Connect to existing Hermes'))
+    fireEvent.click(await screen.findByText('Connect to existing Catalyst'))
     fireEvent.change(await screen.findByPlaceholderText('https://gateway.example.com/hermes'), {
       target: { value: 'https://gateway.example.com/hermes' }
     })

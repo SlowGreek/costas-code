@@ -310,7 +310,7 @@ def claw_command(args):
         print("Usage: hermes claw <command> [options]")
         print()
         print("Commands:")
-        print("  migrate          Migrate settings from OpenClaw to Hermes")
+        print("  migrate          Migrate settings from OpenClaw to Catalyst")
         print("  cleanup          Archive leftover OpenClaw directories after migration")
         print()
         print("Run 'hermes claw <command> --help' for options.")
@@ -354,7 +354,7 @@ def _cmd_migrate(args):
     )
     print(
         color(
-            "│          ⚕ Hermes — OpenClaw Migration                 │",
+            "│          ⚕ Catalyst — OpenClaw Migration                 │",
             Colors.MAGENTA,
         )
     )
@@ -580,7 +580,7 @@ def _cmd_cleanup(args):
     )
     print(
         color(
-            "│          ⚕ Hermes — OpenClaw Cleanup                   │",
+            "│          ⚕ Catalyst — OpenClaw Cleanup                   │",
             Colors.MAGENTA,
         )
     )

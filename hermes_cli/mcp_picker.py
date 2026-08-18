@@ -122,7 +122,7 @@ def _enable_disable(name: str, *, enable: bool) -> None:
     save_config(cfg)
     print(color(
         f"  ✓ '{name}' {'enabled' if enable else 'disabled'}. "
-        "Start a new Hermes session for changes to take effect.",
+        "Start a new Catalyst session for changes to take effect.",
         Colors.GREEN,
     ))
 
@@ -258,7 +258,7 @@ def _print_rows_text(rows: List[_Row]) -> None:
         print()
         for name, _, msg in future:
             print(color(
-                f"  ⚠ '{name}' requires a newer Hermes — run `hermes update` "
+                f"  ⚠ '{name}' requires a newer Catalyst — run `hermes update` "
                 "to install this entry.",
                 Colors.YELLOW,
             ))

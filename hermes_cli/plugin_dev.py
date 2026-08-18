@@ -84,7 +84,7 @@ def _doctor_runtime(plugin_path: Path):
         manifests = manager._scan_directory(plugins_root, source="user")
         if not manifests:
             raise _DoctorLoadError(
-                f"Hermes discovery found no valid plugin manifest under {copied}"
+                f"Catalyst discovery found no valid plugin manifest under {copied}"
             )
         if len(manifests) != 1:
             raise _DoctorLoadError(

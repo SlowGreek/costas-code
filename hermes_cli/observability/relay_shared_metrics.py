@@ -124,7 +124,7 @@ class _Runtime:
     def __init__(self, host: relay_runtime.RelayRuntime | None = None) -> None:
         resolved_host = host or relay_runtime.get_runtime()
         if resolved_host is None:
-            raise RuntimeError("Hermes core Relay runtime is unavailable")
+            raise RuntimeError("Catalyst core Relay runtime is unavailable")
         self.host: relay_runtime.RelayRuntime = resolved_host
         self.relay = self.host.relay
         self._sessions_lock = threading.RLock()

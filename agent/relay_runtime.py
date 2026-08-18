@@ -460,9 +460,9 @@ class RelayRuntime:
         """
         with session.lock:
             if session.closing and not allow_closing:
-                raise RuntimeError("Hermes Relay session is closing")
+                raise RuntimeError("Catalyst Relay session is closing")
             if session.context is None or session.handle is None:
-                raise RuntimeError("Hermes Relay session context is unavailable")
+                raise RuntimeError("Catalyst Relay session context is unavailable")
             relay_context = session.context.copy()
 
         context = contextvars.copy_context()
@@ -508,9 +508,9 @@ class RelayRuntime:
         """Create and await an operation inside the session's saved context."""
         with session.lock:
             if session.closing and not allow_closing:
-                raise RuntimeError("Hermes Relay session is closing")
+                raise RuntimeError("Catalyst Relay session is closing")
             if session.context is None or session.handle is None:
-                raise RuntimeError("Hermes Relay session context is unavailable")
+                raise RuntimeError("Catalyst Relay session context is unavailable")
             relay_context = session.context.copy()
 
         context = contextvars.copy_context()
@@ -1052,7 +1052,7 @@ class RelaySessionCoordinator:
         task_id: str,
     ) -> RelayTurnContext:
         if lease.released:
-            raise RuntimeError("Hermes Relay conversation lease is released")
+            raise RuntimeError("Catalyst Relay conversation lease is released")
         turn = RelayTurnContext(lease=lease, turn_id=turn_id, task_id=task_id)
         key = (lease.profile_key, lease.session_id)
         with self._active_turns_lock:
@@ -1519,12 +1519,12 @@ def run_in_session(
     """Run a scope, LLM, or tool API against a shared Hermes session."""
     runtime = get_runtime()
     if runtime is None:
-        raise RuntimeError("Hermes Relay runtime is unavailable")
+        raise RuntimeError("Catalyst Relay runtime is unavailable")
     session = runtime.get_session(session_id)
     if session is None:
         session = runtime.ensure_session({"session_id": session_id})
     if session is None:
-        raise RuntimeError("Hermes Relay session is unavailable")
+        raise RuntimeError("Catalyst Relay session is unavailable")
     return runtime.run_in_session(session, callback, *args, **kwargs)
 
 
@@ -1537,12 +1537,12 @@ async def run_in_session_async(
     """Await a Relay operation inside a shared Hermes session context."""
     runtime = get_runtime()
     if runtime is None:
-        raise RuntimeError("Hermes Relay runtime is unavailable")
+        raise RuntimeError("Catalyst Relay runtime is unavailable")
     session = runtime.get_session(session_id)
     if session is None:
         session = runtime.ensure_session({"session_id": session_id})
     if session is None:
-        raise RuntimeError("Hermes Relay session is unavailable")
+        raise RuntimeError("Catalyst Relay session is unavailable")
     return await runtime.run_in_session_async(session, callback, *args, **kwargs)
 
 

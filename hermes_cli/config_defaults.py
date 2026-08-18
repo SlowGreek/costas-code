@@ -1729,6 +1729,15 @@ DEFAULT_CONFIG = {
         "barge_in": True,             # Interrupt the agent / stop TTS when the user starts talking
         "barge_in_grace_seconds": 0.5,  # Trip suppression right after TTS playback starts (onset transient); the mic itself is live for the whole turn
         "barge_in_threshold_multiplier": 3.0,  # Speech trigger = quiet-room floor x this (floor is calibrated BEFORE playback, never against speaker bleed)
+        # First-class desktop conversation transport. This is intentionally
+        # separate from the text-agent model/provider and from STT/TTS config.
+        "realtime": {
+            "enabled": True,
+            "model": "gpt-realtime-2.1",
+            "voice": "marin",
+            "transcription_model": "gpt-live-transcribe",
+            "vad": {"type": "semantic_vad", "eagerness": "auto"},
+        },
         # Saying EXACTLY one of these phrases (and nothing else) ends the
         # voice chat instead of being sent to the agent. Case-insensitive,
         # surrounding punctuation ignored. Set [] to disable.

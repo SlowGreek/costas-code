@@ -2,14 +2,12 @@ import { useStore } from '@nanostores/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useI18n } from '@/i18n'
-import { chatMessageText, collectUnspokenTurnSpeech } from '@/lib/chat-messages'
-import { triggerHaptic } from '@/lib/haptics'
+import { chatMessageText } from '@/lib/chat-messages'
 import { clearWakeIndicator, syncWakeIndicatorWithVoice } from '@/lib/wake-indicator'
 import { $voiceConversationStartRequest, takeVoiceConversationStart } from '@/store/composer'
-import { resetBrowseState } from '@/store/composer-input-history'
 import { $gateway } from '@/store/gateway'
-import { notify, notifyError } from '@/store/notifications'
-import { $autoSpeakReplies, $voiceStopPhrase, setAutoSpeakReplies } from '@/store/voice-prefs'
+import { notifyError } from '@/store/notifications'
+import { $autoSpeakReplies, setAutoSpeakReplies } from '@/store/voice-prefs'
 import { resumeWakeAfterVoice } from '@/store/wake-word'
 
 import type { ComposerTarget } from '../focus'
@@ -18,7 +16,7 @@ import { useComposerScope } from '../scope'
 import type { ChatBarProps } from '../types'
 
 import { useAutoSpeakReplies } from './use-auto-speak-replies'
-import { useVoiceConversation } from './use-voice-conversation'
+import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
 import { useVoiceRecorder } from './use-voice-recorder'
 
 interface UseComposerVoiceArgs {
@@ -46,14 +44,10 @@ interface UseComposerVoiceArgs {
  * so it lifts cleanly out of ChatBar.
  */
 export function useComposerVoice({
-  busy,
-  clearDraft,
   disabled,
   focusInput,
   insertText,
   maxRecordingSeconds,
-  onInterrupt,
-  onSubmit,
   onTranscribeAudio,
   sessionId,
   target
@@ -95,12 +89,6 @@ export function useComposerVoice({
     }
   }
 
-  /**
-   * Voice-conversation selector: every unspoken assistant bubble of the turn,
-   * in order — narration interims AND the final answer, not just whichever
-   * bubble happens to be last. See `collectUnspokenTurnSpeech`.
-   */
-  const pendingTurnResponse = () => collectUnspokenTurnSpeech($messages.get(), lastSpokenIdRef.current)
 
   const consumePendingResponse = () => {
     const messages = $messages.get()
@@ -111,16 +99,6 @@ export function useComposerVoice({
     }
   }
 
-  const submitVoiceTurn = async (text: string) => {
-    if (busy) {
-      return
-    }
-
-    triggerHaptic('submit')
-    resetBrowseState(sessionId)
-    clearDraft()
-    await onSubmit(text)
-  }
 
   const wakePausedRef = useRef(false)
   // Resolves once the in-flight wake.pause round-trip completes (mic released by
@@ -130,26 +108,11 @@ export function useComposerVoice({
   // fail and the conversation never starts listening.
   const wakePauseBarrierRef = useRef<Promise<void> | null>(null)
 
-  const conversation = useVoiceConversation({
-    busy,
-    consumePendingResponse,
+  const conversation = useRealtimeVoiceConversation({
+    beforeConnect: () => wakePauseBarrierRef.current ?? undefined,
     enabled: voiceConversationActive,
     onFatalError: () => setVoiceConversationActive(false),
-    // Speaking over the model mid-generation interrupts the in-flight turn —
-    // the same seam as the Stop button — so the interjection becomes the next
-    // turn instead of waiting behind a reply the user already rejected.
-    onInterrupt,
-    // A spoken stop command ("stop", "never mind", "goodbye", …) ends the
-    // hands-free conversation. Flipping the flag is the authoritative off
-    // switch — the enabled=false prop + effect below drive conversation.end()
-    // teardown (mic close, wake re-arm).
-    onStopWord: () => setVoiceConversationActive(false),
-    onSubmit: submitVoiceTurn,
-    onTranscribeAudio,
-    pendingResponse: pendingTurnResponse,
-    // Before the conversation opens the mic, wait for any in-flight wake.pause
-    // to finish releasing the capture device (see wakePauseBarrierRef).
-    beforeMicOpen: () => wakePauseBarrierRef.current ?? undefined
+    runtimeSessionId: sessionId
   })
 
   // eslint-disable-next-line no-restricted-syntax -- ownership token used only by unmount cleanup
@@ -172,9 +135,7 @@ export function useComposerVoice({
     []
   )
 
-  // The `composer.voice` hotkey (Ctrl+B) toggles the conversation. Starting
-  // with STT unconfigured lets the conversation surface its own "configure
-  // speech-to-text" notice rather than silently no-opping.
+  // The `composer.voice` hotkey (Ctrl+B) toggles GPT Realtime conversation.
   const toggleVoiceConversation = useCallback(() => {
     if (disabled) {
       return
@@ -238,25 +199,6 @@ export function useComposerVoice({
     }
   }, [pauseWakeForVoice, resumeWakeIfPaused, voiceConversationActive])
 
-  // 'Say "stop" to end the voice chat.' notice when the conversation starts.
-  // Phrase comes from voice.stop_phrases (first entry) so a custom phrase
-  // renders correctly; a null phrase (stop_phrases: []) shows no notice.
-  useEffect(() => {
-    if (!voiceConversationActive) {
-      return
-    }
-
-    const phrase = $voiceStopPhrase.get()
-
-    if (phrase) {
-      notify({
-        id: 'voice-stop-hint',
-        kind: 'info',
-        icon: 'mic',
-        message: t.notifications.voice.sayStopToEnd(phrase)
-      })
-    }
-  }, [t, voiceConversationActive])
 
   useEffect(() => resumeWakeIfPaused, [resumeWakeIfPaused])
 

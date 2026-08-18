@@ -82,6 +82,7 @@ from hermes_state_common import (  # noqa: F401  (re-exported for back-compat)
 )
 from hermes_state_portability import SessionPortabilityMixin
 from hermes_state_artifacts import SessionArtifactMixin
+from hermes_state_realtime import SessionRealtimeMixin
 from hermes_state_schema import SessionSchemaMixin
 from hermes_state_search import SessionSearchMixin
 
@@ -3118,6 +3119,7 @@ class SessionDB(
     SessionSearchMixin,
     SessionSchemaMixin,
     SessionArtifactMixin,
+    SessionRealtimeMixin,
     SessionPortabilityMixin,
 ):
     """

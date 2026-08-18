@@ -6,11 +6,11 @@ from hermes_state import SCHEMA_VERSION, SessionDB
 
 
 def test_artifact_table_advances_schema_version(tmp_path):
-    assert SCHEMA_VERSION == 27
+    assert SCHEMA_VERSION == 28
     db = SessionDB(db_path=tmp_path / "state.db")
     try:
         stored = db._conn.execute("SELECT version FROM schema_version").fetchone()[0]
-        assert stored == 27
+        assert stored == 28
     finally:
         db.close()
 

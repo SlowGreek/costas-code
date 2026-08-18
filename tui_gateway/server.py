@@ -294,6 +294,8 @@ _LONG_HANDLERS = frozenset(
         "voice.toggle",
         "voice.record",
         "voice.tts",
+        # Mints an ephemeral OpenAI credential over a blocking HTTPS request.
+        "voice.realtime.token",
         # wake.start calls check_wake_word_requirements() → _stt_ready() →
         # _get_provider() → _try_lazy_install_stt() → ensure("stt.faster_whisper")
         # (same synchronous subprocess install chain as the voice RPCs above).
@@ -15842,6 +15844,7 @@ from . import (  # noqa: E402
     methods_images as _methods_images,
     methods_profiles as _methods_profiles,
     methods_prompt as _methods_prompt,
+    methods_realtime as _methods_realtime,
     methods_session as _methods_session,
     methods_tools as _methods_tools,
 )
@@ -15849,6 +15852,7 @@ from . import (  # noqa: E402
 for _m in (
     _methods_session,
     _methods_artifacts,
+    _methods_realtime,
     _methods_prompt,
     _methods_config,
     _methods_complete,

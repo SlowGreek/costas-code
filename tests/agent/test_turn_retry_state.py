@@ -20,6 +20,7 @@ EXPECTED_FIELDS = {
     "nous_paid_entitlement_refresh_attempted",
     "copilot_auth_retry_attempted",
     "copilot_stale_cred_retry_attempted",
+    "copilot_forbidden_retry_attempted",
     "vertex_auth_retry_attempted",
     "thinking_sig_retry_attempted",
     "invalid_encrypted_content_retry_attempted",

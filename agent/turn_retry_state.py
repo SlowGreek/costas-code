@@ -53,6 +53,12 @@ class TurnRetryState:
     # re-exchange + client rebuild for that case, separate from the 401 guard
     # so both can fire within one attempt if needed.
     copilot_stale_cred_retry_attempted: bool = False
+    # GitHub can rotate/revoke the exchanged Copilot API token before its
+    # advertised expiry, which surfaces as a 403 — neither the 401 refresh nor
+    # the 400 stale-credential path fires, so a cached-but-dead JWT keeps
+    # failing until the process restarts. Guard a single-shot forced
+    # re-exchange + client rebuild for that case.
+    copilot_forbidden_retry_attempted: bool = False
     vertex_auth_retry_attempted: bool = False
 
     # ── Format / payload recovery guards ─────────────────────────────────

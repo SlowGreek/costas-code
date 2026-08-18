@@ -417,6 +417,68 @@ def _is_stale_copilot_credential_error(status_code: Optional[int], error_message
     )
 
 
+_COPILOT_FORBIDDEN_POLICY_MARKERS = (
+    # Seat / subscription state — a fresh token cannot mint entitlement.
+    "no active subscription",
+    "does not have a copilot",
+    "copilot seat",
+    "not entitled",
+    "subscription required",
+    # Org / enterprise policy blocks — the account is authenticated fine and
+    # the administrator has disallowed the request.
+    "policy",
+    "disabled by your organization",
+    "blocked by your administrator",
+    "not enabled for your organization",
+)
+
+
+def _is_recoverable_copilot_forbidden(status_code: Optional[int], error_message: str) -> bool:
+    """Detect a Copilot 403 that a fresh token exchange can actually fix.
+
+    GitHub rotates or revokes the exchanged Copilot API token before its
+    advertised ``expires_at``. Hermes keeps serving the cached JWT (in-process
+    ``_jwt_cache`` plus the on-disk store) until that stale expiry, so every
+    request 403s and only a restart — which re-runs the exchange — recovers.
+    The 401 refresh path never fires because the status is 403, and the 400
+    stale-credential path requires a ``model_not_available`` marker, so today
+    nothing self-heals this.
+
+    A 403 is NOT always a stale token: an unsubscribed account, a removed
+    Copilot seat, or an org policy block returns the same status, and
+    re-exchanging there just burns a network round-trip and hides the real
+    message. Those bodies are excluded so the original error surfaces
+    unchanged. The caller enforces Copilot-provider scoping and the
+    single-shot guard.
+    """
+    if status_code != 403:
+        return False
+    lowered = (error_message or "").lower()
+    return not any(marker in lowered for marker in _COPILOT_FORBIDDEN_POLICY_MARKERS)
+
+
+def _copilot_error_haystack(error: Exception) -> str:
+    """Flatten an API error into one string for Copilot 403 body matching.
+
+    GitHub's 403 arrives in three different shapes depending on the transport:
+    an SDK ``body`` dict, a raw ``response.text``, or just the exception's own
+    message. Concatenate whatever is present so the policy-marker exclusions
+    in :func:`_is_recoverable_copilot_forbidden` see the real body text
+    regardless of which shape we got.
+    """
+    parts = [str(getattr(error, "message", "") or "") or str(error)]
+    for attr in ("body", "response"):
+        value = getattr(error, attr, None)
+        if value is None:
+            continue
+        text = getattr(value, "text", None)
+        try:
+            parts.append(str(text if text is not None else value))
+        except Exception:
+            continue
+    return " ".join(p for p in parts if p)
+
+
 def _image_error_max_dimension(error: Exception) -> Optional[int]:
     """Extract a provider-reported image dimension ceiling, if present."""
     parts = []
@@ -4941,6 +5003,19 @@ def _run_conversation_inner(
                     _retry.copilot_auth_retry_attempted = True
                     if agent._try_refresh_copilot_client_credentials():
                         agent._buffer_vprint("🔐 Copilot credentials refreshed after 401. Retrying request...")
+                        continue
+                if (
+                    _is_copilot_provider(agent)
+                    and not _retry.copilot_forbidden_retry_attempted
+                    and _is_recoverable_copilot_forbidden(
+                        status_code, _copilot_error_haystack(api_error)
+                    )
+                ):
+                    _retry.copilot_forbidden_retry_attempted = True
+                    if agent._try_refresh_copilot_client_credentials():
+                        agent._buffer_vprint(
+                            "🔐 Copilot token re-exchanged after 403. Retrying request..."
+                        )
                         continue
                 if (
                     agent.api_mode == "anthropic_messages"

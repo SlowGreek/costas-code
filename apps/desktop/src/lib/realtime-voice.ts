@@ -95,6 +95,8 @@ export interface RealtimeVoiceConnection {
   /** Settles when in-flight input transcriptions have landed. */
   awaitPendingTranscription: (timeoutMs?: number) => Promise<void>
   close: () => void
+  /** Seed prior conversation turns so voice continues rather than restarts. */
+  seedHistory: (turns: RealtimeTranscript[]) => void
   setMuted: (muted: boolean) => void
   /** Manual interrupt: cancel generation and flush buffered assistant audio. */
   stopTurn: () => void
@@ -116,6 +118,8 @@ export interface StartRealtimeVoiceOptions {
 
 const DEFAULT_REALTIME_INSTRUCTIONS =
   'You are Hermes in realtime ideation mode. Collaborate naturally and concisely. ' +
+  'You may be joining a conversation already in progress: earlier turns and the current workbench state are given to you as context. ' +
+  'Continue from there — do not greet the user as if meeting them, and do not re-summarise what was already said unless asked. ' +
   'Call visualize when the shared picture materially changes, at semantic milestones rather than every turn; the mute diagrammer does the drawing. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it.'
@@ -315,6 +319,30 @@ export async function startRealtimeVoiceConnection(
   return {
     awaitPendingTranscription: timeoutMs => pendingTranscription.awaitSettled(timeoutMs),
     close,
+    seedHistory: turns => {
+      if (!channelOpen || closed) {
+        return
+      }
+
+      // Insert prior turns as conversation items so the model continues the
+      // discussion instead of greeting the user cold. No `response.create`:
+      // seeding context must not make it start talking on its own.
+      for (const turn of turns) {
+        send({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: turn.role,
+            content: [
+              {
+                type: turn.role === 'assistant' ? 'output_text' : 'input_text',
+                text: turn.text
+              }
+            ]
+          }
+        })
+      }
+    },
     setMuted: muted => {
       tracks.forEach(track => {
         track.enabled = !muted

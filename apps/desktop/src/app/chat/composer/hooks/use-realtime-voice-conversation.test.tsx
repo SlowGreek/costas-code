@@ -12,11 +12,13 @@ const setMuted = vi.fn()
 const updateWorkbenchContext = vi.fn()
 const awaitPendingTranscription = vi.fn(async () => {})
 const stopTurn = vi.fn()
+const seedHistory = vi.fn()
 
 vi.mock('@/lib/realtime-voice', () => ({
   startRealtimeVoiceConnection: vi.fn(async () => ({
     awaitPendingTranscription,
     close,
+    seedHistory,
     setMuted,
     stopTurn,
     updateWorkbenchContext
@@ -67,6 +69,91 @@ describe('useRealtimeVoiceConversation', () => {
       await Promise.resolve()
     })
     expect(settled).toHaveBeenCalled()
+  })
+
+  it('seeds recent conversation so voice continues instead of starting cold', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'session.history') {
+        return {
+          messages: [
+            { role: 'user', content: 'Lets design the workbench.' },
+            { role: 'assistant', content: 'Voice owns the turn.' },
+            { role: 'system', content: 'ignored' },
+            { role: 'user', content: '   ' }
+          ]
+        }
+      }
+
+      return {}
+    })
+
+    $gateway.set({ request } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    expect(request).toHaveBeenCalledWith('session.history', { session_id: 'runtime-session' })
+    // Only real user/assistant turns are replayed; system and blank are dropped.
+    expect(seedHistory).toHaveBeenCalledWith([
+      { id: 'seed-0', role: 'user', text: 'Lets design the workbench.' },
+      { id: 'seed-1', role: 'assistant', text: 'Voice owns the turn.' }
+    ])
+  })
+
+  it('still connects when history cannot be loaded', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'session.history') {
+        throw new Error('gateway busy')
+      }
+
+      return {}
+    })
+
+    $gateway.set({ request } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    // Losing context degrades the conversation; it must not break the session.
+    await waitFor(() => expect(hook.result.current.status).toBe('listening'))
+    expect(seedHistory).not.toHaveBeenCalled()
+  })
+
+  it('describes a non-map canvas without crashing the connection', async () => {
+    // summarizeWorkbench used to read payload.nodes unconditionally, so
+    // starting voice with a timeline or sketch on screen threw inside connect
+    // and silently cost the model all knowledge of what was displayed.
+    $gateway.set({ request: vi.fn(async () => ({})) } as never)
+    setWorkbenchArtifact({
+      artifact_id: 'map.main',
+      kind: 'timeline',
+      semantic_rev: 3,
+      view_rev: 1,
+      payload: { items: [{ id: 'p1', label: 'Phase 1', order: 0 }] },
+      view_state: {}
+    } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    await waitFor(() => expect(hook.result.current.status).toBe('listening'))
+    expect(updateWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('timeline'))
+    expect(updateWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('Phase 1'))
   })
 
   it('exposes a manual stop-turn interrupt to the composer controls', async () => {
@@ -223,7 +310,12 @@ describe('useRealtimeVoiceConversation', () => {
     vi.useFakeTimers()
     const attempts = { first: 0, second: 0 }
 
-    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => {
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      // Ignore the history seed the hook performs on connect.
+      if (method !== 'voice.realtime.transcript') {
+        return {}
+      }
+
       const id = String(params.item_id) as keyof typeof attempts
       attempts[id] += 1
       const failThrough = id === 'first' ? 6 : 3

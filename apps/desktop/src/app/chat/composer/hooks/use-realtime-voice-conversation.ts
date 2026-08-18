@@ -20,16 +20,66 @@ interface RealtimeVoiceConversationOptions {
   runtimeSessionId: null | string | undefined
 }
 
-const summarizeWorkbench = (artifact: WorkbenchArtifact): string =>
-  JSON.stringify({
-    revision: artifact.semantic_rev,
-    nodes: artifact.payload.nodes.map(node => ({ id: node.id, label: node.label, kind: node.kind })),
-    edges: artifact.payload.edges.map(edge => ({
-      from: edge.from,
-      to: edge.to,
-      label: edge.label
-    }))
-  })
+/**
+ * How many recent turns to replay into a new realtime session.
+ *
+ * Enough to continue a train of thought, bounded because every seeded turn is
+ * tokens on the realtime connection and a long transcript is both costly and
+ * slower to start. `visualize` still reads the FULL durable transcript, so the
+ * diagrammer is unaffected by this bound.
+ */
+const HISTORY_SEED_TURNS = 20
+
+/**
+ * Describe the current canvas to the voice model, per kind.
+ *
+ * Reading `payload.nodes` unconditionally throws for a timeline, quadrant, or
+ * sketch — and because this runs inside connection setup, that failure would
+ * silently cost the model all knowledge of what is on screen.
+ */
+const summarizeWorkbench = (artifact: WorkbenchArtifact): string => {
+  const payload = artifact.payload as {
+    axes?: unknown
+    edges?: { from: string; label?: string; to: string }[]
+    html?: string
+    items?: { id: string; label?: string }[]
+    nodes?: { id: string; kind?: string; label?: string }[]
+  }
+
+  const head = { kind: artifact.kind, revision: artifact.semantic_rev }
+
+  switch (artifact.kind) {
+    case 'quadrant':
+      return JSON.stringify({
+        ...head,
+        axes: payload.axes,
+        items: payload.items ?? []
+      })
+
+    case 'sketch':
+      // Never ship the raw HTML: it is large, and the model does not need the
+      // markup to talk about what it drew.
+      return JSON.stringify({ ...head, note: 'a rendered visual sketch is on screen' })
+
+    case 'timeline':
+      return JSON.stringify({ ...head, items: payload.items ?? [] })
+
+    default:
+      return JSON.stringify({
+        ...head,
+        nodes: (payload.nodes ?? []).map(node => ({
+          id: node.id,
+          label: node.label,
+          kind: node.kind
+        })),
+        edges: (payload.edges ?? []).map(edge => ({
+          from: edge.from,
+          to: edge.to,
+          label: edge.label
+        }))
+      })
+  }
+}
 
 const persistTranscriptWithRetry = async (
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
@@ -166,6 +216,38 @@ export function useRealtimeVoiceConversation({
 
       connectionRef.current = connection
       pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
+
+      // Continue the conversation rather than starting cold. The typed chat and
+      // the voice session share one session, so whatever was already discussed
+      // (typed or spoken) is the context the user expects voice to have.
+      try {
+        const history = await gateway.request<{ messages?: { content?: unknown; role?: string }[] }>(
+          'session.history',
+          { session_id: runtimeSessionId }
+        )
+
+        const turns = (history.messages ?? [])
+          .filter(
+            (message): message is { content: string; role: 'assistant' | 'user' } =>
+              (message.role === 'assistant' || message.role === 'user') &&
+              typeof message.content === 'string' &&
+              message.content.trim().length > 0
+          )
+          .slice(-HISTORY_SEED_TURNS)
+          .map((message, index) => ({
+            id: `seed-${index}`,
+            role: message.role,
+            text: message.content
+          }))
+
+        if (turns.length > 0 && generation === startGenerationRef.current) {
+          connection.seedHistory(turns)
+        }
+      } catch {
+        // Losing prior context is a degraded conversation, not a broken one —
+        // never fail the connection over it.
+      }
+
       const artifact = $workbenchArtifact.get()
 
       if (artifact) {

@@ -7,6 +7,8 @@ implementation in this same file once that phase ships.
 """
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from hermes_cli.service_manager import (
@@ -192,6 +194,15 @@ def fake_subprocess_run(monkeypatch: pytest.MonkeyPatch):
 # tests/docker/test_s6_profile_gateway_integration.py.
 
 
+# s6 seeds the event dir setgid (03730) so the supervision tree and the
+# unprivileged hermes user share group access. macOS forces a new directory to
+# inherit its parent's group and drops the setgid bit on chmod, so the mode
+# assertions below can never hold there. The layout these guard is Linux/s6
+# container-only; the live verification runs in tests/docker/.
+_SETGID_UNSUPPORTED = sys.platform == "darwin"
+
+
+@pytest.mark.skipif(_SETGID_UNSUPPORTED, reason="macOS strips setgid on directories")
 def test_seed_supervise_skeleton_creates_expected_layout(tmp_path) -> None:
     """Verifies the dirs + FIFO + modes the helper lays down."""
     import stat
@@ -229,6 +240,35 @@ def test_seed_supervise_skeleton_creates_expected_layout(tmp_path) -> None:
     assert stat.S_IMODE(control.stat().st_mode) == 0o660
 
 
+@pytest.mark.skipif(_SETGID_UNSUPPORTED, reason="macOS strips setgid on directories")
+def test_seed_supervise_skeleton_handles_log_subservice(tmp_path) -> None:
+    """When a log/ subdir exists, its supervise tree also gets seeded.
+
+    Without this, ``unregister_profile_gateway``'s rmtree would EACCES
+    on the logger's root-owned supervise dir even after the parent
+    slot's supervise/ was hermes-owned.
+    """
+    import stat
+
+    from hermes_cli.service_manager import _seed_supervise_skeleton
+
+    svc_dir = tmp_path / "gateway-foo"
+    svc_dir.mkdir()
+    (svc_dir / "log").mkdir()  # logger subdir present
+
+    _seed_supervise_skeleton(svc_dir)
+
+    # Logger's own supervise tree is seeded the same way.
+    log_event = svc_dir / "log" / "event"
+    log_supervise = svc_dir / "log" / "supervise"
+    log_supervise_event = log_supervise / "event"
+    log_control = log_supervise / "control"
+
+    assert log_event.is_dir()
+    assert stat.S_IMODE(log_event.stat().st_mode) == 0o3730
+    assert log_supervise.is_dir()
+    assert log_supervise_event.is_dir()
+    assert log_control.exists() and stat.S_ISFIFO(log_control.stat().st_mode)
 
 
 

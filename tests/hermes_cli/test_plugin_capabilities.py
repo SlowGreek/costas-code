@@ -114,6 +114,7 @@ class TestDeclarationParsing:
         assert manifest is not None
         assert manifest.capabilities == []
 
+    @pytest.mark.real_entry_points
     def test_entrypoint_companion_metadata_declares_capabilities_without_import(
         self, monkeypatch
     ):

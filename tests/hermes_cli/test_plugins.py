@@ -344,8 +344,14 @@ class TestPluginDiscovery:
         assert mgr._discovered is False, "failed sweep was cached as discovered"
 
         # A later call (with discovery healthy again) must do the real scan.
+        # ``undo()`` reverts EVERY active patch, including the autouse
+        # entry-point isolation in conftest — so re-apply it here, or a
+        # developer with a pip-installed Hermes plugin sees it counted below.
         monkeypatch.undo()
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
+        monkeypatch.setattr(
+            PluginManager, "_scan_entry_points", lambda self: [], raising=False
+        )
         mgr.discover_and_load()
         assert mgr._discovered is True
         non_bundled = {
@@ -354,7 +360,46 @@ class TestPluginDiscovery:
         }
         assert len(non_bundled) == 1
 
+    def test_discover_skips_dir_without_manifest(self, tmp_path, monkeypatch):
+        """Directories without plugin.yaml are silently skipped."""
+        plugins_dir = tmp_path / "hermes_test" / "plugins"
+        (plugins_dir / "no_manifest").mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
 
+        mgr = PluginManager()
+        mgr.discover_and_load()
+
+        # Filter out bundled plugins — they're always discovered.
+        non_bundled = {
+            n: p for n, p in mgr._plugins.items()
+            if p.manifest.source != "bundled"
+        }
+        assert len(non_bundled) == 0
+
+    @pytest.mark.real_entry_points
+    def test_entry_points_scanned(self, tmp_path, monkeypatch):
+        """Entry-point based plugins are discovered (mocked)."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
+
+        fake_module = types.ModuleType("fake_ep_plugin")
+        fake_module.register = lambda ctx: None  # type: ignore[attr-defined]
+
+        fake_ep = MagicMock()
+        fake_ep.name = "ep_plugin"
+        fake_ep.value = "fake_ep_plugin:register"
+        fake_ep.group = ENTRY_POINTS_GROUP
+        fake_ep.load.return_value = fake_module
+
+        def fake_entry_points():
+            result = MagicMock()
+            result.select = MagicMock(return_value=[fake_ep])
+            return result
+
+        with patch("importlib.metadata.entry_points", fake_entry_points):
+            mgr = PluginManager()
+            mgr.discover_and_load()
+
+        assert "ep_plugin" in mgr._plugins
 
     def test_force_rediscover_clears_all_plugin_registries(self, monkeypatch):
         """force=True must clear every plugin-populated registry.
@@ -468,6 +513,7 @@ class TestPluginLoading:
         assert entry.module is None
         assert "exclusive" in (entry.error or "").lower()
 
+    @pytest.mark.real_entry_points
     def test_entrypoint_memory_provider_auto_coerced_to_exclusive(
         self, tmp_path, monkeypatch
     ):
@@ -531,6 +577,7 @@ class TestPluginLoading:
         # The whole point: the module was never imported.
         assert "mempalace_ep" not in sys.modules
 
+    @pytest.mark.real_entry_points
     def test_entrypoint_model_provider_auto_coerced_to_model_provider(
         self, tmp_path, monkeypatch
     ):
@@ -672,6 +719,7 @@ class TestPluginLoading:
         assert p.name == "mempalace_dup"
         assert p.is_available()
 
+    @pytest.mark.real_entry_points
     def test_entrypoint_dotted_name_never_imports_parent_package(
         self, tmp_path, monkeypatch
     ):

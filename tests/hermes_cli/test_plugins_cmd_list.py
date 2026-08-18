@@ -2,6 +2,8 @@ import argparse
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from hermes_cli import plugins_cmd
 
 
@@ -52,6 +54,27 @@ def test_cmd_list_plain_compact_output(monkeypatch, capsys):
     assert "Search" not in out  # plain mode stays compact, no descriptions
 
 
+def test_cmd_list_json_output(monkeypatch, capsys):
+    entries = [("web-search-plus", "2.2.0", "Search", "git", None, "web-search-plus")]
+    monkeypatch.setattr(plugins_cmd, "_discover_all_plugins", lambda: entries)
+    monkeypatch.setattr(plugins_cmd, "_get_enabled_set", lambda: {"web-search-plus"})
+    monkeypatch.setattr(plugins_cmd, "_get_disabled_set", lambda: set())
+
+    plugins_cmd.cmd_list(_args(json=True))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "name": "web-search-plus",
+            "status": "enabled",
+            "version": "2.2.0",
+            "description": "Search",
+            "source": "git",
+        }
+    ]
+
+
+@pytest.mark.real_entry_points
 def test_discover_all_plugins_includes_entrypoint_plugins(monkeypatch, tmp_path):
     bundled_dir = tmp_path / "bundled"
     user_dir = tmp_path / "user"
@@ -94,6 +117,7 @@ def test_discover_all_plugins_includes_entrypoint_plugins(monkeypatch, tmp_path)
     ]
 
 
+@pytest.mark.real_entry_points
 def test_declared_capabilities_for_entrypoint_uses_distribution_metadata(
     monkeypatch, tmp_path
 ):

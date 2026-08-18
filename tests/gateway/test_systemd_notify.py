@@ -4,12 +4,44 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import sys
+import tempfile
+from pathlib import Path
 
 import pytest
 
 
+def test_notify_without_notify_socket_is_a_noop(monkeypatch):
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+
+    from gateway.systemd_notify import notify
+
+    assert notify("READY=1") is False
+
+
+def test_notify_sends_real_unix_datagram(monkeypatch):
+    # NOT tmp_path: AF_UNIX paths are capped near 104 bytes, and pytest's
+    # macOS tmp_path (/private/var/folders/<hash>/.../test_name0) blows past
+    # it with "OSError: AF_UNIX path too long". A short mkdtemp keeps the
+    # socket bindable on every platform.
+    tmp_dir = tempfile.mkdtemp(prefix="hnotify")
+    address = str(Path(tmp_dir) / "n.sock")
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    receiver.bind(address)
+    receiver.settimeout(1.0)
+    monkeypatch.setenv("NOTIFY_SOCKET", address)
+
+    from gateway.systemd_notify import notify
+
+    assert notify("READY=1") is True
+    assert receiver.recv(4096) == b"READY=1"
+    receiver.close()
+
+
 @pytest.mark.skipif(
-    not hasattr(socket, "AF_UNIX"), reason="Unix datagram sockets are unavailable"
+    sys.platform != "linux",
+    reason="abstract-namespace sockets (leading NUL) are Linux-only; macOS/BSD "
+    "have AF_UNIX but bind the NUL as a literal path byte",
 )
 def test_notify_supports_systemd_abstract_socket(monkeypatch):
     name = "\0hermes-test-notify"

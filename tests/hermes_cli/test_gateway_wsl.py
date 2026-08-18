@@ -71,6 +71,10 @@ class TestSupportsSystemdServicesWSL:
             gateway.shutil, "which", lambda _name: "/usr/bin/systemctl"
         )
         monkeypatch.setattr(gateway, "is_wsl", lambda: True)
+        # supports_systemd_services() also probes for the systemctl BINARY,
+        # which does not exist on a macOS dev box. Stub it so this stays a
+        # test of the WSL branch logic rather than of the host's PATH.
+        monkeypatch.setattr(gateway.shutil, "which", lambda name: "/usr/bin/systemctl")
         monkeypatch.setattr(gateway, "_wsl_systemd_operational", lambda: True)
         assert gateway.supports_systemd_services() is True
 

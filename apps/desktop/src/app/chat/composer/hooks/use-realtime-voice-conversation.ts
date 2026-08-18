@@ -119,19 +119,15 @@ export function useRealtimeVoiceConversation({
           await new Promise<void>(resolve => window.setTimeout(resolve, 500))
           await transcriptWriteChainRef.current
 
-          const failed = failedTranscriptsRef.current.splice(0)
+          while (failedTranscriptsRef.current.length > 0) {
+            const entry = failedTranscriptsRef.current[0]
 
-          for (const entry of failed) {
-            try {
-              await persistTranscriptWithRetry(
-                (method, params) => gateway.request(method, params),
-                runtimeSessionId,
-                entry
-              )
-            } catch (error) {
-              failedTranscriptsRef.current.push(entry)
-              throw error
-            }
+            await persistTranscriptWithRetry(
+              (method, params) => gateway.request(method, params),
+              runtimeSessionId,
+              entry
+            )
+            failedTranscriptsRef.current.shift()
           }
         },
         onStatus: setStatus,

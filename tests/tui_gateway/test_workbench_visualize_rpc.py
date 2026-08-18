@@ -46,5 +46,9 @@ def test_workbench_visualize_rpc_delegates_and_emits_artifact(tmp_path, monkeypa
         "session_id": "stored-session",
         "prompt": "Show the shared state as the center.",
     }
-    assert emitted == [("artifact.updated", runtime_id, {"artifact": artifact})]
+    # `artifact.visualizing` now brackets the drawing (see
+    # test_workbench_visualize_pending.py); the completion contract is unchanged.
+    assert [entry for entry in emitted if entry[0] == "artifact.updated"] == [
+        ("artifact.updated", runtime_id, {"artifact": artifact})
+    ]
     assert "workbench.visualize" in server._LONG_HANDLERS

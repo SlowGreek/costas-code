@@ -21,6 +21,7 @@ export interface WorkbenchGraph {
 export interface WorkbenchViewState {
   pinned?: string[]
   positions?: Record<string, { x: number; y: number }>
+  trimmed?: { shown: number; total: number }
   zoom?: number
 }
 
@@ -37,6 +38,66 @@ export const $workbenchArtifact = atom<null | WorkbenchArtifact>(null)
 export const $workbenchError = atom<null | string>(null)
 export const $workbenchVoiceActive = atom(false)
 
+/**
+ * Whether the diagrammer is mid-draw.
+ *
+ * Deliberately separate from `$workbenchArtifact`: the existing drawing must
+ * stay on screen while the next one is being produced, so this is an overlay
+ * signal, never a reason to blank the canvas.
+ */
+export const $workbenchDrawing = atom(false)
+
+/**
+ * Safety valve: a start event whose completion never arrives must not leave a
+ * spinner up forever. The gateway emits both edges, but a dropped socket, a
+ * crashed handler, or a session switch can swallow the second one.
+ */
+export const WORKBENCH_DRAWING_TIMEOUT_MS = 90_000
+
+let drawingTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearDrawingTimer(): void {
+  if (drawingTimer !== null) {
+    clearTimeout(drawingTimer)
+    drawingTimer = null
+  }
+}
+
+export function setWorkbenchDrawing(drawing: boolean): void {
+  clearDrawingTimer()
+
+  if (drawing) {
+    drawingTimer = setTimeout(() => {
+      drawingTimer = null
+      $workbenchDrawing.set(false)
+    }, WORKBENCH_DRAWING_TIMEOUT_MS)
+  }
+
+  $workbenchDrawing.set(drawing)
+}
+
+/**
+ * The honest "showing N of M" disclosure for an artifact, or null when nothing
+ * was dropped. Lives in `view_state` because it describes what the canvas can
+ * show, not what the ideas mean.
+ */
+export function workbenchTrimNotice(
+  artifact: null | WorkbenchArtifact
+): null | { shown: number; total: number } {
+  const trimmed = artifact?.view_state?.trimmed
+
+  if (
+    !trimmed ||
+    typeof trimmed.shown !== 'number' ||
+    typeof trimmed.total !== 'number' ||
+    trimmed.total <= trimmed.shown
+  ) {
+    return null
+  }
+
+  return { shown: trimmed.shown, total: trimmed.total }
+}
+
 export function setWorkbenchVoiceActive(active: boolean): void {
   $workbenchVoiceActive.set(active)
 }
@@ -46,17 +107,26 @@ export function setWorkbenchArtifact(artifact: null | WorkbenchArtifact): void {
 
   if (artifact) {
     $workbenchError.set(null)
+    // A drawing landing is itself proof the draw finished, even if the
+    // completion event is lost.
+    setWorkbenchDrawing(false)
   }
 }
 
 export function setWorkbenchError(error: null | string): void {
   $workbenchError.set(error)
+
+  if (error) {
+    setWorkbenchDrawing(false)
+  }
 }
 
 export function resetWorkbenchForTests(): void {
   $workbenchArtifact.set(null)
   $workbenchError.set(null)
   $workbenchVoiceActive.set(false)
+  clearDrawingTimer()
+  $workbenchDrawing.set(false)
 }
 
 /**

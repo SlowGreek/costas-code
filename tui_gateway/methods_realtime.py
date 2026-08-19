@@ -147,9 +147,11 @@ def _watch_transcript(
 ):
     """Hand one settled transcript line to the background watcher.
 
-    Best-effort by construction: the watcher is an optimisation on top of the
-    voice model's own `visualize` tool, so a failure here must never turn into
-    a failed transcript write and a hole in the conversation record.
+    Best-effort by construction: when active, the watcher is the sole owner of
+    full redraws and the voice model does not receive `visualize`; when shadow
+    or disabled, the watcher cannot write and voice retains the tool. A watcher
+    failure must never turn into a failed transcript write and a hole in the
+    conversation record.
     """
     try:
         from workbench_watch_runtime import observe_transcript

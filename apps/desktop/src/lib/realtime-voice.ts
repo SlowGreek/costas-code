@@ -12,6 +12,8 @@ export interface RealtimeServerEventDeps {
   clearAssistantAudio?: () => void
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
+  onAssistantResponseDone?: () => void
+  onAssistantTranscriptDelta?: (delta: string) => void
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
   pendingTranscription?: PendingTranscriptionTracker
@@ -129,6 +131,8 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  onAssistantResponseDone?: () => void
+  onAssistantTranscriptDelta?: (delta: string) => void
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
   peerConnectionFactory?: () => RTCPeerConnection
@@ -185,6 +189,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // user heard a tour of a diagram with nothing lighting up. Focus is 9ms; it
   // is meant to be used mid-sentence, not announced.
   'Walking through several parts in turn is the main thing focus is for: ring each one as you reach it, so the canvas keeps pace with your voice. That is what makes a step-by-step explanation feel alive, and it costs nothing. ' +
+  'During a walkthrough, say the node labels exactly as written in the workbench summary; the canvas follows those exact names while you keep speaking. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — that is a real change you can make: call visualize and say what arrangement they want. It is not a redraw of the same picture.'
@@ -434,6 +439,8 @@ export async function startRealtimeVoiceConnection(
           onAssistantAudioStarted: () => {
             assistantSpeaking = true
           },
+          onAssistantResponseDone: options.onAssistantResponseDone,
+          onAssistantTranscriptDelta: options.onAssistantTranscriptDelta,
           onStatus: options.onStatus,
           onTranscript: options.onTranscript,
           pendingTranscription,
@@ -549,6 +556,7 @@ export async function startRealtimeVoiceConnection(
 type RealtimeEvent = {
   arguments?: unknown
   call_id?: unknown
+  delta?: unknown
   item_id?: unknown
   name?: unknown
   transcript?: unknown
@@ -666,6 +674,17 @@ export async function routeRealtimeServerEvent(
     deps.onStatus?.('listening')
     // The response finished on its own, so nothing is left to flush.
     deps.onAssistantAudioEnded?.()
+    deps.onAssistantResponseDone?.()
+
+    return
+  }
+
+  if (type === 'response.output_audio_transcript.delta') {
+    const delta = typeof event.delta === 'string' ? event.delta : ''
+
+    if (delta) {
+      deps.onAssistantTranscriptDelta?.(delta)
+    }
 
     return
   }

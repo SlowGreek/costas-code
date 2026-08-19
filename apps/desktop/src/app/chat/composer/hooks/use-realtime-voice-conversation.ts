@@ -10,9 +10,15 @@ import {
   startWorkbenchContextSync,
   summarizeWorkbench
 } from '@/lib/workbench-context-sync'
+import { matchNarrationNode } from '@/lib/workbench-narration-focus'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
-import { $workbenchArtifact, $workbenchLayout, $workbenchSelection } from '@/store/workbench'
+import {
+  $workbenchArtifact,
+  $workbenchLayout,
+  $workbenchSelection,
+  setWorkbenchNarrationFocus
+} from '@/store/workbench'
 
 import type { ConversationStatus } from './use-voice-conversation'
 import { voiceStartReadiness } from './voice-start-readiness'
@@ -86,12 +92,15 @@ export function useRealtimeVoiceConversation({
   // creates it.
   const pendingTranscriptionRef = useRef<(() => Promise<void>) | null>(null)
   const wasEnabledRef = useRef(enabled)
+  const narrationTranscriptRef = useRef('')
 
   const end = useCallback(() => {
     startGenerationRef.current += 1
     connectionRef.current?.close()
     connectionRef.current = null
     pendingTranscriptionRef.current = null
+    narrationTranscriptRef.current = ''
+    setWorkbenchNarrationFocus(null)
     setMuted(false)
     setStatus('idle')
   }, [])
@@ -152,6 +161,19 @@ export function useRealtimeVoiceConversation({
               entry
             )
             failedTranscriptsRef.current.shift()
+          }
+        },
+        onAssistantResponseDone: () => {
+          narrationTranscriptRef.current = ''
+          setWorkbenchNarrationFocus(null)
+        },
+        onAssistantTranscriptDelta: delta => {
+          narrationTranscriptRef.current = `${narrationTranscriptRef.current}${delta}`.slice(-4_000)
+          const nodes = $workbenchArtifact.get()?.payload.nodes ?? []
+          const nodeId = matchNarrationNode(narrationTranscriptRef.current, nodes)
+
+          if (nodeId) {
+            setWorkbenchNarrationFocus(nodeId)
           }
         },
         onStatus: setStatus,

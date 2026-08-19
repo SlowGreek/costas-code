@@ -57,6 +57,24 @@ describe('SketchRenderer', () => {
     expect(srcdoc).toContain("connect-src 'none'")
   })
 
+  it('is a bounded flex viewport with a fixed toolbar and filling iframe', () => {
+    render(<SketchRenderer artifact={sketch('<div style="width:4000px">wide</div>')} />)
+
+    const host = screen.getByTestId('workbench-sketch')
+    const toolbar = screen.getByTestId('workbench-sketch-toolbar')
+    const frame = screen.getByTestId('workbench-sketch-frame')
+
+    for (const className of ['flex', 'min-h-0', 'flex-1', 'flex-col', 'overflow-hidden']) {
+      expect(host.classList.contains(className), className).toBe(true)
+    }
+
+    expect(toolbar.classList.contains('shrink-0')).toBe(true)
+
+    for (const className of ['min-h-0', 'flex-1', 'w-full', 'border-0']) {
+      expect(frame.classList.contains(className), className).toBe(true)
+    }
+  })
+
   it('neutralises remote-loading markup before it reaches the frame', () => {
     render(
       <SketchRenderer

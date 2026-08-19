@@ -75,6 +75,10 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/ring each|as you reach it|keeps pace/i)
   })
 
+  it('asks her to say exact node labels during walkthroughs', () => {
+    expect(text).toMatch(/node labels? exactly|exact node labels?/i)
+  })
+
   it('reads as a description of the mode, not a compliance checklist', () => {
     // Tone regression guard. An earlier revision accrued one prohibition per
     // bug fixed — 11 of 20 sentences — and the model's speech went stilted to

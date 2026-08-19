@@ -45,8 +45,11 @@ export default function SketchRenderer({ artifact }: SketchRendererProps) {
   }
 
   return (
-    <div className="workbench-sketch" data-testid="workbench-sketch">
-      <div className="workbench-sketch__bar">
+    <div
+      className="workbench-sketch flex min-h-0 flex-1 flex-col overflow-hidden"
+      data-testid="workbench-sketch"
+    >
+      <div className="workbench-sketch__bar shrink-0" data-testid="workbench-sketch-toolbar">
         <span className="workbench-sketch__badge" data-testid="workbench-sketch-badge">
           sandboxed sketch
         </span>
@@ -64,7 +67,7 @@ export default function SketchRenderer({ artifact }: SketchRendererProps) {
         </button>
       </div>
       <iframe
-        className="workbench-sketch__frame"
+        className="workbench-sketch__frame min-h-0 w-full flex-1 border-0"
         data-testid="workbench-sketch-frame"
         key={`${artifact.artifact_id}:${artifact.semantic_rev}:${stopped ? 'stopped' : 'live'}`}
         loading="lazy"

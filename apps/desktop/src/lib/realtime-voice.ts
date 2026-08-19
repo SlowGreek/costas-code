@@ -94,6 +94,20 @@ interface RealtimeTokenResponse {
 export interface RealtimeVoiceConnection {
   /** Settles when in-flight input transcriptions have landed. */
   awaitPendingTranscription: (timeoutMs?: number) => Promise<void>
+  /**
+   * Add a fact to the model's context WITHOUT making it speak.
+   *
+   * The append/generate split is a property of the Realtime event protocol,
+   * not of any particular transport: `conversation.item.create` mutates
+   * context, `response.create` runs the model, and they are independent. So a
+   * background worker can keep the model current continuously while the
+   * expensive part only happens when there is an actual conversational turn.
+   *
+   * Preferred over rewriting the instructions for anything that CHANGED:
+   * a rewrite carries state and invalidates the cached prompt prefix, an
+   * append carries the transition and costs one short message.
+   */
+  appendContext: (fact: string) => void
   close: () => void
   /** Seed prior conversation turns so voice continues rather than restarts. */
   seedHistory: (turns: RealtimeTranscript[]) => void
@@ -450,6 +464,26 @@ export async function startRealtimeVoiceConnection(
 
   return {
     awaitPendingTranscription: timeoutMs => pendingTranscription.awaitSettled(timeoutMs),
+    appendContext: fact => {
+      const text = fact.trim().slice(0, 500)
+
+      if (!channelOpen || closed || !text) {
+        return
+      }
+
+      // A system-authored fact, appended as context. Crucially NO
+      // `response.create`: the model absorbs it silently and uses it the next
+      // time it speaks, so the canvas can keep changing without interrupting
+      // the conversation or costing a turn.
+      send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'system',
+          content: [{ type: 'input_text', text }]
+        }
+      })
+    },
     close,
     seedHistory: turns => {
       if (!channelOpen || closed) {

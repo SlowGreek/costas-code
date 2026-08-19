@@ -6,6 +6,7 @@ import {
   type WorkbenchArtifact
 } from '@/store/workbench'
 
+import { describeWorkbenchChange } from './workbench-change-event'
 import { buildWorkbenchContext } from './workbench-spatial'
 
 /**
@@ -29,6 +30,12 @@ export interface WorkbenchContextOverlay {
 }
 
 export interface WorkbenchContextSyncOptions {
+  /**
+   * Append a one-line semantic event to the model's context WITHOUT making it
+   * speak. Carries the transition ("added Memory") that the state snapshot
+   * cannot express.
+   */
+  appendEvent?: (event: string) => void
   /** Pin/hide state, read lazily so Track B can own the atoms. */
   overlay?: () => WorkbenchContextOverlay
   push: (summary: string) => void
@@ -110,11 +117,21 @@ export function summarizeWorkbench(
 }
 
 /**
- * Subscribe to every freshness source and push a coalesced summary.
+ * Keep the voice model current: one snapshot, then events.
  *
- * Selection is pushed IMMEDIATELY (pointing must feel instant); structural and
- * layout churn is debounced so a drag cannot spam the realtime data channel.
- * Returns an unsubscribe function.
+ * The previous design rewrote the model's whole system prompt on every canvas
+ * change. That has two costs — it invalidates the cached prompt prefix on a
+ * long-lived session, and it only ever carries STATE, so the model could see
+ * twelve nodes but never learn that "Memory just appeared", which is the part
+ * worth speaking about.
+ *
+ * Now the snapshot goes out when the picture materially changes (it is what
+ * "which box is on the left" is answered from), and structural changes ALSO
+ * append a one-line event. Appends do not trigger generation, so the canvas
+ * can keep moving without interrupting the conversation.
+ *
+ * Selection still flushes immediately — pointing must feel instant. Layout
+ * churn stays debounced so a drag cannot spam the channel.
  */
 export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions): () => void {
   const schedule = options.scheduler ?? {
@@ -126,6 +143,7 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
 
   let timer: null | number = null
   let lastSent: null | string = null
+  let lastArtifact: null | WorkbenchArtifact = null
   let stopped = false
 
   const flush = () => {
@@ -151,13 +169,27 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
       selection: $workbenchSelection.get()
     })
 
+    // The transition, appended as its own fact. This is what the model can
+    // actually speak to — the snapshot only ever says what IS.
+    const event = describeWorkbenchChange(lastArtifact, artifact)
+
+    lastArtifact = artifact
+
     // Identical payloads are pure noise on the data channel.
     if (summary === lastSent) {
+      if (event) {
+        options.appendEvent?.(event)
+      }
+
       return
     }
 
     lastSent = summary
     options.push(summary)
+
+    if (event) {
+      options.appendEvent?.(event)
+    }
   }
 
   const flushSoon = () => {

@@ -521,6 +521,36 @@ describe('startRealtimeVoiceConnection', () => {
     expect(getUserMedia).not.toHaveBeenCalled()
   })
 
+  it('appends context WITHOUT making the model speak', async () => {
+    // The whole idea rests on this: `conversation.item.create` mutates context
+    // and `response.create` runs the model, and they are independent. If an
+    // append ever triggered generation, a background worker keeping the model
+    // current would interrupt the user mid-sentence on every canvas change.
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+
+    harness.connection.appendContext('You added Memory and connected it to Retrieval.')
+
+    const sent = harness.sent.map(raw => JSON.parse(raw) as { item?: { role?: string }; type: string })
+
+    expect(sent.some(e => e.type === 'conversation.item.create')).toBe(true)
+    expect(sent.some(e => e.type === 'response.create')).toBe(false)
+    expect(sent.find(e => e.type === 'conversation.item.create')?.item?.role).toBe('system')
+  })
+
+  it('ignores an empty append rather than sending a blank turn', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+
+    harness.connection.appendContext('   ')
+
+    expect(harness.sent).toHaveLength(0)
+  })
+
   it('keeps barge-in turn detection on every session update', async () => {
     const harness = await connectHarness()
 

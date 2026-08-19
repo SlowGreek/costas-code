@@ -250,6 +250,12 @@ export function useRealtimeVoiceConversation({
   useEffect(
     () =>
       startWorkbenchContextSync({
+        // The transition, appended silently. The model learns "Memory just
+        // appeared" without being made to speak about it, so the canvas can
+        // change mid-conversation without interrupting.
+        appendEvent: event => {
+          connectionRef.current?.appendContext(event)
+        },
         // Pin/hide is Track B's concern and lives on the artifact's view_state.
         // Read lazily so the model is told a node is pinned or hidden rather
         // than silently describing a canvas the user has already rearranged.

@@ -279,6 +279,30 @@ def _validate_quadrant(payload: Dict[str, Any]) -> None:
         seen.add(item_id)
 
 
+MAP_LAYOUTS = ("linear", "layered", "radial", "cluster")
+"""How a map should be ARRANGED, as an idea rather than as coordinates.
+
+Kind answers "what sort of thing is this"; layout answers "what shape is it".
+Without the second axis a loop, a pipeline and a hierarchy are all just `map`,
+so "show me this linearly" had nothing to change and the diagrammer returned a
+semantically identical graph — the user saw it recenter and nothing else.
+
+Positions stay banned. The renderer owns pixels precisely because the model
+cannot see the canvas it is drawing on.
+"""
+
+
+def _validate_layout(layout: Any) -> None:
+    if layout is None:
+        return
+    if not isinstance(layout, str):
+        raise ArtifactValidationError("artifact layout must be a string")
+    if layout not in MAP_LAYOUTS:
+        raise ArtifactValidationError(
+            f"unsupported artifact layout: {layout} (expected one of {', '.join(MAP_LAYOUTS)})"
+        )
+
+
 def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> None:
     if not isinstance(payload, dict):
         raise ArtifactValidationError("artifact payload must be an object")
@@ -305,6 +329,8 @@ def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> Non
     edges = payload.get("edges")
     if not isinstance(nodes, list) or not isinstance(edges, list):
         raise ArtifactValidationError("artifact graph requires nodes and edges lists")
+
+    _validate_layout(payload.get("layout"))
     if len(nodes) > MAX_GRAPH_NODES:
         raise ArtifactValidationError(f"artifact graph may contain at most {MAX_GRAPH_NODES} nodes")
     if len(edges) > MAX_GRAPH_EDGES:

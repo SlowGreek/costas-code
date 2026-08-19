@@ -37,7 +37,13 @@ _VISUALIZER_INSTRUCTIONS = f"""You are the mute diagrammer for a live voice idea
 Choose the ONE visual form that actually fits what the conversation needs right now, then return ONLY JSON.
 
 "map" — relationships, systems, dependencies, how parts connect:
-{{"kind":"map","nodes":[{{"id":"stable-id","label":"short label","kind":"agent"}}],"edges":[{{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}}]}}
+{{"kind":"map","layout":"linear","nodes":[{{"id":"stable-id","label":"short label","kind":"agent"}}],"edges":[{{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}}]}}
+A map's optional `layout` says what SHAPE it is, and it is the answer when the user asks about arrangement rather than content ("show me this linearly", "as a flow", "step by step", "top down", "around the centre"):
+  "linear"  — one thing after another; a pipeline, a sequence of steps, a chain.
+  "layered" — a directed flow with clear stages, where several things can sit at the same depth.
+  "radial"  — one thing at the centre with everything else arranged around it.
+  "cluster" — loose groups with no single direction.
+Omit `layout` when no arrangement is implied. Changing ONLY the layout is a real and useful change — the same nodes and edges drawn a different way is exactly what "show me this differently" means, and returning the same graph unchanged reads to the user as nothing having happened.
 A node's `kind` is optional but it colours the node, so use it. It must be exactly one of:
 actor, agent, concept, constraint, decision, goal, idea, insight, question, risk, surface, system, task.
 Any other value falls back to a generic accent — do NOT invent kinds like "component" or "infra".
@@ -63,6 +69,7 @@ You are given JSON with four keys:
 PREFER AN INCREMENTAL DIFF. When a `map` is already on screen and the change is describable as a few edits, return ops INSTEAD of a whole payload:
 {{"ops":[{{"op":"add_node","id":"stable-id","label":"short label","kind":"agent"}},{{"op":"connect","from_id":"a","to_id":"b","label":"optional"}},{{"op":"rename","node_id":"a","label":"New label"}},{{"op":"disconnect","edge_id":"e1"}},{{"op":"remove","node_id":"a"}}]}}
 Ops apply in order, so you can add a node and connect to it in the same diff. The whole diff is rejected if any single op fails, so only reference ids that exist in `current_graph` (or that an earlier op in the same diff created).
+To change only the arrangement, send the layout alongside an empty ops list: {{"layout":"linear","ops":[]}} — that is the cheapest possible redraw and it is the right answer to "show me this linearly".
 This is dramatically faster than redrawing — a few ops instead of every node and edge — and the user is waiting. Use it for anything short of a wholesale rethink.
 Return a FULL payload only when there is no current graph, when you are changing kind, or when so much changes that a diff would be longer than the drawing.
 Positions, spacing and arrangement are the renderer's job — never attach coordinates to map or timeline payloads, and never try to lay the diagram out. (Quadrant x/y are the exception: they are semantic 0..1 values saying where the idea sits between the low and high labels, not pixels. Sketch HTML uses its own drawing coordinates, which is fine.)
@@ -167,6 +174,13 @@ def _parse_payload_with_trim(
             raise ValueError("workbench visualizer returned ops with no graph to apply them to")
 
         patched = apply_graph_ops(current_payload, parsed["ops"])
+
+        # Layout rides alongside the ops: "show me this linearly" changes the
+        # arrangement and nothing else, and an empty diff with a new layout is
+        # the cheapest possible redraw.
+        if isinstance(parsed.get("layout"), str):
+            patched = {**patched, "layout": parsed["layout"]}
+
         payload = trim_payload_for_kind("map", patched)
         validate_semantic_payload(payload, "map")
         return "map", payload, summarize_trim("map", patched, payload), True

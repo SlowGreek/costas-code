@@ -62,6 +62,19 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/redraw|render|in flight|plumbing|internals/i)
   })
 
+  it('teaches that arrangement is something she can change', () => {
+    // Reported: "I asked to have it redrawn linearly, she said she did it, but
+    // it didn't change." She had no notion that SHAPE was changeable, so a
+    // request about arrangement produced a redraw of identical content.
+    expect(text).toMatch(/linearly|arrangement|shape/i)
+  })
+
+  it('tells her to ring nodes while walking through them', () => {
+    // Observed: a five-step walkthrough with focus never called once, so the
+    // user heard a tour of a diagram with nothing lighting up.
+    expect(text).toMatch(/ring each|as you reach it|keeps pace/i)
+  })
+
   it('reads as a description of the mode, not a compliance checklist', () => {
     // Tone regression guard. An earlier revision accrued one prohibition per
     // bug fixed — 11 of 20 sentences — and the model's speech went stilted to

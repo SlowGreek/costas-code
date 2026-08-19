@@ -15,6 +15,14 @@ export interface WorkbenchEdge {
 
 export interface WorkbenchGraph {
   edges: WorkbenchEdge[]
+  /**
+   * How the map should be ARRANGED — a semantic hint, never coordinates.
+   *
+   * Kind says what sort of thing the diagram is; layout says what shape it
+   * takes. Without it a loop, a pipeline and a hierarchy are all just "map",
+   * so "show me this linearly" had nothing to change.
+   */
+  layout?: string
   nodes: WorkbenchNode[]
 }
 

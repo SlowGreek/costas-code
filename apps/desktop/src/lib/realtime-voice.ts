@@ -174,7 +174,14 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'The workbench summary places every node in plain language ("upper left", "centre", "far right", and neighbours like "left of: Planner"), and `pointing_at` is the node the user just clicked — they are literally pointing at it. ' +
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
-  'Speak locations the way a person would — "the box on the far right" — and use focus to ring a node as you talk about it, so the user can see which one you mean.'
+  'Speak locations the way a person would — "the box on the far right" — and use focus to ring a node as you talk about it, so the user can see which one you mean. ' +
+  // She narrated a five-step walkthrough without ever calling focus, so the
+  // user heard a tour of a diagram with nothing lighting up. Focus is 9ms; it
+  // is meant to be used mid-sentence, not announced.
+  'Walking through several parts in turn is the main thing focus is for: ring each one as you reach it, so the canvas keeps pace with your voice. That is what makes a step-by-step explanation feel alive, and it costs nothing. ' +
+  // Layout intent. Without this she has no way to answer a question about
+  // arrangement and falls back to redrawing the same graph.
+  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — that is a real change you can make: call visualize and say what arrangement they want. It is not a redraw of the same picture.'
 
 /** Test seam: assert behaviour contracts without exporting a mutable prompt. */
 export const REALTIME_INSTRUCTIONS_FOR_TESTS = DEFAULT_REALTIME_INSTRUCTIONS

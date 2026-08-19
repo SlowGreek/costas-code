@@ -74,7 +74,11 @@ export function hashWorkbenchGraph(graph: WorkbenchGraph): string {
     .sort()
     .join('\u0002')
 
-  const text = `${nodes}\u0003${edges}`
+  // Layout is part of the picture's identity. Without it, "show me this
+  // linearly" hashes identically to the graph already on screen, the memo
+  // short-circuits, and the user watches nothing happen — the exact report.
+  const layout = (graph as undefined | { layout?: unknown })?.layout
+  const text = `${typeof layout === 'string' ? layout : ''}\u0003${nodes}\u0003${edges}`
 
   // FNV-1a, doubled with a second offset basis to cut accidental collisions.
   let a = 2166136261
@@ -289,6 +293,116 @@ export function resetWorkbenchLayoutMemo(): void {
   lastHash = undefined
 }
 
+/**
+ * Arrange nodes according to the map's declared shape.
+ *
+ * Returns null when the graph declares no layout, so the existing
+ * layered/force pipeline stays in charge. Kind says what sort of thing the
+ * diagram is; layout says what shape it takes — and without the second axis a
+ * loop, a pipeline and a hierarchy were all just "map", so asking to see
+ * something "linearly" changed nothing.
+ */
+const intentLayout = (
+  graph: WorkbenchGraph,
+  width: number,
+  height: number
+): null | Record<string, Point> => {
+  const declared = (graph as undefined | { layout?: unknown })?.layout
+  const ids = (graph?.nodes ?? []).map(node => node.id)
+
+  if (typeof declared !== 'string' || ids.length === 0) {
+    return null
+  }
+
+  const insetX = Math.min(CLAMP_INSET_X, width / 2 - 1)
+  const insetY = Math.min(CLAMP_INSET_Y, height / 2 - 1)
+
+  if (declared === 'linear') {
+    // Follow the edges so the chain reads in its real order rather than
+    // whatever order the model happened to emit nodes in.
+    const ordered = topologicalOrder(graph, ids)
+    const step = ids.length > 1 ? (width - insetX * 2) / (ids.length - 1) : 0
+
+    return Object.fromEntries(
+      ordered.map((id, index) => [
+        id,
+        {
+          x: insetX + step * index,
+          // A gentle alternation keeps edge labels from stacking on one line
+          // without breaking the left-to-right read.
+          y: height / 2 + (index % 2 === 0 ? -1 : 1) * Math.min(28, height / 12)
+        }
+      ])
+    )
+  }
+
+  if (declared === 'radial') {
+    // Highest-degree node at the centre: in practice that is the hub the
+    // conversation is actually about.
+    const degrees: Record<string, number> = Object.fromEntries(ids.map(id => [id, 0]))
+
+    for (const edge of graph.edges ?? []) {
+      degrees[edge.from] = (degrees[edge.from] ?? 0) + 1
+      degrees[edge.to] = (degrees[edge.to] ?? 0) + 1
+    }
+
+    const [hub, ...rest] = [...ids].sort((a, b) => (degrees[b] ?? 0) - (degrees[a] ?? 0))
+
+    const radius = Math.max(
+      NODE_HALF_DIAGONAL + 20,
+      Math.min(width / 2 - insetX, height / 2 - insetY)
+    )
+
+    return {
+      [hub]: { x: width / 2, y: height / 2 },
+      ...Object.fromEntries(
+        rest.map((id, index) => {
+          const angle = (index / Math.max(1, rest.length)) * Math.PI * 2
+
+          return [
+            id,
+            {
+              x: width / 2 + Math.cos(angle) * radius,
+              y: height / 2 + Math.sin(angle) * radius
+            }
+          ]
+        })
+      )
+    }
+  }
+
+  // `layered` is what the Sugiyama pass already produces, and `cluster` is
+  // what force layout is good at, so both defer to the existing pipeline.
+  return null
+}
+
+/** Node order along a chain, following edges where they form one. */
+const topologicalOrder = (graph: WorkbenchGraph, ids: string[]): string[] => {
+  const next = new Map<string, string>()
+  const targets = new Set<string>()
+
+  for (const edge of graph.edges ?? []) {
+    if (!next.has(edge.from)) {
+      next.set(edge.from, edge.to)
+      targets.add(edge.to)
+    }
+  }
+
+  const start = ids.find(id => !targets.has(id)) ?? ids[0]
+  const ordered: string[] = []
+  const seen = new Set<string>()
+  let cursor: string | undefined = start
+
+  while (cursor && !seen.has(cursor)) {
+    ordered.push(cursor)
+    seen.add(cursor)
+    cursor = next.get(cursor)
+  }
+
+  // Anything not on the chain keeps its declared order at the end.
+  return [...ordered, ...ids.filter(id => !seen.has(id))]
+}
+
 export function placeWorkbenchNodes(
   graph: WorkbenchGraph,
   existing: Record<string, Point>,
@@ -331,7 +445,10 @@ export function placeWorkbenchNodes(
     return round(persisted)
   }
 
-  const layered = layeredLayout(graph, safeWidth, safeHeight)
+  // A declared layout is an explicit request about SHAPE and outranks the
+  // automatic pipeline: the user asked for this arrangement.
+  const intent = intentLayout(graph, safeWidth, safeHeight)
+  const layered = intent ?? layeredLayout(graph, safeWidth, safeHeight)
   const base = layered ?? forceLayout(graph, existing, safeWidth, safeHeight, hash)
   const separated = separateRects(base, safeWidth, safeHeight)
 

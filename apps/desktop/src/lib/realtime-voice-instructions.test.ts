@@ -34,6 +34,34 @@ describe('realtime instructions', () => {
     }
   })
 
+  it('asks for silent tool calls, which is what removes the audible seam', () => {
+    // A function call ENDS the Realtime response, so anything said before it
+    // becomes a separate utterance and the user hears a gear change:
+    //   "Sure, let me pull together a simple visual"  <- turn 1
+    //   ...seam...
+    //   "Yes. On the canvas, you've got a block diagram"  <- turn 2
+    // Half of every reply in a real session was this throat-clearing. The
+    // model cannot merge the two turns, but it CAN stay silent for the first
+    // one, which collapses the seam to a short pause.
+    expect(text).toMatch(/without saying|say nothing|silently/i)
+    expect(text).toMatch(/let me/i)
+  })
+
+  it('keeps her talking about the ideas rather than the canvas', () => {
+    // Observed: "All set. The expanded view now shows...", "Clean slate is
+    // up.", "All cleaned up. You're now looking at..." — narrating the artifact
+    // instead of the thinking.
+    expect(text).toMatch(/the idea|the thinking|what it means/i)
+  })
+
+  it('keeps the plumbing out of her mouth', () => {
+    // Observed, verbatim: "It's probably still drawing in the background right
+    // now. These full redraws can take a moment, and I shouldn't start another
+    // one while it's in progress." That is my implementation leaking into her
+    // voice, and it reads as apologising for the software.
+    expect(text).toMatch(/redraw|render|in flight|plumbing|internals/i)
+  })
+
   it('reads as a description of the mode, not a compliance checklist', () => {
     // Tone regression guard. An earlier revision accrued one prohibition per
     // bug fixed — 11 of 20 sentences — and the model's speech went stilted to

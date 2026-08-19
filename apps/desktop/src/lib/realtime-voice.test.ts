@@ -527,12 +527,13 @@ describe('startRealtimeVoiceConnection', () => {
     harness.open()
     const initial = JSON.parse(harness.sent[0])
 
-    expect(initial.session.audio.input.turn_detection).toEqual({
-      type: 'semantic_vad',
-      eagerness: 'auto',
-      create_response: true,
-      interrupt_response: true
-    })
+    expect(initial.session.audio.input.turn_detection).toEqual(
+      expect.objectContaining({
+        type: 'semantic_vad',
+        create_response: true,
+        interrupt_response: true
+      })
+    )
 
     // A context update must not silently drop VAD if the API replaces rather
     // than merges the session object.

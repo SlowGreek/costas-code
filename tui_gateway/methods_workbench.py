@@ -27,6 +27,17 @@ def _(rid, params: dict) -> dict:
         # signal the canvas sits unchanged for seconds and the user cannot
         # tell "thinking" from "broken".
         _emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
+        # The background watcher shares this canvas. Telling it that a redraw
+        # is in flight is what stops it starting a second one: the artifact
+        # write is optimistic-concurrency guarded, so the loser burns a full
+        # model call and then dies on a revision conflict with nothing shown
+        # to the user.
+        try:
+            from workbench_watch_runtime import set_in_flight
+
+            set_in_flight(stored_session_id, True)
+        except Exception:
+            set_in_flight = None
         try:
             from workbench_visualizer import visualize_session
 
@@ -40,6 +51,8 @@ def _(rid, params: dict) -> dict:
         except Exception as exc:
             return _err(rid, 4621, f"workbench visualization failed: {exc}")
         finally:
+            if set_in_flight is not None:
+                set_in_flight(stored_session_id, False)
             # Clears on success AND on failure: the pending state must never
             # outlive the work it describes.
             _emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})

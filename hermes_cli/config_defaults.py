@@ -1070,6 +1070,19 @@ DEFAULT_CONFIG = {
             "extra_body": {},
             "reasoning_effort": "",
         },
+        # Background transcript watcher for the same workbench. It only ever
+        # answers "should the canvas change?", so it runs on a tighter timeout
+        # and a much smaller token budget than the diagrammer it wakes.
+        "ideation_workbench_watcher": {
+            "provider": "auto",
+            "model": "",
+            "prefer_fast_model": True,
+            "base_url": "",
+            "api_key": "",
+            "timeout": 15,
+            "extra_body": {},
+            "reasoning_effort": "",
+        },
         "memory_query_rewrite": {
             "provider": "auto",
             "model": "",
@@ -1765,6 +1778,27 @@ DEFAULT_CONFIG = {
         # voice chat instead of being sent to the agent. Case-insensitive,
         # surrounding punctuation ignored. Set [] to disable.
         "stop_phrases": ["stop"],
+    },
+
+    # Voice ideation workbench (the shared canvas beside a Realtime session).
+    "workbench": {
+        # Background transcript watcher. It decides when the canvas should
+        # change so the VOICE model never has to: a function call terminates a
+        # Realtime response, so every tool-driven redraw costs the user an
+        # audible stop-start seam mid-sentence.
+        "watcher": {
+            # Off until deliberately turned on: it spends a model call per
+            # settled utterance for the whole length of a voice session.
+            "enabled": False,
+            # "shadow" runs the watcher and logs its verdict WITHOUT drawing,
+            # so its judgement can be compared against the voice model's before
+            # it is handed the canvas. "active" lets it redraw.
+            "mode": "shadow",
+            # Quiet time after the last user fragment before a burst counts as
+            # one settled utterance. People speak in fragments; firing per
+            # fragment would queue redraws faster than they complete.
+            "debounce_seconds": 2.5,
+        },
     },
 
     # "Hey Hermes" hands-free wake word. Always-on, on-device hotword

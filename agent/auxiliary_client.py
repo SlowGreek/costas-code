@@ -952,7 +952,9 @@ _API_KEY_PROVIDER_AUX_MODELS: Dict[str, str] = _API_KEY_PROVIDER_AUX_MODELS_FALL
 # the user's main chat model. The opt-in lives in
 # ``auxiliary.<task>.prefer_fast_model`` so the default ``auto = main model``
 # contract remains true on every settings surface.
-_FAST_MODEL_TASKS: frozenset = frozenset({"title_generation", "ideation_workbench"})
+_FAST_MODEL_TASKS: frozenset = frozenset(
+    {"title_generation", "ideation_workbench", "ideation_workbench_watcher"}
+)
 
 
 def _task_prefers_fast_model(task: Optional[str]) -> bool:

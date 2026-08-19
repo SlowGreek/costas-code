@@ -106,9 +106,88 @@ def _(rid, params: dict) -> dict:
                         "text": text,
                     },
                 )
+                # Handler bodies execute in the gateway's injected namespace,
+                # so this module's own globals are NOT visible here — import
+                # the helper, and hand it the server helpers explicitly.
+                from tui_gateway.methods_realtime import _watch_transcript
+
+                _watch_transcript(
+                    session,
+                    stored_session_id,
+                    role,
+                    text,
+                    str(params.get("session_id") or ""),
+                    cfg=_load_cfg(),
+                    open_db=_session_db,
+                    emit=_emit,
+                )
             return _ok(rid, result)
         except Exception as exc:
             return _err(rid, 4613, f"could not persist Realtime transcript: {exc}")
+
+
+def _watch_transcript(
+    session: dict,
+    stored_session_id: str,
+    role: str,
+    text: str,
+    sid: str,
+    *,
+    cfg,
+    open_db,
+    emit,
+):
+    """Hand one settled transcript line to the background watcher.
+
+    Best-effort by construction: the watcher is an optimisation on top of the
+    voice model's own `visualize` tool, so a failure here must never turn into
+    a failed transcript write and a hole in the conversation record.
+    """
+    try:
+        from workbench_watch_runtime import observe_transcript
+
+        def _draw(decision) -> None:
+            _visualize_from_watcher(
+                session, stored_session_id, sid, decision.direction, open_db=open_db, emit=emit
+            )
+
+        observe_transcript(
+            stored_session_id,
+            role=role,
+            text=text,
+            cfg=cfg,
+            on_decision=_draw,
+        )
+    except Exception:
+        pass
+
+
+def _visualize_from_watcher(
+    session: dict, stored_session_id: str, sid: str, direction: str, *, open_db, emit
+):
+    """Redraw exactly the way the RPC does, minus the voice model.
+
+    It reuses `artifact.visualizing` so the canvas shows the same pending state
+    a voice-triggered redraw shows, and so the watcher's own in-flight guard
+    sees a redraw it started.
+    """
+    from workbench_watch_runtime import set_in_flight
+
+    with open_db(session) as db:
+        if db is None:
+            return
+        set_in_flight(stored_session_id, True)
+        emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
+        try:
+            from workbench_visualizer import visualize_session
+
+            artifact = visualize_session(db, stored_session_id, prompt=direction)
+            emit("artifact.updated", sid, {"artifact": artifact})
+        except Exception:
+            pass
+        finally:
+            set_in_flight(stored_session_id, False)
+            emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
 
 
 def register(server) -> None:

@@ -7,6 +7,9 @@ import {
   useRef
 } from 'react'
 
+import type { WorkbenchCamera } from '@/lib/workbench-camera'
+
+import { clampCamera, IDENTITY_CAMERA, visibleSize } from '@/lib/workbench-camera'
 import { focusedNodeId } from '@/lib/workbench-focus'
 import {
   NODE_HALF_HEIGHT,
@@ -232,29 +235,38 @@ const degreeMap = (nodes: WorkbenchNode[], edges: WorkbenchEdge[]): Record<strin
 }
 
 /**
- * Map a client (viewport) point into canvas/viewBox units.
+ * Map a client (viewport) point into canvas/world units.
  *
  * Pure and DOM-free so it is unit-testable: the caller supplies the SVG's
  * bounding rect. `preserveAspectRatio` defaults to `xMidYMid meet`, so the
  * viewBox is letterboxed inside the element — the scale is the SMALLER of the
  * two ratios and the leftover is split evenly as padding.
+ *
+ * The camera makes this correct when the view is zoomed or panned: the SVG is
+ * showing a WINDOW of the world, so element pixels map through that window,
+ * not through the full world. Every caller must pass the live camera or drag
+ * and click-to-select land on the wrong node.
  */
 export function clientToCanvas(
   client: Point,
   rect: { height: number; left: number; top: number; width: number },
-  viewBox: { height: number; width: number }
+  viewBox: { height: number; width: number },
+  camera: WorkbenchCamera = IDENTITY_CAMERA
 ): Point {
   if (!rect.width || !rect.height || !viewBox.width || !viewBox.height) {
     return { x: client.x - rect.left, y: client.y - rect.top }
   }
 
-  const scale = Math.min(rect.width / viewBox.width, rect.height / viewBox.height)
-  const padX = (rect.width - viewBox.width * scale) / 2
-  const padY = (rect.height - viewBox.height * scale) / 2
+  const safe = clampCamera(camera, viewBox)
+  const view = visibleSize(safe, viewBox)
+
+  const scale = Math.min(rect.width / view.width, rect.height / view.height)
+  const padX = (rect.width - view.width * scale) / 2
+  const padY = (rect.height - view.height * scale) / 2
 
   return {
-    x: (client.x - rect.left - padX) / scale,
-    y: (client.y - rect.top - padY) / scale
+    x: safe.x + (client.x - rect.left - padX) / scale,
+    y: safe.y + (client.y - rect.top - padY) / scale
   }
 }
 

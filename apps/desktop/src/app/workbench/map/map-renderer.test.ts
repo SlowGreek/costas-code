@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
+import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
 import type { WorkbenchEdge } from '@/store/workbench'
 
 import {
   accentForKind,
   borderPoint,
   bowFactors,
+  clientToCanvas,
   fitLabel,
   nodeRingState,
   routeEdge
@@ -26,6 +28,49 @@ describe('nodeRingState', () => {
         selected: 'gateway'
       })
     ).toEqual({ durable: false, selected: false })
+  })
+})
+
+describe('clientToCanvas', () => {
+  const rect = { height: 420, left: 0, top: 0, width: 720 }
+  const world = { height: 420, width: 720 }
+
+  it('is unchanged by the camera at identity', () => {
+    expect(clientToCanvas({ x: 360, y: 210 }, rect, world, IDENTITY_CAMERA)).toEqual({
+      x: 360,
+      y: 210
+    })
+  })
+
+  it('defaults to identity when no camera is supplied', () => {
+    expect(clientToCanvas({ x: 100, y: 50 }, rect, world)).toEqual({ x: 100, y: 50 })
+  })
+
+  it('maps into world units when zoomed in', () => {
+    expect(clientToCanvas({ x: 360, y: 210 }, rect, world, { x: 0, y: 0, zoom: 2 })).toEqual({
+      x: 180,
+      y: 105
+    })
+  })
+
+  it('offsets by the camera origin when panned', () => {
+    expect(clientToCanvas({ x: 0, y: 0 }, rect, world, { x: 100, y: 50, zoom: 1 })).toEqual({
+      x: 100,
+      y: 50
+    })
+  })
+
+  it('handles pan and zoom together', () => {
+    const got = clientToCanvas({ x: 360, y: 210 }, rect, world, { x: 100, y: 50, zoom: 2 })
+
+    expect(got.x).toBeCloseTo(280, 5)
+    expect(got.y).toBeCloseTo(155, 5)
+  })
+
+  it('still accounts for letterboxing when the element aspect differs', () => {
+    const tall = { height: 840, left: 0, top: 0, width: 720 }
+
+    expect(clientToCanvas({ x: 0, y: 210 }, tall, world, IDENTITY_CAMERA)).toEqual({ x: 0, y: 0 })
   })
 })
 

@@ -159,6 +159,20 @@ describe('buildWorkbenchContext', () => {
     expect(buildWorkbenchContext(base)).not.toMatch(/"x"|"y"|450|300/)
   })
 
+  it('keeps edge ids so disconnect(edge_id) has a target', () => {
+    // `disconnect` takes an edge_id, artifacts carry one, and the projection
+    // used to strip it — so the tool existed and the model could never name a
+    // target. Same orphan class as a renderer nobody dispatches to.
+    const parsed = JSON.parse(
+      buildWorkbenchContext({
+        ...base,
+        edges: [{ from: 'planner', id: 'planner-controller', label: 'drives', to: 'controller' }]
+      })
+    ) as { edges: { id?: string }[] }
+
+    expect(parsed.edges[0].id).toBe('planner-controller')
+  })
+
   it('tells the model what the user is pointing at', () => {
     const parsed = JSON.parse(buildWorkbenchContext({ ...base, selection: 'controller' })) as {
       pointing_at: null | string

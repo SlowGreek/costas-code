@@ -14,11 +14,18 @@ from hermes_state_artifacts import (
     trim_payload_for_kind,
     validate_semantic_payload,
 )
-from workbench_sketch import MAX_SKETCH_HTML_BYTES, validate_sketch_payload
+from workbench_sketch import SKETCH_MODEL_GUIDANCE, validate_sketch_payload
 
 
 _MAX_TRANSCRIPT_CHARS = 64_000
 _MAX_DIRECTION_CHARS = 1_000
+
+# One ceiling for every visualizer turn. `max_tokens` is a CAP, not a
+# reservation: a map costs a few hundred tokens either way, while a sketch is a
+# whole HTML document. The old 800-token default keyed off `direction`, which is
+# empty on the now-proactive first draw — so the truncation cliff sat exactly on
+# the happy path.
+MAX_VISUALIZER_OUTPUT_TOKENS = 6_000
 
 # The kind is the diagrammer's own choice. `map` stays the default so an older
 # model, a malformed reply, or an unrecognised name never regresses behaviour.
@@ -29,7 +36,10 @@ _VISUALIZER_INSTRUCTIONS = f"""You are the mute diagrammer for a live voice idea
 Choose the ONE visual form that actually fits what the conversation needs right now, then return ONLY JSON.
 
 "map" — relationships, systems, dependencies, how parts connect:
-{{"kind":"map","nodes":[{{"id":"stable-id","label":"short label","kind":"optional"}}],"edges":[{{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}}]}}
+{{"kind":"map","nodes":[{{"id":"stable-id","label":"short label","kind":"agent"}}],"edges":[{{"id":"stable-id","from":"node-id","to":"node-id","label":"optional"}}]}}
+A node's `kind` is optional but it colours the node, so use it. It must be exactly one of:
+actor, agent, concept, constraint, decision, goal, idea, insight, question, risk, surface, system, task.
+Any other value falls back to a generic accent — do NOT invent kinds like "component" or "infra".
 
 "timeline" — sequences, phases, roadmaps, steps in order, before/after:
 {{"kind":"timeline","items":[{{"id":"stable-id","label":"short label","detail":"optional one line","order":0}}]}}
@@ -39,20 +49,28 @@ Choose the ONE visual form that actually fits what the conversation needs right 
 
 "sketch" — self-contained HTML/CSS/JS (canvas, WebGL, SVG, animation) rendered in a locked-down sandbox:
 {{"kind":"sketch","html":"<canvas id=\\"c\\"></canvas><style>...</style><script>...</script>"}}
+The runtime provides its own full-bleed canvas via `Sketch.canvas()` (id `sketch-canvas`) — you do not need to author a <canvas> element yourself; the id in the example above is illustrative only.
 Reach for it when the idea is visual, spatial, dynamic, or illustrative rather than structural — a rendered 3D object, a simulation, a chart, a custom visual metaphor, an animated concept.
 Trade-off to weigh honestly: a sketch is redrawn whole and has no stable ids, so the user cannot point at its parts the way they can with a map. Worth it when the picture itself is the point.
-A built-in offline runtime is already injected as `window.Sketch` — never write a <script src> tag or reference a CDN: the sandbox has NO network and any remote load is blocked.
-`Sketch` gives you: `canvas` (fullscreen, DPR-correct) and `fit`; `loop(fn)` for a rAF loop with delta time; `canvas2d()`; `gl`/`program`/`shader`/`buffer` for raw WebGL; `scene3d()` for a lit 3D scene with orbit controls; `box`/`sphere`/`plane` geometry; `mat4`/`vec3` math; `lerp`/`clamp`; `hasWebGL()`; and `error(e)` to surface a failure in-frame.
-Prefer `Sketch.scene3d()` for 3D rather than hand-writing projection matrices. Everything must be inline and self-contained, under {MAX_SKETCH_HTML_BYTES} bytes (the runtime does not count against that).
+Full sketch capabilities, the `Sketch` runtime API, and the hard size limit are in the SKETCH RUNTIME section at the end of these instructions.
+
+You are given JSON with four keys:
+`transcript` — the conversation so far. Read it as a whole.
+`current_kind` and `current_graph` — your own previous work (nodes/edges, items, or html). REVISE it rather than redrawing from scratch, and preserve existing ids for the same concept. For a sketch that means editing the HTML you produced last time, unless the idea itself changed.
+`direction` — an optional instruction from the voice agent about what to change right now. When it is non-empty it is the highest-priority input: it is what the user just asked for, and your output should visibly satisfy it.
+Positions, spacing and arrangement are the renderer's job — never attach coordinates to map or timeline payloads, and never try to lay the diagram out. (Quadrant x/y are the exception: they are semantic 0..1 values saying where the idea sits between the low and high labels, not pixels. Sketch HTML uses its own drawing coordinates, which is fine.)
+If `direction` is about appearance rather than content ("make it prettier", "tidy it up", "less cluttered"), the fix you CAN make is editorial: shorten verbose labels, drop exact-duplicate or redundant edges, cut items that carry no distinct idea. Do not invent structure, and do not delete a distinct concept just to look tidier.
 
 All four forms are equally available — pick by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map, something you need to actually SEE is a sketch.
-Keep the current kind unless the conversation has genuinely moved to a different shape; switching redraws everything.
-Read the transcript as a whole and update the current artifact rather than redrawing from scratch.
-You are shown your own previous work as `current_graph` (nodes/edges, items, or html for a sketch) — REVISE it. For a sketch that means editing the HTML you produced last time, not starting over, unless the idea itself changed.
-Preserve existing ids for the same concept. Draw only what materially helps the shared idea.
+Keep the current kind unless the conversation has genuinely moved to a different shape, or `direction` explicitly asks for another form ("show this as a timeline"); switching redraws everything.
+Draw only what materially helps the shared idea.
 Prefer a legible diagram over an exhaustive one.
-Quadrant x/y are meaning, not pixels: numbers from 0 to 1 saying where the idea sits between the low and high labels.
-Never emit prose, Markdown, pixel coordinates, more than {MAX_GRAPH_NODES} nodes, more than {MAX_GRAPH_EDGES} edges, more than {MAX_TIMELINE_ITEMS} timeline items, or more than {MAX_QUADRANT_ITEMS} quadrant items."""
+In map / timeline / quadrant payloads: never emit prose or Markdown, never attach renderer coordinates, and never exceed {MAX_GRAPH_NODES} nodes, {MAX_GRAPH_EDGES} edges, {MAX_TIMELINE_ITEMS} timeline items, or {MAX_QUADRANT_ITEMS} quadrant items. Return ONLY the JSON object.
+
+SKETCH RUNTIME — only relevant if you chose "sketch"; ignore it entirely for map, timeline, and quadrant.
+Read the following as advice about the document you put in the outer JSON object's `html` string. It never overrides the protocol above: still return ONLY the JSON object, never a raw HTML document.
+Practical size: 128 KiB is the hard validation cap, but your generation budget is tighter, and HTML cut off mid-tag is ACCEPTED rather than rejected — a silently broken sketch. Keep it well under ~15 KB.
+""" + SKETCH_MODEL_GUIDANCE
 
 
 def _empty_payload(kind: str) -> Dict[str, Any]:
@@ -175,26 +193,12 @@ def visualize_session(
 
         run_oneshot_fn = run_oneshot
 
-    # A diagram is a few hundred tokens of JSON; a sketch is a whole HTML
-    # document and needs far more headroom. 800 tokens caps output at ~3KB,
-    # which truncates a real canvas/WebGL sketch mid-tag and yields a broken
-    # document that the byte-cap validator would happily accept.
-    #
-    # The kind is the model's choice AFTER we call it, so we cannot know in
-    # advance whether this turn is a sketch. Budget generously whenever a
-    # sketch is plausible — already sketching, or the voice agent explicitly
-    # asked to see/draw/render/animate something.
-    wants_visual = any(
-        word in request["direction"].lower()
-        for word in ("sketch", "render", "draw", "animate", "simulate", "visual", "3d", "show me")
-    )
-    max_tokens = 6_000 if current_kind == "sketch" or wants_visual else 800
-
+    # One generous ceiling for every turn — see MAX_VISUALIZER_OUTPUT_TOKENS.
     generated = run_oneshot_fn(
         instructions=_VISUALIZER_INSTRUCTIONS,
         user_input=json.dumps(request, ensure_ascii=False),
         task="ideation_workbench",
-        max_tokens=max_tokens,
+        max_tokens=MAX_VISUALIZER_OUTPUT_TOKENS,
         temperature=0.2,
         timeout=45,
         main_runtime=None,

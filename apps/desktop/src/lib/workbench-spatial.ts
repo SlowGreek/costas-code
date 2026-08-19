@@ -184,7 +184,7 @@ export function describeLocation(spatial: SpatialNode): string {
  * ------------------------------------------------------------------ */
 
 export interface WorkbenchContextInput {
-  edges?: { from: string; label?: string; to: string }[]
+  edges?: { from: string; id?: string; label?: string; to: string }[]
   hidden?: string[]
   kind: string
   layout?: null | { height: number; positions: Record<string, SpatialPoint>; width: number }
@@ -248,7 +248,15 @@ export function buildWorkbenchContext(input: WorkbenchContextInput): string {
     nodes: described,
     edges: (input.edges ?? [])
       .filter(edge => !hidden.has(edge.from) && !hidden.has(edge.to))
-      .map(edge => ({ from: edge.from, to: edge.to, label: edge.label })),
+      // The edge id is what makes `disconnect(edge_id)` callable. Without it
+      // the tool exists and the model can never name a target — the same
+      // orphan class as a renderer nobody dispatches to.
+      .map(edge => ({
+        ...(edge.id ? { id: edge.id } : {}),
+        from: edge.from,
+        to: edge.to,
+        label: edge.label
+      })),
     ...(hidden.size > 0 ? { hidden_from_view: [...hidden] } : {})
   })
 }

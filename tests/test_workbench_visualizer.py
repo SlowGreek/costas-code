@@ -1,18 +1,26 @@
 import json
+import re
 
 import pytest
 
 from hermes_state import SessionDB
 from hermes_state_artifacts import MAX_GRAPH_EDGES, MAX_GRAPH_NODES
-from workbench_sketch import MAX_SKETCH_HTML_BYTES
-from workbench_visualizer import visualize_session
+from workbench_sketch import MAX_SKETCH_HTML_BYTES, SKETCH_MODEL_GUIDANCE
+from workbench_visualizer import (
+    MAX_VISUALIZER_OUTPUT_TOKENS,
+    _VISUALIZER_INSTRUCTIONS,
+    visualize_session,
+)
 
 
-def test_sketch_turns_get_enough_tokens_to_emit_real_html(tmp_path):
-    """800 tokens truncates a canvas sketch mid-tag; sketch turns need headroom.
+def test_every_turn_gets_room_to_emit_a_real_sketch(tmp_path):
+    """One ceiling for every turn, including a first draw with NO direction.
 
-    The byte-cap validator accepts truncated HTML happily, so an undersized
-    budget fails silently as a broken document rather than an error.
+    The old budget keyed off `direction` and only went large when the text
+    looked visual ("render", "draw", "3d"). The voice agent now draws the FIRST
+    diagram proactively, with an empty direction — so the starved case was
+    exactly the happy path. A truncated sketch is not an error either: the
+    byte-cap validator accepts HTML cut mid-tag, so it fails silently.
     """
     db = SessionDB(db_path=tmp_path / "state.db")
     try:
@@ -24,23 +32,68 @@ def test_sketch_turns_get_enough_tokens_to_emit_real_html(tmp_path):
 
             return json.dumps({"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []})
 
-        # A plain diagram turn stays cheap.
+        # The proactive first draw: no prompt at all.
         visualize_session(db, "voice-session", run_oneshot_fn=spy)
-        assert budgets[-1] == 800
+        assert budgets[-1] == MAX_VISUALIZER_OUTPUT_TOKENS
 
-        # An explicit visual request gets room to actually draw.
+        # An explicit visual request.
         visualize_session(db, "voice-session", prompt="render a rotating cube", run_oneshot_fn=spy)
-        assert budgets[-1] > 800
+        assert budgets[-1] == MAX_VISUALIZER_OUTPUT_TOKENS
 
-        # Once the artifact IS a sketch, every revision keeps the headroom.
+        # Revising an existing sketch.
         def to_sketch(**_kwargs):
             return json.dumps({"kind": "sketch", "html": "<canvas id='c'></canvas>"})
 
         visualize_session(db, "voice-session", prompt="draw it", run_oneshot_fn=to_sketch)
         visualize_session(db, "voice-session", run_oneshot_fn=spy)
-        assert budgets[-1] > 800
+        assert budgets[-1] == MAX_VISUALIZER_OUTPUT_TOKENS
+
+        # Enough headroom for a real canvas/WebGL document, not just JSON.
+        assert MAX_VISUALIZER_OUTPUT_TOKENS >= 4_000
     finally:
         db.close()
+
+
+def test_the_sketch_runtime_guidance_actually_reaches_the_model(tmp_path):
+    """The canonical guidance must be spliced into the real instructions.
+
+    It was previously orphaned: `test_workbench_sketch_guidance.py` asserted
+    hard on its content while NOTHING imported it, so every one of those tests
+    passed against text the diagrammer never saw — the same bug class as the
+    `sketch` kind the model was never told existed.
+    """
+    assert SKETCH_MODEL_GUIDANCE in _VISUALIZER_INSTRUCTIONS
+    # And it must survive f-string interpolation intact.
+    assert "Sketch.scene3d" in _VISUALIZER_INSTRUCTIONS
+    assert not re.search(r"\{[A-Z_]+\}", _VISUALIZER_INSTRUCTIONS)
+
+
+def test_the_prompt_names_its_own_inputs_and_vocabulary():
+    """Contract guards, not prose snapshots.
+
+    Each assertion below is a defect found by reading the assembled prompt:
+    `direction` was never named at all, and node `kind` was documented as
+    "optional" with no vocabulary, so the model invented kinds the renderer
+    cannot colour.
+    """
+    text = _VISUALIZER_INSTRUCTIONS
+
+    for key in ("direction", "current_kind", "current_graph", "transcript"):
+        assert f"`{key}`" in text, f"prompt never names its {key} input"
+
+    # The renderer's KIND_ACCENTS vocabulary must be spelled out.
+    for kind in ("actor", "agent", "concept", "decision", "risk", "system", "task"):
+        assert kind in text, f"node kind {kind} missing from prompt"
+
+    # Every JSON example must be valid JSON after interpolation.
+    examples = re.findall(r"^\{.*\}$", text, re.M)
+    assert len(examples) == 4
+    for example in examples:
+        json.loads(example)
+
+    # Language that previously suppressed drawing must stay gone.
+    assert "LAST RESORT" not in text
+    assert "return it unchanged" not in text
 
 
 def test_visualize_session_routes_a_sketch_through_sandboxed_validation(tmp_path):

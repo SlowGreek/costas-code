@@ -122,7 +122,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'Continue from there — do not greet the user as if meeting them, and do not re-summarise what was already said unless asked. ' +
   'The canvas is the point of this mode: the user should not have to ask you to draw. ' +
   'If there is no diagram yet and the conversation has any shape worth seeing — a set of parts, a sequence, a comparison, a system — call visualize WITHOUT being asked. ' +
-  'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove / focus) for single edits. ' +
+  'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove) for single edits. ' +
   'A stale or missing canvas is a failure; asking permission to draw is worse than drawing. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
@@ -176,7 +176,7 @@ const sessionUpdateEvent = (instructions: string) => ({
         description:
           'Draw or redraw the whole diagram via the mute diagrammer. Call it proactively — the user should never have to ask you to visualize. ' +
           'Use it for the FIRST drawing as soon as the conversation has a shape worth seeing, and afterwards whenever the structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
-          'It takes a few seconds and regenerates everything, so for a single edit — one label, one link, dropping one box, pointing at something — use rename / connect / disconnect / remove / focus instead, which are instant.',
+          'It takes a few seconds and regenerates everything, so for a single edit — one label, one link, dropping one box — use rename / connect / disconnect / remove instead, which are instant.',
         parameters: {
           type: 'object',
           properties: {
@@ -192,7 +192,7 @@ const sessionUpdateEvent = (instructions: string) => ({
         type: 'function',
         name: 'focus',
         description:
-          'Instantly centre and highlight ONE existing node so the user can see which one you mean. Use it whenever you talk about a specific box ("the planner here"). Changes nothing about the ideas themselves. Never call visualize for this.',
+          'Record which ONE existing node you are talking about, so the rest of Hermes knows your referent. NOTE: the canvas does not yet render a focus highlight, so do NOT tell the user you have highlighted, centred, or pointed at anything — say which box you mean in words. Changes nothing about the ideas themselves. Never call visualize for this.',
         parameters: {
           type: 'object',
           properties: {

@@ -55,7 +55,10 @@ export function summarizeWorkbench(
 ): string {
   const payload = artifact.payload as {
     axes?: unknown
-    edges?: { from: string; label?: string; to: string }[]
+    // `id` is load-bearing: it is the only handle `disconnect(edge_id)` has.
+    // Declaring edges without it invites a "tidy up" projection that silently
+    // re-orphans the tool.
+    edges?: { from: string; id?: string; label?: string; to: string }[]
     items?: { id: string; label?: string }[]
     nodes?: { id: string; kind?: string; label?: string }[]
   }

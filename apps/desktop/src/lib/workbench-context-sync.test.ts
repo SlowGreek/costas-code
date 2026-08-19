@@ -87,31 +87,88 @@ describe('summarizeWorkbench', () => {
 })
 
 describe('startWorkbenchContextSync', () => {
-  it('pushes immediately when the selection changes', () => {
-    setWorkbenchArtifact(artifact())
+  it('appends transitions after startup instead of rewriting the system prompt', () => {
+    // Codex pattern: one snapshot at startup, semantic events after. Rewriting
+    // the full instructions on every canvas change invalidates prompt caching
+    // and tells the model only WHAT IS, never WHAT CHANGED.
+    setWorkbenchArtifact(artifact(1))
     setWorkbenchLayout(layout)
 
     const push = vi.fn()
+    const appendEvent = vi.fn()
     const scheduler = makeScheduler()
-    const stop = startWorkbenchContextSync({ push, scheduler })
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
 
+    // Ignore initial subscription delivery: the connection has its explicit
+    // startup snapshot in use-realtime-voice-conversation.ts.
     push.mockClear()
-    setWorkbenchSelection('planner')
+    appendEvent.mockClear()
 
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push.mock.calls[0][0]).toContain('"pointing_at":"planner"')
+    setWorkbenchArtifact({
+      ...artifact(2),
+      payload: {
+        ...artifact(2).payload,
+        nodes: [...artifact(2).payload.nodes, { id: 'memory', label: 'Memory' }]
+      }
+    })
+    scheduler.run()
+
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
+    expect(appendEvent.mock.calls[0][0]).toContain('Memory')
+    expect(appendEvent.mock.calls[0][0]).toContain('Current canvas state')
     stop()
   })
 
-  it('coalesces layout churn into one push', () => {
+  it('appends user selection as world state without generating a response', () => {
     setWorkbenchArtifact(artifact())
     setWorkbenchLayout(layout)
 
     const push = vi.fn()
+    const appendEvent = vi.fn()
     const scheduler = makeScheduler()
-    const stop = startWorkbenchContextSync({ push, scheduler })
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
 
     push.mockClear()
+    appendEvent.mockClear()
+    setWorkbenchSelection('planner')
+
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
+    expect(appendEvent.mock.calls[0][0]).toContain('"pointing_at":"planner"')
+    stop()
+  })
+
+  it('appends immediately when the selection changes', () => {
+    setWorkbenchArtifact(artifact())
+    setWorkbenchLayout(layout)
+
+    const push = vi.fn()
+    const appendEvent = vi.fn()
+    const scheduler = makeScheduler()
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
+
+    push.mockClear()
+    appendEvent.mockClear()
+    setWorkbenchSelection('planner')
+
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
+    expect(appendEvent.mock.calls[0][0]).toContain('"pointing_at":"planner"')
+    stop()
+  })
+
+  it('coalesces layout churn into one append', () => {
+    setWorkbenchArtifact(artifact())
+    setWorkbenchLayout(layout)
+
+    const push = vi.fn()
+    const appendEvent = vi.fn()
+    const scheduler = makeScheduler()
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
+
+    push.mockClear()
+    appendEvent.mockClear()
 
     for (let index = 0; index < 10; index++) {
       setWorkbenchLayout({
@@ -120,45 +177,52 @@ describe('startWorkbenchContextSync', () => {
       })
     }
 
-    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).not.toHaveBeenCalled()
     scheduler.run()
-    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
     stop()
   })
 
-  it('re-pushes when the artifact changes', () => {
+  it('appends when the artifact changes', () => {
     setWorkbenchArtifact(artifact(1))
     setWorkbenchLayout(layout)
 
     const push = vi.fn()
+    const appendEvent = vi.fn()
     const scheduler = makeScheduler()
-    const stop = startWorkbenchContextSync({ push, scheduler })
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
 
     push.mockClear()
+    appendEvent.mockClear()
     setWorkbenchArtifact(artifact(2))
     scheduler.run()
 
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push.mock.calls[0][0]).toContain('"revision":2')
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
+    expect(appendEvent.mock.calls[0][0]).toContain('"revision":2')
     stop()
   })
 
-  it('re-pushes when the pin/hide overlay changes via a layout tick', () => {
+  it('appends when the pin/hide overlay changes via a layout tick', () => {
     setWorkbenchArtifact(artifact())
     setWorkbenchLayout(layout)
 
     const push = vi.fn()
+    const appendEvent = vi.fn()
     const scheduler = makeScheduler()
     let overlay: { hidden?: string[]; pinned?: string[] } = {}
-    const stop = startWorkbenchContextSync({ overlay: () => overlay, push, scheduler })
+    const stop = startWorkbenchContextSync({ appendEvent, overlay: () => overlay, push, scheduler })
 
     push.mockClear()
+    appendEvent.mockClear()
     overlay = { pinned: ['controller'] }
     setWorkbenchLayout({ ...layout })
     scheduler.run()
 
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push.mock.calls[0][0]).toContain('"pinned":true')
+    expect(push).not.toHaveBeenCalled()
+    expect(appendEvent).toHaveBeenCalledTimes(1)
+    expect(appendEvent.mock.calls[0][0]).toContain('"pinned":true')
     stop()
   })
 

@@ -125,10 +125,11 @@ export function summarizeWorkbench(
  * twelve nodes but never learn that "Memory just appeared", which is the part
  * worth speaking about.
  *
- * Now the snapshot goes out when the picture materially changes (it is what
- * "which box is on the left" is answered from), and structural changes ALSO
- * append a one-line event. Appends do not trigger generation, so the canvas
- * can keep moving without interrupting the conversation.
+ * Exactly one startup snapshot goes into instructions (what "which box is on
+ * the left" is answered from). Every later transition is appended as a short
+ * semantic event plus the latest authoritative snapshot. Appends do not
+ * trigger generation, so clicks and canvas changes can keep the model current
+ * without interrupting the conversation or invalidating the prompt prefix.
  *
  * Selection still flushes immediately — pointing must feel instant. Layout
  * churn stays debounced so a drag cannot spam the channel.
@@ -175,6 +176,8 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
 
     lastArtifact = artifact
 
+    const firstSnapshot = lastSent === null
+
     // Identical payloads are pure noise on the data channel.
     if (summary === lastSent) {
       if (event) {
@@ -185,11 +188,25 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
     }
 
     lastSent = summary
-    options.push(summary)
 
-    if (event) {
-      options.appendEvent?.(event)
+    if (firstSnapshot) {
+      // Exactly one system-instruction snapshot. The connection setup also
+      // sends one explicitly; before the connection exists this call is a
+      // harmless no-op. Crucially, later changes never rewrite instructions.
+      options.push(summary)
+
+      return
     }
+
+    // Every later change is appended as a conversation fact, without
+    // `response.create`. Include the fresh authoritative snapshot so old
+    // events cannot leave the model confidently holding stale positions or a
+    // stale `pointing_at` value.
+    const fact = [event, `Current canvas state (authoritative): ${summary}`]
+      .filter(Boolean)
+      .join(' ')
+
+    options.appendEvent?.(fact)
   }
 
   const flushSoon = () => {

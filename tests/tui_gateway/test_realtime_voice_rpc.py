@@ -37,6 +37,11 @@ def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch)
         "expires_at": 1234,
         "model": "gpt-realtime-2.1",
         "voice": "marin",
+        "workbench_watcher": {
+            "active": False,
+            "pipeline": "direct",
+            "owns_redraws": False,
+        },
     }
     assert captured == {
         "api_key": "sk-test",
@@ -80,6 +85,36 @@ def test_realtime_token_rpc_mints_an_entra_token_for_azure(monkeypatch):
     assert captured["api_key"] == "entra-token"
     assert captured["base_url"] == "https://res.openai.azure.com/openai/v1"
     assert envelope["result"]["webrtc_url"] == "https://res/openai/v1/realtime/calls"
+
+
+def test_realtime_token_exposes_when_the_active_watcher_owns_redraws(monkeypatch):
+    import copy
+
+    runtime_id = "runtime-session"
+    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["workbench"]["watcher"].update(
+        {"enabled": True, "mode": "active", "pipeline": "direct"}
+    )
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    monkeypatch.setattr(tool_backend_helpers, "resolve_openai_audio_api_key", lambda: "sk-test")
+    monkeypatch.setattr(
+        realtime_voice,
+        "create_realtime_client_secret",
+        lambda **_: {"client_secret": "ek_short"},
+    )
+    try:
+        result = server._methods["voice.realtime.token"](
+            "request-1", {"session_id": runtime_id}
+        )["result"]
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    assert result["workbench_watcher"] == {
+        "active": True,
+        "pipeline": "direct",
+        "owns_redraws": True,
+    }
 
 
 def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):

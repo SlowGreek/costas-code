@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # The watcher must be able to say "nothing to draw" in a handful of tokens; it
 # runs once per settled utterance and its cost is paid on every turn.
 MAX_WATCHER_OUTPUT_TOKENS = 120
+MAX_DIRECT_OUTPUT_TOKENS = 6_000
 
 # Routed through the auxiliary fast-model path (see `_FAST_MODEL_TASKS`).
 WATCHER_TASK = "ideation_workbench_watcher"
@@ -33,6 +34,8 @@ WATCHER_TASK = "ideation_workbench_watcher"
 DEFAULT_DEBOUNCE_SECONDS = 2.5
 DEFAULT_MODE = "shadow"
 SUPPORTED_MODES = ("shadow", "active")
+DEFAULT_PIPELINE = "direct"
+SUPPORTED_PIPELINES = ("direct", "two_stage")
 
 _MAX_UTTERANCE_CHARS = 4_000
 _MAX_REASON_CHARS = 240
@@ -55,6 +58,19 @@ Return ONLY this JSON object and nothing else:
 `direction` is an instruction to the artist. Leave it "" when `draw` is false.
 """
 
+DIRECT_WATCHER_INSTRUCTIONS = """You are the single mute canvas worker for a live voice ideation conversation.
+In this ONE response, decide whether the canvas should change and, when it should, emit the visual update yourself. There is no second diagrammer call.
+
+Input JSON contains `utterance`, `recent`, `current_kind`, `current_payload`, and `current_summary`.
+Return ONLY one JSON envelope:
+{"draw":false,"reason":"one short clause"}
+or
+{"draw":true,"reason":"one short clause","visual":<visualizer JSON object>}
+
+The nested `visual` object uses the existing visualizer contract below. On the first draw it MUST be a full payload. `ops` are allowed only when the current payload is an existing non-empty map.
+
+"""
+
 
 @dataclass(frozen=True)
 class WatcherConfig:
@@ -63,6 +79,7 @@ class WatcherConfig:
     enabled: bool = False
     mode: str = DEFAULT_MODE
     debounce_seconds: float = DEFAULT_DEBOUNCE_SECONDS
+    pipeline: str = DEFAULT_PIPELINE
 
     @property
     def active(self) -> bool:
@@ -86,6 +103,10 @@ def watcher_config_from(cfg: Any) -> WatcherConfig:
     if mode not in SUPPORTED_MODES:
         mode = DEFAULT_MODE
 
+    pipeline = str(watcher.get("pipeline") or DEFAULT_PIPELINE).strip().lower()
+    if pipeline not in SUPPORTED_PIPELINES:
+        pipeline = DEFAULT_PIPELINE
+
     try:
         debounce = float(watcher.get("debounce_seconds", DEFAULT_DEBOUNCE_SECONDS))
     except (TypeError, ValueError):
@@ -97,6 +118,7 @@ def watcher_config_from(cfg: Any) -> WatcherConfig:
         enabled=watcher.get("enabled") is True,
         mode=mode,
         debounce_seconds=debounce,
+        pipeline=pipeline,
     )
 
 
@@ -112,6 +134,8 @@ class WatchDecision:
     # so the caller must NOT redraw. Kept distinct from `draw` so shadow logs
     # record what the watcher actually thought.
     suppressed: bool = False
+    visual: Any = None
+    expected_rev: Optional[int] = None
 
     @property
     def should_draw(self) -> bool:
@@ -144,6 +168,10 @@ class TranscriptWatcher:
     _in_flight: bool = field(default=False, init=False)
     current_kind: str = field(default="map", init=False)
     current_summary: str = field(default="", init=False)
+    current_payload: Dict[str, Any] = field(
+        default_factory=lambda: {"nodes": [], "edges": []}, init=False
+    )
+    current_rev: Optional[int] = field(default=None, init=False)
     # Why the most recent poll produced nothing. Log/metric label, not control
     # flow: callers that only care about decisions can ignore it entirely.
     last_skip: Optional[str] = field(default=None, init=False)
@@ -227,24 +255,36 @@ class TranscriptWatcher:
         self._recent.append(utterance)
         del self._recent[:-6]
 
+        direct = self.config.pipeline == "direct"
+        if direct:
+            # The direct call is the redraw, not merely a cheap preflight. Hold
+            # the same guard across generation so a second settled utterance
+            # cannot start another full artifact response concurrently.
+            self._in_flight = True
         verdict = self._ask(utterance, recent)
         if verdict is None:
+            if direct:
+                self._in_flight = False
             return None
 
-        draw, reason, direction = verdict
+        draw, reason, direction, visual = verdict
         decision = WatchDecision(
             draw=draw,
             reason=reason,
             direction=direction,
             utterance=utterance,
             suppressed=draw and not self.config.active,
+            visual=visual,
+            expected_rev=self.current_rev,
         )
+        if direct and not decision.should_draw:
+            self._in_flight = False
         self._log(decision)
         return decision
 
     # -- model call -----------------------------------------------------
 
-    def _ask(self, utterance: str, recent: List[str]) -> tuple[bool, str, str] | None:
+    def _ask(self, utterance: str, recent: List[str]) -> tuple[bool, str, str, Any] | None:
         run = self.run_oneshot_fn
         if run is None:
             from agent.oneshot import run_oneshot
@@ -257,14 +297,33 @@ class TranscriptWatcher:
             "current_kind": self.current_kind,
             "current_summary": self.current_summary,
         }
+        direct = self.config.pipeline == "direct"
+        instructions = WATCHER_INSTRUCTIONS
+        max_tokens = MAX_WATCHER_OUTPUT_TOKENS
+        timeout = 15
+        if direct:
+            from workbench_visualizer import _VISUALIZER_INSTRUCTIONS
+
+            request["current_payload"] = self.current_payload
+            visualizer_instructions = _VISUALIZER_INSTRUCTIONS.replace(
+                "current_graph", "current_payload"
+            )
+            instructions = (
+                DIRECT_WATCHER_INSTRUCTIONS
+                + visualizer_instructions
+                + "\n\nFINAL OUTPUT RULE: the visualizer JSON described above MUST be nested under "
+                + "the outer `visual` key. Return the direct watcher envelope, never a bare visual."
+            )
+            max_tokens = MAX_DIRECT_OUTPUT_TOKENS
+            timeout = 45
         try:
             generated = run(
-                instructions=WATCHER_INSTRUCTIONS,
+                instructions=instructions,
                 user_input=json.dumps(request, ensure_ascii=False),
                 task=WATCHER_TASK,
-                max_tokens=MAX_WATCHER_OUTPUT_TOKENS,
+                max_tokens=max_tokens,
                 temperature=0.0,
-                timeout=15,
+                timeout=timeout,
                 # Keep the watcher off the expensive conversation model.
                 main_runtime=None,
             )
@@ -273,12 +332,35 @@ class TranscriptWatcher:
             # "don't draw", never to a broken conversation.
             logger.debug("workbench watcher call failed: %s", exc)
             return None
-        return parse_watch_reply(generated)
+        if direct:
+            return parse_direct_reply(generated, self.current_payload)
+        parsed = parse_watch_reply(generated)
+        if parsed is None:
+            return None
+        return parsed[0], parsed[1], parsed[2], None
 
     # -- canvas context --------------------------------------------------
 
-    def set_canvas(self, *, kind: str = "map", summary: str = "") -> None:
+    def set_canvas(
+        self,
+        *,
+        artifact: Dict[str, Any] | None = None,
+        kind: str = "map",
+        summary: str = "",
+    ) -> None:
+        if isinstance(artifact, dict):
+            payload = artifact.get("payload")
+            self.current_kind = str(artifact.get("kind") or kind or "map")
+            self.current_payload = (
+                dict(payload) if isinstance(payload, dict) else {"nodes": [], "edges": []}
+            )
+            rev = artifact.get("semantic_rev")
+            self.current_rev = int(rev) if isinstance(rev, int) else None
+            self.current_summary = summarize_canvas(artifact)[:600]
+            return
         self.current_kind = str(kind or "map")
+        self.current_payload = {"nodes": [], "edges": []}
+        self.current_rev = None
         self.current_summary = str(summary or "")[:600]
 
     # -- logging ---------------------------------------------------------
@@ -299,6 +381,43 @@ class TranscriptWatcher:
             decision.direction,
             decision.utterance,
         )
+
+
+def parse_direct_reply(
+    text: str, current_payload: Dict[str, Any] | None = None
+) -> tuple[bool, str, str, Any] | None:
+    """Parse and validate the one-call decision + visual envelope."""
+    stripped = str(text or "").strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2 and lines[-1].strip() == "```":
+            stripped = "\n".join(lines[1:-1]).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        parsed = json.loads(stripped[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("draw"), bool):
+        return None
+
+    draw = parsed["draw"]
+    reason = str(parsed.get("reason") or "").strip()[:_MAX_REASON_CHARS]
+    if not draw:
+        return False, reason, "", None
+    visual = parsed.get("visual")
+    if not isinstance(visual, dict):
+        return None
+    try:
+        from workbench_visualizer import apply_visual_payload
+
+        result = apply_visual_payload(visual, current_payload)
+    except Exception as exc:
+        logger.debug("workbench direct watcher visual rejected: %s", exc)
+        return None
+    return True, reason, "", result
 
 
 def parse_watch_reply(text: str) -> tuple[bool, str, str] | None:

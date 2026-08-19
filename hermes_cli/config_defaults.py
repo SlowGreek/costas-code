@@ -1796,6 +1796,10 @@ DEFAULT_CONFIG = {
             # so its judgement can be compared against the voice model's before
             # it is handed the canvas. "active" lets it redraw.
             "mode": "shadow",
+            # "direct" decides and emits the validated visual in one model
+            # response. "two_stage" preserves the old watcher -> diagrammer
+            # path for measured A/B comparison.
+            "pipeline": "direct",
             # Quiet time after the last user fragment before a burst counts as
             # one settled utterance. People speak in fragments; firing per
             # fragment would queue redraws faster than they complete.

@@ -17,7 +17,6 @@ from workbench_watcher import (
     TranscriptWatcher,
     WatchDecision,
     WatcherConfig,
-    summarize_canvas,
     watcher_config_from,
 )
 
@@ -80,10 +79,7 @@ def observe_transcript(
 
     watcher = get_watcher(session_key, config)
     if canvas is not None:
-        watcher.set_canvas(
-            kind=str(canvas.get("kind") or "map"),
-            summary=summarize_canvas(canvas),
-        )
+        watcher.set_canvas(artifact=canvas)
     watcher.observe(text, now=time.monotonic(), role=role)
     _arm(session_key, watcher, on_decision)
     return watcher
@@ -140,6 +136,10 @@ def _fire(
         on_decision(decision)
     except Exception as exc:
         logger.debug("workbench watcher action failed: %s", exc)
+    finally:
+        # Direct generation holds this guard from before its model call through
+        # persistence. Also makes callback failures unable to wedge the session.
+        watcher.set_in_flight(False)
 
 
 _RETRY_SECONDS = 2.0

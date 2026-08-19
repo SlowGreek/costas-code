@@ -116,29 +116,35 @@ export interface StartRealtimeVoiceOptions {
   runtimeSessionId: string
 }
 
+/**
+ * How the realtime voice agent behaves in ideation mode.
+ *
+ * Written as a description of the mode, not a list of prohibitions. An earlier
+ * revision accumulated one "never" per bug fixed — 11 of 20 sentences carried a
+ * prohibition — and a model walking on eggshells sounds like it: careful,
+ * hedged, and stilted. The behaviours below are the same; the framing is what
+ * the mode IS rather than what it must avoid.
+ */
 const DEFAULT_REALTIME_INSTRUCTIONS =
-  'You are Hermes in realtime ideation mode. Collaborate naturally and concisely. ' +
-  'You may be joining a conversation already in progress: earlier turns and the current workbench state are given to you as context. ' +
-  'Continue from there — do not greet the user as if meeting them, and do not re-summarise what was already said unless asked. ' +
-  'The canvas is the point of this mode: the user should not have to ask you to draw. ' +
-  'If there is no diagram yet and the conversation has any shape worth seeing — a set of parts, a sequence, a comparison, a system — call visualize WITHOUT being asked. ' +
-  'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove) for single edits. ' +
-  'A stale or missing canvas is a failure; asking permission to draw is worse than drawing. ' +
-  'When the workbench summary has `redrawing: true` a full redraw is ALREADY in flight: never start another one, never say you are waiting for it, just keep talking and use the instant tools (focus / rename / connect / disconnect / remove / go_back) if the user asks for something. ' +
-  'visualize returns immediately with `status: drawing` — that means the redraw STARTED, not that it finished. Keep talking through it; never announce that the canvas now shows something, and never go silent waiting. The user watches it appear while you speak. ' +
-  'The instant tools take milliseconds; visualize takes several seconds. When the user asks to go back to an earlier picture, call go_back — never redraw to recreate something you already had. ' +
-  'Use session_snapshot before explaining or referring to the workbench canvas. ' +
-  'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
+  'You are Hermes, thinking out loud with someone at a shared canvas. Talk like a person: warm, brief, curious. ' +
+  'You are often joining a conversation already under way — earlier turns and the current canvas are in your context, so continue the thought rather than introducing yourself or recapping. ' +
+  // The canvas is the point of the mode, stated as intent rather than as a
+  // failure condition.
+  'Drawing is how you think here, so draw first and talk about it after. As soon as the conversation has a shape — parts, a sequence, a comparison, a system — call visualize and keep going; the picture appears while you speak. ' +
+  'visualize answers straight away with `status: drawing`, which means the redraw is under way. Carry on talking through it. The user is watching it arrive, so describe the idea rather than the drawing, and let them tell you when they see it. ' +
+  '`redrawing: true` in the workbench summary means one is already in flight; keep talking and reach for the instant tools if the user wants something changed. ' +
+  // Latency is the reason to prefer the fast tools, so give the reason.
+  'The instant tools land in milliseconds while visualize takes seconds, so reach for focus, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. Save visualize for a genuine change of shape. ' +
+  'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
   // the model has the selection in context and still asks "which one?".
-  'The workbench summary tells you where each node sits on screen in plain terms ' +
-  '("upper left", "centre", "far right", and neighbours like "left of: Planner"), ' +
-  'and `pointing_at` is the node the user has just clicked — the user is literally pointing at it. ' +
-  'When the user says "this one", "that one", "it", "this box", or "that", they mean `pointing_at`; ' +
-  'resolve it to that node id silently and act, do NOT ask which one they mean. ' +
-  'If `pointing_at` is null they are not pointing at anything, so fall back to the spatial ' +
-  'descriptions to work out what "the one on the left" refers to, and ask only if it is genuinely ambiguous. ' +
-  'Speak these locations the way a person would ("the box on the far right"); never read out coordinates.'
+  'The workbench summary places every node in plain language ("upper left", "centre", "far right", and neighbours like "left of: Planner"), and `pointing_at` is the node the user just clicked — they are literally pointing at it. ' +
+  '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
+  'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
+  'Speak locations the way a person would — "the box on the far right" — and use focus to ring a node as you talk about it, so the user can see which one you mean.'
+
+/** Test seam: assert behaviour contracts without exporting a mutable prompt. */
+export const REALTIME_INSTRUCTIONS_FOR_TESTS = DEFAULT_REALTIME_INSTRUCTIONS
 
 /**
  * Server-side turn taking. Sent on every `session.update` so a later context
@@ -677,9 +683,9 @@ export async function routeRealtimeServerEvent(
   let output: unknown
 
   try {
-    await deps.beforeToolCall?.()
-
     if (name === 'session_snapshot') {
+      // Reads stored state, so it must see the user's last sentence.
+      await deps.beforeToolCall?.()
       output = await deps.request('artifact.list', { session_id: deps.runtimeSessionId })
     } else if (name === 'visualize') {
       let prompt = ''
@@ -697,12 +703,18 @@ export async function routeRealtimeServerEvent(
       // The drawing reaches the canvas on its own via the `artifact.updated`
       // gateway event, so the model has no reason to wait for it before
       // carrying on talking.
-      void deps
-        .request('workbench.visualize', {
+      //
+      // The transcription gate stays INSIDE the deferred work: the diagrammer
+      // reads the durable transcript, and drawing before the user's last
+      // sentence lands produces a diagram of the wrong conversation. Waiting
+      // here costs nothing now that nobody is waiting on us.
+      void (async () => {
+        await deps.beforeToolCall?.()
+        await deps.request('workbench.visualize', {
           session_id: deps.runtimeSessionId,
           prompt
         })
-        .catch(() => undefined)
+      })().catch(() => undefined)
 
       // Deliberately NOT a success claim: the redraw may still fail, and the
       // model must not announce a drawing that never arrived. `drawing` says
@@ -712,7 +724,10 @@ export async function routeRealtimeServerEvent(
       const surgical = surgicalToolRequest(name, asTrimmedString(event.arguments))
 
       if (surgical) {
-        // Straight to persistence: no diagrammer, no multi-second redraw.
+        // Straight to persistence: no diagrammer, no multi-second redraw, and
+        // deliberately NO transcription gate. These tools act on ids the model
+        // already holds and never read the transcript, so gating them would
+        // add a stall to the one path whose whole purpose is to feel instant.
         output = await deps.request(surgical.method, {
           session_id: deps.runtimeSessionId,
           ...surgical.params

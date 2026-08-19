@@ -201,7 +201,7 @@ describe('routeRealtimeServerEvent', () => {
     expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
   })
 
-  it('delegates visualize calls to the mute workbench agent', async () => {
+  it('delegates visualize calls to the mute workbench agent without blocking', async () => {
     const request = vi.fn(async () => ({
       artifact: { artifact_id: 'map.main', semantic_rev: 3, payload: { nodes: [], edges: [] } }
     }))
@@ -222,10 +222,12 @@ describe('routeRealtimeServerEvent', () => {
       session_id: 'runtime-session',
       prompt: 'Show voice and canvas as separate consumers.'
     })
-    expect(JSON.parse(send.mock.calls[0][0].item.output).artifact.semantic_rev).toBe(3)
+    // The redraw takes ~9s in production. The model is told it STARTED, not
+    // that it finished — waiting for the artifact froze the conversation.
+    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({ status: 'drawing' })
   })
 
-  it('returns visualization failures to the voice agent instead of dropping the turn', async () => {
+  it('does not fail the turn when a redraw fails after the model moved on', async () => {
     const send = vi.fn()
 
     await expect(
@@ -246,9 +248,10 @@ describe('routeRealtimeServerEvent', () => {
       )
     ).resolves.toBeUndefined()
 
-    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({
-      error: 'diagram JSON was invalid'
-    })
+    // The failure arrives after the turn is already over, so it cannot be
+    // reported as a tool error. It surfaces through the canvas instead: the
+    // drawing indicator clears and the artifact simply does not change.
+    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({ status: 'drawing' })
     expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
   })
 

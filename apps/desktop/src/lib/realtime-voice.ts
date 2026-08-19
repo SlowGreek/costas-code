@@ -125,6 +125,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove) for single edits. ' +
   'A stale or missing canvas is a failure; asking permission to draw is worse than drawing. ' +
   'When the workbench summary has `redrawing: true` a full redraw is ALREADY in flight: never start another one, never say you are waiting for it, just keep talking and use the instant tools (focus / rename / connect / disconnect / remove / go_back) if the user asks for something. ' +
+  'visualize returns immediately with `status: drawing` — that means the redraw STARTED, not that it finished. Keep talking through it; never announce that the canvas now shows something, and never go silent waiting. The user watches it appear while you speak. ' +
   'The instant tools take milliseconds; visualize takes several seconds. When the user asks to go back to an earlier picture, call go_back — never redraw to recreate something you already had. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
@@ -690,10 +691,23 @@ export async function routeRealtimeServerEvent(
         // Invalid optional arguments degrade to transcript-only visualization.
       }
 
-      output = await deps.request('workbench.visualize', {
-        session_id: deps.runtimeSessionId,
-        prompt
-      })
+      // FIRE AND FORGET. A full redraw measured ~9s on the running app, and
+      // awaiting it froze the realtime turn for that entire time — the user
+      // heard "let me walk through it visually", then ten seconds of silence.
+      // The drawing reaches the canvas on its own via the `artifact.updated`
+      // gateway event, so the model has no reason to wait for it before
+      // carrying on talking.
+      void deps
+        .request('workbench.visualize', {
+          session_id: deps.runtimeSessionId,
+          prompt
+        })
+        .catch(() => undefined)
+
+      // Deliberately NOT a success claim: the redraw may still fail, and the
+      // model must not announce a drawing that never arrived. `drawing` says
+      // the request is under way and nothing more.
+      output = { status: 'drawing' }
     } else {
       const surgical = surgicalToolRequest(name, asTrimmedString(event.arguments))
 

@@ -10,6 +10,7 @@ from hermes_state_artifacts import (
     MAX_GRAPH_NODES,
     MAX_QUADRANT_ITEMS,
     MAX_TIMELINE_ITEMS,
+    apply_graph_ops,
     summarize_trim,
     trim_payload_for_kind,
     validate_semantic_payload,
@@ -58,6 +59,12 @@ You are given JSON with four keys:
 `transcript` — the conversation so far. Read it as a whole.
 `current_kind` and `current_graph` — your own previous work (nodes/edges, items, or html). REVISE it rather than redrawing from scratch, and preserve existing ids for the same concept. For a sketch that means editing the HTML you produced last time, unless the idea itself changed.
 `direction` — an optional instruction from the voice agent about what to change right now. When it is non-empty it is the highest-priority input: it is what the user just asked for, and your output should visibly satisfy it.
+
+PREFER AN INCREMENTAL DIFF. When a `map` is already on screen and the change is describable as a few edits, return ops INSTEAD of a whole payload:
+{{"ops":[{{"op":"add_node","id":"stable-id","label":"short label","kind":"agent"}},{{"op":"connect","from_id":"a","to_id":"b","label":"optional"}},{{"op":"rename","node_id":"a","label":"New label"}},{{"op":"disconnect","edge_id":"e1"}},{{"op":"remove","node_id":"a"}}]}}
+Ops apply in order, so you can add a node and connect to it in the same diff. The whole diff is rejected if any single op fails, so only reference ids that exist in `current_graph` (or that an earlier op in the same diff created).
+This is dramatically faster than redrawing — a few ops instead of every node and edge — and the user is waiting. Use it for anything short of a wholesale rethink.
+Return a FULL payload only when there is no current graph, when you are changing kind, or when so much changes that a diff would be longer than the drawing.
 Positions, spacing and arrangement are the renderer's job — never attach coordinates to map or timeline payloads, and never try to lay the diagram out. (Quadrant x/y are the exception: they are semantic 0..1 values saying where the idea sits between the low and high labels, not pixels. Sketch HTML uses its own drawing coordinates, which is fine.)
 If `direction` is about appearance rather than content ("make it prettier", "tidy it up", "less cluttered"), the fix you CAN make is editorial: shorten verbose labels, drop exact-duplicate or redundant edges, cut items that carry no distinct idea. Do not invent structure, and do not delete a distinct concept just to look tidier.
 
@@ -114,8 +121,15 @@ def _infer_kind(payload: Dict[str, Any]) -> str:
     return DEFAULT_KIND
 
 
-def _parse_payload_with_trim(text: str) -> Tuple[str, Dict[str, Any], Dict[str, int] | None]:
-    """Parse the diagrammer reply, returning kind, payload and trim disclosure."""
+def _parse_payload_with_trim(
+    text: str, current_payload: Dict[str, Any] | None = None
+) -> Tuple[str, Dict[str, Any], Dict[str, int] | None]:
+    """Parse the diagrammer reply, returning kind, payload and trim disclosure.
+
+    Accepts either a whole payload or an incremental `ops` diff. The diff path
+    is the fast one: emitting three ops instead of forty nodes is the
+    difference between a redraw the user waits through and one they don't.
+    """
     stripped = str(text or "").strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
@@ -134,6 +148,24 @@ def _parse_payload_with_trim(text: str) -> Tuple[str, Dict[str, Any], Dict[str, 
 
     declared = parsed.pop("kind", None)
     kind = declared if isinstance(declared, str) and declared in SUPPORTED_KINDS else None
+
+    # An `ops` diff patches what is already on screen. Only valid against an
+    # existing graph: there is nothing to diff against on a first draw (an
+    # empty node list is a placeholder, not a drawing), and a timeline has no
+    # nodes to patch.
+    if isinstance(parsed.get("ops"), list):
+        if (
+            not isinstance(current_payload, dict)
+            or not isinstance(current_payload.get("nodes"), list)
+            or not current_payload["nodes"]
+        ):
+            raise ValueError("workbench visualizer returned ops with no graph to apply them to")
+
+        patched = apply_graph_ops(current_payload, parsed["ops"])
+        payload = trim_payload_for_kind("map", patched)
+        validate_semantic_payload(payload, "map")
+        return "map", payload, summarize_trim("map", patched, payload)
+
     if kind is None:
         kind = _infer_kind(parsed)
 
@@ -203,7 +235,7 @@ def visualize_session(
         timeout=45,
         main_runtime=None,
     )
-    kind, payload, trimmed = _parse_payload_with_trim(generated)
+    kind, payload, trimmed = _parse_payload_with_trim(generated, current_payload)
 
     if current:
         artifact = db.update_artifact_semantics(

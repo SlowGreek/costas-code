@@ -358,6 +358,15 @@ def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> Non
 
 SURGICAL_EDIT_OPS = ("rename", "connect", "disconnect", "remove")
 
+# A diff the diagrammer can emit instead of a whole new payload. `add_node` is
+# the one op a surgical edit never needed (the voice model only edits what is
+# already there) but a redraw always does.
+GRAPH_OPS = SURGICAL_EDIT_OPS + ("add_node",)
+
+
+class GraphOpsError(ValueError):
+    """A diff did not apply cleanly, so NONE of it was applied."""
+
 
 class SurgicalEditError(ValueError):
     """A surgical edit could not be applied to the stored graph."""
@@ -465,6 +474,79 @@ def apply_surgical_edit(payload: Dict[str, Any], edit: Dict[str, Any]) -> Dict[s
         edge["label"] = _edit_text(label_raw, "label", MAX_GRAPH_LABEL_CHARS)
     result["edges"] = [*edges, edge]
     return result
+
+
+def apply_graph_ops(payload: Dict[str, Any], ops: Any) -> Dict[str, Any]:
+    """Apply an ordered diff to a graph payload. All-or-nothing.
+
+    This is the incremental redraw path: the diagrammer emits ops instead of a
+    whole new graph, so an ordinary update costs one small model response
+    rather than regenerating every node and edge.
+
+    Two properties matter more than speed:
+
+    * **Atomic.** A diff that fails halfway is a corrupted drawing — worse than
+      a failed update, because it silently looks like a successful one. Ops are
+      applied to a working copy and only returned if every one succeeds.
+    * **Ordered.** Later ops see earlier ones, so "add a node, then connect to
+      it" works in a single diff.
+
+    Reuses ``apply_surgical_edit`` for the shared ops rather than
+    reimplementing them: the voice tools and the diagrammer must never disagree
+    about what `rename` means.
+    """
+    if not isinstance(payload, dict):
+        raise GraphOpsError("artifact payload must be an object")
+    if not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
+        raise GraphOpsError("graph ops require a graph artifact (nodes and edges)")
+    if ops is None:
+        ops = []
+    if not isinstance(ops, list):
+        raise GraphOpsError("ops must be a list")
+
+    current = {**payload, "nodes": list(payload["nodes"]), "edges": list(payload["edges"])}
+
+    for index, op_spec in enumerate(ops):
+        if not isinstance(op_spec, dict):
+            raise GraphOpsError(f"op {index} must be an object")
+
+        op = str(op_spec.get("op") or "").strip()
+        if op not in GRAPH_OPS:
+            raise GraphOpsError(f"unsupported graph op: {op or '<missing>'}")
+
+        try:
+            if op == "add_node":
+                current = _apply_add_node(current, op_spec)
+            else:
+                current = apply_surgical_edit(current, op_spec)
+        except SurgicalEditError as exc:
+            # Surface which op failed; the whole diff is discarded either way.
+            raise GraphOpsError(f"op {index} ({op}): {exc}") from exc
+
+    return current
+
+
+def _apply_add_node(payload: Dict[str, Any], op_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Add one node. Rejects duplicates rather than overwriting.
+
+    Overwriting would make the diff lie: the model believes it added a concept
+    while it actually replaced a different one that happened to share an id.
+    """
+    nodes = payload["nodes"]
+    node_id = _edit_text(op_spec.get("id"), "id", MAX_GRAPH_ID_CHARS)
+    label = _edit_text(op_spec.get("label"), "label", MAX_GRAPH_LABEL_CHARS)
+
+    if any(isinstance(n, dict) and n.get("id") == node_id for n in nodes):
+        raise SurgicalEditError(f"node already exists: {node_id}")
+    if len(nodes) >= MAX_GRAPH_NODES:
+        raise SurgicalEditError(f"artifact graph already holds {MAX_GRAPH_NODES} nodes")
+
+    node: Dict[str, Any] = {"id": node_id, "label": label}
+    kind_raw = op_spec.get("kind")
+    if isinstance(kind_raw, str) and kind_raw.strip():
+        node["kind"] = _edit_text(kind_raw, "kind", MAX_GRAPH_LABEL_CHARS)
+
+    return {**payload, "nodes": [*nodes, node]}
 
 
 def _shape_artifact(row: Any) -> Dict[str, Any]:

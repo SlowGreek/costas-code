@@ -13,6 +13,102 @@ from workbench_visualizer import (
 )
 
 
+def test_an_ops_diff_patches_the_current_drawing(tmp_path):
+    """The incremental path: a few ops instead of a whole regenerated graph.
+
+    On the user's real 12-node artifact this is ~36 tokens of output instead of
+    ~531 — and model latency scales with tokens emitted, which is where the
+    measured ~9s redraw came from.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript(
+            "voice-session", item_id="u1", role="user", text="Add a memory layer."
+        )
+
+        full = json.dumps(
+            {
+                "kind": "map",
+                "nodes": [{"id": "voice", "label": "Voice"}, {"id": "canvas", "label": "Canvas"}],
+                "edges": [{"id": "e1", "from": "voice", "to": "canvas"}],
+            }
+        )
+        visualize_session(db, "voice-session", run_oneshot_fn=lambda **_: full)
+
+        diff = json.dumps(
+            {
+                "ops": [
+                    {"op": "add_node", "id": "memory", "label": "Memory", "kind": "store"},
+                    {"op": "connect", "from_id": "canvas", "to_id": "memory"},
+                ]
+            }
+        )
+        artifact = visualize_session(db, "voice-session", run_oneshot_fn=lambda **_: diff)
+
+        assert [n["id"] for n in artifact["payload"]["nodes"]] == ["voice", "canvas", "memory"]
+        # Existing ids survive — deixis depends on it.
+        assert artifact["payload"]["nodes"][0]["label"] == "Voice"
+        assert any(e["to"] == "memory" for e in artifact["payload"]["edges"])
+    finally:
+        db.close()
+
+
+def test_a_rejected_diff_leaves_the_canvas_untouched(tmp_path):
+    """A diff against a stale base must not half-apply.
+
+    Silently corrupting a drawing is worse than failing to update it: the user
+    cannot tell the difference between a diagram that is wrong and one that is
+    merely stale.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript("voice-session", item_id="u1", role="user", text="x")
+        visualize_session(
+            db,
+            "voice-session",
+            run_oneshot_fn=lambda **_: json.dumps(
+                {"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []}
+            ),
+        )
+        before = db.get_session_artifact("voice-session", "map.main")
+
+        with pytest.raises(Exception, match="unknown node"):
+            visualize_session(
+                db,
+                "voice-session",
+                run_oneshot_fn=lambda **_: json.dumps(
+                    {"ops": [{"op": "rename", "node_id": "ghost", "label": "Nope"}]}
+                ),
+            )
+
+        after = db.get_session_artifact("voice-session", "map.main")
+        assert after["payload"] == before["payload"]
+        assert after["semantic_rev"] == before["semantic_rev"]
+    finally:
+        db.close()
+
+
+def test_ops_on_a_first_draw_are_rejected(tmp_path):
+    """There is nothing to diff against before the first drawing exists."""
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript("voice-session", item_id="u1", role="user", text="x")
+
+        with pytest.raises(ValueError, match="no graph to apply"):
+            visualize_session(
+                db,
+                "voice-session",
+                run_oneshot_fn=lambda **_: json.dumps(
+                    {"ops": [{"op": "add_node", "id": "a", "label": "A"}]}
+                ),
+            )
+    finally:
+        db.close()
+
+
 def test_every_turn_gets_room_to_emit_a_real_sketch(tmp_path):
     """One ceiling for every turn, including a first draw with NO direction.
 
@@ -85,11 +181,17 @@ def test_the_prompt_names_its_own_inputs_and_vocabulary():
     for kind in ("actor", "agent", "concept", "decision", "risk", "system", "task"):
         assert kind in text, f"node kind {kind} missing from prompt"
 
-    # Every JSON example must be valid JSON after interpolation.
+    # Every JSON example must be valid JSON after interpolation. Five now: the
+    # four artifact kinds plus the incremental `ops` diff.
     examples = re.findall(r"^\{.*\}$", text, re.M)
-    assert len(examples) == 4
+    assert len(examples) == 5
     for example in examples:
         json.loads(example)
+
+    # The incremental path must be advertised, or the model never uses it and
+    # every redraw stays a full regenerate.
+    assert '"ops"' in text
+    assert "add_node" in text
 
     # Language that previously suppressed drawing must stay gone.
     assert "LAST RESORT" not in text

@@ -90,6 +90,7 @@ import { ShellContextMenu } from '../shell/shell-context-menu'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
 import { ContribWiring, WiredPane } from './wiring'
+import { createWorkbenchHydrator } from './workbench-hydrate'
 
 /**
  * Stripped-down app root (bb/contrib-areas) on the layout TREE model, mounting
@@ -673,41 +674,26 @@ const watchWorkbenchDrawing = () =>
 watchWorkbenchDrawing()
 
 /**
- * Hydrate the artifact atom when the active session changes.
+ * Hydrate the artifact atom for the active session.
  *
- * Same reasoning as the event watcher: the pane cannot fetch its own first
- * artifact, because it is not mounted until one exists. Without this,
- * reopening a session that already has a drawing shows nothing until the
- * voice agent happens to call `visualize` again.
+ * The pane cannot fetch its own first artifact, because it is not mounted
+ * until one exists. Logic and ordering rules live in `workbench-hydrate.ts`
+ * so they are testable; this only wires the subscriptions.
+ *
+ * Subscribed to BOTH the session and the gateway: on a cold start the session
+ * id is set before the socket is open, so a session-only subscription bails
+ * once and never retries.
  */
+const hydrateWorkbenchArtifact = createWorkbenchHydrator({
+  getGateway: () => $gateway.get(),
+  getSessionId: () => $activeSessionId.get()
+})
+
 $activeSessionId.subscribe(runtimeSessionId => {
-  setWorkbenchArtifact(null)
-  // A pending draw belongs to the session that started it.
-  setWorkbenchDrawing(false)
-
-  const gateway = $gateway.get()
-
-  if (!gateway || !runtimeSessionId) {
-    return
-  }
-
-  void gateway
-    .request<{ artifacts?: WorkbenchArtifact[] }>('artifact.list', {
-      session_id: runtimeSessionId
-    })
-    .then(result => {
-      // Ignore a late reply for a session the user already navigated away from.
-      if ($activeSessionId.get() !== runtimeSessionId) {
-        return
-      }
-
-      const current = result.artifacts?.find(item => item.artifact_id === 'map.main')
-
-      if (current) {
-        setWorkbenchArtifact(current)
-      }
-    })
-    .catch(() => undefined)
+  void hydrateWorkbenchArtifact(runtimeSessionId)
+})
+$gateway.subscribe(() => {
+  void hydrateWorkbenchArtifact($activeSessionId.get())
 })
 
 // The workbench appears only once there is something to show. Starting a voice

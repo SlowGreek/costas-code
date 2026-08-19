@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
+
 import {
   $workbenchCamera,
   clearWorkbenchForSessionTransition,

@@ -178,3 +178,60 @@ export function cameraForNode(
 export function isIdentityCamera(camera: WorkbenchCamera): boolean {
   return camera.x === 0 && camera.y === 0 && camera.zoom === 1
 }
+
+/* --- input interpretation -------------------------------------------- */
+//
+// Kept pure and separate from React so the same rules can later be driven by
+// a gesture/hand-tracking source. Every result is continuous — nothing snaps
+// to discrete steps — because a hand has no detents.
+
+/** How far a pointer must move before a press counts as a drag, in px. */
+const PAN_THRESHOLD = 4
+
+/** Wheel-delta to zoom-ratio sensitivity. Tuned for trackpad pinch. */
+const WHEEL_SENSITIVITY = 0.0015
+
+export interface WheelLike {
+  ctrlKey: boolean
+  deltaX: number
+  deltaY: number
+  metaKey: boolean
+}
+
+/**
+ * What a wheel event means.
+ *
+ * A trackpad pinch arrives as a wheel event with `ctrlKey` set — that is the
+ * browser convention, not a modifier the user is holding.
+ */
+export function wheelIntent(event: WheelLike): 'none' | 'pan' | 'zoom' {
+  if (event.deltaX === 0 && event.deltaY === 0) {
+    return 'none'
+  }
+
+  return event.ctrlKey || event.metaKey ? 'zoom' : 'pan'
+}
+
+/**
+ * The zoom a wheel delta should produce.
+ *
+ * Multiplicative, so the same gesture changes zoom by the same RATIO at every
+ * scale — an additive step crawls when zoomed out and leaps when zoomed in.
+ */
+export function zoomStepFromWheel(zoom: number, deltaY: number): number {
+  if (!Number.isFinite(zoom) || !Number.isFinite(deltaY)) {
+    return clamp(Number.isFinite(zoom) ? zoom : 1, MIN_ZOOM, MAX_ZOOM)
+  }
+
+  return clamp(zoom * Math.exp(-deltaY * WHEEL_SENSITIVITY), MIN_ZOOM, MAX_ZOOM)
+}
+
+/**
+ * Whether a press-and-move should be treated as a pan.
+ *
+ * Mirrors the rule node drag already uses: a press with no movement is a
+ * click. Without this a pan would clear the user's selection every time.
+ */
+export function isPanGesture(origin: Point, current: Point): boolean {
+  return Math.hypot(current.x - origin.x, current.y - origin.y) >= PAN_THRESHOLD
+}

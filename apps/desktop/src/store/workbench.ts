@@ -1,7 +1,6 @@
 import { atom } from 'nanostores'
 
 import type { WorkbenchCamera } from '@/lib/workbench-camera'
-
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
 
 export interface WorkbenchNode {

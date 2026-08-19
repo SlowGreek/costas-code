@@ -60,6 +60,7 @@ describe('workbench camera', () => {
       x: (focal.x - IDENTITY_CAMERA.x) / world.width,
       y: (focal.y - IDENTITY_CAMERA.y) / world.height
     }
+
     const relAfter = {
       x: (focal.x - next.x) / (world.width / next.zoom),
       y: (focal.y - next.y) / (world.height / next.zoom)
@@ -80,6 +81,7 @@ describe('workbench camera', () => {
 
   it('frames a node at the centre of the window', () => {
     const framed = cameraForNode({ x: 360, y: 210 }, world, 2)
+
     const centre = {
       x: framed.x + world.width / framed.zoom / 2,
       y: framed.y + world.height / framed.zoom / 2

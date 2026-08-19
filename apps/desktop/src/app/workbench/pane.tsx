@@ -17,6 +17,7 @@ import {
   $workbenchArtifact,
   $workbenchDrawing,
   $workbenchError,
+  resetWorkbenchCameraFor,
   setWorkbenchArtifact,
   setWorkbenchDragOverride,
   setWorkbenchLayout,
@@ -96,10 +97,20 @@ export function WorkbenchPane() {
     [artifact?.view_state, autoPositions]
   )
 
+  // The camera belongs to the DRAWING, not to the pane. A different artifact
+  // resets the view; the same artifact redrawing keeps it, so a `visualize`
+  // never yanks the user back to fit mid-conversation.
+  useEffect(() => {
+    resetWorkbenchCameraFor(artifact?.artifact_id ?? null)
+  }, [artifact?.artifact_id])
+
   // Publish where things actually ended up so the ONE context-freshness owner
   // can describe the canvas to the voice model without recomputing layout.
   // Deliberately AFTER pins are applied: the model must describe what the user
   // is actually looking at, not where the layout engine would have put things.
+  //
+  // WORLD units, deliberately: the camera must NOT leak in here or the
+  // assistant's spatial language would change every time the user zoomed.
   useEffect(() => {
     setWorkbenchLayout(
       artifact && artifact.kind !== 'sketch' && Object.keys(positions).length > 0

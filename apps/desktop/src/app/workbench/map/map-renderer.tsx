@@ -8,8 +8,17 @@ import {
 } from 'react'
 
 import type { WorkbenchCamera } from '@/lib/workbench-camera'
-
-import { clampCamera, IDENTITY_CAMERA, visibleSize } from '@/lib/workbench-camera'
+import {
+  cameraViewBox,
+  clampCamera,
+  IDENTITY_CAMERA,
+  isPanGesture,
+  panCamera,
+  visibleSize,
+  wheelIntent,
+  zoomAt,
+  zoomStepFromWheel
+} from '@/lib/workbench-camera'
 import { focusedNodeId } from '@/lib/workbench-focus'
 import {
   NODE_HALF_HEIGHT,
@@ -19,10 +28,12 @@ import {
   type Point
 } from '@/lib/workbench-node-box'
 import {
+  $workbenchCamera,
   $workbenchDraggingNode,
   $workbenchDragOverride,
   $workbenchSelection,
   clearWorkbenchSelection,
+  setWorkbenchCamera,
   setWorkbenchDragOverride,
   setWorkbenchSelection,
   type WorkbenchArtifact,
@@ -356,7 +367,14 @@ export default function MapRenderer({
         return { x: clientX, y: clientY }
       }
 
-      return clientToCanvas({ x: clientX, y: clientY }, rect, { height, width })
+      return clientToCanvas(
+        { x: clientX, y: clientY },
+        rect,
+        { height, width },
+        // Read the LIVE camera rather than closing over it: a stale camera
+        // here sends the dragged node to the wrong world point.
+        $workbenchCamera.get()
+      )
     },
     [height, width]
   )
@@ -442,17 +460,140 @@ export default function MapRenderer({
     [onNodePinned]
   )
 
+  // --- camera ---------------------------------------------------------
+  //
+  // Pan/zoom are PRESENTATION only: they change the viewBox and nothing else.
+  // Node positions, pins and the spatial language handed to the model all
+  // stay in world units, so the model's map of the canvas does not move when
+  // the user zooms.
+
+  const camera = useStore($workbenchCamera)
+  const panRef = useRef<null | { camera: WorkbenchCamera; origin: Point; panning: boolean }>(null)
+
+  useEffect(() => {
+    const svg = svgRef.current
+
+    if (!svg) {
+      return
+    }
+
+    // Registered natively (not via onWheel) because React's synthetic wheel
+    // listener is passive: preventDefault there is a no-op and the page
+    // scrolls behind the canvas.
+    const onWheel = (event: WheelEvent) => {
+      const intent = wheelIntent(event)
+
+      if (intent === 'none') {
+        return
+      }
+
+      event.preventDefault()
+
+      const world = { height, width }
+
+      if (intent === 'zoom') {
+        const focal = clientToCanvas(
+          { x: event.clientX, y: event.clientY },
+          svg.getBoundingClientRect(),
+          world,
+          $workbenchCamera.get()
+        )
+
+        setWorkbenchCamera(
+          zoomAt(
+            $workbenchCamera.get(),
+            world,
+            focal,
+            zoomStepFromWheel($workbenchCamera.get().zoom, event.deltaY)
+          )
+        )
+
+        return
+      }
+
+      setWorkbenchCamera(
+        panCamera($workbenchCamera.get(), world, { x: -event.deltaX, y: -event.deltaY })
+      )
+    }
+
+    svg.addEventListener('wheel', onWheel, { passive: false })
+
+    return () => {
+      svg.removeEventListener('wheel', onWheel)
+    }
+  }, [height, width])
+
+  const handleCanvasPointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0) {
+      return
+    }
+
+    panRef.current = {
+      camera: $workbenchCamera.get(),
+      origin: { x: event.clientX, y: event.clientY },
+      panning: false
+    }
+  }, [])
+
+  const handleCanvasPointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      const pan = panRef.current
+
+      // A node drag owns the pointer: never pan underneath it.
+      if (!pan || gestureRef.current) {
+        return
+      }
+
+      const current = { x: event.clientX, y: event.clientY }
+
+      if (!pan.panning && !isPanGesture(pan.origin, current)) {
+        return
+      }
+
+      pan.panning = true
+
+      const rect = svgRef.current?.getBoundingClientRect()
+      // Convert element pixels to on-screen pixels of the letterboxed viewBox
+      // so the content sticks to the pointer at any zoom.
+      const scale = rect ? Math.min(rect.width / width, rect.height / height) : 1
+
+      setWorkbenchCamera(
+        panCamera(
+          pan.camera,
+          { height, width },
+          { x: (current.x - pan.origin.x) / (scale || 1), y: (current.y - pan.origin.y) / (scale || 1) }
+        )
+      )
+    },
+    [height, width]
+  )
+
+  const endCanvasPan = useCallback(() => {
+    panRef.current = null
+  }, [])
+
   return (
     <svg
       aria-label="Live ideation map"
       className="min-h-0 flex-1"
       data-testid="workbench-canvas"
       onClick={() => {
+        // A pan is not a click: only a press that never moved clears the
+        // user's referent.
+        if (panRef.current?.panning) {
+          return
+        }
+
         clearWorkbenchSelection()
       }}
+      onPointerCancel={endCanvasPan}
+      onPointerDown={handleCanvasPointerDown}
+      onPointerMove={handleCanvasPointerMove}
+      onPointerUp={endCanvasPan}
       ref={svgRef}
       role="img"
-      viewBox={`0 0 ${width} ${height}`}
+      style={{ touchAction: 'none' }}
+      viewBox={cameraViewBox(camera, { height, width })}
     >
       <defs>
         <pattern height="32" id="workbench-grid" patternUnits="userSpaceOnUse" width="32">

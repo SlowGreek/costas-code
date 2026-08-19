@@ -42,6 +42,8 @@ export interface RealtimeServerEventDeps {
   clearAssistantAudio?: () => void
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
+  /** Frame one node locally, or reset when nodeId is null. */
+  onCameraTarget?: (nodeId: null | string, zoom?: number) => boolean
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
@@ -304,6 +306,7 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  onCameraTarget?: (nodeId: null | string, zoom?: number) => boolean
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
@@ -352,7 +355,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds, so use focus, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'The instant tools land in milliseconds, so use focus, zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. zoom_to frames one node close up; omit its node_id to return to the whole canvas. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
   // the model has the selection in context and still asks "which one?".
@@ -363,7 +366,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // A walkthrough is intentionally one bounded semantic micro-round per node.
   // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
   // focus from generated words highlights the whole route before it is heard.
-  'During a walkthrough, handle exactly one node per tool round. Focus exactly one node, then in the continuation explain only that node. After that explanation, call focus for the next node and repeat. Never schedule multiple focus calls together, and do not name future nodes during the current node’s explanation. ' +
+  'During a walkthrough, handle exactly one node per tool round. Focus and zoom_to exactly one node, then in the continuation explain only that node while it remains framed. After that explanation has played, move to the next node and repeat. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -561,6 +564,28 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
       },
       {
         type: 'function',
+        name: 'zoom_to',
+        description:
+          'Move the camera to frame ONE existing node close up, or omit node_id to return to the whole canvas. Presentation-only and instant: it does not redraw or change the ideas. Pair it with focus when explaining a specific node, and return to the whole view when the explanation returns to system structure.',
+        parameters: {
+          type: 'object',
+          properties: {
+            node_id: {
+              type: 'string',
+              description: 'Existing node id from session_snapshot. Omit to reset the camera.'
+            },
+            zoom: {
+              type: 'number',
+              minimum: 0.25,
+              maximum: 4,
+              description: 'Optional magnification. Around 2 is a readable close-up.'
+            }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
         name: 'go_back',
         description:
           'Instantly restore the PREVIOUS version of the drawing. This is the tool for "go back", "undo that", "show me what it looked like before", "actually the old one was better". It is immediate and never calls the diagrammer, so never redraw to get back to something you already had.',
@@ -709,6 +734,7 @@ export async function startRealtimeVoiceConnection(
   const voiceToolDeps = {
     beforeToolCall: options.beforeToolCall,
     createMissionId: options.createMissionId,
+    onCameraTarget: options.onCameraTarget,
     onResearchDispatched: options.onResearchDispatched,
     request: options.request,
     runtimeSessionId: options.runtimeSessionId
@@ -946,6 +972,11 @@ type RealtimeEvent = {
 
 const asTrimmedString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 
+/** Every tool offered by the live Realtime session schema. */
+export const VOICE_TOOL_NAMES: readonly string[] = sessionUpdateEvent('').session.tools
+  .map(tool => asTrimmedString(tool.name))
+  .filter(Boolean)
+
 /**
  * Turn a surgical tool call into a gateway request.
  *
@@ -1061,7 +1092,7 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
     return 'read'
   }
 
-  if (call.name === 'focus') {
+  if (call.name === 'focus' || call.name === 'zoom_to') {
     return 'gesture'
   }
 
@@ -1109,12 +1140,37 @@ export async function executeRealtimeVoiceTool(
     RealtimeServerEventDeps,
     | 'beforeToolCall'
     | 'createMissionId'
+    | 'onCameraTarget'
     | 'onResearchDispatched'
     | 'request'
     | 'runtimeSessionId'
   >
 ): Promise<unknown> {
   const { name } = call
+
+  if (name === 'zoom_to') {
+    let nodeId: null | string = null
+    let zoom: number | undefined
+
+    try {
+      const parsed = JSON.parse(call.arguments || '{}') as {
+        node_id?: unknown
+        zoom?: unknown
+      }
+
+      nodeId = asTrimmedString(parsed.node_id) || null
+      zoom =
+        typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom)
+          ? Math.min(Math.max(parsed.zoom, 0.25), 4)
+          : undefined
+    } catch {
+      return { error: 'zoom_to has malformed arguments' }
+    }
+
+    return deps.onCameraTarget?.(nodeId, zoom)
+      ? { status: 'framed' }
+      : { error: nodeId ? `Node ${nodeId} is not on the canvas` : 'No canvas is mounted' }
+  }
 
   if (name === 'session_snapshot') {
     // Reads stored state, so it must see the user's last sentence.

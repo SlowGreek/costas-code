@@ -54,11 +54,11 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/original user request is satisfied/i)
   })
 
-  it('paces walkthrough highlights with one focus action per explanation', () => {
-    expect(text).toMatch(/focus exactly one node/i)
+  it('paces walkthrough camera moves with one explanation at a time', () => {
+    expect(text).toMatch(/focus and zoom_to exactly one node/i)
     expect(text).toMatch(/explain only that node/i)
-    expect(text).toMatch(/call focus for the next node/i)
-    expect(text).toMatch(/never schedule multiple focus calls together/i)
+    expect(text).toMatch(/after that explanation has played/i)
+    expect(text).toMatch(/never schedule multiple focus or zoom_to calls together/i)
   })
 
   it('explains that visualize returns before the drawing exists', () => {
@@ -68,7 +68,7 @@ describe('realtime instructions', () => {
   })
 
   it('steers single edits to the instant tools', () => {
-    for (const tool of ['focus', 'rename', 'connect', 'disconnect', 'remove', 'go_back']) {
+    for (const tool of ['focus', 'zoom_to', 'rename', 'connect', 'disconnect', 'remove', 'go_back']) {
       expect(text, `${tool} missing from instructions`).toMatch(new RegExp(tool))
     }
   })

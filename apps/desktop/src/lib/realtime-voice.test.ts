@@ -1246,6 +1246,7 @@ describe('startRealtimeVoiceConnection', () => {
       // Surgical tools: one thing, instantly, with no diagrammer round trip.
       'add_node',
       'focus',
+      'zoom_to',
       'go_back',
       'rename',
       'connect',

@@ -708,14 +708,19 @@ $activeSessionId.subscribe(runtimeSessionId => {
 $gateway.subscribe(() => {
   void hydrateWorkbenchArtifact($activeSessionId.get())
 })
-// Picking a chat in the sidebar changes the STORED id. A stored chat that has
-// never been resumed has no runtime session at all, so a runtime-only
-// subscription never fires and the previous chat's diagram stays on screen —
-// reported as "the workbench sticks when switching chats". Re-hydrating here
-// blanks the canvas immediately; the runtime subscription then fills it in if
-// and when that chat resumes.
+// Picking a chat in the sidebar CLEARS the canvas; it does not load one.
+//
+// Resume is asynchronous: the stored id changes on the click, and the runtime
+// id only changes once `session.resume` resolves. Hydrating here would fetch
+// using the runtime id of the chat the user just LEFT and put its drawing
+// straight back — which is what made "the workbench sticks when switching
+// chats" worse rather than better. Clearing is the honest response: there is
+// nothing to load from until the resume lands, and the runtime subscription
+// above fills it in the moment it does.
 $selectedStoredSessionId.subscribe(() => {
-  void hydrateWorkbenchArtifact($activeSessionId.get())
+  setWorkbenchArtifact(null)
+  // A pending draw belongs to the chat that started it.
+  setWorkbenchDrawing(false)
 })
 
 // The workbench appears only once there is something to show. Starting a voice

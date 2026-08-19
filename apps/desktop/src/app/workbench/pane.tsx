@@ -133,7 +133,14 @@ export function WorkbenchPane() {
         updated_by: 'renderer'
       })
       .then(result => {
-        if (!stale) {
+        // Only repaint if the SESSION on screen is still the one this persist
+        // was started for. Without that check a write that began before a chat
+        // switch lands afterwards and re-instates the previous chat's drawing
+        // — the "workbench sticks when switching chats" report. The cleanup
+        // flag alone is not enough: hydrate clearing the atom does not re-run
+        // this effect, so nothing ever sets `stale`. Comparing artifact ids
+        // would not work either; every session's artifact is `map.main`.
+        if (!stale && $activeSessionId.get() === runtimeSessionId) {
           setWorkbenchArtifact(result.artifact)
         }
       })
@@ -170,7 +177,12 @@ export function WorkbenchPane() {
         updated_by: 'user-drag'
       })
       .then(result => {
-        setWorkbenchArtifact(result.artifact)
+        // Same session guard as the auto-persist above: a drag that resolves
+        // after the user switched chats must not repaint the old drawing.
+        if ($activeSessionId.get() === runtimeSessionId) {
+          setWorkbenchArtifact(result.artifact)
+        }
+
         // The pin is durable now, so the local override is redundant.
         setWorkbenchDragOverride(nodeId, null)
       })

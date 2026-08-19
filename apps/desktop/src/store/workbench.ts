@@ -1,5 +1,9 @@
 import { atom } from 'nanostores'
 
+import type { WorkbenchCamera } from '@/lib/workbench-camera'
+
+import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
+
 export interface WorkbenchNode {
   id: string
   label: string
@@ -205,12 +209,45 @@ export function setWorkbenchError(error: null | string): void {
   }
 }
 
+// --- camera (viewport) ---
+//
+// Ephemeral PRESENTATION state, deliberately NOT persisted to `view_state`.
+// `view_state` is backend truth shared with the model (focus, user_pins); a
+// per-window camera is not, and writing it would make two windows fight over
+// the same row and add a DB write on every wheel tick.
+
+export const $workbenchCamera = atom<WorkbenchCamera>({ ...IDENTITY_CAMERA })
+
+/** Which artifact the current camera belongs to, so a redraw can keep it. */
+let cameraArtifactId: null | string = null
+
+export function setWorkbenchCamera(camera: WorkbenchCamera): void {
+  const current = $workbenchCamera.get()
+
+  if (current.x === camera.x && current.y === camera.y && current.zoom === camera.zoom) {
+    return
+  }
+
+  $workbenchCamera.set(camera)
+}
+
+/** Reset only when the artifact identity changes, never for a same-artifact redraw. */
+export function resetWorkbenchCameraFor(artifactId: null | string): void {
+  if (artifactId !== null && artifactId === cameraArtifactId) {
+    return
+  }
+
+  cameraArtifactId = artifactId
+  setWorkbenchCamera({ ...IDENTITY_CAMERA })
+}
+
 /** Clear every foreground workbench projection when ownership moves sessions. */
 export function clearWorkbenchForSessionTransition(): void {
   setWorkbenchArtifact(null)
   setWorkbenchDrawing(false)
   $workbenchError.set(null)
   $workbenchLayout.set(null)
+  resetWorkbenchCameraFor(null)
 }
 
 export function resetWorkbenchForTests(): void {
@@ -221,6 +258,8 @@ export function resetWorkbenchForTests(): void {
   $workbenchDrawing.set(false)
   $workbenchSelection.set(null)
   $workbenchLayout.set(null)
+  cameraArtifactId = null
+  $workbenchCamera.set({ ...IDENTITY_CAMERA })
 }
 
 /**

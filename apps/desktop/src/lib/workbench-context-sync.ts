@@ -1,5 +1,6 @@
 import {
   $workbenchArtifact,
+  $workbenchDrawing,
   $workbenchLayout,
   $workbenchSelection,
   type WorkbenchArtifact
@@ -48,6 +49,15 @@ const NON_MAP_KINDS = new Set(['quadrant', 'sketch', 'timeline'])
 export function summarizeWorkbench(
   artifact: WorkbenchArtifact,
   context: {
+    /**
+     * Whether a full redraw is in flight RIGHT NOW.
+     *
+     * Without this the voice model guesses: in a real session it told the user
+     * "it's probably still drawing in the background" with nothing to base that
+     * on, then declined to act. It can now see the state and reach for the
+     * instant tools instead of queueing another ~9s redraw.
+     */
+    drawing?: boolean
     layout?: null | { height: number; positions: Record<string, { x: number; y: number }>; width: number }
     overlay?: WorkbenchContextOverlay
     selection?: null | string
@@ -63,7 +73,13 @@ export function summarizeWorkbench(
     nodes?: { id: string; kind?: string; label?: string }[]
   }
 
-  const head = { kind: artifact.kind, revision: artifact.semantic_rev }
+  // `redrawing` rides on EVERY kind: the model must know a slow redraw is in
+  // flight whatever is currently on screen.
+  const head = {
+    kind: artifact.kind,
+    revision: artifact.semantic_rev,
+    ...(context.drawing ? { redrawing: true } : {})
+  }
 
   if (NON_MAP_KINDS.has(artifact.kind)) {
     switch (artifact.kind) {
@@ -81,6 +97,7 @@ export function summarizeWorkbench(
   }
 
   return buildWorkbenchContext({
+    drawing: context.drawing,
     edges: payload.edges,
     hidden: context.overlay?.hidden,
     kind: artifact.kind,
@@ -128,6 +145,7 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
     }
 
     const summary = summarizeWorkbench(artifact, {
+      drawing: $workbenchDrawing.get(),
       layout: $workbenchLayout.get(),
       overlay: options.overlay?.(),
       selection: $workbenchSelection.get()
@@ -153,6 +171,11 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
   const unsubscribes = [
     $workbenchArtifact.subscribe(() => {
       flushSoon()
+    }),
+    // Immediate: the model must learn a slow redraw started BEFORE it decides
+    // whether to queue another one.
+    $workbenchDrawing.subscribe(() => {
+      flush()
     }),
     $workbenchLayout.subscribe(() => {
       flushSoon()

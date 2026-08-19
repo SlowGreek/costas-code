@@ -62,7 +62,7 @@ Positions, spacing and arrangement are the renderer's job — never attach coord
 If `direction` is about appearance rather than content ("make it prettier", "tidy it up", "less cluttered"), the fix you CAN make is editorial: shorten verbose labels, drop exact-duplicate or redundant edges, cut items that carry no distinct idea. Do not invent structure, and do not delete a distinct concept just to look tidier.
 
 All four forms are equally available — pick by what the ideas ARE, not by habit: a sequence is a timeline, a trade-off is a quadrant, a structure is a map, something you need to actually SEE is a sketch.
-Keep the current kind unless the conversation has genuinely moved to a different shape, or `direction` explicitly asks for another form ("show this as a timeline"); switching redraws everything.
+Switch kind as often as the ideas warrant. If a sequence becomes a trade-off, or a structure becomes something you need to SEE, change form immediately — never keep an ill-fitting shape just because it is what you drew last time.
 Draw only what materially helps the shared idea.
 Prefer a legible diagram over an exhaustive one.
 In map / timeline / quadrant payloads: never emit prose or Markdown, never attach renderer coordinates, and never exceed {MAX_GRAPH_NODES} nodes, {MAX_GRAPH_EDGES} edges, {MAX_TIMELINE_ITEMS} timeline items, or {MAX_QUADRANT_ITEMS} quadrant items. Return ONLY the JSON object.

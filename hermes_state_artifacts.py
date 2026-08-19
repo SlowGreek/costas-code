@@ -21,6 +21,19 @@ class ArtifactValidationError(ValueError):
 
 
 MAX_ARTIFACT_JSON_BYTES = 64 * 1024
+
+MAX_ARTIFACT_HISTORY = 20
+"""How many past versions of a drawing 'go back' can reach.
+
+Bounded because an hour of ideation would otherwise grow the DB without limit.
+Deep enough that walking back through a conversation stays useful.
+"""
+
+
+class ArtifactHistoryEmpty(Exception):
+    """Raised when 'go back' has nothing earlier to restore."""
+
+
 # Canvas legibility bound, not a safety bound. Real ideation sessions outgrow a
 # dozen concepts quickly, so this is generous enough to hold a whole system
 # sketch; the visualizer trims to it rather than failing the update.
@@ -553,6 +566,41 @@ class SessionArtifactMixin:
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
         def _write(conn):
+            # Snapshot the version we are about to overwrite, in the SAME
+            # transaction as the update. Recorded before the UPDATE so a
+            # revision conflict aborts both together and history can never
+            # contain a version that was not actually on screen.
+            conn.execute(
+                """INSERT OR IGNORE INTO artifact_history
+                       (session_id, artifact_id, semantic_rev, kind,
+                        payload_json, updated_by, recorded_at)
+                   SELECT session_id, artifact_id, semantic_rev, kind,
+                          payload_json, updated_by, ?
+                     FROM session_artifacts
+                    WHERE session_id = ? AND artifact_id = ? AND semantic_rev = ?""",
+                (now, session_id, artifact_id, expected_rev),
+            )
+
+            # Keep history bounded: an hour of ideation is hundreds of redraws.
+            # Drops the OLDEST, so "go back" always reaches the versions the
+            # user can plausibly still remember.
+            conn.execute(
+                """DELETE FROM artifact_history
+                    WHERE session_id = ? AND artifact_id = ?
+                      AND semantic_rev NOT IN (
+                          SELECT semantic_rev FROM artifact_history
+                           WHERE session_id = ? AND artifact_id = ?
+                           ORDER BY semantic_rev DESC LIMIT ?
+                      )""",
+                (
+                    session_id,
+                    artifact_id,
+                    session_id,
+                    artifact_id,
+                    MAX_ARTIFACT_HISTORY,
+                ),
+            )
+
             cursor = conn.execute(
                 """UPDATE session_artifacts
                    SET payload_json = ?, kind = ?, semantic_rev = semantic_rev + 1,
@@ -583,6 +631,91 @@ class SessionArtifactMixin:
             ).fetchone()
 
         return _shape_artifact(self._execute_write(_write))
+
+    def list_artifact_history(
+        self, session_id: str, artifact_id: str
+    ) -> List[Dict[str, Any]]:
+        """Past versions of a drawing, oldest first.
+
+        Only SEMANTIC versions appear here. Pointing at a node or dragging a box
+        changes `view_state`, not the drawing, and must not become something
+        "go back" walks through.
+        """
+        rows = self._conn.execute(
+            """SELECT semantic_rev, kind, payload_json, updated_by, recorded_at
+                 FROM artifact_history
+                WHERE session_id = ? AND artifact_id = ?
+                ORDER BY semantic_rev ASC""",
+            (session_id, artifact_id),
+        ).fetchall()
+
+        return [
+            {
+                "semantic_rev": row[0],
+                "kind": row[1],
+                "payload": json.loads(row[2]),
+                "updated_by": row[3],
+                "recorded_at": row[4],
+            }
+            for row in rows
+        ]
+
+    def restore_artifact_version(
+        self,
+        session_id: str,
+        artifact_id: str,
+        *,
+        expected_rev: int,
+        target_rev: int | None = None,
+    ) -> Dict[str, Any]:
+        """Go back to a previous drawing.
+
+        Restoring moves FORWARD: it writes the old payload as a new revision
+        rather than rewinding the counter. Rewinding would collide with the
+        optimistic-concurrency check every other writer depends on, and would
+        make "go back" itself unable to be undone.
+
+        Carries the `kind` as well as the payload — restoring a map's payload
+        while the row still said "timeline" would hand the renderer a payload
+        with no nodes, which is exactly the crash that took down the whole pane.
+        """
+        history = self.list_artifact_history(session_id, artifact_id)
+
+        if not history:
+            raise ArtifactHistoryEmpty(
+                f"no earlier version of {session_id}/{artifact_id} to go back to"
+            )
+
+        if target_rev is None:
+            version = history[-1]
+        else:
+            matches = [item for item in history if item["semantic_rev"] == target_rev]
+            if not matches:
+                raise ArtifactHistoryEmpty(
+                    f"no earlier version {target_rev} of {session_id}/{artifact_id}"
+                )
+            version = matches[0]
+
+        restored = self.update_artifact_semantics(
+            session_id,
+            artifact_id,
+            payload=version["payload"],
+            expected_rev=expected_rev,
+            updated_by="restore",
+            kind=version["kind"],
+        )
+
+        # Consume the version we just went back to, so a second "go back" walks
+        # further into the past instead of ping-ponging between two drawings.
+        self._execute_write(
+            lambda conn: conn.execute(
+                """DELETE FROM artifact_history
+                    WHERE session_id = ? AND artifact_id = ? AND semantic_rev >= ?""",
+                (session_id, artifact_id, version["semantic_rev"]),
+            )
+        )
+
+        return restored
 
     def update_artifact_view_state(
         self,

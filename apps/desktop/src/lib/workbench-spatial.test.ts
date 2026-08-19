@@ -159,6 +159,20 @@ describe('buildWorkbenchContext', () => {
     expect(buildWorkbenchContext(base)).not.toMatch(/"x"|"y"|450|300/)
   })
 
+  it('tells the model when a slow redraw is already in flight', () => {
+    // The model used to guess: it told a real user "it's probably still
+    // drawing in the background" with nothing to base that on, then declined
+    // to act. `redrawing` is present only while true, so it reads as a live
+    // condition rather than a permanent field to tune out.
+    expect(buildWorkbenchContext(base)).not.toMatch(/redrawing/)
+
+    const parsed = JSON.parse(buildWorkbenchContext({ ...base, drawing: true })) as {
+      redrawing?: boolean
+    }
+
+    expect(parsed.redrawing).toBe(true)
+  })
+
   it('keeps edge ids so disconnect(edge_id) has a target', () => {
     // `disconnect` takes an edge_id, artifacts carry one, and the projection
     // used to strip it — so the tool existed and the model could never name a

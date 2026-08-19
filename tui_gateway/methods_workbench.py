@@ -152,5 +152,43 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4626, f"focus failed: {exc}")
 
 
+@method("workbench.back")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    """Go back to the previous drawing. No model call, so it is instant.
+
+    Restoring writes the old payload forward as a new revision rather than
+    rewinding the counter, so it plays by the same optimistic-concurrency rules
+    as every other writer and is itself undoable.
+    """
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    stored_session_id = str(session.get("session_key") or "").strip()
+    if not stored_session_id:
+        return _err(rid, 4620, "session has no durable identity")
+
+    artifact_id = str(params.get("artifact_id") or "map.main").strip() or "map.main"
+    sid = str(params.get("session_id") or "")
+
+    with _session_db(session) as db:
+        if db is None:
+            return _db_unavailable_error(rid, code=5007)
+        try:
+            artifact = db.get_session_artifact(stored_session_id, artifact_id)
+            if artifact is None:
+                return _err(rid, 4623, f"no artifact {artifact_id} in this session")
+
+            restored = db.restore_artifact_version(
+                stored_session_id,
+                artifact_id,
+                expected_rev=int(artifact["semantic_rev"]),
+            )
+            _emit("artifact.updated", sid, {"artifact": restored})
+            return _ok(rid, {"artifact": restored})
+        except Exception as exc:
+            return _err(rid, 4627, f"go back failed: {exc}")
+
+
 def register(server) -> None:
     _registry.install(server)

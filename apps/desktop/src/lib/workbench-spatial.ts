@@ -184,6 +184,8 @@ export function describeLocation(spatial: SpatialNode): string {
  * ------------------------------------------------------------------ */
 
 export interface WorkbenchContextInput {
+  /** A full redraw is in flight; prefer the instant tools over another one. */
+  drawing?: boolean
   edges?: { from: string; id?: string; label?: string; to: string }[]
   hidden?: string[]
   kind: string
@@ -240,6 +242,9 @@ export function buildWorkbenchContext(input: WorkbenchContextInput): string {
   return JSON.stringify({
     kind: input.kind,
     revision: input.revision,
+    // Present only while true, so it reads as a live condition rather than a
+    // permanent field the model learns to ignore.
+    ...(input.drawing ? { redrawing: true } : {}),
     // `null` is meaningful and must be sent explicitly: it is how the model
     // learns the user STOPPED pointing at something.
     pointing_at: selection,

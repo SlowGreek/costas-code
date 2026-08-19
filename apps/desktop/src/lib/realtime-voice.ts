@@ -124,6 +124,8 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'If there is no diagram yet and the conversation has any shape worth seeing — a set of parts, a sequence, a comparison, a system — call visualize WITHOUT being asked. ' +
   'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove) for single edits. ' +
   'A stale or missing canvas is a failure; asking permission to draw is worse than drawing. ' +
+  'When the workbench summary has `redrawing: true` a full redraw is ALREADY in flight: never start another one, never say you are waiting for it, just keep talking and use the instant tools (focus / rename / connect / disconnect / remove / go_back) if the user asks for something. ' +
+  'The instant tools take milliseconds; visualize takes several seconds. When the user asks to go back to an earlier picture, call go_back — never redraw to recreate something you already had. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -192,13 +194,24 @@ const sessionUpdateEvent = (instructions: string) => ({
         type: 'function',
         name: 'focus',
         description:
-          'Record which ONE existing node you are talking about, so the rest of Hermes knows your referent. NOTE: the canvas does not yet render a focus highlight, so do NOT tell the user you have highlighted, centred, or pointed at anything — say which box you mean in words. Changes nothing about the ideas themselves. Never call visualize for this.',
+          'Instantly ring ONE existing node on the canvas so the user can see which box you mean. Use it whenever you talk about a specific part ("the planner here", "this one on the left") — the user sees the highlight while you speak. Changes nothing about the ideas themselves. Never call visualize for this.',
         parameters: {
           type: 'object',
           properties: {
             node_id: { type: 'string', description: 'Existing node id from session_snapshot.' }
           },
           required: ['node_id'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'go_back',
+        description:
+          'Instantly restore the PREVIOUS version of the drawing. This is the tool for "go back", "undo that", "show me what it looked like before", "actually the old one was better". It is immediate and never calls the diagrammer, so never redraw to get back to something you already had.',
+        parameters: {
+          type: 'object',
+          properties: {},
           additionalProperties: false
         }
       },
@@ -490,6 +503,11 @@ export function surgicalToolRequest(
   }
 
   const text = (key: string): string => asTrimmedString(parsed[key]).slice(0, 200)
+
+  if (name === 'go_back') {
+    // No arguments: "go back" always means one step, from wherever we are.
+    return { method: 'workbench.back', params: {} }
+  }
 
   if (name === 'focus') {
     const nodeId = text('node_id')

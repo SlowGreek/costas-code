@@ -379,6 +379,20 @@ CREATE TABLE IF NOT EXISTS session_artifacts (
     PRIMARY KEY (session_id, artifact_id)
 );
 
+CREATE TABLE IF NOT EXISTS artifact_history (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL,
+    semantic_rev INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    PRIMARY KEY (session_id, artifact_id, semantic_rev)
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_history_lookup
+    ON artifact_history(session_id, artifact_id, semantic_rev DESC);
+
 CREATE TABLE IF NOT EXISTS state_meta (
     key TEXT PRIMARY KEY,
     value TEXT

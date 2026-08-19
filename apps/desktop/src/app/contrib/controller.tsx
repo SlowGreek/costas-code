@@ -708,6 +708,15 @@ $activeSessionId.subscribe(runtimeSessionId => {
 $gateway.subscribe(() => {
   void hydrateWorkbenchArtifact($activeSessionId.get())
 })
+// Picking a chat in the sidebar changes the STORED id. A stored chat that has
+// never been resumed has no runtime session at all, so a runtime-only
+// subscription never fires and the previous chat's diagram stays on screen —
+// reported as "the workbench sticks when switching chats". Re-hydrating here
+// blanks the canvas immediately; the runtime subscription then fills it in if
+// and when that chat resumes.
+$selectedStoredSessionId.subscribe(() => {
+  void hydrateWorkbenchArtifact($activeSessionId.get())
+})
 
 // The workbench appears only once there is something to show. Starting a voice
 // conversation must NOT open an empty canvas: the pane is the result of the

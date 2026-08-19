@@ -15,6 +15,7 @@ import { notifyError } from '@/store/notifications'
 import { $workbenchArtifact, $workbenchLayout, $workbenchSelection } from '@/store/workbench'
 
 import type { ConversationStatus } from './use-voice-conversation'
+import { voiceStartReadiness } from './voice-start-readiness'
 
 interface RealtimeVoiceConversationOptions {
   beforeConnect?: () => Promise<void> | void
@@ -76,6 +77,8 @@ export function useRealtimeVoiceConversation({
   const [status, setStatus] = useState<ConversationStatus>('idle')
   const connectionRef = useRef<RealtimeVoiceConnection | null>(null)
   const startGenerationRef = useRef(0)
+  // A start attempted before the chat had a session, waiting for one.
+  const pendingStartRef = useRef(false)
   const transcriptWriteChainRef = useRef(Promise.resolve())
   const failedTranscriptsRef = useRef<RealtimeTranscript[]>([])
   // Populated once the connection exists. `beforeToolCall` closes over the ref
@@ -95,14 +98,27 @@ export function useRealtimeVoiceConversation({
 
   const start = useCallback(async () => {
     const gateway = $gateway.get()
+    const readiness = voiceStartReadiness({ hasGateway: !!gateway, sessionId: runtimeSessionId })
 
-    if (!gateway || !runtimeSessionId) {
-      const error = new Error('Hermes gateway session is not ready for GPT Realtime')
+    if (readiness.kind === 'wait-for-session') {
+      // A brand-new chat has no runtime session until its first message
+      // creates one. Park the intent instead of discarding it: the effect
+      // below starts as soon as the session lands, so the user does not have
+      // to press the button a second time.
+      pendingStartRef.current = true
+
+      return
+    }
+
+    if (readiness.kind === 'fail' || !gateway || !runtimeSessionId) {
+      const error = new Error(readiness.kind === 'fail' ? readiness.reason : 'Voice is unavailable')
       notifyError(error, t.notifications.voice.couldNotStartSession)
       onFatalError?.()
 
       return
     }
+
+    pendingStartRef.current = false
 
     end()
     const generation = startGenerationRef.current
@@ -286,6 +302,16 @@ export function useRealtimeVoiceConversation({
 
     wasEnabledRef.current = enabled
   }, [enabled, end, start])
+
+  // Resume a start that was parked because the chat had no session yet. A new
+  // chat gets its runtime session when the first message creates one; without
+  // this the parked intent would sit there forever and the mic would look
+  // broken.
+  useEffect(() => {
+    if (enabled && runtimeSessionId && pendingStartRef.current) {
+      void start()
+    }
+  }, [enabled, runtimeSessionId, start])
 
   useEffect(() => end, [end])
 

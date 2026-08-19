@@ -18,6 +18,30 @@ const artifact = {
 } as unknown as WorkbenchArtifact
 
 describe('createWorkbenchHydrator', () => {
+  it('clears the canvas when the chat has no runtime session to load from', async () => {
+    // Reported: switching chats in the sidebar leaves the previous chat's
+    // diagram on screen, so a new chat opens showing someone else's canvas.
+    //
+    // Confirmed live: runtime session dd93eb95, selected chat 65e9d7, and the
+    // canvas holding 65e9d7's 12-node map at revision 7. A stored chat that
+    // has never been resumed has NO runtime session, so hydrating it must
+    // still blank the canvas rather than leave the last drawing up.
+    resetWorkbenchForTests()
+
+    const request = vi.fn(async () => ({ artifacts: [] }))
+
+    const hydrate = createWorkbenchHydrator({
+      getGateway: () => ({ request }) as never,
+      getSessionId: () => null
+    })
+
+    $workbenchArtifact.set(artifact)
+
+    await hydrate(null)
+
+    expect($workbenchArtifact.get()).toBeNull()
+  })
+
   it('recovers when the gateway connects AFTER the session is set', async () => {
     // The real cold-start ordering: session id lands first, socket later. A
     // session-only subscription took the `!gateway` early return once and

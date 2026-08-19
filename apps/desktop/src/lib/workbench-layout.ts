@@ -61,12 +61,15 @@ const seededRandom = (text: string): (() => number) => {
  * not: "it says it updated but it didn't change".
  */
 export function hashWorkbenchGraph(graph: WorkbenchGraph): string {
-  const nodes = graph.nodes
+  // Non-map payloads (timeline / quadrant / sketch) carry no nodes or edges,
+  // and `pane.tsx` runs layout for every kind before dispatching to a
+  // renderer — an unguarded read here crashed the whole workbench.
+  const nodes = (graph?.nodes ?? [])
     .map(node => `${node.id}\u0001${node.label}\u0001${node.kind ?? ''}`)
     .sort()
     .join('\u0002')
 
-  const edges = graph.edges
+  const edges = (graph?.edges ?? [])
     .map(edge => `${edge.id}\u0001${edge.from}\u0001${edge.to}\u0001${edge.label ?? ''}`)
     .sort()
     .join('\u0002')
@@ -296,7 +299,10 @@ export function placeWorkbenchNodes(
   const safeWidth = Math.max(NODE_WIDTH * 2, width)
   const safeHeight = Math.max(NODE_HEIGHT * 3, height)
   const hash = hashWorkbenchGraph(graph)
-  const ids = graph.nodes.map(node => node.id)
+  // Public entry point: a timeline / quadrant / sketch payload has no nodes at
+  // all, and `pane.tsx` calls this for EVERY kind. Normalising here keeps every
+  // downstream helper safe and returns {} for a non-graph payload.
+  const ids = (graph?.nodes ?? []).map(node => node.id)
 
   if (ids.length === 0) {
     return {}

@@ -196,17 +196,21 @@ export function visibleGraph(
   graph: WorkbenchGraph,
   viewState: DirectManipulationViewState | null | undefined
 ): WorkbenchGraph {
+  // A timeline / quadrant / sketch payload has no `nodes` or `edges` at all.
+  // `pane.tsx` computes layout for EVERY kind before dispatching to a
+  // renderer, so touching these unguarded crashed the whole workbench into an
+  // error boundary rather than degrading one panel.
+  const allNodes = graph?.nodes ?? []
+  const allEdges = graph?.edges ?? []
   const hidden = new Set(readHidden(viewState))
 
   if (hidden.size === 0) {
-    return graph
+    return { edges: allEdges, nodes: allNodes }
   }
 
-  const nodes = graph.nodes.filter(node => !hidden.has(node.id))
-
   return {
-    edges: graph.edges.filter(edge => !hidden.has(edge.from) && !hidden.has(edge.to)),
-    nodes
+    edges: allEdges.filter(edge => !hidden.has(edge.from) && !hidden.has(edge.to)),
+    nodes: allNodes.filter(node => !hidden.has(node.id))
   }
 }
 

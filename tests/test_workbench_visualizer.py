@@ -13,6 +13,39 @@ from workbench_visualizer import (
 )
 
 
+def test_the_fast_path_is_visible_in_stored_data(tmp_path):
+    """`updated_by` must distinguish a diff from a full regenerate.
+
+    Without this, "it still feels slow" is unfalsifiable: a redraw that
+    silently stayed on the slow path looks identical in the database to one
+    that used the fast path.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session("voice-session", "desktop", model="test")
+        db.append_realtime_transcript("voice-session", item_id="u1", role="user", text="x")
+
+        full = json.dumps(
+            {"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []}
+        )
+        first = visualize_session(db, "voice-session", run_oneshot_fn=lambda **_: full)
+        assert first["updated_by"] == "ambient"
+
+        # A full payload on a later turn is still the slow path.
+        again = json.dumps(
+            {"kind": "map", "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "edges": []}
+        )
+        slow = visualize_session(db, "voice-session", run_oneshot_fn=lambda **_: again)
+        assert slow["updated_by"] == "ambient"
+
+        # An ops diff is the fast path and must be labelled as such.
+        diff = json.dumps({"ops": [{"op": "add_node", "id": "c", "label": "C"}]})
+        fast = visualize_session(db, "voice-session", run_oneshot_fn=lambda **_: diff)
+        assert fast["updated_by"] == "ambient-diff"
+    finally:
+        db.close()
+
+
 def test_an_ops_diff_patches_the_current_drawing(tmp_path):
     """The incremental path: a few ops instead of a whole regenerated graph.
 

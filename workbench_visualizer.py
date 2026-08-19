@@ -123,8 +123,13 @@ def _infer_kind(payload: Dict[str, Any]) -> str:
 
 def _parse_payload_with_trim(
     text: str, current_payload: Dict[str, Any] | None = None
-) -> Tuple[str, Dict[str, Any], Dict[str, int] | None]:
-    """Parse the diagrammer reply, returning kind, payload and trim disclosure.
+) -> Tuple[str, Dict[str, Any], Dict[str, int] | None, bool]:
+    """Parse the diagrammer reply.
+
+    Returns kind, payload, trim disclosure, and whether the INCREMENTAL path
+    was taken. That last flag is instrumentation, not decoration: without it
+    there is no way to tell from stored data whether the model actually used
+    the fast path, and "it still feels slow" becomes unfalsifiable.
 
     Accepts either a whole payload or an incremental `ops` diff. The diff path
     is the fast one: emitting three ops instead of forty nodes is the
@@ -164,7 +169,7 @@ def _parse_payload_with_trim(
         patched = apply_graph_ops(current_payload, parsed["ops"])
         payload = trim_payload_for_kind("map", patched)
         validate_semantic_payload(payload, "map")
-        return "map", payload, summarize_trim("map", patched, payload)
+        return "map", payload, summarize_trim("map", patched, payload), True
 
     if kind is None:
         kind = _infer_kind(parsed)
@@ -173,18 +178,18 @@ def _parse_payload_with_trim(
     # its own validator and its own (sandboxed) renderer, and it is atomic —
     # trimming HTML at a byte offset would yield a broken document.
     if kind == "sketch":
-        return kind, validate_sketch_payload(parsed), None
+        return kind, validate_sketch_payload(parsed), None, False
 
     # Bound the payload to what the canvas can show BEFORE validating, so an
     # over-eager diagram degrades to its core instead of failing the update
     # and surfacing to the user as a broken workbench.
     payload = trim_payload_for_kind(kind, parsed)
     validate_semantic_payload(payload, kind)
-    return kind, payload, summarize_trim(kind, parsed, payload)
+    return kind, payload, summarize_trim(kind, parsed, payload), False
 
 
 def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
-    kind, payload, _ = _parse_payload_with_trim(text)
+    kind, payload, _, _ = _parse_payload_with_trim(text)
     return kind, payload
 
 
@@ -235,7 +240,7 @@ def visualize_session(
         timeout=45,
         main_runtime=None,
     )
-    kind, payload, trimmed = _parse_payload_with_trim(generated, current_payload)
+    kind, payload, trimmed, incremental = _parse_payload_with_trim(generated, current_payload)
 
     if current:
         artifact = db.update_artifact_semantics(
@@ -243,7 +248,11 @@ def visualize_session(
             current["artifact_id"],
             payload=payload,
             expected_rev=current["semantic_rev"],
-            updated_by="ambient",
+            # Distinguish the fast path in stored data. Without this there is
+            # no way to answer "did the model actually emit a diff?" after the
+            # fact, and a redraw that silently stayed slow looks identical to
+            # one that got faster.
+            updated_by="ambient-diff" if incremental else "ambient",
             kind=kind,
         )
         return _record_trim(db, session_id, artifact, trimmed)

@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { ar } from './ar'
 import { en } from './en'
 import { ja } from './ja'
-import { zhHant } from './zh-hant'
 import { zh } from './zh'
+import { zhHant } from './zh-hant'
 
 /**
  * Catalyst is a downstream fork of Hermes Agent. Every upstream sync drags in
@@ -38,22 +38,28 @@ function stripAllowed(value: string): string {
 function* strings(node: unknown, path = ''): Generator<[string, string]> {
   if (typeof node === 'string') {
     yield [path, node]
+
     return
   }
+
   if (typeof node === 'function') {
     // Template functions (e.g. `(host, platform) => \`...\``) hide their copy
     // behind a call. Invoke with placeholders so the brand check sees it.
     let rendered: unknown
+
     try {
       rendered = (node as (...a: unknown[]) => unknown)('«a»', '«b»', '«c»', '«d»')
     } catch {
       return // needs richer args than we can synthesise; skip rather than fail
     }
+
     if (typeof rendered === 'string') {
       yield [path, rendered]
     }
+
     return
   }
+
   if (node && typeof node === 'object') {
     for (const [key, child] of Object.entries(node)) {
       yield* strings(child, path ? `${path}.${key}` : key)
@@ -69,7 +75,8 @@ describe('brand: user-facing copy says Catalyst, never Hermes', () => {
       const offenders: string[] = []
 
       for (const [path, value] of strings(catalog)) {
-        if (!/Hermes/i.test(value)) continue
+        if (!/Hermes/i.test(value)) {continue}
+
         // Key names may still say Hermes (updateHermes, sshHermesPathTitle) —
         // only the VALUE is user-visible, and that is what we check here.
         if (/Hermes/.test(stripAllowed(value))) {

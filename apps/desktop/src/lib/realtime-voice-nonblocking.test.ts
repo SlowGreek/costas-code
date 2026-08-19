@@ -32,12 +32,14 @@ const visualizeEvent = {
 describe('visualize does not block the conversation', () => {
   it('returns a tool result immediately instead of awaiting the redraw', async () => {
     let resolveRedraw: ((value: unknown) => void) | undefined
+
     const request = vi.fn(
       () =>
         new Promise(resolve => {
           resolveRedraw = resolve
         })
     )
+
     const d = deps(request)
 
     await routeRealtimeServerEvent(visualizeEvent, d as never)

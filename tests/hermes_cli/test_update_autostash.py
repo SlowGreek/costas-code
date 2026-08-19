@@ -331,8 +331,15 @@ def _make_update_side_effect(
     fetch_fails=False,
     fetch_stderr="",
 ):
-    """Build a subprocess.run side_effect for cmd_update tests."""
+    """Build a subprocess.run side_effect for cmd_update tests.
+
+    HEAD is stateful: a successful `git checkout` moves it. The upstream
+    post-pull guard re-reads `rev-parse --abbrev-ref HEAD` and refuses to
+    claim success when the checkout is parked on another branch, so a
+    constant HEAD made the switch-to-costas-code path exit 1.
+    """
     recorded = []
+    state = {"head": current_branch}
 
     def side_effect(cmd, **kwargs):
         recorded.append(cmd)
@@ -342,8 +349,10 @@ def _make_update_side_effect(
                 return SimpleNamespace(stdout="", stderr=fetch_stderr, returncode=128)
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if "rev-parse" in joined and "--abbrev-ref" in joined:
-            return SimpleNamespace(stdout=f"{current_branch}\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout=f"{state['head']}\n", stderr="", returncode=0)
         if "checkout" in joined and "costas-code" in joined:
+            state["head"] = "costas-code"
+
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if "rev-list" in joined:
             return SimpleNamespace(stdout=f"{commit_count}\n", stderr="", returncode=0)
@@ -419,7 +428,10 @@ def test_cmd_update_switches_to_costas_code_from_feature_branch(
 
     out = capsys.readouterr().out
     assert "fix/something" in out
-    assert "switching to costas-code" in out
+    # Upstream reworded this to "switching back to <branch>" for the parked
+    # case and "switching to <branch>" for detached HEAD; assert the behaviour
+    # (it announces the switch to costas-code), not the exact phrasing.
+    assert "costas-code" in out and "switching" in out
 
 
 def test_cmd_update_switches_to_costas_code_from_detached_head(
@@ -469,12 +481,16 @@ def test_cmd_update_restores_stash_and_branch_when_already_up_to_date(monkeypatc
     # Stash should have been restored
     assert len(restore_calls) == 1
 
-    # Should have checked out back to the original branch
+    # Upstream changed the intent here: when the parked branch was FULLY
+    # MERGED, update deliberately leaves the checkout on the distribution
+    # branch instead of switching back to the stale feature branch (it says
+    # so explicitly). Only an unmerged branch is restored.
     checkout_back = [c for c in recorded if "checkout" in c and "fix/something" in c]
-    assert len(checkout_back) == 1
+    assert len(checkout_back) == 0
 
     out = capsys.readouterr().out
     assert "Already up to date" in out
+    assert "switched back to costas-code" in out
 
 
 def test_cmd_update_no_checkout_when_already_on_costas_code(monkeypatch, tmp_path):

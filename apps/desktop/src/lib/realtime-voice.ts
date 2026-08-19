@@ -218,7 +218,7 @@ const REALTIME_AUDIO_CONFIG = {
   }
 }
 
-const sessionUpdateEvent = (instructions: string) => ({
+const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) => ({
   type: 'session.update',
   session: {
     type: 'realtime',
@@ -337,7 +337,7 @@ const sessionUpdateEvent = (instructions: string) => ({
           additionalProperties: false
         }
       }
-    ],
+    ].filter(tool => !(watcherOwnsRedraws && tool.name === 'visualize')),
     tool_choice: 'auto'
   }
 })
@@ -359,6 +359,13 @@ export async function startRealtimeVoiceConnection(
   const fetchFn = options.fetchFn ?? fetch
   const peer = createPeer()
   const audio = createAudio()
+  const watcherOwnsRedraws = token.workbench_watcher?.owns_redraws === true
+
+  const configuredInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
+
+  const baseInstructions = watcherOwnsRedraws
+    ? `${configuredInstructions}\n\nA background canvas worker owns every full redraw in this session. It listens to the conversation and updates the canvas independently while you keep speaking. The visualize tool is intentionally absent: do not call it, ask for it, or announce redraws. You still own the instant tools—focus, rename, connect, disconnect, remove, and go_back—and canvas changes arrive as appended semantic events in your context.`
+    : configuredInstructions
 
   const stream = await mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -366,7 +373,6 @@ export async function startRealtimeVoiceConnection(
 
   const tracks = stream.getTracks()
   const channel = peer.createDataChannel('oai-events')
-  const baseInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
   const pendingTranscription = createPendingTranscriptionTracker()
   let channelOpen = false
   let closed = false
@@ -424,7 +430,7 @@ export async function startRealtimeVoiceConnection(
 
     channel.addEventListener('open', () => {
       channelOpen = true
-      send(sessionUpdateEvent(instructions()))
+      send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))
     })
     channel.addEventListener('message', event => {
       try {
@@ -547,7 +553,7 @@ export async function startRealtimeVoiceConnection(
       workbenchContext = summary.trim().slice(0, 4_000)
 
       if (channelOpen && !closed) {
-        send(sessionUpdateEvent(instructions()))
+        send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))
       }
     }
   }

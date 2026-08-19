@@ -340,7 +340,7 @@ describe('routeRealtimeServerEvent', () => {
 
 describe('startRealtimeVoiceConnection', () => {
   /** Boot a connection over fake WebRTC and expose its data-channel traffic. */
-  const connectHarness = async () => {
+  const connectHarness = async (tokenOverrides: Record<string, unknown> = {}) => {
     const sent: string[] = []
     const listeners = new Map<string, (event: { data?: string }) => void>()
 
@@ -377,7 +377,8 @@ describe('startRealtimeVoiceConnection', () => {
       request: vi.fn(async () => ({
         client_secret: 'ek_short',
         model: 'gpt-realtime-2.1',
-        voice: 'marin'
+        voice: 'marin',
+        ...tokenOverrides
       })),
       runtimeSessionId: 'runtime-session'
     })
@@ -391,6 +392,41 @@ describe('startRealtimeVoiceConnection', () => {
       sentTypes: () => sent.map(payload => JSON.parse(payload).type as string)
     }
   }
+
+  it('removes visualize when the active watcher owns redraws', async () => {
+    // This is the ownership seam. The reported session proved that exposing
+    // both writers starts two model generations for one user request: voice
+    // first, watcher second. When the backend says the active watcher owns
+    // redraws, the duplicate path must be physically absent—not discouraged by
+    // another prompt sentence.
+    const harness = await connectHarness({
+      workbench_watcher: { active: true, owns_redraws: true, pipeline: 'direct' }
+    })
+
+    harness.open()
+
+    const update = JSON.parse(harness.sent[0]) as {
+      session: { instructions: string; tools: { name: string }[] }
+    }
+
+    const names = update.session.tools.map(tool => tool.name)
+
+    expect(names).not.toContain('visualize')
+    expect(names).toContain('focus')
+    expect(names).toContain('go_back')
+    expect(update.session.instructions).toMatch(/background canvas worker owns every full redraw/i)
+  })
+
+  it('keeps visualize when the watcher is shadow-only', async () => {
+    const harness = await connectHarness({
+      workbench_watcher: { active: false, owns_redraws: false, pipeline: 'direct' }
+    })
+
+    harness.open()
+    const update = JSON.parse(harness.sent[0]) as { session: { tools: { name: string }[] } }
+
+    expect(update.session.tools.map(tool => tool.name)).toContain('visualize')
+  })
 
   it('connects WebRTC with an ephemeral key and cleans up owned media', async () => {
     const sent: string[] = []

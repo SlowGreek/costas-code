@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
 
 from hermes_state_artifacts import (
+    ArtifactRevisionConflict,
     MAX_GRAPH_EDGES,
     MAX_GRAPH_NODES,
     MAX_QUADRANT_ITEMS,
@@ -32,6 +34,16 @@ MAX_VISUALIZER_OUTPUT_TOKENS = 6_000
 # model, a malformed reply, or an unrecognised name never regresses behaviour.
 DEFAULT_KIND = "map"
 SUPPORTED_KINDS = ("map", "timeline", "quadrant", "sketch")
+
+
+@dataclass(frozen=True)
+class VisualResult:
+    """A parsed and validated visual reply, ready for optimistic persistence."""
+
+    kind: str
+    payload: Dict[str, Any]
+    trimmed: Dict[str, int] | None = None
+    incremental: bool = False
 
 _VISUALIZER_INSTRUCTIONS = f"""You are the mute diagrammer for a live voice ideation workbench.
 Choose the ONE visual form that actually fits what the conversation needs right now, then return ONLY JSON.
@@ -158,6 +170,22 @@ def _parse_payload_with_trim(
     if not isinstance(parsed, dict):
         raise ValueError("workbench visualizer returned a non-object payload")
 
+    result = apply_visual_payload(parsed, current_payload)
+    return result.kind, result.payload, result.trimmed, result.incremental
+
+
+def apply_visual_payload(
+    visual: Dict[str, Any], current_payload: Dict[str, Any] | None = None
+) -> VisualResult:
+    """Apply the existing visualizer contract without model I/O or persistence.
+
+    Direct watcher replies pass their nested ``visual`` object here, ensuring
+    full payloads, graph ops, sketches, trimming, and all semantic validators
+    remain exactly the same contract as the explicit visualizer path.
+    """
+    if not isinstance(visual, dict):
+        raise ValueError("workbench visualizer returned a non-object payload")
+    parsed = dict(visual)
     declared = parsed.pop("kind", None)
     kind = declared if isinstance(declared, str) and declared in SUPPORTED_KINDS else None
 
@@ -183,7 +211,7 @@ def _parse_payload_with_trim(
 
         payload = trim_payload_for_kind("map", patched)
         validate_semantic_payload(payload, "map")
-        return "map", payload, summarize_trim("map", patched, payload), True
+        return VisualResult("map", payload, summarize_trim("map", patched, payload), True)
 
     if kind is None:
         kind = _infer_kind(parsed)
@@ -192,14 +220,14 @@ def _parse_payload_with_trim(
     # its own validator and its own (sandboxed) renderer, and it is atomic —
     # trimming HTML at a byte offset would yield a broken document.
     if kind == "sketch":
-        return kind, validate_sketch_payload(parsed), None, False
+        return VisualResult(kind, validate_sketch_payload(parsed))
 
     # Bound the payload to what the canvas can show BEFORE validating, so an
     # over-eager diagram degrades to its core instead of failing the update
     # and surfacing to the user as a broken workbench.
     payload = trim_payload_for_kind(kind, parsed)
     validate_semantic_payload(payload, kind)
-    return kind, payload, summarize_trim(kind, parsed, payload), False
+    return VisualResult(kind, payload, summarize_trim(kind, parsed, payload))
 
 
 def _parse_payload(text: str) -> Tuple[str, Dict[str, Any]]:
@@ -255,30 +283,55 @@ def visualize_session(
         main_runtime=None,
     )
     kind, payload, trimmed, incremental = _parse_payload_with_trim(generated, current_payload)
+    return persist_visual_result(
+        db,
+        session_id,
+        VisualResult(kind, payload, trimmed, incremental),
+        expected_rev=current["semantic_rev"] if current else None,
+    )
 
-    if current:
+
+def persist_visual_result(
+    db,
+    session_id: str,
+    result: VisualResult,
+    *,
+    expected_rev: int | None,
+) -> Dict[str, Any]:
+    """Persist a validated visual result with the original optimistic guard."""
+    current = db.get_session_artifact(session_id, "map.main")
+    if expected_rev is None and current is not None:
+        raise ArtifactRevisionConflict(
+            f"semantic revision conflict for {session_id}/map.main: expected no artifact"
+        )
+    if expected_rev is not None and current is None:
+        raise ArtifactRevisionConflict(
+            f"semantic revision conflict for {session_id}/map.main: expected {expected_rev}"
+        )
+
+    if current is not None:
         artifact = db.update_artifact_semantics(
             session_id,
             current["artifact_id"],
-            payload=payload,
-            expected_rev=current["semantic_rev"],
+            payload=result.payload,
+            expected_rev=expected_rev,
             # Distinguish the fast path in stored data. Without this there is
             # no way to answer "did the model actually emit a diff?" after the
             # fact, and a redraw that silently stayed slow looks identical to
             # one that got faster.
-            updated_by="ambient-diff" if incremental else "ambient",
-            kind=kind,
+            updated_by="ambient-diff" if result.incremental else "ambient",
+            kind=result.kind,
         )
-        return _record_trim(db, session_id, artifact, trimmed)
+        return _record_trim(db, session_id, artifact, result.trimmed)
 
     view_state: Dict[str, Any] = {"positions": {}, "pinned": []}
-    if trimmed:
-        view_state["trimmed"] = trimmed
+    if result.trimmed:
+        view_state["trimmed"] = result.trimmed
     return db.create_session_artifact(
         session_id,
         "map.main",
-        kind=kind,
-        payload=payload,
+        kind=result.kind,
+        payload=result.payload,
         view_state=view_state,
         updated_by="ambient",
     )

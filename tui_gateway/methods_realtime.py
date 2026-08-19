@@ -54,6 +54,14 @@ def _(rid, params: dict) -> dict:
             transcription_model=transcription_model,
             base_url=base_url,
         )
+        from workbench_watcher import watcher_config_from
+
+        watcher = watcher_config_from(cfg)
+        token["workbench_watcher"] = {
+            "active": watcher.active,
+            "pipeline": watcher.pipeline,
+            "owns_redraws": watcher.active,
+        }
         return _ok(rid, token)
     except Exception as exc:
         return _err(rid, 4611, str(exc))
@@ -146,9 +154,19 @@ def _watch_transcript(
     try:
         from workbench_watch_runtime import observe_transcript
 
+        canvas = None
+        with open_db(session) as db:
+            if db is not None:
+                canvas = db.get_session_artifact(stored_session_id, "map.main")
+
         def _draw(decision) -> None:
             _visualize_from_watcher(
-                session, stored_session_id, sid, decision.direction, open_db=open_db, emit=emit
+                session,
+                stored_session_id,
+                sid,
+                decision,
+                open_db=open_db,
+                emit=emit,
             )
 
         observe_transcript(
@@ -157,20 +175,16 @@ def _watch_transcript(
             text=text,
             cfg=cfg,
             on_decision=_draw,
+            canvas=canvas,
         )
     except Exception:
         pass
 
 
 def _visualize_from_watcher(
-    session: dict, stored_session_id: str, sid: str, direction: str, *, open_db, emit
+    session: dict, stored_session_id: str, sid: str, decision, *, open_db, emit
 ):
-    """Redraw exactly the way the RPC does, minus the voice model.
-
-    It reuses `artifact.visualizing` so the canvas shows the same pending state
-    a voice-triggered redraw shows, and so the watcher's own in-flight guard
-    sees a redraw it started.
-    """
+    """Persist a direct result, or run the preserved two-stage diagrammer."""
     from workbench_watch_runtime import set_in_flight
 
     with open_db(session) as db:
@@ -179,9 +193,19 @@ def _visualize_from_watcher(
         set_in_flight(stored_session_id, True)
         emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
         try:
-            from workbench_visualizer import visualize_session
+            if decision.visual is not None:
+                from workbench_visualizer import persist_visual_result
 
-            artifact = visualize_session(db, stored_session_id, prompt=direction)
+                artifact = persist_visual_result(
+                    db,
+                    stored_session_id,
+                    decision.visual,
+                    expected_rev=decision.expected_rev,
+                )
+            else:
+                from workbench_visualizer import visualize_session
+
+                artifact = visualize_session(db, stored_session_id, prompt=decision.direction)
             emit("artifact.updated", sid, {"artifact": artifact})
         except Exception:
             pass

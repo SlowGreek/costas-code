@@ -87,6 +87,12 @@ interface RealtimeTokenResponse {
   expires_at?: number
   model: string
   voice: string
+  /** Backend watcher ownership lets the client omit the duplicate visualize tool. */
+  workbench_watcher?: {
+    active: boolean
+    pipeline: 'direct' | 'two_stage'
+    owns_redraws: boolean
+  }
   /** Host that issued the secret; Azure secrets are not valid at OpenAI. */
   webrtc_url?: string
 }

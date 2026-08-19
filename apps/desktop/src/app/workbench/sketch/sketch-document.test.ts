@@ -47,6 +47,16 @@ describe('buildSketchDocument', () => {
     expect(html).toContain('document.getElementById("c").width=10')
   })
 
+  it('injects a viewport contract that contains authored fixed dimensions', () => {
+    const { html } = buildSketchDocument('<main style="width:4000px;height:3000px">x</main>')
+
+    expect(html).toContain('name="viewport"')
+    expect(html).toContain('width=device-width')
+    expect(html).toContain('max-width:100%!important')
+    expect(html).toContain('max-height:100%!important')
+    expect(html).toContain('overflow:hidden!important')
+  })
+
   it('strips <base> tags that would repoint relative URLs', () => {
     const { html } = buildSketchDocument('<base href="https://evil.test/"><p>x</p>')
     expect(html).not.toMatch(/<base\b/i)

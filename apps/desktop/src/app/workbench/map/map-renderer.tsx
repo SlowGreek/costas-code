@@ -18,6 +18,7 @@ import {
 import {
   $workbenchDraggingNode,
   $workbenchDragOverride,
+  $workbenchNarrationFocus,
   $workbenchSelection,
   clearWorkbenchSelection,
   setWorkbenchDragOverride,
@@ -51,6 +52,17 @@ interface MapRendererProps {
 // layout's collision radius and clamp inset are derived from the SAME numbers
 // the renderer draws. Re-exported for existing importers.
 export { NODE_HEIGHT, NODE_WIDTH }
+
+export function nodeRingState(
+  nodeId: string,
+  state: { durable: null | string; narration: null | string; selected: null | string }
+): { durable: boolean; narration: boolean; selected: boolean } {
+  return {
+    durable: state.durable === nodeId,
+    narration: state.narration === nodeId,
+    selected: state.selected === nodeId
+  }
+}
 
 const NODE_RADIUS = 12
 const NODE_HALF_W = NODE_HALF_WIDTH
@@ -269,6 +281,7 @@ export default function MapRenderer({
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
   const selected = useStore($workbenchSelection)
+  const narrationFocused = useStore($workbenchNarrationFocus)
 
   // What the ASSISTANT is pointing at, written by the `focus` voice tool.
   // Distinct from `selected`, which is what the USER clicked. Passing the live
@@ -476,12 +489,17 @@ export default function MapRenderer({
              selection ring: a soft pulse reads as "I am talking about this"
              rather than "you clicked this". */
           .wb-focus-ring { animation: wb-focus-pulse 1.8s ease-in-out infinite; }
+          .wb-narration-ring { animation: wb-narration-pulse 900ms ease-in-out infinite; }
           @keyframes wb-focus-pulse {
             0%, 100% { opacity: 0.30; }
             50%      { opacity: 0.85; }
           }
+          @keyframes wb-narration-pulse {
+            0%, 100% { opacity: 0.45; }
+            50%      { opacity: 1; }
+          }
           @media (prefers-reduced-motion: reduce) {
-            .wb-focus-ring { animation: none; opacity: 0.7; }
+            .wb-focus-ring, .wb-narration-ring { animation: none; opacity: 0.7; }
           }
           .wb-edge { transition: d 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
           .wb-enter { animation: wb-pop 340ms cubic-bezier(.22,1,.36,1) both; }
@@ -558,8 +576,13 @@ export default function MapRenderer({
         }
 
         const accent = accentForKind(node.kind)
-        const isSelected = selected === node.id
-        const isFocused = focused === node.id
+
+        const rings = nodeRingState(node.id, {
+          durable: focused,
+          narration: narrationFocused,
+          selected
+        })
+
         // Visual hierarchy: well-connected nodes read louder.
         const weight = (degrees[node.id] ?? 0) / maxDegree
         const lines = fitLabel(node.label, NODE_WIDTH - 22, TYPE_LABEL, node.kind ? 2 : 3)
@@ -568,11 +591,11 @@ export default function MapRenderer({
         return (
           <g
             aria-label={node.label}
-            aria-pressed={isSelected}
+            aria-pressed={rings.selected}
             className={
               draggingNode === node.id ? 'wb-enter' : 'wb-node wb-node-hit wb-enter'
             }
-            data-selected={isSelected ? 'true' : undefined}
+            data-selected={rings.selected ? 'true' : undefined}
             data-testid={`workbench-node-${node.id}`}
             key={node.id}
             onClick={event => {
@@ -616,7 +639,7 @@ export default function MapRenderer({
             {/* The assistant's referent, drawn outside the selection ring so
                 "I'm talking about this" and "you clicked this" can both be
                 true at once and stay visually distinct. */}
-            {isFocused ? (
+            {rings.durable ? (
               <rect
                 className="wb-focus-ring"
                 fill="none"
@@ -632,9 +655,27 @@ export default function MapRenderer({
               />
             ) : null}
 
+            {/* Streamed narration focus is ephemeral and visually distinct
+                from both durable assistant focus and click selection. */}
+            {rings.narration ? (
+              <rect
+                className="wb-narration-ring"
+                data-testid={`workbench-narration-ring-${node.id}`}
+                fill="none"
+                height={NODE_HEIGHT + 14}
+                pointerEvents="none"
+                rx={NODE_RADIUS + 7}
+                stroke="var(--ui-yellow)"
+                strokeWidth="3"
+                width={NODE_WIDTH + 14}
+                x="-7"
+                y="-7"
+              />
+            ) : null}
+
             {/* Selection ring: theme tokens only, drawn outside the box so it
                 never competes with the kind accent. */}
-            {isSelected ? (
+            {rings.selected ? (
               <>
                 <rect
                   className="wb-selected-ring"

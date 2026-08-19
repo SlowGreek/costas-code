@@ -112,6 +112,32 @@ describe('barge-in audio flushing', () => {
 })
 
 describe('routeRealtimeServerEvent', () => {
+  it('routes assistant transcript deltas before clearing narration focus at response end', async () => {
+    const events: string[] = []
+
+    const deps = {
+      onAssistantResponseDone: () => events.push('done'),
+      onAssistantTranscriptDelta: (delta: string) => events.push(delta),
+      request: vi.fn(),
+      runtimeSessionId: 'runtime-session',
+      send: vi.fn()
+    }
+
+    await routeRealtimeServerEvent(
+      { type: 'response.output_audio_transcript.delta', delta: 'API ' },
+      deps
+    )
+    await routeRealtimeServerEvent(
+      { type: 'response.output_audio_transcript.delta', delta: 'Gateway' },
+      deps
+    )
+    await routeRealtimeServerEvent({ type: 'response.done' }, deps)
+
+    expect(events).toEqual(['API ', 'Gateway', 'done'])
+    expect(deps.request).not.toHaveBeenCalled()
+    expect(deps.send).not.toHaveBeenCalled()
+  })
+
   it('marks a committed utterance pending and settles it on transcription', async () => {
     const pendingTranscription = createPendingTranscriptionTracker()
 

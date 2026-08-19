@@ -59,9 +59,13 @@ export const SKETCH_SANDBOX = 'allow-scripts'
 const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${SKETCH_CSP}">`
 
 const BASE_STYLE =
-  '<style>html,body{margin:0;padding:0;height:100%;background:#0b0d10;' +
-  "color:#e6e9ef;font-family:ui-sans-serif,system-ui,sans-serif;overflow:hidden}" +
-  'canvas{display:block}</style>'
+  '<style>*,*::before,*::after{box-sizing:border-box}' +
+  'html,body{margin:0!important;padding:0!important;width:100%!important;min-width:0!important;' +
+  'max-width:100%!important;height:100%!important;min-height:0!important;max-height:100%!important;' +
+  'background:#0b0d10;color:#e6e9ef;font-family:ui-sans-serif,system-ui,sans-serif;' +
+  'overflow:hidden!important}' +
+  'body{position:relative}body>*{max-width:100%!important;max-height:100%!important}' +
+  'canvas,svg,img,video{display:block;max-width:100%!important;max-height:100%!important}</style>'
 
 function stripBaseTags(html: string): string {
   return html.replace(/<base\b[^>]*>/gi, '')
@@ -137,6 +141,7 @@ export function buildSketchDocument(raw: unknown): SketchDocumentResult {
     '<!doctype html><html><head>' +
     CSP_META +
     '<meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">' +
     '<meta name="referrer" content="no-referrer">' +
     BASE_STYLE +
     SKETCH_RUNTIME_SCRIPT +

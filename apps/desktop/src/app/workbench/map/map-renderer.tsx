@@ -269,9 +269,15 @@ export default function MapRenderer({
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
   const selected = useStore($workbenchSelection)
+
   // What the ASSISTANT is pointing at, written by the `focus` voice tool.
-  // Distinct from `selected`, which is what the USER clicked.
-  const focused = focusedNodeId(artifact.view_state)
+  // Distinct from `selected`, which is what the USER clicked. Passing the live
+  // node ids drops a focus whose node a redraw deleted — view_state survives
+  // semantic updates untouched, so the old id lingers otherwise.
+  const focused = focusedNodeId(
+    artifact.view_state,
+    nodes.map(node => node.id)
+  )
 
   // Escape clears the pointing gesture — the same affordance as everywhere
   // else in the app, and the only way to say "I'm not pointing at anything"

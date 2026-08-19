@@ -31,4 +31,21 @@ describe('focusedNodeId', () => {
     expect(focusedNodeId(viewState)).toBe('planner')
     expect('selection' in viewState).toBe(false)
   })
+
+  it('drops a focus whose node a redraw deleted', () => {
+    // Verified against the real SessionDB: update_artifact_semantics does not
+    // touch view_state, so after a full redraw that removes the focused node
+    // the old id is still sitting there. Rendering it would pulse a ring
+    // around nothing — or around whatever node later reused the id.
+    expect(focusedNodeId({ focus: 'planner' }, ['memory', 'tools'])).toBeNull()
+  })
+
+  it('keeps a focus whose node survived the redraw', () => {
+    expect(focusedNodeId({ focus: 'planner' }, ['memory', 'planner'])).toBe('planner')
+  })
+
+  it('trusts the focus when no node list is supplied', () => {
+    // Back-compat: callers that cannot cheaply enumerate nodes still work.
+    expect(focusedNodeId({ focus: 'planner' })).toBe('planner')
+  })
 })

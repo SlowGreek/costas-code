@@ -14,8 +14,17 @@ import type { WorkbenchViewState } from '@/store/workbench'
  * referents: `focus` is where the assistant is pointing, selection is where
  * the user is pointing. Merging them would let the model appear to move the
  * user's own cursor.
+ *
+ * `liveNodeIds` guards against a STALE focus. `update_artifact_semantics`
+ * deliberately does not touch `view_state`, so a full redraw that renames or
+ * deletes the focused node leaves the old id behind — verified against the
+ * real SessionDB. Without this check the ring would either vanish silently or,
+ * worse, pulse around whatever node later reused the id.
  */
-export function focusedNodeId(viewState: undefined | WorkbenchViewState): null | string {
+export function focusedNodeId(
+  viewState: undefined | WorkbenchViewState,
+  liveNodeIds?: Iterable<string>
+): null | string {
   const focus = viewState?.focus
 
   if (typeof focus !== 'string') {
@@ -24,5 +33,19 @@ export function focusedNodeId(viewState: undefined | WorkbenchViewState): null |
 
   const trimmed = focus.trim()
 
-  return trimmed.length > 0 ? trimmed : null
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  if (liveNodeIds === undefined) {
+    return trimmed
+  }
+
+  for (const id of liveNodeIds) {
+    if (id === trimmed) {
+      return trimmed
+    }
+  }
+
+  return null
 }

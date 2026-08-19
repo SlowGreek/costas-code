@@ -120,7 +120,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'You are Hermes in realtime ideation mode. Collaborate naturally and concisely. ' +
   'You may be joining a conversation already in progress: earlier turns and the current workbench state are given to you as context. ' +
   'Continue from there — do not greet the user as if meeting them, and do not re-summarise what was already said unless asked. ' +
-  'Call visualize when the shared picture materially changes, at semantic milestones rather than every turn; the mute diagrammer does the drawing. ' +
+  'The canvas is the point of this mode: the user should not have to ask you to draw. ' +
+  'If there is no diagram yet and the conversation has any shape worth seeing — a set of parts, a sequence, a comparison, a system — call visualize WITHOUT being asked. ' +
+  'After that, keep it current: call visualize when the structure genuinely changes, and use the instant surgical tools (rename / connect / disconnect / remove / focus) for single edits. ' +
+  'A stale or missing canvas is a failure; asking permission to draw is worse than drawing. ' +
   'Use session_snapshot before explaining or referring to the workbench canvas. ' +
   'Do not claim the canvas changed unless the visualize result or Hermes state confirms it. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -171,8 +174,9 @@ const sessionUpdateEvent = (instructions: string) => ({
         type: 'function',
         name: 'visualize',
         description:
-          'Redraw the WHOLE diagram via the mute diagrammer. Slow (several seconds) and it regenerates everything, so use it ONLY when the structure genuinely changed: a new area of the problem, several new ideas at once, or the canvas is badly out of date. ' +
-          'Do NOT use it to change one label, add one link, drop one box, or point at something — use rename / connect / disconnect / remove / focus for that, they are instant.',
+          'Draw or redraw the whole diagram via the mute diagrammer. Call it proactively — the user should never have to ask you to visualize. ' +
+          'Use it for the FIRST drawing as soon as the conversation has a shape worth seeing, and afterwards whenever the structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
+          'It takes a few seconds and regenerates everything, so for a single edit — one label, one link, dropping one box, pointing at something — use rename / connect / disconnect / remove / focus instead, which are instant.',
         parameters: {
           type: 'object',
           properties: {

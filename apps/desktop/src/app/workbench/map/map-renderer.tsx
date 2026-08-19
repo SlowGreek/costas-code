@@ -9,9 +9,11 @@ import {
 
 import type { WorkbenchCamera } from '@/lib/workbench-camera'
 import {
+  cameraFromKey,
   cameraViewBox,
   clampCamera,
   IDENTITY_CAMERA,
+  isIdentityCamera,
   isPanGesture,
   panCamera,
   visibleSize,
@@ -315,11 +317,38 @@ export default function MapRenderer({
   // Escape clears the pointing gesture — the same affordance as everywhere
   // else in the app, and the only way to say "I'm not pointing at anything"
   // without hunting for empty canvas.
+  //
+  // Camera keys live here too, but only when focus is NOT in a text field:
+  // typing "0" in the composer must never reset the view.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         clearWorkbenchSelection()
+
+        return
       }
+
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+
+      if (
+        target?.isContentEditable === true ||
+        ['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName ?? '')
+      ) {
+        return
+      }
+
+      const next = cameraFromKey($workbenchCamera.get(), { height, width }, event.key)
+
+      if (!next) {
+        return
+      }
+
+      event.preventDefault()
+      setWorkbenchCamera(next)
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -327,7 +356,7 @@ export default function MapRenderer({
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [])
+  }, [height, width])
 
   const selectNode = useCallback((event: React.MouseEvent, nodeId: string) => {
     // Stop the background handler from immediately clearing what we just set.
@@ -863,6 +892,47 @@ export default function MapRenderer({
           </g>
         )
       })}
+
+      {/* A way back. Shown only once the camera has actually moved, so the
+          default canvas stays clean. Drawn in SCREEN space via the live
+          viewBox so it stays pinned to the corner at any zoom. */}
+      {isIdentityCamera(camera) ? null : (
+        <g
+          className="wb-reset-view"
+          onClick={event => {
+            event.stopPropagation()
+            setWorkbenchCamera({ ...IDENTITY_CAMERA })
+          }}
+          role="button"
+          style={{ cursor: 'pointer' }}
+          transform={`translate(${(camera.x + 12 / camera.zoom).toFixed(2)} ${(
+            camera.y +
+            (height / camera.zoom - 12 / camera.zoom)
+          ).toFixed(2)}) scale(${(1 / camera.zoom).toFixed(4)})`}
+        >
+          <title>Reset view (0)</title>
+          <rect
+            fill="var(--ui-bg-elevated)"
+            height="22"
+            rx="6"
+            stroke="var(--ui-stroke-secondary)"
+            strokeWidth="1"
+            width="96"
+            y="-22"
+          />
+          <text
+            dominantBaseline="middle"
+            fill="var(--ui-text-tertiary)"
+            fontSize="10"
+            letterSpacing="0.04em"
+            textAnchor="middle"
+            x="48"
+            y="-11"
+          >
+            {`RESET VIEW · ${Math.round(camera.zoom * 100)}%`}
+          </text>
+        </g>
+      )}
     </svg>
   )
 }

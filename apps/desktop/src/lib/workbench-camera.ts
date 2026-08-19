@@ -235,3 +235,57 @@ export function zoomStepFromWheel(zoom: number, deltaY: number): number {
 export function isPanGesture(origin: Point, current: Point): boolean {
   return Math.hypot(current.x - origin.x, current.y - origin.y) >= PAN_THRESHOLD
 }
+
+/** Zoom ratio per keypress, and pan distance per arrow press (element px). */
+const KEY_ZOOM_STEP = 1.2
+const KEY_PAN_STEP = 60
+
+/**
+ * The camera a keypress should produce, or `null` when the key is not ours.
+ *
+ * Returning `null` rather than the unchanged camera matters: the caller uses
+ * it to decide whether to `preventDefault`, so unowned keys keep working.
+ *
+ * Escape is deliberately NOT here. It already has one meaning — clear the
+ * selection — and the cancel gesture must do exactly one thing. Reset is `0`.
+ */
+export function cameraFromKey(
+  camera: WorkbenchCamera,
+  world: WorkbenchWorld,
+  key: string
+): null | WorkbenchCamera {
+  const centre = {
+    x: camera.x + world.width / camera.zoom / 2,
+    y: camera.y + world.height / camera.zoom / 2
+  }
+
+  switch (key) {
+    case '+':
+
+    case '=':
+      return zoomAt(camera, world, centre, camera.zoom * KEY_ZOOM_STEP)
+
+    case '-':
+
+    case '_':
+      return zoomAt(camera, world, centre, camera.zoom / KEY_ZOOM_STEP)
+
+    case '0':
+      return { ...IDENTITY_CAMERA }
+
+    case 'ArrowDown':
+      return panCamera(camera, world, { x: 0, y: -KEY_PAN_STEP })
+
+    case 'ArrowLeft':
+      return panCamera(camera, world, { x: KEY_PAN_STEP, y: 0 })
+
+    case 'ArrowRight':
+      return panCamera(camera, world, { x: -KEY_PAN_STEP, y: 0 })
+
+    case 'ArrowUp':
+      return panCamera(camera, world, { x: 0, y: KEY_PAN_STEP })
+
+    default:
+      return null
+  }
+}

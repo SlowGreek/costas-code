@@ -7,6 +7,7 @@ import {
   useRef
 } from 'react'
 
+import { focusedNodeId } from '@/lib/workbench-focus'
 import {
   NODE_HALF_HEIGHT,
   NODE_HALF_WIDTH,
@@ -268,6 +269,9 @@ export default function MapRenderer({
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
   const selected = useStore($workbenchSelection)
+  // What the ASSISTANT is pointing at, written by the `focus` voice tool.
+  // Distinct from `selected`, which is what the USER clicked.
+  const focused = focusedNodeId(artifact.view_state)
 
   // Escape clears the pointing gesture — the same affordance as everywhere
   // else in the app, and the only way to say "I'm not pointing at anything"
@@ -462,6 +466,17 @@ export default function MapRenderer({
           .wb-node { transition: transform 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
           .wb-node-hit { cursor: pointer; }
           .wb-selected-ring { transition: opacity 160ms ease; }
+          /* The assistant's referent. Deliberately distinct from the user's
+             selection ring: a soft pulse reads as "I am talking about this"
+             rather than "you clicked this". */
+          .wb-focus-ring { animation: wb-focus-pulse 1.8s ease-in-out infinite; }
+          @keyframes wb-focus-pulse {
+            0%, 100% { opacity: 0.30; }
+            50%      { opacity: 0.85; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .wb-focus-ring { animation: none; opacity: 0.7; }
+          }
           .wb-edge { transition: d 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
           .wb-enter { animation: wb-pop 340ms cubic-bezier(.22,1,.36,1) both; }
           @keyframes wb-pop { from { opacity: 0 } to { opacity: 1 } }
@@ -538,6 +553,7 @@ export default function MapRenderer({
 
         const accent = accentForKind(node.kind)
         const isSelected = selected === node.id
+        const isFocused = focused === node.id
         // Visual hierarchy: well-connected nodes read louder.
         const weight = (degrees[node.id] ?? 0) / maxDegree
         const lines = fitLabel(node.label, NODE_WIDTH - 22, TYPE_LABEL, node.kind ? 2 : 3)
@@ -590,6 +606,25 @@ export default function MapRenderer({
               x="0.5"
               y="7"
             />
+
+            {/* The assistant's referent, drawn outside the selection ring so
+                "I'm talking about this" and "you clicked this" can both be
+                true at once and stay visually distinct. */}
+            {isFocused ? (
+              <rect
+                className="wb-focus-ring"
+                fill="none"
+                height={NODE_HEIGHT + 18}
+                pointerEvents="none"
+                rx={NODE_RADIUS + 9}
+                stroke="var(--ui-cyan)"
+                strokeDasharray="6 4"
+                strokeWidth="2"
+                width={NODE_WIDTH + 18}
+                x="-9"
+                y="-9"
+              />
+            ) : null}
 
             {/* Selection ring: theme tokens only, drawn outside the box so it
                 never competes with the kind accent. */}

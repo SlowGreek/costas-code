@@ -90,6 +90,7 @@ import { ShellContextMenu } from '../shell/shell-context-menu'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
 import { ContribWiring, WiredPane } from './wiring'
+import { acceptWorkbenchEvent } from './workbench-event-scope'
 import { createWorkbenchHydrator } from './workbench-hydrate'
 
 /**
@@ -642,7 +643,7 @@ const syncWorkbenchPane = (active: boolean) => {
  */
 const watchWorkbenchArtifacts = () =>
   onGatewayEvent('artifact.updated', event => {
-    if (event.session_id !== $activeSessionId.get()) {
+    if (!acceptWorkbenchEvent(event.session_id, $activeSessionId.get())) {
       return
     }
 
@@ -662,7 +663,7 @@ watchWorkbenchArtifacts()
  */
 const watchWorkbenchDrawing = () =>
   onGatewayEvent('artifact.visualizing', event => {
-    if (event.session_id !== $activeSessionId.get()) {
+    if (!acceptWorkbenchEvent(event.session_id, $activeSessionId.get())) {
       return
     }
 

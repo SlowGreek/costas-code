@@ -19,6 +19,12 @@ export interface WorkbenchGraph {
 }
 
 export interface WorkbenchViewState {
+  /**
+   * The node the ASSISTANT is talking about, written by the `focus` voice
+   * tool. Distinct from the user's click selection: this is where the model is
+   * pointing, `$workbenchSelection` is where the user is pointing.
+   */
+  focus?: string
   pinned?: string[]
   positions?: Record<string, { x: number; y: number }>
   trimmed?: { shown: number; total: number }

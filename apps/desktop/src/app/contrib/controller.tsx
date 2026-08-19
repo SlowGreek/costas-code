@@ -643,7 +643,13 @@ const syncWorkbenchPane = (active: boolean) => {
  */
 const watchWorkbenchArtifacts = () =>
   onGatewayEvent('artifact.updated', event => {
-    if (!acceptWorkbenchEvent(event.session_id, $activeSessionId.get())) {
+    if (
+      !acceptWorkbenchEvent(
+        event.session_id,
+        $activeSessionId.get(),
+        $workbenchArtifact.get() !== null
+      )
+    ) {
       return
     }
 
@@ -663,7 +669,13 @@ watchWorkbenchArtifacts()
  */
 const watchWorkbenchDrawing = () =>
   onGatewayEvent('artifact.visualizing', event => {
-    if (!acceptWorkbenchEvent(event.session_id, $activeSessionId.get())) {
+    if (
+      !acceptWorkbenchEvent(
+        event.session_id,
+        $activeSessionId.get(),
+        $workbenchArtifact.get() !== null
+      )
+    ) {
       return
     }
 

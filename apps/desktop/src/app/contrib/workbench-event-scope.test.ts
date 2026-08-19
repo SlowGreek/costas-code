@@ -19,9 +19,17 @@ describe('acceptWorkbenchEvent', () => {
     // to ask "can you show me the harness?" for a diagram that already existed.
     //
     // A null active id means the renderer does not yet know which session is
-    // foreground — it cannot be evidence that this event belongs to another
-    // one.
-    expect(acceptWorkbenchEvent('sess-new', null)).toBe(true)
+    // foreground. Safe ONLY because there is nothing on screen yet: a first
+    // drawing has no competitor to overwrite.
+    expect(acceptWorkbenchEvent('sess-new', null, false)).toBe(true)
+  })
+
+  it('does NOT overwrite a drawing already on screen when the active id is unknown', () => {
+    // The opposite failure, hit by a real user the same day: a new session
+    // drew a workout diagram while the canvas kept showing a previous
+    // session's architecture map. Absence of knowledge about the foreground is
+    // not a licence to paint over whatever is currently displayed.
+    expect(acceptWorkbenchEvent('sess-other', null, true)).toBe(false)
   })
 
   it('rejects an event with no session id at all', () => {

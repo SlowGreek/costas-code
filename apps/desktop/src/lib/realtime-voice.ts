@@ -229,12 +229,7 @@ interface RealtimeTokenResponse {
   expires_at?: number
   model: string
   voice: string
-  /** Backend watcher ownership lets the client omit the duplicate visualize tool. */
-  workbench_watcher?: {
-    active: boolean
-    pipeline: 'direct' | 'two_stage'
-    owns_redraws: boolean
-  }
+  voice_capabilities?: { web_search?: boolean }
   /** Host that issued the secret; Azure secrets are not valid at OpenAI. */
   webrtc_url?: string
 }
@@ -330,15 +325,15 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'During a walkthrough, say the node labels exactly as written in the workbench summary; the canvas follows those exact names while you keep speaking. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
-  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — say the desired arrangement clearly. That is a real canvas change, not a redraw of identical content.'
+  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
 
 const VOICE_OWNED_REDRAW_INSTRUCTIONS =
-  'You own full redraws in this session. Drawing is how you think here, so draw first: as soon as the conversation has a useful shape, call visualize silently and keep speaking. `status: drawing` means the update started, not that it finished; describe the idea while it appears and let the user confirm what they see.'
+  'You decide when the drawing should change in this session. Call visualize silently when the user asks to see, map, sketch, organize, simplify, redraw, or visualize something, or when a visual would clearly help answer what they are asking. Explicit visual requests such as “show me,” “redraw that,” and “what would that look like?” always require a canvas tool action; spoken description alone does not satisfy them. The mute diagrammer edits in place with validated ops whenever possible and replaces the whole artifact only for a genuine wholesale rethink or kind change. Conversation alone is often enough, so let the decision follow the user’s intent rather than drawing every thought. `status: drawing` means the update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
-const WATCHER_OWNED_REDRAW_INSTRUCTIONS =
-  'A background canvas worker owns every full redraw in this session. It listens to the conversation and updates the canvas independently while you keep speaking. The visualize tool is intentionally absent: do not call it, ask for it, or announce redraws. You still own the instant tools—focus, rename, connect, disconnect, remove, and go_back—and canvas changes arrive as appended semantic events in your context.'
+const WEB_SEARCH_INSTRUCTIONS =
+  'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
 
-/** Test seam: assert behavior contracts for the voice-owned fallback mode. */
+/** Test seam: assert behavior contracts for the voice-owned mode. */
 export const REALTIME_INSTRUCTIONS_FOR_TESTS =
   `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}`
 
@@ -363,7 +358,7 @@ const REALTIME_AUDIO_CONFIG = {
   }
 }
 
-const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) => ({
+const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) => ({
   type: 'session.update',
   session: {
     type: 'realtime',
@@ -384,9 +379,9 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
         type: 'function',
         name: 'visualize',
         description:
-          'Draw or redraw the whole diagram via the mute diagrammer. Call it proactively — the user should never have to ask you to visualize. ' +
-          'Use it for the FIRST drawing as soon as the conversation has a shape worth seeing, and afterwards whenever the structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
-          'It takes a few seconds and regenerates everything, so for a single edit — one label, one link, dropping one box — use rename / connect / disconnect / remove instead, which are instant.',
+          'Draw or redraw the whole diagram via the mute diagrammer. Use it for explicit visual requests including “show me,” “what would that look like?”, “simplify this,” “organize this,” map, sketch, redraw, and visualize. ' +
+          'After the first drawing, use it when the requested structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
+          'It takes a few seconds, but the diagrammer edits in place with validated ops whenever possible; grouped removals/additions and layout-only changes do not require replacing the artifact. For one label, one link, or one box, use rename / connect / disconnect / remove instead, which are instant.',
         parameters: {
           type: 'object',
           properties: {
@@ -395,6 +390,21 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
               description: 'Optional direction for what the diagrammer should emphasize or correct.'
             }
           },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'web_search',
+        description:
+          'Search the live web for current events, recent changes, unfamiliar entities, versions, prices, policies, or any fact you are not confident is current. Use the returned titles, descriptions, and URLs as sources instead of guessing.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Focused search query.' },
+            limit: { type: 'integer', minimum: 1, maximum: 5 }
+          },
+          required: ['query'],
           additionalProperties: false
         }
       },
@@ -442,7 +452,7 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
         type: 'function',
         name: 'connect',
         description:
-          'Instantly add ONE link between two nodes that already exist. Use it for "those two are related", "the planner feeds the executor". If either end does not exist yet, describe the new structure plainly so the full-redraw owner can add it.',
+          'Instantly add ONE link between two nodes that already exist. Use it for "those two are related", "the planner feeds the executor". If either end does not exist yet, call visualize with the new structure so the mute diagrammer can add it.',
         parameters: {
           type: 'object',
           properties: {
@@ -482,7 +492,7 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
           additionalProperties: false
         }
       }
-    ].filter(tool => !(watcherOwnsRedraws && tool.name === 'visualize')),
+    ].filter(tool => tool.name !== 'web_search' || webSearchAvailable),
     tool_choice: 'auto'
   }
 })
@@ -504,15 +514,9 @@ export async function startRealtimeVoiceConnection(
   const fetchFn = options.fetchFn ?? fetch
   const peer = createPeer()
   const audio = createAudio()
-  const watcherOwnsRedraws = token.workbench_watcher?.owns_redraws === true
-
+  const webSearchAvailable = token.voice_capabilities?.web_search === true
   const configuredInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
-
-  const ownershipInstructions = watcherOwnsRedraws
-    ? WATCHER_OWNED_REDRAW_INSTRUCTIONS
-    : VOICE_OWNED_REDRAW_INSTRUCTIONS
-
-  const baseInstructions = `${configuredInstructions}\n\n${ownershipInstructions}`
+  const baseInstructions = `${configuredInstructions}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}${webSearchAvailable ? `\n\n${WEB_SEARCH_INSTRUCTIONS}` : ''}`
 
   const stream = await mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -587,7 +591,7 @@ export async function startRealtimeVoiceConnection(
 
     channel.addEventListener('open', () => {
       channelOpen = true
-      send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))
+      send(sessionUpdateEvent(instructions(), webSearchAvailable))
     })
     channel.addEventListener('message', event => {
       try {
@@ -717,7 +721,7 @@ export async function startRealtimeVoiceConnection(
       workbenchContext = boundWorkbenchContext(summary)
 
       if (channelOpen && !closed) {
-        send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))
+        send(sessionUpdateEvent(instructions(), webSearchAvailable))
       }
     }
   }
@@ -980,6 +984,32 @@ export async function routeRealtimeServerEvent(
       // model must not announce a drawing that never arrived. `drawing` says
       // the request is under way and nothing more.
       output = { status: 'drawing' }
+    } else if (name === 'web_search') {
+      let query = ''
+      let limit = 5
+
+      try {
+        const parsed = JSON.parse(asTrimmedString(event.arguments) || '{}') as {
+          limit?: unknown
+          query?: unknown
+        }
+
+        query = asTrimmedString(parsed.query).slice(0, 500)
+
+        if (typeof parsed.limit === 'number' && Number.isFinite(parsed.limit)) {
+          limit = Math.min(Math.max(Math.trunc(parsed.limit), 1), 5)
+        }
+      } catch {
+        // Invalid search arguments become a structured tool error below.
+      }
+
+      output = query
+        ? await deps.request('voice.realtime.web_search', {
+            session_id: deps.runtimeSessionId,
+            query,
+            limit
+          })
+        : { error: 'web_search is missing a query' }
     } else {
       const surgical = surgicalToolRequest(name, asTrimmedString(event.arguments))
 

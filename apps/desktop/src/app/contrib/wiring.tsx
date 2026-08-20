@@ -135,6 +135,7 @@ import { useQuickEntryBridge } from './hooks/use-quick-entry-bridge'
 import { useSessionTileDelegate } from './hooks/use-session-tile-delegate'
 import { McpInstallDeepLinkDialog } from './mcp-install-deeplink-dialog'
 import { $restartPreviewServer, useTitlebarToolContributions } from './panes'
+import { appendRealtimeTranscript, type RealtimeTranscriptEvent } from './realtime-transcript-projection'
 import { ChatRoutesSurface, SidebarSurface, StatusbarSurface, TerminalSurface } from './surfaces'
 import type { WiringActions, WiringApi } from './types'
 
@@ -708,6 +709,14 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     (event: Parameters<typeof handleDesktopGatewayEvent>[0]) => {
       emitGatewayEvent(event)
 
+      if (event.type === 'voice.realtime.transcript' && event.session_id) {
+        updateSessionState(event.session_id, state => {
+          const messages = appendRealtimeTranscript(state.messages, event.payload as RealtimeTranscriptEvent)
+
+          return messages === state.messages ? state : { ...state, messages }
+        })
+      }
+
       if (event.type === 'wake.detected') {
         const payload = event.payload as { profile?: null | string; start_new_session?: boolean } | undefined
 
@@ -744,7 +753,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
       handleDesktopGatewayEvent(event)
     },
-    [handleDesktopGatewayEvent, startFreshSessionDraft]
+    [handleDesktopGatewayEvent, startFreshSessionDraft, updateSessionState]
   )
 
   useGatewayBoot({

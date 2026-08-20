@@ -19254,6 +19254,78 @@ def test_prompt_submit_row_id_real_sessiondb_resolve_without_memory_stamps(
         server._sessions.pop(sid, None)
 
 
+def test_prompt_submit_row_id_resolves_after_model_switch_marker(
+    monkeypatch, tmp_path
+):
+    """A display-only model switch must not hide the following editable row.
+
+    Alternation repair merges the consecutive ``model_switch`` user marker and
+    real user prompt under the marker's row id. Truncation addressing needs the
+    verbatim durable rows so the real prompt's row id remains resolvable.
+    """
+    from hermes_state import SessionDB
+
+    db = SessionDB(db_path=tmp_path / "rowid-model-switch.db")
+    session_key = "real-db-row-model-switch"
+    db.create_session(session_key, "desktop")
+    msgs = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply 1"},
+        {
+            "role": "user",
+            "content": "[System: model changed]",
+            "display_kind": "model_switch",
+        },
+        {"role": "user", "content": "edit this prompt"},
+        {"role": "assistant", "content": "reply 2"},
+    ]
+    with db._lock:
+        assert db._conn is not None
+        db._insert_message_rows(db._conn, session_key, msgs)
+        db._conn.commit()
+    target_row_id = msgs[3]["_row_id"]
+
+    live_history = [
+        {
+            key: value
+            for key, value in message.items()
+            if key in {"role", "content", "display_kind"}
+        }
+        for message in msgs
+    ]
+    sess = _session(history=live_history, session_key=session_key)
+    sid = "real-db-row-model-switch-sid"
+    server._sessions[sid] = sess
+    monkeypatch.setattr(server, "_get_db", lambda: db)
+    monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_start_inflight_turn", lambda *a, **k: None)
+
+    try:
+        resp = server.handle_request(
+            {
+                "id": "1",
+                "method": "prompt.submit",
+                "params": {
+                    "session_id": sid,
+                    "text": "edited prompt",
+                    "truncate_before_row_id": target_row_id,
+                    "truncate_before_user_ordinal": 1,
+                    "confirm_truncate": True,
+                },
+            }
+        )
+
+        assert resp is not None
+        assert resp.get("error") is None, resp
+        assert [(m["role"], m["content"]) for m in sess["history"]] == [
+            ("user", "first"),
+            ("assistant", "reply 1"),
+            ("user", "[System: model changed]"),
+        ]
+    finally:
+        server._sessions.pop(sid, None)
+
+
 def test_prompt_submit_row_id_real_sessiondb_unknown_refuses_despite_ordinal(
     monkeypatch, tmp_path
 ):

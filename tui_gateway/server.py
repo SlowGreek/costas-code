@@ -296,6 +296,8 @@ _LONG_HANDLERS = frozenset(
         "voice.tts",
         # Mints an ephemeral OpenAI credential over a blocking HTTPS request.
         "voice.realtime.token",
+        # Searches the configured live web provider for the Realtime voice model.
+        "voice.realtime.web_search",
         # Runs a bounded auxiliary-model call over transcript + current graph.
         "workbench.visualize",
         # wake.start calls check_wake_word_requirements() → _stt_ready() →
@@ -1004,25 +1006,6 @@ def _teardown_popped_session(
                 )
         except Exception:
             logger.debug("failed waiting for session turn thread", exc_info=True)
-    # Retire background canvas work before tearing down the session. Watcher
-    # ownership is keyed by the runtime voice connection, not the durable chat:
-    # two windows may temporarily resume the same stored session, and closing
-    # the older one must not cancel the newer one's timer. Without cleanup a
-    # pending timer can still spend a model request after the user has left.
-    watcher_keys = {str(session.get("_sid") or "").strip()}
-    frozen_connections = session.get("_workbench_watchers")
-    if isinstance(frozen_connections, dict):
-        watcher_keys.update(str(key).strip() for key in frozen_connections)
-    watcher_keys.discard("")
-    if watcher_keys:
-        try:
-            from workbench_watch_runtime import forget_session
-
-            for watcher_key in watcher_keys:
-                forget_session(watcher_key)
-        except Exception:
-            logger.debug("failed retiring workbench watcher", exc_info=True)
-
     _teardown_session(session, end_reason=end_reason)
     return True
 

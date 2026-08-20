@@ -1057,9 +1057,9 @@ DEFAULT_CONFIG = {
             "reasoning_effort": "",  # per-task thinking level: none|minimal|low|medium|high|xhigh|max|ultra (empty = provider default)
             "language": "",
         },
-        # Mute diagrammer for GPT Realtime ideation. Kept on the auxiliary
-        # routing plane so a cheap/fast model can update the canvas without
-        # spending the coding model every few seconds.
+        # Mute diagrammer for GPT Realtime ideation. The voice model decides
+        # when to call ``visualize``; this separate auxiliary model produces the
+        # validated artifact or incremental ops without making the speaker draw.
         "ideation_workbench": {
             "provider": "auto",
             "model": "",
@@ -1071,20 +1071,7 @@ DEFAULT_CONFIG = {
             "extra_body": {},
             "reasoning_effort": "",
         },
-        # Background transcript watcher for the same workbench. It only ever
-        # answers "should the canvas change?", so it runs on a tighter timeout
-        # and a much smaller token budget than the diagrammer it wakes.
-        "ideation_workbench_watcher": {
-            "provider": "auto",
-            "model": "",
-            "prefer_fast_model": True,
-            "base_url": "",
-            "api_key": "",
-            "api_mode": "",
-            "timeout": 15,
-            "extra_body": {},
-            "reasoning_effort": "",
-        },
+
         "memory_query_rewrite": {
             "provider": "auto",
             "model": "",
@@ -1782,30 +1769,6 @@ DEFAULT_CONFIG = {
         "stop_phrases": ["stop"],
     },
 
-    # Voice ideation workbench (the shared canvas beside a Realtime session).
-    "workbench": {
-        # Background transcript watcher. It decides when the canvas should
-        # change so the VOICE model never has to: a function call terminates a
-        # Realtime response, so every tool-driven redraw costs the user an
-        # audible stop-start seam mid-sentence.
-        "watcher": {
-            # Off until deliberately turned on: it spends a model call per
-            # settled utterance for the whole length of a voice session.
-            "enabled": False,
-            # "shadow" runs the watcher and logs its verdict WITHOUT drawing,
-            # so its judgement can be compared against the voice model's before
-            # it is handed the canvas. "active" lets it redraw.
-            "mode": "shadow",
-            # "direct" decides and emits the validated visual in one model
-            # response. "two_stage" preserves the old watcher -> diagrammer
-            # path for measured A/B comparison.
-            "pipeline": "direct",
-            # Quiet time after the last user fragment before a burst counts as
-            # one settled utterance. People speak in fragments; firing per
-            # fragment would queue redraws faster than they complete.
-            "debounce_seconds": 2.5,
-        },
-    },
 
     # "Hey Hermes" hands-free wake word. Always-on, on-device hotword
     # detection that starts a fresh voice session — the "Hey Siri" pattern.

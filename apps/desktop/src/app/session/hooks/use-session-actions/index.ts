@@ -73,6 +73,7 @@ import {
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { forgetSessionUnread } from '@/store/session-unread'
 import { isWatchWindow } from '@/store/windows'
+import { clearWorkbenchForSessionTransition } from '@/store/workbench'
 import type { SessionCreateResponse, SessionInfo, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
 
 import { navigateToWorkspacePage, NEW_CHAT_ROUTE, sessionRoute, SETTINGS_ROUTE } from '../../../routes'
@@ -397,6 +398,7 @@ export function useSessionActions({
       activeSessionIdRef.current = null
       setSelectedStoredSessionId(null)
       selectedStoredSessionIdRef.current = null
+      clearWorkbenchForSessionTransition()
       setMessages([])
       setCurrentUsage({
         calls: 0,

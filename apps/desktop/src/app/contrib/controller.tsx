@@ -59,8 +59,9 @@ import {
 } from '@/store/layout'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
-import { $activeSessionId, $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
+import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
+import { $focusedRuntimeId } from '@/store/session-states'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
@@ -646,7 +647,7 @@ const watchWorkbenchArtifacts = () =>
     if (
       !acceptWorkbenchEvent(
         event.session_id,
-        $activeSessionId.get(),
+        $focusedRuntimeId.get(),
         $workbenchArtifact.get() !== null
       )
     ) {
@@ -672,7 +673,7 @@ const watchWorkbenchDrawing = () =>
     if (
       !acceptWorkbenchEvent(
         event.session_id,
-        $activeSessionId.get(),
+        $focusedRuntimeId.get(),
         $workbenchArtifact.get() !== null
       )
     ) {
@@ -699,14 +700,14 @@ watchWorkbenchDrawing()
  */
 const hydrateWorkbenchArtifact = createWorkbenchHydrator({
   getGateway: () => $gateway.get(),
-  getSessionId: () => $activeSessionId.get()
+  getSessionId: () => $focusedRuntimeId.get()
 })
 
-$activeSessionId.subscribe(runtimeSessionId => {
+$focusedRuntimeId.subscribe(runtimeSessionId => {
   void hydrateWorkbenchArtifact(runtimeSessionId)
 })
 $gateway.subscribe(() => {
-  void hydrateWorkbenchArtifact($activeSessionId.get())
+  void hydrateWorkbenchArtifact($focusedRuntimeId.get())
 })
 // Picking a chat in the sidebar CLEARS the canvas; it does not load one.
 //

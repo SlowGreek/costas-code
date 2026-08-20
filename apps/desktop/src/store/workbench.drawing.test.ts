@@ -12,12 +12,16 @@ import {
   workbenchTrimNotice
 } from './workbench'
 
-const artifact = (view_state: WorkbenchArtifact['view_state'] = {}): WorkbenchArtifact => ({
+const artifact = (
+  view_state: WorkbenchArtifact['view_state'] = {},
+  updated_by = 'ambient'
+): WorkbenchArtifact => ({
   artifact_id: 'map.main',
   kind: 'map',
   semantic_rev: 1,
   view_rev: 1,
   payload: { nodes: [{ id: 'voice', label: 'Voice' }], edges: [] },
+  updated_by,
   view_state
 })
 
@@ -46,6 +50,14 @@ describe('workbench drawing state', () => {
     setWorkbenchArtifact(artifact())
 
     expect($workbenchDrawing.get()).toBe(false)
+  })
+
+  it('keeps drawing active when an instant edit lands during generation', () => {
+    setWorkbenchDrawing(true)
+    setWorkbenchArtifact(artifact({}, 'voice-edit'))
+
+    expect($workbenchArtifact.get()?.updated_by).toBe('voice-edit')
+    expect($workbenchDrawing.get()).toBe(true)
   })
 
   it('clears on failure', () => {

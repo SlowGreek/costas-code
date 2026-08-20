@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   $workbenchArtifact,
+  $workbenchDrawing,
   $workbenchError,
   $workbenchVoiceActive,
+  clearWorkbenchForSessionTransition,
   resetWorkbenchForTests,
   setWorkbenchArtifact,
+  setWorkbenchDrawing,
   setWorkbenchError,
   setWorkbenchVoiceActive,
   shouldShowWorkbenchPane
@@ -72,5 +75,26 @@ describe('workbench store', () => {
     expect($workbenchVoiceActive.get()).toBe(true)
     expect($workbenchArtifact.get()?.payload.nodes[0].id).toBe('voice')
     expect($workbenchError.get()).toBeNull()
+  })
+
+  it('rejects late artifact events that would move either revision backward', () => {
+    setWorkbenchArtifact({ ...artifact, semantic_rev: 2, view_rev: 3 })
+
+    setWorkbenchArtifact({ ...artifact, semantic_rev: 1, view_rev: 99 })
+    expect($workbenchArtifact.get()?.semantic_rev).toBe(2)
+    expect($workbenchArtifact.get()?.view_rev).toBe(3)
+
+    setWorkbenchArtifact({ ...artifact, semantic_rev: 2, view_rev: 2 })
+    expect($workbenchArtifact.get()?.view_rev).toBe(3)
+  })
+
+  it('clears the previous canvas and drawing state for a fresh session', () => {
+    setWorkbenchArtifact({ ...artifact, semantic_rev: 7 })
+    setWorkbenchDrawing(true)
+
+    clearWorkbenchForSessionTransition()
+
+    expect($workbenchArtifact.get()).toBeNull()
+    expect($workbenchDrawing.get()).toBe(false)
   })
 })

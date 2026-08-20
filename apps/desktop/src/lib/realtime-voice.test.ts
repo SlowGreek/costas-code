@@ -321,6 +321,33 @@ describe('routeRealtimeServerEvent', () => {
     expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
   })
 
+  it('routes current-information searches through the configured backend provider', async () => {
+    const request = vi.fn(async () => ({
+      success: true,
+      data: { web: [{ title: 'Current', url: 'https://example.com', description: 'Live result' }] }
+    }))
+
+    const send = vi.fn()
+
+    await routeRealtimeServerEvent(
+      {
+        type: 'response.function_call_arguments.done',
+        call_id: 'call-search',
+        name: 'web_search',
+        arguments: JSON.stringify({ query: 'latest realtime api', limit: 99 })
+      },
+      { request, runtimeSessionId: 'runtime-session', send }
+    )
+
+    expect(request).toHaveBeenCalledWith('voice.realtime.web_search', {
+      session_id: 'runtime-session',
+      query: 'latest realtime api',
+      limit: 5
+    })
+    expect(JSON.parse(send.mock.calls[0][0].item.output).data.web[0].title).toBe('Current')
+    expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
+  })
+
   it('publishes completed user and assistant transcripts', async () => {
     const onTranscript = vi.fn()
 
@@ -457,12 +484,10 @@ describe('startRealtimeVoiceConnection', () => {
     )
   })
 
-  it('removes visualize when the active watcher owns redraws', async () => {
-    // This is the ownership seam. The reported session proved that exposing
-    // both writers starts two model generations for one user request: voice
-    // first, watcher second. When the backend says the active watcher owns
-    // redraws, the duplicate path must be physically absent—not discouraged by
-    // another prompt sentence.
+  it('keeps voice as the redraw owner even for a legacy watcher token', async () => {
+    // Older backends/configs can still advertise watcher ownership. The client
+    // must fail toward the deliberate voice-owned path rather than silently
+    // removing visualize and letting a transcript observer decide when to draw.
     const harness = await connectHarness({
       workbench_watcher: { active: true, owns_redraws: true, pipeline: 'direct' }
     })
@@ -470,15 +495,19 @@ describe('startRealtimeVoiceConnection', () => {
     harness.open()
 
     const update = JSON.parse(harness.sent[0]) as {
-      session: { instructions: string; tools: { name: string }[] }
+      session: { instructions: string; tools: { description: string; name: string }[] }
     }
 
     const names = update.session.tools.map(tool => tool.name)
 
-    expect(names).not.toContain('visualize')
+    expect(names).toContain('visualize')
     expect(names).toContain('focus')
     expect(names).toContain('go_back')
-    expect(update.session.instructions).toMatch(/background canvas worker owns every full redraw/i)
+    expect(update.session.tools.find(tool => tool.name === 'visualize')?.description).toMatch(
+      /edits? in place/i
+    )
+    expect(update.session.instructions).toMatch(/you decide when the drawing should change/i)
+    expect(update.session.instructions).not.toMatch(/background canvas worker owns every full redraw/i)
   })
 
   it('keeps visualize when the watcher is shadow-only', async () => {
@@ -490,6 +519,25 @@ describe('startRealtimeVoiceConnection', () => {
     const update = JSON.parse(harness.sent[0]) as { session: { tools: { name: string }[] } }
 
     expect(update.session.tools.map(tool => tool.name)).toContain('visualize')
+  })
+
+  it('exposes live web search only when the backend advertises it', async () => {
+    const available = await connectHarness({ voice_capabilities: { web_search: true } })
+
+    available.open()
+
+    const enabledUpdate = JSON.parse(available.sent[0]) as {
+      session: { instructions: string; tools: { name: string }[] }
+    }
+
+    expect(enabledUpdate.session.tools.map(tool => tool.name)).toContain('web_search')
+    expect(enabledUpdate.session.instructions).toMatch(/current information/i)
+
+    const unavailable = await connectHarness({ voice_capabilities: { web_search: false } })
+
+    unavailable.open()
+    const disabledUpdate = JSON.parse(unavailable.sent[0]) as { session: { tools: { name: string }[] } }
+    expect(disabledUpdate.session.tools.map(tool => tool.name)).not.toContain('web_search')
   })
 
   it('connects WebRTC with an ephemeral key and cleans up owned media', async () => {

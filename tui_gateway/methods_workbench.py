@@ -19,42 +19,62 @@ def _(rid, params: dict) -> dict:
 
     prompt = str(params.get("prompt") or "").strip()[:1_000]
     sid = str(params.get("session_id") or "")
-    _ensure_session_db_row(session)
-    with _session_db(session) as db:
-        if db is None:
-            return _db_unavailable_error(rid, code=5007)
-        # The diagrammer is a whole model round trip. Without a start-side
-        # signal the canvas sits unchanged for seconds and the user cannot
-        # tell "thinking" from "broken".
+    import threading
+
+    # Multiple Realtime responses may intentionally call visualize during one
+    # semantic turn. Run every request, but serialize model generation per
+    # session and keep one continuous busy window across the queue.
+    state = session.setdefault("_workbench_visualize_state", {})
+    if not isinstance(state, dict):
+        state = {}
+        session["_workbench_visualize_state"] = state
+    coordinate = state.setdefault("coordinate", threading.Lock())
+    serialize = state.setdefault("serialize", threading.Lock())
+    with coordinate:
+        active = int(session.get("_workbench_visualize_active", 0)) + 1
+        session["_workbench_visualize_active"] = active
+        first_active = active == 1
+
+    if first_active:
         _emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
-        # The background watcher shares this canvas. Telling it that a redraw
-        # is in flight is what stops it starting a second one: the artifact
-        # write is optimistic-concurrency guarded, so the loser burns a full
-        # model call and then dies on a revision conflict with nothing shown
-        # to the user.
-        try:
-            from workbench_watch_runtime import set_in_flight
 
-            set_in_flight(sid, True)
-        except Exception:
-            set_in_flight = None
-        try:
-            from workbench_visualizer import visualize_session
+    try:
+        with serialize:
+            _ensure_session_db_row(session)
+            with _session_db(session) as db:
+                if db is None:
+                    return _db_unavailable_error(rid, code=5007)
+                try:
+                    from hermes_state_artifacts import ArtifactRevisionConflict
+                    from workbench_visualizer import visualize_session
 
-            artifact = visualize_session(
-                db,
-                stored_session_id,
-                prompt=prompt,
-            )
-            _emit("artifact.updated", sid, {"artifact": artifact})
-            return _ok(rid, {"artifact": artifact})
-        except Exception as exc:
-            return _err(rid, 4621, f"workbench visualization failed: {exc}")
-        finally:
-            if set_in_flight is not None:
-                set_in_flight(sid, False)
-            # Clears on success AND on failure: the pending state must never
-            # outlive the work it describes.
+                    try:
+                        artifact = visualize_session(
+                            db,
+                            stored_session_id,
+                            prompt=prompt,
+                        )
+                    except ArtifactRevisionConflict:
+                        # The voice keeps talking while the mute diagrammer works, so
+                        # an instant rename/connect/remove can legitimately win the
+                        # revision race. Regenerate once from that accepted latest
+                        # artifact so neither the edit nor the requested redraw is lost.
+                        artifact = visualize_session(
+                            db,
+                            stored_session_id,
+                            prompt=prompt,
+                        )
+                    _emit("artifact.updated", sid, {"artifact": artifact})
+                    return _ok(rid, {"artifact": artifact})
+                except Exception as exc:
+                    return _err(rid, 4621, f"workbench visualization failed: {exc}")
+    finally:
+        with coordinate:
+            active = max(0, int(session.get("_workbench_visualize_active", 1)) - 1)
+            session["_workbench_visualize_active"] = active
+            last_active = active == 0
+        if last_active:
+            # Clears only after the final queued request succeeds or fails.
             _emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
 
 

@@ -47,6 +47,13 @@ import {
   setTurnStartedAt
 } from '@/store/session'
 import { $sessionTiles } from '@/store/session-states'
+import {
+  $workbenchArtifact,
+  $workbenchDrawing,
+  resetWorkbenchForTests,
+  setWorkbenchArtifact,
+  setWorkbenchDrawing
+} from '@/store/workbench'
 
 import sessionResumeActiveTurn from '../../../../../../tests/fixtures/session-resume-active-turn.json'
 import { sessionRoute } from '../../routes'
@@ -437,7 +444,35 @@ async function createWith(
 }
 
 describe('startFreshSessionDraft', () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    resetWorkbenchForTests()
+  })
+
+  it('clears the previous session workbench from a new-session draft', async () => {
+    const navigate = vi.fn()
+    const requestGateway = vi.fn(async () => ({}) as never)
+    let handle: HarnessHandle | null = null
+
+    setWorkbenchArtifact({
+      artifact_id: 'map.main',
+      kind: 'map',
+      payload: { edges: [], nodes: [{ id: 'old', label: 'Old session' }] },
+      semantic_rev: 7,
+      updated_by: 'ambient',
+      view_rev: 1,
+      view_state: {}
+    })
+    setWorkbenchDrawing(true)
+
+    render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    act(() => handle!.startFreshSessionDraft())
+
+    expect($workbenchArtifact.get()).toBeNull()
+    expect($workbenchDrawing.get()).toBe(false)
+  })
 
   it('can reset machine-bound session state without closing the current overlay route', async () => {
     const navigate = vi.fn()

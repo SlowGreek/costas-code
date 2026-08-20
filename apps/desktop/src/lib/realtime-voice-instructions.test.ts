@@ -17,9 +17,16 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/this one/i)
   })
 
-  it('keeps the proactive-drawing behaviour', () => {
+  it('makes visualization a deliberate voice decision', () => {
     expect(text).toMatch(/visualize/)
-    expect(text).toMatch(/draw first/i)
+    expect(text).toMatch(/user asks|clearly help/i)
+    expect(text).toMatch(/edits? in place/i)
+    expect(text).not.toMatch(/draw first/i)
+  })
+
+  it('requires an actual tool action for explicit visual requests', () => {
+    expect(text).toMatch(/spoken description alone does not satisfy/i)
+    expect(text).toMatch(/what would that look like/i)
   })
 
   it('explains that visualize returns before the drawing exists', () => {
@@ -66,7 +73,7 @@ describe('realtime instructions', () => {
     // Reported: "I asked to have it redrawn linearly, she said she did it, but
     // it didn't change." She had no notion that SHAPE was changeable, so a
     // request about arrangement produced a redraw of identical content.
-    expect(text).toMatch(/linearly|arrangement|shape/i)
+    expect(text).toMatch(/call visualize with the requested arrangement/i)
   })
 
   it('tells her to ring nodes while walking through them', () => {

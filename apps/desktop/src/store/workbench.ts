@@ -44,6 +44,7 @@ export interface WorkbenchArtifact {
   kind: string
   payload: WorkbenchGraph
   semantic_rev: number
+  updated_by?: string
   view_rev: number
   view_state: WorkbenchViewState
 }
@@ -165,6 +166,19 @@ export function setWorkbenchVoiceActive(active: boolean): void {
 }
 
 export function setWorkbenchArtifact(artifact: null | WorkbenchArtifact): void {
+  const current = $workbenchArtifact.get()
+
+  if (artifact && current?.artifact_id === artifact.artifact_id) {
+    const olderSemantic = artifact.semantic_rev < current.semantic_rev
+
+    const olderViewAtSameSemantic =
+      artifact.semantic_rev === current.semantic_rev && artifact.view_rev < current.view_rev
+
+    if (olderSemantic || olderViewAtSameSemantic) {
+      return
+    }
+  }
+
   $workbenchArtifact.set(artifact)
 
   // A selection that no longer exists is exactly the "confidently wrong"
@@ -191,9 +205,14 @@ export function setWorkbenchArtifact(artifact: null | WorkbenchArtifact): void {
 
   if (artifact) {
     $workbenchError.set(null)
-    // A drawing landing is itself proof the draw finished, even if the
-    // completion event is lost.
-    setWorkbenchDrawing(false)
+
+    // Only the mute visualizer's own artifact proves the draw finished. An
+    // instant voice edit can land while a conflict retry is still generating;
+    // treating that edit as completion drops `redrawing` from voice context and
+    // allows another full request into the same race.
+    if (artifact.updated_by === 'ambient' || artifact.updated_by === 'ambient-diff') {
+      setWorkbenchDrawing(false)
+    }
   }
 }
 
@@ -203,6 +222,14 @@ export function setWorkbenchError(error: null | string): void {
   if (error) {
     setWorkbenchDrawing(false)
   }
+}
+
+/** Clear every foreground workbench projection when ownership moves sessions. */
+export function clearWorkbenchForSessionTransition(): void {
+  setWorkbenchArtifact(null)
+  setWorkbenchDrawing(false)
+  $workbenchError.set(null)
+  $workbenchLayout.set(null)
 }
 
 export function resetWorkbenchForTests(): void {

@@ -73,7 +73,13 @@ def _find_user_turn_by_row_id(history: list, target_row_id: int):
 
 
 def _load_durable_truncation_history(session: dict, fallback_sid: str = ""):
-    """Load the durable live-replay transcript, or None when it cannot be proven safe."""
+    """Load verbatim durable rows for identity lookup, or None on failure.
+
+    This is not a model-replay read. Alternation repair can merge a display-only
+    user marker (for example ``model_switch``) with the following real prompt
+    and retain only the marker's row id. A later edit must still be able to
+    address the real prompt by its own durable id.
+    """
     session_key = str(session.get("session_key") or fallback_sid or "")
     if not session_key:
         return []
@@ -83,7 +89,7 @@ def _load_durable_truncation_history(session: dict, fallback_sid: str = ""):
             if not callable(get_conv):
                 return None
             history = get_conv(
-                session_key, repair_alternation=True, include_row_ids=True
+                session_key, repair_alternation=False, include_row_ids=True
             )
     except Exception:
         logger.debug(
@@ -100,9 +106,9 @@ def _resolve_truncate_row_id(session: dict, history: list, target_row_id: int):
 
     Prefer in-memory ``_row_id`` / ``row_id`` stamps. When a live turn rewrote
     ``session["history"]`` without stamps (provider-format messages), load the
-    session's durable transcript with ``include_row_ids=True`` and map the
-    matched user-turn ordinal onto the live list. Does **not** fall back to a
-    client-supplied ordinal — unknown row ids must refuse (#82959).
+    session's verbatim durable transcript with ``include_row_ids=True`` and map
+    the matched user-turn ordinal onto the live list. Does **not** fall back to
+    a client-supplied ordinal — unknown row ids must refuse (#82959).
     """
     hit = _find_user_turn_by_row_id(history, target_row_id)
     if hit is not None:
@@ -114,11 +120,10 @@ def _resolve_truncate_row_id(session: dict, history: list, target_row_id: int):
 
     # Heal missing in-memory stamps when the live list still lines up 1:1 with
     # the durable transcript (common after turn-completion rewrites). Equal
-    # length alone is NOT proof of alignment: the durable copy above is loaded
-    # with repair_alternation=True (which can merge/drop rows) while the live
-    # list is unrepaired, and memory can carry optimistic/marker rows — so the
-    # two can coincide in length while position-shifted. A positional stamp on
-    # a misaligned pair is sticky and re-aims every later rewind at the wrong
+    # length alone is NOT proof of alignment: memory can carry optimistic rows
+    # or a provider rewrite can differ from the verbatim durable projection, so
+    # the two can coincide in length while position-shifted. A positional stamp
+    # on a misaligned pair is sticky and re-aims every later rewind at the wrong
     # durable row. Stamp only when EVERY pair agrees (all-or-nothing): roles
     # must match on every pair, and addressable user turns must match content.
     if len(db_history) == len(history) and all(

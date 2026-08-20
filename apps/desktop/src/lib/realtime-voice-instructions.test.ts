@@ -68,6 +68,12 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/let me/i)
   })
 
+  it('does not turn silent tool use into act-everything-before-speaking', () => {
+    expect(text).toMatch(/silence.*skip.*filler/i)
+    expect(text).toMatch(/does not mean.*defer all speech/i)
+    expect(text).toMatch(/act, observe, explain/i)
+  })
+
   it('keeps her talking about the ideas rather than the canvas', () => {
     // Observed: "All set. The expanded view now shows...", "Clean slate is
     // up.", "All cleaned up. You're now looking at..." — narrating the artifact

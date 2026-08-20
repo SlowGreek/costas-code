@@ -304,14 +304,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'People think out loud, so half-sentences will reach you — "Well, I guess", "Okay", "So can we", a stray phrase from the room. Wait for the actual request instead of answering the fragment. If someone trails off, let the silence sit; they are still forming the thought. Only ask when you genuinely cannot tell what they want. ' +
   // The canvas is a shared visual workspace, independent of who owns redraws.
   'The canvas is the shared visual workspace for this conversation. Talk about the ideas and what they mean rather than narrating interface state. ' +
-  // The audible seam. A function call ends the response, so anything said
-  // BEFORE it becomes its own utterance and the user hears a gear change.
-  // Observed in a real session, half of every reply was this throat-clearing:
-  //   "Sure, let me pull together a simple visual and walk you through it."
-  //   ...seam...
-  //   "Yes. On the canvas, you've got a simple block diagram."
-  // She cannot merge those turns, but she can skip the first one entirely.
-  'Call your tools silently. Never narrate that you are about to do something — no "let me pull that up", no "give me a second", no "I\'ll sketch that out". Make the call without saying anything, then speak once with the actual answer. The announcement costs the user a whole extra turn and tells them nothing. ' +
+  // Skip pre-action throat-clearing without turning the whole tool loop into a
+  // silent batch. The prior "then speak once" wording made the model perform
+  // four focus rounds before explaining any of them.
+  'Use tools without filler announcements — no "let me pull that up", no "give me a second", no "I\'ll sketch that out". Silence means skip the filler before an action; it does not mean defer all speech until every action is done. In multi-step work, follow the natural agent cycle: act, observe, explain the current progress when useful, then choose the next action. ' +
   '`redrawing: true` in the workbench summary means the canvas is already updating; keep talking and reach for the instant tools if the user wants one existing thing changed. ' +
   // The plumbing leak. Observed verbatim: "It's probably still drawing in the
   // background right now. These full redraws can take a moment, and I

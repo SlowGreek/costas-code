@@ -18,7 +18,6 @@ import {
 import {
   $workbenchDraggingNode,
   $workbenchDragOverride,
-  $workbenchNarrationFocus,
   $workbenchSelection,
   clearWorkbenchSelection,
   setWorkbenchDragOverride,
@@ -55,11 +54,10 @@ export { NODE_HEIGHT, NODE_WIDTH }
 
 export function nodeRingState(
   nodeId: string,
-  state: { durable: null | string; narration: null | string; selected: null | string }
-): { durable: boolean; narration: boolean; selected: boolean } {
+  state: { durable: null | string; selected: null | string }
+): { durable: boolean; selected: boolean } {
   return {
     durable: state.durable === nodeId,
-    narration: state.narration === nodeId,
     selected: state.selected === nodeId
   }
 }
@@ -281,7 +279,6 @@ export default function MapRenderer({
   const maxDegree = useMemo(() => Math.max(1, ...Object.values(degrees)), [degrees])
   const dense = nodes.length > 24
   const selected = useStore($workbenchSelection)
-  const narrationFocused = useStore($workbenchNarrationFocus)
 
   // What the ASSISTANT is pointing at, written by the `focus` voice tool.
   // Distinct from `selected`, which is what the USER clicked. Passing the live
@@ -489,17 +486,12 @@ export default function MapRenderer({
              selection ring: a soft pulse reads as "I am talking about this"
              rather than "you clicked this". */
           .wb-focus-ring { animation: wb-focus-pulse 1.8s ease-in-out infinite; }
-          .wb-narration-ring { animation: wb-narration-pulse 900ms ease-in-out infinite; }
           @keyframes wb-focus-pulse {
             0%, 100% { opacity: 0.30; }
             50%      { opacity: 0.85; }
           }
-          @keyframes wb-narration-pulse {
-            0%, 100% { opacity: 0.45; }
-            50%      { opacity: 1; }
-          }
           @media (prefers-reduced-motion: reduce) {
-            .wb-focus-ring, .wb-narration-ring { animation: none; opacity: 0.7; }
+            .wb-focus-ring { animation: none; opacity: 0.7; }
           }
           .wb-edge { transition: d 420ms cubic-bezier(.22,1,.36,1), opacity 260ms ease; }
           .wb-enter { animation: wb-pop 340ms cubic-bezier(.22,1,.36,1) both; }
@@ -579,7 +571,6 @@ export default function MapRenderer({
 
         const rings = nodeRingState(node.id, {
           durable: focused,
-          narration: narrationFocused,
           selected
         })
 
@@ -652,24 +643,6 @@ export default function MapRenderer({
                 width={NODE_WIDTH + 18}
                 x="-9"
                 y="-9"
-              />
-            ) : null}
-
-            {/* Streamed narration focus is ephemeral and visually distinct
-                from both durable assistant focus and click selection. */}
-            {rings.narration ? (
-              <rect
-                className="wb-narration-ring"
-                data-testid={`workbench-narration-ring-${node.id}`}
-                fill="none"
-                height={NODE_HEIGHT + 14}
-                pointerEvents="none"
-                rx={NODE_RADIUS + 7}
-                stroke="var(--ui-yellow)"
-                strokeWidth="3"
-                width={NODE_WIDTH + 14}
-                x="-7"
-                y="-7"
               />
             ) : null}
 

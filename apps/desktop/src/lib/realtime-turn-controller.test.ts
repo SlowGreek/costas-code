@@ -53,6 +53,31 @@ describe('RealtimeTurnController', () => {
     expect(outcome).toEqual({ continued: true, settled: false })
   })
 
+  it('retains session instructions on every tool continuation response', async () => {
+    const send = vi.fn()
+
+    const controller = createRealtimeTurnController({
+      baseInstructions: () =>
+        'During a walkthrough, focus exactly one node and explain only that node.',
+      execute: async () => ({ focused: 'mic' }),
+      send
+    })
+
+    controller.beginTurn('Walk through the chart node by node.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-focus', 'focus'))
+    await controller.responseDone('response-1')
+
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'response.create',
+      response: {
+        instructions: expect.stringMatching(
+          /focus exactly one node[\s\S]*Continue the same semantic turn/i
+        )
+      }
+    })
+  })
+
   it('runs consecutive independent reads concurrently', async () => {
     const first = deferred<unknown>()
     const second = deferred<unknown>()

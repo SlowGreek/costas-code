@@ -53,15 +53,6 @@ export const $workbenchArtifact = atom<null | WorkbenchArtifact>(null)
 export const $workbenchError = atom<null | string>(null)
 export const $workbenchVoiceActive = atom(false)
 
-/** Ephemeral exact-match focus for the node currently named in streamed speech. */
-export const $workbenchNarrationFocus = atom<null | string>(null)
-
-export function setWorkbenchNarrationFocus(nodeId: null | string): void {
-  if ($workbenchNarrationFocus.get() !== nodeId) {
-    $workbenchNarrationFocus.set(nodeId)
-  }
-}
-
 /* --- shared referent state (Track A: selection + laid-out geometry) --- */
 
 /**
@@ -193,16 +184,6 @@ export function setWorkbenchArtifact(artifact: null | WorkbenchArtifact): void {
     }
   }
 
-  const narrationFocus = $workbenchNarrationFocus.get()
-
-  if (narrationFocus !== null) {
-    const nodes = (artifact?.payload as undefined | { nodes?: { id: string }[] })?.nodes
-
-    if (!nodes?.some(node => node.id === narrationFocus)) {
-      $workbenchNarrationFocus.set(null)
-    }
-  }
-
   if (artifact) {
     $workbenchError.set(null)
 
@@ -236,7 +217,6 @@ export function resetWorkbenchForTests(): void {
   $workbenchArtifact.set(null)
   $workbenchError.set(null)
   $workbenchVoiceActive.set(false)
-  $workbenchNarrationFocus.set(null)
   clearDrawingTimer()
   $workbenchDrawing.set(false)
   $workbenchSelection.set(null)

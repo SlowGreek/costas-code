@@ -12,22 +12,20 @@ import {
 } from './map-renderer'
 
 describe('nodeRingState', () => {
-  it('keeps narration focus independent of durable focus and click selection', () => {
+  it('keeps assistant focus independent of click selection', () => {
     expect(
       nodeRingState('gateway', {
         durable: 'gateway',
-        narration: 'gateway',
         selected: 'gateway'
       })
-    ).toEqual({ durable: true, narration: true, selected: true })
+    ).toEqual({ durable: true, selected: true })
 
     expect(
       nodeRingState('worker', {
         durable: 'gateway',
-        narration: 'worker',
         selected: 'gateway'
       })
-    ).toEqual({ durable: false, narration: true, selected: false })
+    ).toEqual({ durable: false, selected: false })
   })
 })
 

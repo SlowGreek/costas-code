@@ -36,6 +36,13 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/search.*visualize/i)
   })
 
+  it('paces walkthrough highlights with one focus action per explanation', () => {
+    expect(text).toMatch(/focus exactly one node/i)
+    expect(text).toMatch(/explain only that node/i)
+    expect(text).toMatch(/call focus for the next node/i)
+    expect(text).toMatch(/never schedule multiple focus calls together/i)
+  })
+
   it('explains that visualize returns before the drawing exists', () => {
     // Without this the model waits for a result that never comes, or announces
     // a picture that has not arrived. Both were observed.
@@ -83,14 +90,8 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/call visualize with the requested arrangement/i)
   })
 
-  it('uses streamed labels for walkthrough focus without spending a tool round per node', () => {
-    expect(text).toMatch(/without spending a tool round/i)
-    expect(text).toMatch(/exact node labels?/i)
-    expect(text).toMatch(/focus.*single/i)
-  })
-
-  it('asks her to say exact node labels during walkthroughs', () => {
-    expect(text).toMatch(/node labels? exactly|exact node labels?/i)
+  it('does not use generated transcript timing as the walkthrough clock', () => {
+    expect(text).not.toMatch(/canvas follows those labels|without spending a tool round per node/i)
   })
 
   it('reads as a description of the mode, not a compliance checklist', () => {

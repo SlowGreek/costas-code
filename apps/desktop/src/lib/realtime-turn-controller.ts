@@ -22,6 +22,7 @@ export interface RealtimeTurnOutcome {
 export type RealtimeToolLane = 'edit' | 'gesture' | 'read' | 'serial' | 'slow'
 
 interface RealtimeTurnControllerOptions {
+  baseInstructions?: () => string
   execute: (call: RealtimeTurnToolCall) => Promise<unknown>
   laneFor?: (call: RealtimeTurnToolCall) => RealtimeToolLane
   maxActions?: number
@@ -80,13 +81,15 @@ const continuationInstructions = (
   turn: ActiveTurn,
   maxActions: number,
   maxToolRounds: number,
-  finalResponse: boolean
+  finalResponse: boolean,
+  baseInstructions = ''
 ): string => {
   const state = snapshot(turn, maxActions, maxToolRounds)
   const completed = state.completedActions.length ? state.completedActions.join(', ') : 'none yet'
   const goal = state.goal || "Continue the user's current request."
 
   return [
+    baseInstructions.trim(),
     `Continue the same semantic turn (${state.id}).`,
     `User goal: ${goal}`,
     `Completed actions: ${completed}.`,
@@ -94,7 +97,7 @@ const continuationInstructions = (
       ? 'No tool rounds remain. Give the best current answer without calling tools.'
       : `Remaining tool rounds: ${state.remainingToolRounds}. You may call another tool when its result advances the goal.`,
     'Continue from the tool results without greeting, restarting, or recapping what you already said.'
-  ].join(' ')
+  ].filter(Boolean).join('\n\n')
 }
 
 export interface RealtimeTurnController {
@@ -414,7 +417,13 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       options.send({
         type: 'response.create',
         response: {
-          instructions: continuationInstructions(turn, maxActions, maxToolRounds, finalResponse),
+          instructions: continuationInstructions(
+            turn,
+            maxActions,
+            maxToolRounds,
+            finalResponse,
+            options.baseInstructions?.()
+          ),
           ...(finalResponse ? { tool_choice: 'none' } : {})
         }
       })

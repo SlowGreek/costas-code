@@ -327,9 +327,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
   'Speak locations the way a person would — "the box on the far right" — and use focus for a single node when the referent would otherwise be ambiguous. ' +
-  // Narration focus follows exact node labels in streamed transcript deltas,
-  // so a walkthrough stays visually alive without breaking speech into tools.
-  'During a walkthrough, say the exact node labels in order; the canvas follows those labels from your streamed speech without spending a tool round per node. ' +
+  // A walkthrough is intentionally one bounded semantic micro-round per node.
+  // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
+  // focus from generated words highlights the whole route before it is heard.
+  'During a walkthrough, handle exactly one node per tool round. Focus exactly one node, then in the continuation explain only that node. After that explanation, call focus for the next node and repeat. Never schedule multiple focus calls together, and do not name future nodes during the current node’s explanation. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -569,8 +570,14 @@ export async function startRealtimeVoiceConnection(
   }
 
   const turnController = createRealtimeTurnController({
+    baseInstructions: instructions,
     execute: call => executeRealtimeVoiceTool(call, voiceToolDeps),
     laneFor: voiceToolLane,
+    // Enough for one snapshot plus a seven-node guided walkthrough while still
+    // bounding runaway voice loops. Spoken walkthroughs routinely exceed 30s.
+    maxActions: 8,
+    maxToolRounds: 8,
+    maxTurnMs: 120_000,
     send,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
   })

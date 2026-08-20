@@ -146,21 +146,33 @@ describe('barge-in audio flushing', () => {
   it('tracks assistant speaking state from output buffer events', async () => {
     const onAssistantAudioStarted = vi.fn()
     const onAssistantAudioEnded = vi.fn()
-    const shared = deps({ onAssistantAudioEnded, onAssistantAudioStarted })
+    const assistantAudioStarted = vi.fn()
+    const assistantAudioEnded = vi.fn()
+
+    const shared = deps({
+      onAssistantAudioEnded,
+      onAssistantAudioStarted,
+      turnController: {
+        assistantAudioEnded,
+        assistantAudioStarted
+      } as never
+    })
 
     await routeRealtimeServerEvent({ type: 'output_audio_buffer.started' }, shared)
     expect(onAssistantAudioStarted).toHaveBeenCalled()
+    expect(assistantAudioStarted).toHaveBeenCalled()
 
     await routeRealtimeServerEvent({ type: 'output_audio_buffer.stopped' }, shared)
     expect(onAssistantAudioEnded).toHaveBeenCalled()
+    expect(assistantAudioEnded).toHaveBeenCalled()
   })
 
-  it('treats a completed response as the end of assistant audio', async () => {
+  it('does not treat response generation completion as audio playback completion', async () => {
     const onAssistantAudioEnded = vi.fn()
 
     await routeRealtimeServerEvent({ type: 'response.done' }, deps({ onAssistantAudioEnded }))
 
-    expect(onAssistantAudioEnded).toHaveBeenCalled()
+    expect(onAssistantAudioEnded).not.toHaveBeenCalled()
   })
 })
 
@@ -378,6 +390,30 @@ describe('routeRealtimeServerEvent', () => {
       role: 'assistant',
       text: 'Then ambient only writes meaning.'
     })
+  })
+
+  it('records the assistant transcript as the Stop checkpoint candidate', async () => {
+    const assistantTranscriptDone = vi.fn()
+
+    await routeRealtimeServerEvent(
+      {
+        type: 'response.output_audio_transcript.done',
+        item_id: 'assistant-1',
+        response_id: 'response-1',
+        transcript: 'Candidate answer.'
+      },
+      {
+        request: vi.fn(),
+        runtimeSessionId: 'runtime-session',
+        send: vi.fn(),
+        turnController: {
+          assistantTranscriptDone,
+          turnIdForResponse: vi.fn(() => 'voice-turn-1')
+        } as never
+      }
+    )
+
+    expect(assistantTranscriptDone).toHaveBeenCalledWith('response-1', 'Candidate answer.')
   })
 
   it('reports speaking and listening lifecycle from server events', async () => {
@@ -650,6 +686,56 @@ describe('startRealtimeVoiceConnection', () => {
     expect(requestOverride).not.toHaveBeenCalled()
     expect(harness.sentTypes()).not.toContain('conversation.item.create')
     expect(harness.sentTypes()).not.toContain('response.create')
+  })
+
+  it('uses the FX Stop checkpoint once after two silent tool rounds', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+
+    for (const index of [0, 1]) {
+      const responseId = `response-${index + 1}`
+
+      harness.emit({ type: 'response.created', response: { id: responseId } })
+      harness.emit({
+        type: 'response.function_call_arguments.done',
+        response_id: responseId,
+        call_id: `call-${index + 1}`,
+        name: 'session_snapshot',
+        arguments: '{}'
+      })
+      harness.emit({ type: 'response.done', response: { id: responseId, status: 'completed' } })
+      await vi.waitFor(() =>
+        expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(index + 1)
+      )
+    }
+
+    harness.emit({ type: 'response.created', response: { id: 'response-3' } })
+    harness.emit({
+      type: 'response.done',
+      response: { id: 'response-3', status: 'completed' }
+    })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(3)
+    )
+
+    const recovery = harness.sent
+      .map(payload => JSON.parse(payload))
+      .filter(event => event.type === 'response.create')
+      .at(-1)
+
+    expect(recovery.response.instructions).toMatch(/summarize.*current progress/i)
+
+    harness.emit({ type: 'response.created', response: { id: 'response-4' } })
+    harness.emit({
+      type: 'response.done',
+      response: { id: 'response-4', status: 'completed' }
+    })
+    await Promise.resolve()
+
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(3)
   })
 
   it('releases every resource when closing with a pending tool call', async () => {

@@ -53,6 +53,59 @@ describe('RealtimeTurnController', () => {
     expect(outcome).toEqual({ continued: true, settled: false })
   })
 
+  it('retains ordered tool arguments and results as execution memory', async () => {
+    const send = vi.fn()
+
+    const controller = createRealtimeTurnController({
+      execute: async ({ name }) =>
+        name === 'focus' ? { focused: 'mic' } : { artifacts: ['map.main'] },
+      send
+    })
+
+    controller.beginTurn('Inspect and focus the first node.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone({
+      arguments: '{"node_id":"mic"}',
+      callId: 'call-focus',
+      name: 'focus',
+      responseId: 'response-1'
+    })
+    controller.functionCallDone({
+      arguments: '{}',
+      callId: 'call-snapshot',
+      name: 'session_snapshot',
+      responseId: 'response-1'
+    })
+    await controller.responseDone('response-1')
+
+    expect(controller.activeTurn()?.executions).toEqual([
+      {
+        arguments: '{"node_id":"mic"}',
+        callId: 'call-focus',
+        name: 'focus',
+        output: { focused: 'mic' },
+        responseId: 'response-1',
+        status: 'success'
+      },
+      {
+        arguments: '{}',
+        callId: 'call-snapshot',
+        name: 'session_snapshot',
+        output: { artifacts: ['map.main'] },
+        responseId: 'response-1',
+        status: 'success'
+      }
+    ])
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+      response: {
+        instructions: expect.stringMatching(
+          /focus\(\{"node_id":"mic"\}\)[\s\S]*focused[\s\S]*mic/i
+        )
+      },
+      type: 'response.create'
+    })
+  })
+
   it('retains session instructions on every tool continuation response', async () => {
     const send = vi.fn()
 
@@ -161,6 +214,68 @@ describe('RealtimeTurnController', () => {
     expect(outputs).toEqual([{ superseded: true }, { focused: 'call-new' }])
   })
 
+  it('requires speech between focus rounds instead of silently skipping the graph', async () => {
+    const execute = vi.fn(async ({ arguments: raw }) => ({
+      focused: JSON.parse(raw).node_id
+    }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: () => 'gesture',
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Explain each node as you focus it.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone({
+      arguments: '{"node_id":"mic"}',
+      callId: 'call-mic',
+      name: 'focus',
+      responseId: 'response-1'
+    })
+    await controller.responseDone('response-1')
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone({
+      arguments: '{"node_id":"vad"}',
+      callId: 'call-vad-too-early',
+      name: 'focus',
+      responseId: 'response-2'
+    })
+    await controller.responseDone('response-2')
+
+    expect(execute).toHaveBeenCalledOnce()
+    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
+      callId: 'call-vad-too-early',
+      output: { narration_required: true },
+      status: 'skipped'
+    })
+
+    controller.responseCreated('response-3')
+    controller.assistantTranscriptDone('response-3', 'Mic audio is where speech enters.')
+    controller.assistantAudioStarted()
+    controller.functionCallDone({
+      arguments: '{"node_id":"vad"}',
+      callId: 'call-vad',
+      name: 'focus',
+      responseId: 'response-3'
+    })
+    const completing = controller.responseDone('response-3')
+
+    await Promise.resolve()
+    expect(execute).toHaveBeenCalledOnce()
+
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
+      callId: 'call-vad',
+      output: { focused: 'vad' },
+      status: 'success'
+    })
+  })
+
   it('executes a duplicate call id only once', async () => {
     const execute = vi.fn(async () => ({ ok: true }))
     const send = vi.fn()
@@ -205,6 +320,43 @@ describe('RealtimeTurnController', () => {
     })
     expect(controller.activeTurn()).toBeNull()
     expect(controller.turnIdForResponse('response-1')).toBe(turnId)
+  })
+
+  it('lets an FX-style Stop checkpoint continue one tool-free candidate once', async () => {
+    const send = vi.fn()
+
+    const stop = vi.fn(async input => {
+      expect(input.candidateText).toBe('I explained only the first step.')
+      expect(input.turn.goal).toBe('Explain every step.')
+      expect(input.canContinue).toBe(true)
+
+      return { context: 'The original request is incomplete. Continue.', kind: 'continue_once' } as const
+    })
+
+    const controller = createRealtimeTurnController({ execute: vi.fn(), send, stop })
+
+    const turnId = controller.beginTurn('Explain every step.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'I explained only the first step.')
+
+    await expect(controller.responseDone('response-1')).resolves.toEqual({
+      continued: true,
+      settled: false
+    })
+    expect(controller.activeTurn()?.id).toBe(turnId)
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+      response: { instructions: expect.stringMatching(/original request is incomplete/i) },
+      type: 'response.create'
+    })
+
+    controller.responseCreated('response-2')
+    controller.assistantTranscriptDone('response-2', 'Now every step is covered.')
+    await expect(controller.responseDone('response-2')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
+    expect(stop).toHaveBeenCalledOnce()
+    expect(controller.activeTurn()).toBeNull()
   })
 
   it('forces a final no-tool response when the round budget is exhausted', async () => {

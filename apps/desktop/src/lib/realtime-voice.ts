@@ -1,9 +1,25 @@
 import {
   createRealtimeTurnController,
+  type RealtimeStopInput,
+  type RealtimeStopOutcome,
   type RealtimeToolLane,
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
+
+export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
+  const completedTools = input.turn.executions.filter(execution => execution.status === 'success')
+
+  if (!input.canContinue || input.candidateText.trim() || completedTools.length < 2) {
+    return { kind: 'allow' }
+  }
+
+  return {
+    context:
+      'Summarize your current progress for the user. Explain what the completed tools established before deciding whether another action is needed.',
+    kind: 'continue_once'
+  }
+}
 
 export interface RealtimeTranscript {
   connectionId?: string
@@ -575,6 +591,7 @@ export async function startRealtimeVoiceConnection(
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,
+    stop: fxStyleStopCheckpoint,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
   })
 
@@ -1011,8 +1028,6 @@ export async function routeRealtimeServerEvent(
 
   if (type === 'response.done') {
     deps.onStatus?.('listening')
-    // The response finished on its own, so nothing is left to flush.
-    deps.onAssistantAudioEnded?.()
 
     const outcome = deps.turnController
       ? await deps.turnController.responseDone(
@@ -1053,12 +1068,14 @@ export async function routeRealtimeServerEvent(
   }
 
   if (type === 'output_audio_buffer.started') {
+    deps.turnController?.assistantAudioStarted()
     deps.onAssistantAudioStarted?.()
 
     return
   }
 
   if (type === 'output_audio_buffer.stopped' || type === 'output_audio_buffer.cleared') {
+    deps.turnController?.assistantAudioEnded()
     deps.onAssistantAudioEnded?.()
 
     return
@@ -1105,7 +1122,10 @@ export async function routeRealtimeServerEvent(
     const text = asTrimmedString(event.transcript)
 
     if (text) {
-      const semanticTurnId = deps.turnController?.turnIdForResponse(realtimeResponseId(event))
+      const responseId = realtimeResponseId(event)
+
+      deps.turnController?.assistantTranscriptDone(responseId, text)
+      const semanticTurnId = deps.turnController?.turnIdForResponse(responseId)
 
       deps.onTranscript?.({
         id: asTrimmedString(event.item_id),

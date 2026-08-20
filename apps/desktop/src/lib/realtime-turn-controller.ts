@@ -5,8 +5,14 @@ export interface RealtimeTurnToolCall {
   responseId: string
 }
 
+export interface RealtimeToolExecution extends RealtimeTurnToolCall {
+  output: unknown
+  status: 'failure' | 'skipped' | 'success'
+}
+
 export interface RealtimeTurnSnapshot {
   completedActions: string[]
+  executions: RealtimeToolExecution[]
   goal: string
   id: string
   remainingActions: number
@@ -18,6 +24,17 @@ export interface RealtimeTurnOutcome {
   continued: boolean
   settled: boolean
 }
+
+export interface RealtimeStopInput {
+  candidateText: string
+  canContinue: boolean
+  responseId: string
+  turn: RealtimeTurnSnapshot
+}
+
+export type RealtimeStopOutcome =
+  | { kind: 'allow' }
+  | { context: string; kind: 'continue_once' }
 
 export type RealtimeToolLane = 'edit' | 'gesture' | 'read' | 'serial' | 'slow'
 
@@ -31,6 +48,7 @@ interface RealtimeTurnControllerOptions {
   now?: () => number
   onSettled?: (turn: RealtimeTurnSnapshot) => void
   send: (event: Record<string, unknown>) => void
+  stop?: (input: RealtimeStopInput) => Promise<RealtimeStopOutcome> | RealtimeStopOutcome
   turnIdPrefix?: string
 }
 
@@ -39,6 +57,7 @@ interface TrackedCall extends RealtimeTurnToolCall {
 }
 
 interface TrackedResponse {
+  assistantText: string
   calls: TrackedCall[]
   done: boolean
   generation: number
@@ -51,11 +70,14 @@ interface ActiveTurn {
   callIds: Set<string>
   cancelled: boolean
   completedActions: string[]
+  executions: RealtimeToolExecution[]
   generation: number
+  gestureNarrationPending: boolean
   goal: string
   id: string
   responses: Map<string, TrackedResponse>
   startedAt: number
+  stopCheckpointUsed: boolean
   toolRounds: number
 }
 
@@ -70,6 +92,7 @@ const outputEvent = (callId: string, output: unknown): Record<string, unknown> =
 
 const snapshot = (turn: ActiveTurn, maxActions: number, maxToolRounds: number): RealtimeTurnSnapshot => ({
   completedActions: [...turn.completedActions],
+  executions: turn.executions.map(execution => ({ ...execution })),
   goal: turn.goal,
   id: turn.id,
   remainingActions: Math.max(0, maxActions - turn.actions),
@@ -77,22 +100,59 @@ const snapshot = (turn: ActiveTurn, maxActions: number, maxToolRounds: number): 
   toolRounds: turn.toolRounds
 })
 
+const boundedJson = (value: unknown, maxChars: number): string => {
+  let text: string
+
+  try {
+    text = JSON.stringify(value) ?? String(value)
+  } catch {
+    text = String(value)
+  }
+
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`
+}
+
+const executionMemory = (turn: ActiveTurn): string => {
+  if (!turn.executions.length) {
+    return 'none yet'
+  }
+
+  return turn.executions
+    .slice(-8)
+    .map(execution => {
+      const args =
+        execution.arguments.length <= 200
+          ? execution.arguments
+          : `${execution.arguments.slice(0, 199)}…`
+
+      return (
+        `${execution.name}(${args}) -> ` +
+        `[${execution.status}] ${boundedJson(execution.output, 300)}`
+      )
+    })
+    .join('; ')
+}
+
 const continuationInstructions = (
   turn: ActiveTurn,
   maxActions: number,
   maxToolRounds: number,
   finalResponse: boolean,
-  baseInstructions = ''
+  baseInstructions = '',
+  stopContext = ''
 ): string => {
   const state = snapshot(turn, maxActions, maxToolRounds)
   const completed = state.completedActions.length ? state.completedActions.join(', ') : 'none yet'
+  const executions = executionMemory(turn)
   const goal = state.goal || "Continue the user's current request."
 
   return [
     baseInstructions.trim(),
     `Continue the same semantic turn (${state.id}).`,
     `User goal: ${goal}`,
+    stopContext.trim() ? `Stop checkpoint context:\n${stopContext.trim()}` : '',
     `Completed actions: ${completed}.`,
+    `Execution memory: ${executions}.`,
     finalResponse
       ? 'No tool rounds remain. Give the best current answer without calling tools.'
       : `Remaining tool rounds: ${state.remainingToolRounds}. You may call another tool when its result advances the goal.`,
@@ -102,6 +162,9 @@ const continuationInstructions = (
 
 export interface RealtimeTurnController {
   activeTurn: () => null | RealtimeTurnSnapshot
+  assistantAudioEnded: () => void
+  assistantAudioStarted: () => void
+  assistantTranscriptDone: (responseId: string, text: string) => void
   beginTurn: (goal?: string) => string
   close: () => void
   functionCallDone: (call: RealtimeTurnToolCall) => void
@@ -126,6 +189,30 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
   let blockedUntilBegin = false
   let current: ActiveTurn | null = null
   const responseTurnIds = new Map<string, string>()
+  let audioPlaying = false
+  let audioEndedPromise = Promise.resolve()
+  let resolveAudioEnded: null | (() => void) = null
+
+  const finishAudio = () => {
+    if (!audioPlaying) {
+      return
+    }
+
+    audioPlaying = false
+    resolveAudioEnded?.()
+    resolveAudioEnded = null
+  }
+
+  const startAudio = () => {
+    if (audioPlaying) {
+      return
+    }
+
+    audioPlaying = true
+    audioEndedPromise = new Promise<void>(resolve => {
+      resolveAudioEnded = resolve
+    })
+  }
 
   const currentSnapshot = (): null | RealtimeTurnSnapshot =>
     current ? snapshot(current, maxActions, maxToolRounds) : null
@@ -140,11 +227,14 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       callIds: new Set(),
       cancelled: false,
       completedActions: [],
+      executions: [],
       generation,
+      gestureNarrationPending: false,
       goal: goal.trim(),
       id: `${turnIdPrefix}-${turnSequence}`,
       responses: new Map(),
       startedAt: now(),
+      stopCheckpointUsed: false,
       toolRounds: 0
     }
     lastTurnId = current.id
@@ -162,7 +252,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       return existing
     }
 
-    const response = { calls: [], done: false, generation: turn.generation, id }
+    const response = { assistantText: '', calls: [], done: false, generation: turn.generation, id }
     turn.responses.set(id, response)
     turn.activeResponseId = id
     responseTurnIds.set(id, turn.id)
@@ -179,6 +269,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
   }
 
   const interrupt = () => {
+    finishAudio()
     const turn = current
 
     if (!turn) {
@@ -206,6 +297,19 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
   return {
     activeTurn: currentSnapshot,
+    assistantAudioEnded: finishAudio,
+    assistantAudioStarted: startAudio,
+    assistantTranscriptDone: (responseId, text) => {
+      const turn = current
+      const id = responseId.trim()
+      const response = turn && id ? turn.responses.get(id) : undefined
+
+      if (!response || response.done || responseTurnIds.get(id) !== turn?.id) {
+        return
+      }
+
+      response.assistantText = text.trim()
+    },
     beginTurn: start,
     close: () => {
       if (closed) {
@@ -277,7 +381,56 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         return { continued: false, settled: true }
       }
 
+      if (response.assistantText.trim()) {
+        turn.gestureNarrationPending = false
+      }
+
       if (!response.calls.length) {
+        const canContinue =
+          turn.toolRounds < maxToolRounds &&
+          turn.actions < maxActions &&
+          now() - turn.startedAt < maxTurnMs
+
+        if (!turn.stopCheckpointUsed && options.stop) {
+          turn.stopCheckpointUsed = true
+          let stopOutcome: RealtimeStopOutcome = { kind: 'allow' }
+
+          try {
+            stopOutcome = await options.stop({
+              candidateText: response.assistantText,
+              canContinue,
+              responseId: response.id,
+              turn: snapshot(turn, maxActions, maxToolRounds)
+            })
+          } catch {
+            stopOutcome = { kind: 'allow' }
+          }
+
+          if (closed || current !== turn || turn.cancelled || response.generation !== turn.generation) {
+            return { continued: false, settled: false }
+          }
+
+          const context = stopOutcome.kind === 'continue_once' ? stopOutcome.context.trim() : ''
+
+          if (stopOutcome.kind === 'continue_once' && canContinue && context && context.length <= 64_000) {
+            options.send({
+              type: 'response.create',
+              response: {
+                instructions: continuationInstructions(
+                  turn,
+                  maxActions,
+                  maxToolRounds,
+                  false,
+                  options.baseInstructions?.(),
+                  context
+                )
+              }
+            })
+
+            return { continued: true, settled: false }
+          }
+        }
+
         current = null
         options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
 
@@ -287,7 +440,11 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       turn.toolRounds += 1
       const generationAtStart = turn.generation
 
-      const results = new Map<string, { executed: boolean; output: unknown }>()
+      const results = new Map<
+        string,
+        { executed: boolean; output: unknown; status: RealtimeToolExecution['status'] }
+      >()
+
       const gestureLastIndex = new Map<string, number>()
 
       response.calls.forEach((call, index) => {
@@ -303,8 +460,33 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
         const lane = options.laneFor?.(call) ?? 'serial'
 
+        if (lane === 'gesture' && turn.gestureNarrationPending) {
+          results.set(call.callId, {
+            executed: false,
+            output: {
+              narration_required: true,
+              message: 'Explain the currently focused item before moving focus again.'
+            },
+            status: 'skipped'
+          })
+
+          return
+        }
+
+        if (lane === 'gesture' && response.assistantText.trim() && audioPlaying) {
+          await audioEndedPromise
+
+          if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {
+            return
+          }
+        }
+
         if (lane === 'gesture' && gestureLastIndex.get(call.name) !== index) {
-          results.set(call.callId, { executed: false, output: { superseded: true } })
+          results.set(call.callId, {
+            executed: false,
+            output: { superseded: true },
+            status: 'skipped'
+          })
 
           return
         }
@@ -312,7 +494,8 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         if (turn.actions >= maxActions) {
           results.set(call.callId, {
             executed: false,
-            output: { error: 'Voice action budget exhausted' }
+            output: { error: 'Voice action budget exhausted' },
+            status: 'skipped'
           })
 
           return
@@ -323,7 +506,8 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         if (remainingMs <= 0) {
           results.set(call.callId, {
             executed: false,
-            output: { error: 'Voice tool timed out' }
+            output: { error: 'Voice tool timed out' },
+            status: 'failure'
           })
 
           return
@@ -331,6 +515,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
         turn.actions += 1
         let output: unknown
+        let status: RealtimeToolExecution['status'] = 'success'
         let timeoutId: ReturnType<typeof setTimeout> | undefined
 
         try {
@@ -344,12 +529,18 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
               })
             ])
 
-            output = result === timeout ? { error: 'Voice tool timed out' } : result
+            if (result === timeout) {
+              output = { error: 'Voice tool timed out' }
+              status = 'failure'
+            } else {
+              output = result
+            }
           } else {
             output = await options.execute(call)
           }
         } catch (error) {
           output = { error: error instanceof Error ? error.message : String(error) }
+          status = 'failure'
         } finally {
           if (timeoutId !== undefined) {
             clearTimeout(timeoutId)
@@ -360,7 +551,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
-        results.set(call.callId, { executed: true, output })
+        results.set(call.callId, { executed: true, output, status })
       }
 
       let callIndex = 0
@@ -399,9 +590,21 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         }
 
         call.outputSent = true
+        turn.executions.push({
+          arguments: call.arguments,
+          callId: call.callId,
+          name: call.name,
+          output: result.output,
+          responseId: call.responseId,
+          status: result.status
+        })
 
         if (result.executed) {
           turn.completedActions.push(call.name)
+
+          if ((options.laneFor?.(call) ?? 'serial') === 'gesture' && result.status === 'success') {
+            turn.gestureNarrationPending = true
+          }
         }
 
         options.send(outputEvent(call.callId, result.output))

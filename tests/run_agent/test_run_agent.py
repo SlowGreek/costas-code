@@ -2281,7 +2281,7 @@ class TestConcurrentToolExecution:
         assert outcome.result == "ok"
         assert dispatched == [{"command": "true"}]
         assert duplicate_errors == [
-            "Hermes tool execution callback invoked more than once"
+            "Catalyst tool execution callback invoked more than once"
         ]
         assert outcome.blocked is False
 
@@ -2343,7 +2343,7 @@ class TestConcurrentToolExecution:
 
         assert outcome.result == "ok"
         assert dispatched == [{"command": "true"}]
-        assert errors == ["Hermes tool execution callback invoked more than once"]
+        assert errors == ["Catalyst tool execution callback invoked more than once"]
         assert outcome.blocked is False
 
 

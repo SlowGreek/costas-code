@@ -77,8 +77,8 @@ def test_check_for_updates_expired_cache(tmp_path, monkeypatch):
         result = check_for_updates()
 
     assert result == 5
-    # origin probe + is-shallow probe + git fetch + git rev-list
-    assert mock_run.call_count == 4
+    # origin probe + is-shallow probe + git fetch + git rev-list + local-ahead guard
+    assert mock_run.call_count == 5
 
 
 def test_check_for_updates_official_ssh_origin_uses_https_probe(tmp_path):

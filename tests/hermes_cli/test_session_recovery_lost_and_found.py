@@ -564,7 +564,7 @@ def test_fingerprint_error_enumerates_parent_cli_session(
     with pytest.raises(SessionRecoverySafetyError) as excinfo:
         session_recovery.inspect_session_database(source, work_dir=tmp_path)
     message = str(excinfo.value)
-    assert "Stop every Hermes process" in message
+    assert "Stop every Catalyst process" in message
     # The gap from #72291: the parent CLI session itself must be enumerated.
     assert "CLI session" in message
     assert "fresh shell" in message

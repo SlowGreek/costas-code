@@ -42,6 +42,11 @@
     "eslint-plugin-unused-imports": "4.4.1",
     "globals": "17.7.0"
   },
+  "optionalDependencies": {
+    "@esbuild/linux-x64": "0.28.1",
+    "@rolldown/binding-linux-x64-gnu": "1.2.1",
+    "lightningcss-linux-x64-gnu": "1.32.0"
+  },
   "overrides": {
     "lodash": "4.18.1",
     "yauzl": "^3.3.1",

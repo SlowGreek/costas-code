@@ -65,6 +65,7 @@ def observe_transcript(
     text: str,
     cfg: Any,
     on_decision: Callable[[WatchDecision], None],
+    on_busy: Optional[Callable[[bool], None]] = None,
     canvas: Optional[Dict[str, Any]] = None,
 ) -> Optional[TranscriptWatcher]:
     """Feed one transcript fragment in and arm the debounce timer.
@@ -81,7 +82,7 @@ def observe_transcript(
     if canvas is not None:
         watcher.set_canvas(artifact=canvas)
     watcher.observe(text, now=time.monotonic(), role=role)
-    _arm(session_key, watcher, on_decision)
+    _arm(session_key, watcher, on_decision, on_busy)
     return watcher
 
 
@@ -89,6 +90,7 @@ def _arm(
     session_key: str,
     watcher: TranscriptWatcher,
     on_decision: Callable[[WatchDecision], None],
+    on_busy: Optional[Callable[[bool], None]] = None,
 ) -> None:
     """(Re)schedule the settle check. A later fragment always wins.
 
@@ -105,7 +107,7 @@ def _arm(
     if existing is not None:
         existing.cancel()
 
-    timer = threading.Timer(delay, _fire, args=(session_key, watcher, on_decision))
+    timer = threading.Timer(delay, _fire, args=(session_key, watcher, on_decision, on_busy))
     timer.daemon = True
     with _lock:
         _timers[session_key] = timer
@@ -116,30 +118,51 @@ def _fire(
     session_key: str,
     watcher: TranscriptWatcher,
     on_decision: Callable[[WatchDecision], None],
+    on_busy: Optional[Callable[[bool], None]] = None,
 ) -> None:
     with _lock:
         _timers.pop(session_key, None)
+
+    # In direct mode watcher.poll() IS the visual generation. Surface busy
+    # before entering the model call and keep it true through persistence. The
+    # two-stage preflight is only a decision and its callback owns draw state.
+    due = watcher.due_at()
+    direct_busy = (
+        watcher.config.active
+        and watcher.config.pipeline == "direct"
+        and watcher.has_pending
+        and not watcher.in_flight
+        and due is not None
+        and time.monotonic() >= due
+    )
+    if direct_busy and on_busy is not None:
+        on_busy(True)
+
     try:
-        decision = watcher.poll(now=time.monotonic())
-    except Exception as exc:
-        logger.debug("workbench watcher poll failed: %s", exc)
-        return
-    if decision is None:
-        # A skip for IN_FLIGHT leaves the utterance pending on purpose: retry
-        # once the current redraw finishes rather than dropping what was said.
-        if watcher.last_skip == "in_flight" and watcher.has_pending:
-            _retry_later(session_key, watcher, on_decision)
-        return
-    if not decision.should_draw:
-        return
-    try:
-        on_decision(decision)
-    except Exception as exc:
-        logger.debug("workbench watcher action failed: %s", exc)
+        try:
+            decision = watcher.poll(now=time.monotonic())
+        except Exception as exc:
+            logger.debug("workbench watcher poll failed: %s", exc)
+            return
+        if decision is None:
+            # A skip for IN_FLIGHT leaves the utterance pending on purpose: retry
+            # once the current redraw finishes rather than dropping what was said.
+            if watcher.last_skip == "in_flight" and watcher.has_pending:
+                _retry_later(session_key, watcher, on_decision, on_busy)
+            return
+        if not decision.should_draw:
+            return
+        try:
+            on_decision(decision)
+        except Exception as exc:
+            logger.debug("workbench watcher action failed: %s", exc)
+        finally:
+            # Direct generation holds this guard from before its model call through
+            # persistence. Also makes callback failures unable to wedge the session.
+            watcher.set_in_flight(False)
     finally:
-        # Direct generation holds this guard from before its model call through
-        # persistence. Also makes callback failures unable to wedge the session.
-        watcher.set_in_flight(False)
+        if direct_busy and on_busy is not None:
+            on_busy(False)
 
 
 _RETRY_SECONDS = 2.0
@@ -149,8 +172,11 @@ def _retry_later(
     session_key: str,
     watcher: TranscriptWatcher,
     on_decision: Callable[[WatchDecision], None],
+    on_busy: Optional[Callable[[bool], None]] = None,
 ) -> None:
-    timer = threading.Timer(_RETRY_SECONDS, _fire, args=(session_key, watcher, on_decision))
+    timer = threading.Timer(
+        _RETRY_SECONDS, _fire, args=(session_key, watcher, on_decision, on_busy)
+    )
     timer.daemon = True
     with _lock:
         old = _timers.pop(session_key, None)

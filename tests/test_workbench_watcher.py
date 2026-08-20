@@ -406,6 +406,43 @@ def test_direct_ops_update_applies_to_the_current_graph():
     assert decision.expected_rev == 3
 
 
+def test_direct_expected_revision_is_the_snapshot_used_for_generation():
+    """A mid-generation edit must make the worker stale, not bless its output.
+
+    The watcher state is mutable from transcript callbacks. Reading current_rev
+    after the model returns lets a canvas refresh move it from rev 3 to rev 4,
+    then applies a visual generated from rev 3 with expected_rev=4 — silently
+    overwriting the edit the revision guard was meant to protect.
+    """
+    watcher = _watcher(_Model(""), debounce=1.0, pipeline="direct")
+    watcher.set_canvas(
+        artifact={
+            "artifact_id": "map.main",
+            "kind": "map",
+            "semantic_rev": 3,
+            "payload": {"nodes": [{"id": "a", "label": "A"}], "edges": []},
+        }
+    )
+
+    def model(**_kwargs):
+        # Simulate a surgical edit/current-canvas refresh while MAI is running.
+        watcher.set_canvas(
+            artifact={
+                "artifact_id": "map.main",
+                "kind": "map",
+                "semantic_rev": 4,
+                "payload": {"nodes": [{"id": "a", "label": "Renamed"}], "edges": []},
+            }
+        )
+        return _direct_reply({"ops": [{"op": "add_node", "id": "b", "label": "B"}]})
+
+    watcher.run_oneshot_fn = model
+    watcher.observe("add B", now=0.0)
+    decision = watcher.poll(now=2.0)
+
+    assert decision.expected_rev == 3
+
+
 def test_direct_sketch_uses_the_existing_sketch_validator():
     model = _Model(_direct_reply({"kind": "sketch", "html": "<canvas></canvas>"}))
     w = _watcher(model, debounce=1.0, pipeline="direct")

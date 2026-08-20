@@ -161,9 +161,8 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // treated as an instruction. Each reply to a fragment costs a turn and
   // derails the thread.
   'People think out loud, so half-sentences will reach you — "Well, I guess", "Okay", "So can we", a stray phrase from the room. Wait for the actual request instead of answering the fragment. If someone trails off, let the silence sit; they are still forming the thought. Only ask when you genuinely cannot tell what they want. ' +
-  // The canvas is the point of the mode, stated as intent rather than as a
-  // failure condition.
-  'Drawing is how you think here, so draw first and talk about it after. As soon as the conversation has a shape — parts, a sequence, a comparison, a system — call visualize and keep going; the picture appears while you speak. ' +
+  // The canvas is a shared visual workspace, independent of who owns redraws.
+  'The canvas is the shared visual workspace for this conversation. Talk about the ideas and what they mean rather than narrating interface state. ' +
   // The audible seam. A function call ends the response, so anything said
   // BEFORE it becomes its own utterance and the user hears a gear change.
   // Observed in a real session, half of every reply was this throat-clearing:
@@ -172,15 +171,14 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   //   "Yes. On the canvas, you've got a simple block diagram."
   // She cannot merge those turns, but she can skip the first one entirely.
   'Call your tools silently. Never narrate that you are about to do something — no "let me pull that up", no "give me a second", no "I\'ll sketch that out". Make the call without saying anything, then speak once with the actual answer. The announcement costs the user a whole extra turn and tells them nothing. ' +
-  'visualize answers straight away with `status: drawing`, which means the redraw is under way. Carry on talking through it. The user is watching it arrive, so talk about the idea rather than the picture: explain what it means, not what is on screen or that it is ready. ' +
-  '`redrawing: true` in the workbench summary means one is already in flight; keep talking and reach for the instant tools if the user wants something changed. ' +
+  '`redrawing: true` in the workbench summary means the canvas is already updating; keep talking and reach for the instant tools if the user wants one existing thing changed. ' +
   // The plumbing leak. Observed verbatim: "It's probably still drawing in the
   // background right now. These full redraws can take a moment, and I
   // shouldn't start another one while it's in progress." That is the
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds while visualize takes seconds, so reach for focus, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. Save visualize for a genuine change of shape. ' +
+  'The instant tools land in milliseconds, so use focus, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
   // the model has the selection in context and still asks "which one?".
@@ -195,10 +193,17 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'During a walkthrough, say the node labels exactly as written in the workbench summary; the canvas follows those exact names while you keep speaking. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
-  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — that is a real change you can make: call visualize and say what arrangement they want. It is not a redraw of the same picture.'
+  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — say the desired arrangement clearly. That is a real canvas change, not a redraw of identical content.'
 
-/** Test seam: assert behaviour contracts without exporting a mutable prompt. */
-export const REALTIME_INSTRUCTIONS_FOR_TESTS = DEFAULT_REALTIME_INSTRUCTIONS
+const VOICE_OWNED_REDRAW_INSTRUCTIONS =
+  'You own full redraws in this session. Drawing is how you think here, so draw first: as soon as the conversation has a useful shape, call visualize silently and keep speaking. `status: drawing` means the update started, not that it finished; describe the idea while it appears and let the user confirm what they see.'
+
+const WATCHER_OWNED_REDRAW_INSTRUCTIONS =
+  'A background canvas worker owns every full redraw in this session. It listens to the conversation and updates the canvas independently while you keep speaking. The visualize tool is intentionally absent: do not call it, ask for it, or announce redraws. You still own the instant tools—focus, rename, connect, disconnect, remove, and go_back—and canvas changes arrive as appended semantic events in your context.'
+
+/** Test seam: assert behavior contracts for the voice-owned fallback mode. */
+export const REALTIME_INSTRUCTIONS_FOR_TESTS =
+  `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}`
 
 /**
  * Server-side turn taking. Sent on every `session.update` so a later context
@@ -260,7 +265,7 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
         type: 'function',
         name: 'focus',
         description:
-          'Instantly ring ONE existing node on the canvas so the user can see which box you mean. Use it whenever you talk about a specific part ("the planner here", "this one on the left") — the user sees the highlight while you speak. Changes nothing about the ideas themselves. Never call visualize for this.',
+          'Instantly ring ONE existing node on the canvas so the user can see which box you mean. Use it whenever you talk about a specific part ("the planner here", "this one on the left") — the user sees the highlight while you speak. Changes nothing about the ideas themselves and needs no full redraw.',
         parameters: {
           type: 'object',
           properties: {
@@ -300,7 +305,7 @@ const sessionUpdateEvent = (instructions: string, watcherOwnsRedraws = false) =>
         type: 'function',
         name: 'connect',
         description:
-          'Instantly add ONE link between two nodes that already exist. Use it for "those two are related", "the planner feeds the executor". If either end does not exist yet, that is new structure — use visualize instead.',
+          'Instantly add ONE link between two nodes that already exist. Use it for "those two are related", "the planner feeds the executor". If either end does not exist yet, describe the new structure plainly so the full-redraw owner can add it.',
         parameters: {
           type: 'object',
           properties: {
@@ -366,9 +371,11 @@ export async function startRealtimeVoiceConnection(
 
   const configuredInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
 
-  const baseInstructions = watcherOwnsRedraws
-    ? `${configuredInstructions}\n\nA background canvas worker owns every full redraw in this session. It listens to the conversation and updates the canvas independently while you keep speaking. The visualize tool is intentionally absent: do not call it, ask for it, or announce redraws. You still own the instant tools—focus, rename, connect, disconnect, remove, and go_back—and canvas changes arrive as appended semantic events in your context.`
-    : configuredInstructions
+  const ownershipInstructions = watcherOwnsRedraws
+    ? WATCHER_OWNED_REDRAW_INSTRUCTIONS
+    : VOICE_OWNED_REDRAW_INSTRUCTIONS
+
+  const baseInstructions = `${configuredInstructions}\n\n${ownershipInstructions}`
 
   const stream = await mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }

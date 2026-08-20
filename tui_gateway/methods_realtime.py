@@ -199,12 +199,20 @@ def _watch_transcript(
                 emit=emit,
             )
 
+        def _busy(active: bool) -> None:
+            emit(
+                "artifact.visualizing",
+                sid,
+                {"artifact_id": "map.main", "active": active},
+            )
+
         observe_transcript(
             stored_session_id,
             role=role,
             text=text,
             cfg=cfg,
             on_decision=_draw,
+            on_busy=_busy,
             canvas=canvas,
         )
     except Exception:
@@ -215,15 +223,26 @@ def _visualize_from_watcher(
     session: dict, stored_session_id: str, sid: str, decision, *, open_db, emit
 ):
     """Persist a direct result, or run the preserved two-stage diagrammer."""
+    # A timer can be cancelled before it starts, but a model request already
+    # executing cannot. Session pop stamps this lease before teardown; discard
+    # the completed result instead of mutating a chat the user has left.
+    if session.get("_closing"):
+        return
+
     from workbench_watch_runtime import set_in_flight
 
     with open_db(session) as db:
-        if db is None:
+        if db is None or session.get("_closing"):
             return
         set_in_flight(stored_session_id, True)
-        emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
+        direct = decision.visual is not None
+        if not direct:
+            # In direct mode the runtime already emitted busy before entering
+            # the one model call. Two-stage mode reaches the real diagrammer
+            # only here, so its visible draw state starts here.
+            emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": True})
         try:
-            if decision.visual is not None:
+            if direct:
                 from workbench_visualizer import persist_visual_result
 
                 artifact = persist_visual_result(
@@ -241,7 +260,8 @@ def _visualize_from_watcher(
             pass
         finally:
             set_in_flight(stored_session_id, False)
-            emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
+            if not direct:
+                emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
 
 
 def register(server) -> None:

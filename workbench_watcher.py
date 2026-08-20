@@ -16,6 +16,7 @@ model and without sleeping in tests.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from dataclasses import dataclass, field
@@ -256,12 +257,26 @@ class TranscriptWatcher:
         del self._recent[:-6]
 
         direct = self.config.pipeline == "direct"
+        # One immutable base for the entire direct transaction. Transcript and
+        # artifact callbacks can refresh watcher state while the model is
+        # running; using those later values would bless a result generated from
+        # a different canvas and defeat the expected-revision guard.
+        base_rev = self.current_rev
+        base_kind = self.current_kind
+        base_summary = self.current_summary
+        base_payload = copy.deepcopy(self.current_payload)
         if direct:
             # The direct call is the redraw, not merely a cheap preflight. Hold
             # the same guard across generation so a second settled utterance
             # cannot start another full artifact response concurrently.
             self._in_flight = True
-        verdict = self._ask(utterance, recent)
+        verdict = self._ask(
+            utterance,
+            recent,
+            current_kind=base_kind,
+            current_summary=base_summary,
+            current_payload=base_payload,
+        )
         if verdict is None:
             if direct:
                 self._in_flight = False
@@ -275,7 +290,7 @@ class TranscriptWatcher:
             utterance=utterance,
             suppressed=draw and not self.config.active,
             visual=visual,
-            expected_rev=self.current_rev,
+            expected_rev=base_rev,
         )
         if direct and not decision.should_draw:
             self._in_flight = False
@@ -284,7 +299,15 @@ class TranscriptWatcher:
 
     # -- model call -----------------------------------------------------
 
-    def _ask(self, utterance: str, recent: List[str]) -> tuple[bool, str, str, Any] | None:
+    def _ask(
+        self,
+        utterance: str,
+        recent: List[str],
+        *,
+        current_kind: str,
+        current_summary: str,
+        current_payload: Dict[str, Any],
+    ) -> tuple[bool, str, str, Any] | None:
         run = self.run_oneshot_fn
         if run is None:
             from agent.oneshot import run_oneshot
@@ -294,8 +317,8 @@ class TranscriptWatcher:
         request = {
             "utterance": utterance,
             "recent": recent,
-            "current_kind": self.current_kind,
-            "current_summary": self.current_summary,
+            "current_kind": current_kind,
+            "current_summary": current_summary,
         }
         direct = self.config.pipeline == "direct"
         instructions = WATCHER_INSTRUCTIONS
@@ -304,7 +327,7 @@ class TranscriptWatcher:
         if direct:
             from workbench_visualizer import _VISUALIZER_INSTRUCTIONS
 
-            request["current_payload"] = self.current_payload
+            request["current_payload"] = current_payload
             visualizer_instructions = _VISUALIZER_INSTRUCTIONS.replace(
                 "current_graph", "current_payload"
             )
@@ -333,7 +356,7 @@ class TranscriptWatcher:
             logger.debug("workbench watcher call failed: %s", exc)
             return None
         if direct:
-            return parse_direct_reply(generated, self.current_payload)
+            return parse_direct_reply(generated, current_payload)
         parsed = parse_watch_reply(generated)
         if parsed is None:
             return None

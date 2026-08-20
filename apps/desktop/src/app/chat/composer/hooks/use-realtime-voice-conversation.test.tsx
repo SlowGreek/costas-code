@@ -8,6 +8,7 @@ import { setWorkbenchArtifact } from '@/store/workbench'
 import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
 
 const close = vi.fn()
+const appendContext = vi.fn()
 const setMuted = vi.fn()
 const updateWorkbenchContext = vi.fn()
 const awaitPendingTranscription = vi.fn(async () => {})
@@ -16,6 +17,7 @@ const seedHistory = vi.fn()
 
 vi.mock('@/lib/realtime-voice', () => ({
   startRealtimeVoiceConnection: vi.fn(async () => ({
+    appendContext,
     awaitPendingTranscription,
     close,
     seedHistory,
@@ -203,14 +205,20 @@ describe('useRealtimeVoiceConversation', () => {
       })
     })
     await waitFor(() =>
-      expect(updateWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('GPT Realtime'))
+      expect(appendContext).toHaveBeenCalledWith(expect.stringContaining('GPT Realtime'))
     )
 
     const connectionOptions = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
-    connectionOptions.onTranscript?.({ id: 'item-user-1', role: 'user', text: 'Draw it as we talk.' })
+    connectionOptions.onTranscript?.({
+      connectionId: 'voice-connection-1',
+      id: 'item-user-1',
+      role: 'user',
+      text: 'Draw it as we talk.'
+    })
     await waitFor(() =>
       expect($gateway.get()?.request).toHaveBeenCalledWith('voice.realtime.transcript', {
         session_id: 'runtime-session',
+        connection_id: 'voice-connection-1',
         item_id: 'item-user-1',
         role: 'user',
         text: 'Draw it as we talk.'
@@ -245,13 +253,19 @@ describe('useRealtimeVoiceConversation', () => {
       await hook.result.current.start()
     })
     const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
-    options.onTranscript?.({ id: 'user-1', role: 'user', text: 'Keep this turn.' })
+    options.onTranscript?.({
+      connectionId: 'voice-connection-retry',
+      id: 'user-1',
+      role: 'user',
+      text: 'Keep this turn.'
+    })
 
     await vi.advanceTimersByTimeAsync(2_000)
 
     expect(request).toHaveBeenCalledTimes(3)
     expect(request).toHaveBeenLastCalledWith('voice.realtime.transcript', {
       session_id: 'runtime-session',
+      connection_id: 'voice-connection-retry',
       item_id: 'user-1',
       role: 'user',
       text: 'Keep this turn.'

@@ -42,6 +42,14 @@ def get_watcher(session_key: str, config: WatcherConfig) -> TranscriptWatcher:
         return watcher
 
 
+def refresh_canvas(session_key: str, canvas: Optional[Dict[str, Any]]) -> None:
+    """Refresh one live watcher's generation base after a revision conflict."""
+    with _lock:
+        watcher = _watchers.get(session_key)
+    if watcher is not None:
+        watcher.set_canvas(artifact=canvas)
+
+
 def forget_session(session_key: str) -> None:
     with _lock:
         _watchers.pop(session_key, None)
@@ -114,6 +122,11 @@ def _arm(
     timer.start()
 
 
+def _is_current(session_key: str, watcher: TranscriptWatcher) -> bool:
+    with _lock:
+        return _watchers.get(session_key) is watcher
+
+
 def _notify_busy(on_busy: Optional[Callable[[bool], None]], active: bool) -> None:
     """Best-effort observer: UI event failure never owns the worker lifecycle."""
     if on_busy is None:
@@ -132,6 +145,9 @@ def _fire(
 ) -> None:
     with _lock:
         _timers.pop(session_key, None)
+
+    if not _is_current(session_key, watcher):
+        return
 
     # In direct mode watcher.poll() IS the visual generation. Surface busy
     # before entering the model call and keep it true through persistence. The
@@ -166,6 +182,10 @@ def _fire(
             on_decision(decision)
         except Exception as exc:
             logger.debug("workbench watcher action failed: %s", exc)
+            if watcher.requeue_action_failure(decision.utterance, now=time.monotonic()):
+                _retry_later(session_key, watcher, on_decision, on_busy)
+        else:
+            watcher.mark_action_succeeded()
         finally:
             # Direct generation holds this guard from before its model call through
             # persistence. Also makes callback failures unable to wedge the session.
@@ -184,6 +204,8 @@ def _retry_later(
     on_decision: Callable[[WatchDecision], None],
     on_busy: Optional[Callable[[bool], None]] = None,
 ) -> None:
+    if not _is_current(session_key, watcher):
+        return
     timer = threading.Timer(
         _RETRY_SECONDS, _fire, args=(session_key, watcher, on_decision, on_busy)
     )

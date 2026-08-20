@@ -1,4 +1,5 @@
 export interface RealtimeTranscript {
+  connectionId?: string
   id: string
   role: 'assistant' | 'user'
   text: string
@@ -108,8 +109,17 @@ export function boundWorkbenchContext(
   }
 
   const marker = 'Current canvas state (authoritative): '
-  const markerAt = text.lastIndexOf(marker)
-  const prefix = markerAt >= 0 ? text.slice(0, markerAt + marker.length) : ''
+  const markerAt = text.indexOf(marker)
+  const rawEventPrefix = markerAt >= 0 ? text.slice(0, markerAt) : ''
+  // Semantic event prefixes are normally one short sentence. Bound them
+  // independently so a pathological caller cannot consume the entire JSON
+  // budget before compaction starts, while always preserving the marker.
+  const prefixLimit = Math.min(1_000, Math.floor(maxChars / 4))
+  const eventPrefix =
+    rawEventPrefix.length > prefixLimit
+      ? `${rawEventPrefix.slice(0, prefixLimit - 2)}… `
+      : rawEventPrefix
+  const prefix = markerAt >= 0 ? `${eventPrefix}${marker}` : ''
   const jsonText = markerAt >= 0 ? text.slice(markerAt + marker.length) : text
 
   let parsed: Record<string, unknown>
@@ -213,6 +223,7 @@ export function boundWorkbenchContext(
 
 interface RealtimeTokenResponse {
   client_secret: string
+  connection_id?: string
   expires_at?: number
   model: string
   voice: string
@@ -545,6 +556,14 @@ export async function startRealtimeVoiceConnection(
 
     closed = true
     channelOpen = false
+    if (token.connection_id) {
+      void options
+        .request('voice.realtime.close', {
+          connection_id: token.connection_id,
+          session_id: options.runtimeSessionId
+        })
+        .catch(() => undefined)
+    }
     tracks.forEach(track => track.stop())
     channel.close()
     peer.close()
@@ -582,7 +601,8 @@ export async function startRealtimeVoiceConnection(
           onAssistantResponseDone: options.onAssistantResponseDone,
           onAssistantTranscriptDelta: options.onAssistantTranscriptDelta,
           onStatus: options.onStatus,
-          onTranscript: options.onTranscript,
+          onTranscript: entry =>
+            options.onTranscript?.({ ...entry, connectionId: token.connection_id }),
           pendingTranscription,
           request: options.request,
           runtimeSessionId: options.runtimeSessionId,

@@ -25,6 +25,7 @@ def test_direct_generation_reports_busy_for_the_actual_model_call(monkeypatch):
     )
     watcher.observe("okay", now=0.0)
     monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, "stored-session", watcher)
 
     runtime._fire(
         "stored-session",
@@ -46,6 +47,7 @@ def test_busy_notification_failure_does_not_drop_the_utterance(monkeypatch):
     )
     watcher.observe("okay", now=0.0)
     monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, "stored-session", watcher)
 
     def broken_busy(active):
         events.append(f"busy:{active}")
@@ -60,6 +62,59 @@ def test_busy_notification_failure_does_not_drop_the_utterance(monkeypatch):
     assert watcher.in_flight is False
 
 
+def test_action_failure_requeues_once_then_succeeds(monkeypatch):
+    calls = []
+    retries = []
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=lambda **_kwargs: calls.append("model")
+        or '{"draw":true,"reason":"draw","visual":{"kind":"map","nodes":[{"id":"a","label":"A"}],"edges":[]}}',
+    )
+    watcher.observe("draw A", now=0.0)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, "stored-session", watcher)
+    monkeypatch.setattr(runtime, "_retry_later", lambda *args: retries.append(args))
+
+    def fail(_decision):
+        raise RuntimeError("revision conflict")
+
+    runtime._fire("stored-session", watcher, fail)
+
+    assert len(calls) == 1
+    assert watcher.has_pending is True
+    assert watcher.last_skip == "action_failed"
+    assert len(retries) == 1
+
+    runtime._fire("stored-session", watcher, lambda _decision: None)
+
+    assert len(calls) == 2
+    assert watcher.has_pending is False
+
+
+def test_teardown_during_failed_model_call_cannot_resurrect_retry(monkeypatch):
+    key = "closing-runtime"
+    calls = []
+
+    def model(**_kwargs):
+        calls.append("model")
+        runtime.forget_session(key)
+        return "not json"
+
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=model,
+    )
+    watcher.observe("draw", now=0.0)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, key, watcher)
+
+    runtime._fire(key, watcher, lambda _decision: None)
+
+    assert calls == ["model"]
+    assert key not in runtime._watchers
+    assert key not in runtime._timers
+
+
 def test_two_stage_decision_does_not_claim_the_diagrammer_is_already_drawing(monkeypatch):
     """Two-stage mode's first call only DECIDES; its callback owns draw state."""
     events = []
@@ -71,6 +126,7 @@ def test_two_stage_decision_does_not_claim_the_diagrammer_is_already_drawing(mon
     )
     watcher.observe("okay", now=0.0)
     monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, "stored-session", watcher)
 
     runtime._fire(
         "stored-session",

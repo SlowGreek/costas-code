@@ -70,6 +70,8 @@ describe('buildSketchDocument', () => {
     expect(html).toContain('data-hermes-viewport-fit')
     expect(html).toContain("addEventListener('resize',fit)")
     expect(html).toContain('MutationObserver')
+    expect(html).toContain('attributes:true,characterData:true')
+    expect(html).toContain("addEventListener('animationend',fit,true)")
     expect(html).toContain("setProperty(name,value,'important')")
   })
 

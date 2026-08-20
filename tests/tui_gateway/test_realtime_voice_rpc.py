@@ -32,6 +32,8 @@ def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch)
         server._sessions.pop(runtime_id, None)
 
     assert "error" not in envelope
+    connection_id = envelope["result"].pop("connection_id")
+    assert isinstance(connection_id, str) and connection_id
     assert envelope["result"] == {
         "client_secret": "ek_short",
         "expires_at": 1234,
@@ -154,13 +156,17 @@ def test_realtime_token_freezes_watcher_ownership_for_the_voice_connection(monke
     )
 
     try:
-        server._methods["voice.realtime.token"]("token", {"session_id": runtime_id})
+        token = server._methods["voice.realtime.token"](
+            "token", {"session_id": runtime_id}
+        )["result"]
+        connection_id = token["connection_id"]
         # User edits config while this voice connection remains open.
         monkeypatch.setattr(server, "_load_cfg", lambda: shadow_cfg)
         server._methods["voice.realtime.transcript"](
             "transcript",
             {
                 "session_id": runtime_id,
+                "connection_id": connection_id,
                 "item_id": "u1",
                 "role": "user",
                 "text": "show me this",
@@ -173,6 +179,106 @@ def test_realtime_token_freezes_watcher_ownership_for_the_voice_connection(monke
     assert watcher["enabled"] is True
     assert watcher["mode"] == "active"
     assert watcher["pipeline"] == "direct"
+
+
+def test_reconnect_keeps_each_connection_ownership_isolated(monkeypatch):
+    """A delayed event from connection A cannot inherit connection B's mode."""
+    import copy
+    from tui_gateway import methods_realtime
+
+    runtime_id = "runtime-reconnect-owner"
+    live_session = {"session_key": "stored-reconnect", "profile_home": None, "history": []}
+    server._sessions[runtime_id] = live_session
+    active_cfg = copy.deepcopy(DEFAULT_CONFIG)
+    active_cfg["workbench"]["watcher"].update({"enabled": True, "mode": "active"})
+    shadow_cfg = copy.deepcopy(active_cfg)
+    shadow_cfg["workbench"]["watcher"]["mode"] = "shadow"
+    current = {"cfg": active_cfg}
+
+    monkeypatch.setattr(server, "_load_cfg", lambda: current["cfg"])
+    monkeypatch.setattr(tool_backend_helpers, "resolve_openai_audio_api_key", lambda: "sk-test")
+    monkeypatch.setattr(
+        realtime_voice,
+        "create_realtime_client_secret",
+        lambda **_: {"client_secret": "ek_short"},
+    )
+    captured = []
+    monkeypatch.setattr(
+        methods_realtime,
+        "_watch_transcript",
+        lambda *_args, **kwargs: captured.append(
+            (kwargs["connection_id"], kwargs["cfg"]["workbench"]["watcher"]["mode"])
+        ),
+    )
+
+    try:
+        first = server._methods["voice.realtime.token"](
+            "token-a", {"session_id": runtime_id}
+        )["result"]
+        current["cfg"] = shadow_cfg
+        second = server._methods["voice.realtime.token"](
+            "token-b", {"session_id": runtime_id}
+        )["result"]
+
+        for item_id, token in (("old-event", first), ("new-event", second)):
+            result = server._methods["voice.realtime.transcript"](
+                item_id,
+                {
+                    "session_id": runtime_id,
+                    "connection_id": token["connection_id"],
+                    "item_id": item_id,
+                    "role": "user",
+                    "text": "show me this",
+                },
+            )
+            assert "error" not in result
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    assert captured == [
+        (first["connection_id"], "active"),
+        (second["connection_id"], "shadow"),
+    ]
+
+
+def test_realtime_close_cancels_watcher_but_accepts_late_transcript(tmp_path, monkeypatch):
+    from tui_gateway import methods_realtime
+
+    db = SessionDB(db_path=tmp_path / "state.db")
+    runtime_id = "runtime-close-race"
+    db.create_session(session_id="stored-close-race", source="desktop", model="test")
+    live_session = {
+        "session_key": "stored-close-race",
+        "profile_home": None,
+        "history": [],
+        "_workbench_watchers": {"connection-a": {"enabled": True, "mode": "active"}},
+    }
+    server._sessions[runtime_id] = live_session
+    monkeypatch.setattr(server, "_db", db)
+    watched = []
+    monkeypatch.setattr(methods_realtime, "_watch_transcript", lambda *_a, **_k: watched.append(1))
+
+    try:
+        closed = server._methods["voice.realtime.close"](
+            "close", {"session_id": runtime_id, "connection_id": "connection-a"}
+        )
+        transcript = server._methods["voice.realtime.transcript"](
+            "late",
+            {
+                "session_id": runtime_id,
+                "connection_id": "connection-a",
+                "item_id": "late-user",
+                "role": "user",
+                "text": "Store this but do not redraw.",
+            },
+        )
+    finally:
+        server._sessions.pop(runtime_id, None)
+        db.close()
+
+    assert closed["result"] == {"closed": True}
+    assert transcript["result"]["inserted"] is True
+    assert watched == []
 
 
 def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):

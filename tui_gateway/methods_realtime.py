@@ -67,7 +67,17 @@ def _(rid, params: dict) -> dict:
         # current config. The client tool list is fixed by this token response;
         # freezing the same watcher config on the session prevents a later
         # active↔shadow edit from creating zero or two redraw owners.
+        import uuid
+
+        connection_id = uuid.uuid4().hex
+        frozen_by_connection = session.setdefault("_workbench_watchers", {})
+        if not isinstance(frozen_by_connection, dict):
+            frozen_by_connection = {}
+            session["_workbench_watchers"] = frozen_by_connection
+        frozen_by_connection[connection_id] = frozen_watcher
+        # Legacy fallback for clients that predate connection leases.
         session["_workbench_watcher"] = frozen_watcher
+        token["connection_id"] = connection_id
         token["workbench_watcher"] = {
             "active": watcher.active,
             "pipeline": watcher.pipeline,
@@ -78,17 +88,45 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 4611, str(exc))
 
 
+@method("voice.realtime.close")
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    connection_id = str(params.get("connection_id") or "").strip()
+    if not connection_id:
+        return _err(rid, 4615, "connection_id is required")
+
+    closed_connections = session.setdefault("_workbench_closed_connections", set())
+    if not isinstance(closed_connections, set):
+        closed_connections = set()
+        session["_workbench_closed_connections"] = closed_connections
+    closed_connections.add(connection_id)
+    try:
+        from workbench_watch_runtime import forget_session
+
+        forget_session(connection_id)
+    except Exception:
+        pass
+    return _ok(rid, {"closed": True})
+
+
 @method("voice.realtime.transcript")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    connection_id = str(params.get("connection_id") or "").strip()
     stored_session_id = str(session.get("session_key") or "").strip()
     item_id = str(params.get("item_id") or "").strip()
     role = str(params.get("role") or "").strip()
     text = str(params.get("text") or "").strip()
     if not stored_session_id or not item_id or not text or role not in {"user", "assistant"}:
         return _err(rid, 4612, "session, item_id, user/assistant role, and text are required")
+    if connection_id:
+        frozen_by_connection = session.get("_workbench_watchers")
+        if not isinstance(frozen_by_connection, dict) or connection_id not in frozen_by_connection:
+            return _err(rid, 4614, "Realtime connection is stale or unknown")
 
     _ensure_session_db_row(session)
     with _session_db(session) as db:
@@ -133,24 +171,38 @@ def _(rid, params: dict) -> dict:
                     _watcher_cfg_for_session,
                 )
 
-                _watch_transcript(
-                    session,
-                    stored_session_id,
-                    role,
-                    text,
-                    str(params.get("session_id") or ""),
-                    cfg=_watcher_cfg_for_session(session, _load_cfg()),
-                    open_db=_session_db,
-                    emit=_emit,
+                closed_connections = session.get("_workbench_closed_connections")
+                connection_closed = (
+                    bool(connection_id)
+                    and isinstance(closed_connections, set)
+                    and connection_id in closed_connections
                 )
+                if not connection_closed:
+                    _watch_transcript(
+                        session,
+                        stored_session_id,
+                        role,
+                        text,
+                        str(params.get("session_id") or ""),
+                        connection_id=connection_id,
+                        cfg=_watcher_cfg_for_session(session, _load_cfg(), connection_id),
+                        open_db=_session_db,
+                        emit=_emit,
+                    )
             return _ok(rid, result)
         except Exception as exc:
             return _err(rid, 4613, f"could not persist Realtime transcript: {exc}")
 
 
-def _watcher_cfg_for_session(session: dict, cfg):
-    """Overlay this voice connection's frozen watcher ownership onto config."""
-    frozen = session.get("_workbench_watcher")
+def _watcher_cfg_for_session(session: dict, cfg, connection_id: str = ""):
+    """Overlay one voice connection's frozen watcher ownership onto config."""
+    frozen = None
+    by_connection = session.get("_workbench_watchers")
+    if connection_id and isinstance(by_connection, dict):
+        frozen = by_connection.get(connection_id)
+    elif not connection_id:
+        # Backward compatibility for a desktop client without connection IDs.
+        frozen = session.get("_workbench_watcher")
     if not isinstance(frozen, dict):
         return cfg
 
@@ -169,6 +221,7 @@ def _watch_transcript(
     text: str,
     sid: str,
     *,
+    connection_id: str = "",
     cfg,
     open_db,
     emit,
@@ -184,6 +237,7 @@ def _watch_transcript(
     try:
         from workbench_watch_runtime import observe_transcript
 
+        watcher_key = connection_id or sid
         canvas = None
         with open_db(session) as db:
             if db is not None:
@@ -195,6 +249,7 @@ def _watch_transcript(
                 stored_session_id,
                 sid,
                 decision,
+                watcher_key=watcher_key,
                 open_db=open_db,
                 emit=emit,
             )
@@ -207,7 +262,7 @@ def _watch_transcript(
             )
 
         observe_transcript(
-            sid,
+            watcher_key,
             role=role,
             text=text,
             cfg=cfg,
@@ -220,7 +275,14 @@ def _watch_transcript(
 
 
 def _visualize_from_watcher(
-    session: dict, stored_session_id: str, sid: str, decision, *, open_db, emit
+    session: dict,
+    stored_session_id: str,
+    sid: str,
+    decision,
+    *,
+    watcher_key: str = "",
+    open_db,
+    emit,
 ):
     """Persist a direct result, or run the preserved two-stage diagrammer."""
     # A timer can be cancelled before it starts, but a model request already
@@ -234,7 +296,8 @@ def _visualize_from_watcher(
     with open_db(session) as db:
         if db is None or session.get("_closing"):
             return
-        set_in_flight(sid, True)
+        runtime_key = watcher_key or sid
+        set_in_flight(runtime_key, True)
         direct = decision.visual is not None
         if not direct:
             # In direct mode the runtime already emitted busy before entering
@@ -257,9 +320,21 @@ def _visualize_from_watcher(
                 artifact = visualize_session(db, stored_session_id, prompt=decision.direction)
             emit("artifact.updated", sid, {"artifact": artifact})
         except Exception:
-            pass
+            # The runtime owns bounded retry. Refresh the immutable generation
+            # base first so an optimistic conflict caused by an instant edit
+            # regenerates from the accepted revision rather than failing twice.
+            try:
+                from workbench_watch_runtime import refresh_canvas
+
+                refresh_canvas(
+                    runtime_key,
+                    db.get_session_artifact(stored_session_id, "map.main"),
+                )
+            except Exception:
+                pass
+            raise
         finally:
-            set_in_flight(sid, False)
+            set_in_flight(runtime_key, False)
             if not direct:
                 emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
 

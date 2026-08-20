@@ -150,6 +150,7 @@ class SkipReason:
     NOTHING_PENDING = "nothing_pending"
     IN_FLIGHT = "in_flight"
     MODEL_FAILED = "model_failed"
+    ACTION_FAILED = "action_failed"
     DISABLED = "disabled"
 
 
@@ -169,6 +170,7 @@ class TranscriptWatcher:
     _last_fragment_at: Optional[float] = field(default=None, init=False)
     _in_flight: bool = field(default=False, init=False)
     _direct_retry_count: int = field(default=0, init=False)
+    _action_retry_count: int = field(default=0, init=False)
     current_kind: str = field(default="map", init=False)
     current_summary: str = field(default="", init=False)
     current_payload: Dict[str, Any] = field(
@@ -210,6 +212,20 @@ class TranscriptWatcher:
     @property
     def has_pending(self) -> bool:
         return bool(self._pending)
+
+    def requeue_action_failure(self, utterance: str, *, now: float) -> bool:
+        """Retry one failed persistence/action against refreshed canvas state."""
+        if self._action_retry_count >= 1 or not utterance.strip():
+            self._action_retry_count = 0
+            return False
+        self._action_retry_count += 1
+        self._pending.insert(0, utterance.strip())
+        self._last_fragment_at = now - self.config.debounce_seconds
+        self.last_skip = SkipReason.ACTION_FAILED
+        return True
+
+    def mark_action_succeeded(self) -> None:
+        self._action_retry_count = 0
 
     def due_at(self) -> Optional[float]:
         if not self._pending or self._last_fragment_at is None:

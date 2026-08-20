@@ -118,7 +118,10 @@ const VIEWPORT_FIT_SCRIPT = `<script data-hermes-viewport-fit>(function(){
     });
   }
   addEventListener('resize',fit);addEventListener('load',fit);
-  new MutationObserver(fit).observe(root,{childList:true,subtree:true});
+  root.addEventListener('animationend',fit,true);root.addEventListener('transitionend',fit,true);
+  if(typeof MutationObserver!=='undefined')new MutationObserver(function(records){
+    if(records.some(function(record){return !(record.type==='attributes'&&record.target===root&&record.attributeName==='style')}))fit();
+  }).observe(root,{attributes:true,characterData:true,childList:true,subtree:true});
   fit();
 })()</script>`
 

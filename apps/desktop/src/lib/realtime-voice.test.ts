@@ -1,11 +1,48 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  boundWorkbenchContext,
   createPendingTranscriptionTracker,
   MAX_WORKBENCH_CONTEXT_CHARS,
   routeRealtimeServerEvent,
-  startRealtimeVoiceConnection
+  startRealtimeVoiceConnection,
+  type RealtimeTranscript
 } from './realtime-voice'
+
+describe('boundWorkbenchContext', () => {
+  const marker = 'Current canvas state (authoritative): '
+
+  it('preserves the JSON boundary when the semantic prefix alone exceeds budget', () => {
+    const result = boundWorkbenchContext(`${'x'.repeat(20_000)}${marker}{"kind":"map"}`)
+
+    expect(result.length).toBeLessThanOrEqual(MAX_WORKBENCH_CONTEXT_CHARS)
+    expect(result).toContain(marker)
+    expect(() => JSON.parse(result.slice(result.indexOf(marker) + marker.length))).not.toThrow()
+  })
+
+  it('is not confused by the boundary text inside a node label', () => {
+    const state = {
+      kind: 'map',
+      nodes: Array.from({ length: 40 }, (_, index) => ({
+        id: `n-${index}-${'i'.repeat(120)}`,
+        label: `${index === 20 ? marker : ''}${'L'.repeat(190)}`
+      })),
+      edges: Array.from({ length: 80 }, (_, index) => ({
+        id: `e-${index}-${'e'.repeat(120)}`,
+        from: `n-${index % 40}-${'i'.repeat(120)}`,
+        to: `n-${(index + 1) % 40}-${'i'.repeat(120)}`,
+        label: 'R'.repeat(190)
+      }))
+    }
+    const result = boundWorkbenchContext(`Canvas changed. ${marker}${JSON.stringify(state)}`)
+    const compacted = JSON.parse(result.slice(result.indexOf(marker) + marker.length)) as {
+      context_truncated?: { nodes_total?: number }
+    }
+
+    expect(result.length).toBeLessThanOrEqual(MAX_WORKBENCH_CONTEXT_CHARS)
+    expect(compacted.context_truncated?.nodes_total).toBe(40)
+  })
+})
 
 describe('createPendingTranscriptionTracker', () => {
   it('adds no latency when no transcription is in flight', async () => {
@@ -341,7 +378,10 @@ describe('routeRealtimeServerEvent', () => {
 
 describe('startRealtimeVoiceConnection', () => {
   /** Boot a connection over fake WebRTC and expose its data-channel traffic. */
-  const connectHarness = async (tokenOverrides: Record<string, unknown> = {}) => {
+  const connectHarness = async (
+    tokenOverrides: Record<string, unknown> = {},
+    onTranscript?: (entry: RealtimeTranscript) => void
+  ) => {
     const sent: string[] = []
     const listeners = new Map<string, (event: { data?: string }) => void>()
 
@@ -375,6 +415,7 @@ describe('startRealtimeVoiceConnection', () => {
       })) as never,
       mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
       peerConnectionFactory: () => peer as never,
+      onTranscript,
       request: vi.fn(async () => ({
         client_secret: 'ek_short',
         model: 'gpt-realtime-2.1',
@@ -393,6 +434,26 @@ describe('startRealtimeVoiceConnection', () => {
       sentTypes: () => sent.map(payload => JSON.parse(payload).type as string)
     }
   }
+
+  it('tags settled transcripts with the token connection lease', async () => {
+    const onTranscript = vi.fn()
+    const harness = await connectHarness({ connection_id: 'connection-a' }, onTranscript)
+
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-a',
+      transcript: 'Keep ownership with this connection.'
+    })
+
+    await vi.waitFor(() =>
+      expect(onTranscript).toHaveBeenCalledWith({
+        connectionId: 'connection-a',
+        id: 'user-a',
+        role: 'user',
+        text: 'Keep ownership with this connection.'
+      })
+    )
+  })
 
   it('removes visualize when the active watcher owns redraws', async () => {
     // This is the ownership seam. The reported session proved that exposing

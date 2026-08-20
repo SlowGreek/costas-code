@@ -1009,12 +1009,17 @@ def _teardown_popped_session(
     # two windows may temporarily resume the same stored session, and closing
     # the older one must not cancel the newer one's timer. Without cleanup a
     # pending timer can still spend a model request after the user has left.
-    watcher_key = str(session.get("_sid") or "").strip()
-    if watcher_key:
+    watcher_keys = {str(session.get("_sid") or "").strip()}
+    frozen_connections = session.get("_workbench_watchers")
+    if isinstance(frozen_connections, dict):
+        watcher_keys.update(str(key).strip() for key in frozen_connections)
+    watcher_keys.discard("")
+    if watcher_keys:
         try:
             from workbench_watch_runtime import forget_session
 
-            forget_session(watcher_key)
+            for watcher_key in watcher_keys:
+                forget_session(watcher_key)
         except Exception:
             logger.debug("failed retiring workbench watcher", exc_info=True)
 

@@ -57,6 +57,7 @@ const persistTranscriptWithRetry = async (
     try {
       await request('voice.realtime.transcript', {
         session_id: runtimeSessionId,
+        connection_id: entry.connectionId,
         item_id: entry.id,
         role: entry.role,
         text: entry.text

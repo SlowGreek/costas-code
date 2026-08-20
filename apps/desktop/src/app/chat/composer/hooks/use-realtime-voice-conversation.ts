@@ -19,7 +19,10 @@ import {
   $workbenchSelection,
   setWorkbenchNarrationFocus
 } from '@/store/workbench'
+import type { SessionMessage } from '@/types/hermes'
 
+import { recentRealtimeSeedTurns } from './realtime-history-seed'
+import { realtimeTranscriptRpcParams } from './realtime-transcript-persistence'
 import type { ConversationStatus } from './use-voice-conversation'
 import { voiceStartReadiness } from './voice-start-readiness'
 
@@ -55,13 +58,7 @@ const persistTranscriptWithRetry = async (
     }
 
     try {
-      await request('voice.realtime.transcript', {
-        session_id: runtimeSessionId,
-        connection_id: entry.connectionId,
-        item_id: entry.id,
-        role: entry.role,
-        text: entry.text
-      })
+      await request('voice.realtime.transcript', realtimeTranscriptRpcParams(runtimeSessionId, entry))
 
       return
     } catch (error) {
@@ -213,24 +210,12 @@ export function useRealtimeVoiceConversation({
       // the voice session share one session, so whatever was already discussed
       // (typed or spoken) is the context the user expects voice to have.
       try {
-        const history = await gateway.request<{ messages?: { content?: unknown; role?: string }[] }>(
+        const history = await gateway.request<{ messages?: SessionMessage[] }>(
           'session.history',
           { session_id: runtimeSessionId }
         )
 
-        const turns = (history.messages ?? [])
-          .filter(
-            (message): message is { content: string; role: 'assistant' | 'user' } =>
-              (message.role === 'assistant' || message.role === 'user') &&
-              typeof message.content === 'string' &&
-              message.content.trim().length > 0
-          )
-          .slice(-HISTORY_SEED_TURNS)
-          .map((message, index) => ({
-            id: `seed-${index}`,
-            role: message.role,
-            text: message.content
-          }))
+        const turns = recentRealtimeSeedTurns(history.messages ?? [], HISTORY_SEED_TURNS)
 
         if (turns.length > 0 && generation === startGenerationRef.current) {
           connection.seedHistory(turns)

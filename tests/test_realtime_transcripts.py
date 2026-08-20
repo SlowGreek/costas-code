@@ -31,3 +31,22 @@ def test_realtime_transcript_is_persisted_once_by_item_id(tmp_path):
         ]
     finally:
         db.close()
+
+
+def test_realtime_transcript_persists_semantic_turn_identity(tmp_path):
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.create_session(session_id="voice-session", source="desktop", model="test")
+
+        db.append_realtime_transcript(
+            "voice-session",
+            item_id="item-assistant-1",
+            role="assistant",
+            text="First segment.",
+            semantic_turn_id="voice-turn-7",
+        )
+
+        message = db.get_messages("voice-session")[0]
+        assert message["display_metadata"] == {"semantic_turn_id": "voice-turn-7"}
+    finally:
+        db.close()

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChatMessage } from '@/lib/chat-messages'
+import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
 
 import { appendRealtimeTranscript } from './realtime-transcript-projection'
 
@@ -48,6 +48,53 @@ describe('appendRealtimeTranscript', () => {
     expect(appendRealtimeTranscript(once, { item_id: 'item-b', message_id: 42, role: 'assistant', text: 'Answer.' }, 2)).toBe(
       once
     )
+  })
+
+  it('groups assistant continuation segments from one semantic turn', () => {
+    const first = appendRealtimeTranscript(
+      [],
+      {
+        item_id: 'assistant-1',
+        message_id: 51,
+        role: 'assistant',
+        semantic_turn_id: 'voice-turn-7',
+        text: 'First segment.'
+      },
+      1
+    )
+
+    const grouped = appendRealtimeTranscript(
+      first,
+      {
+        item_id: 'assistant-2',
+        message_id: 52,
+        role: 'assistant',
+        semantic_turn_id: 'voice-turn-7',
+        text: 'Second segment.'
+      },
+      2
+    )
+
+    expect(grouped).toHaveLength(1)
+    expect(chatMessageText(grouped[0])).toBe('First segment. Second segment.')
+    expect(grouped[0]).toMatchObject({
+      realtimeItemIds: ['assistant-1', 'assistant-2'],
+      realtimeRowIds: [51, 52],
+      semanticTurnId: 'voice-turn-7'
+    })
+    expect(
+      appendRealtimeTranscript(
+        grouped,
+        {
+          item_id: 'assistant-2',
+          message_id: 52,
+          role: 'assistant',
+          semantic_turn_id: 'voice-turn-7',
+          text: 'Second segment.'
+        },
+        3
+      )
+    ).toBe(grouped)
   })
 
   it('ignores malformed or unsupported transcript events', () => {

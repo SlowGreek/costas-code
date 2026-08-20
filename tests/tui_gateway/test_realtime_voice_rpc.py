@@ -283,6 +283,7 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
                 "session_id": runtime_id,
                 "item_id": "item-user-1",
                 "role": "user",
+                "semantic_turn_id": "voice-turn-7",
                 "text": "Draw the canvas as we talk.",
             },
         )["result"]
@@ -292,6 +293,7 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
                 "session_id": runtime_id,
                 "item_id": "item-user-1",
                 "role": "user",
+                "semantic_turn_id": "voice-turn-7",
                 "text": "Draw the canvas as we talk.",
             },
         )["result"]
@@ -306,6 +308,7 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
             "role": "user",
             "content": "Draw the canvas as we talk.",
             "display_kind": "realtime_transcript",
+            "display_metadata": {"semantic_turn_id": "voice-turn-7"},
         }
     ]
     assert live_session["history_version"] == 1
@@ -317,6 +320,7 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
                 "item_id": "item-user-1",
                 "message_id": first["message_id"],
                 "role": "user",
+                "semantic_turn_id": "voice-turn-7",
                 "text": "Draw the canvas as we talk.",
             },
         )

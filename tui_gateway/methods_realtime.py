@@ -133,6 +133,7 @@ def _(rid, params: dict) -> dict:
     stored_session_id = str(session.get("session_key") or "").strip()
     item_id = str(params.get("item_id") or "").strip()
     role = str(params.get("role") or "").strip()
+    semantic_turn_id = str(params.get("semantic_turn_id") or "").strip()
     text = str(params.get("text") or "").strip()
     if not stored_session_id or not item_id or not text or role not in {"user", "assistant"}:
         return _err(rid, 4612, "session, item_id, user/assistant role, and text are required")
@@ -155,6 +156,7 @@ def _(rid, params: dict) -> dict:
                 stored_session_id,
                 item_id=item_id,
                 role=role,
+                semantic_turn_id=semantic_turn_id,
                 text=text,
             )
             if result["inserted"]:
@@ -162,6 +164,11 @@ def _(rid, params: dict) -> dict:
                     "role": role,
                     "content": text,
                     "display_kind": "realtime_transcript",
+                    **(
+                        {"display_metadata": {"semantic_turn_id": semantic_turn_id}}
+                        if semantic_turn_id
+                        else {}
+                    ),
                 }
                 history_lock = session.get("history_lock")
                 if history_lock is not None:
@@ -178,6 +185,7 @@ def _(rid, params: dict) -> dict:
                         "item_id": item_id,
                         "message_id": result["message_id"],
                         "role": role,
+                        "semantic_turn_id": semantic_turn_id,
                         "text": text,
                     },
                 )

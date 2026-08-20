@@ -40,6 +40,12 @@ export type ChatMessage = {
   attachmentRefs?: string[]
   /** Durable backend `messages.id`. Absent until the row is persisted. */
   rowId?: number
+  /** Provider transcript item ids folded into this semantic voice turn. */
+  realtimeItemIds?: string[]
+  /** Durable transcript rows folded into this semantic voice turn. */
+  realtimeRowIds?: number[]
+  /** One human voice turn across multiple provider response continuations. */
+  semanticTurnId?: string
   /** Emoji reactions on this message — one per author (see MessageReaction). */
   reactions?: MessageReaction[]
 }
@@ -1135,6 +1141,14 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
         ? 'system'
         : message.role
 
+    const semanticTurnId =
+      message.display_kind === 'realtime_transcript'
+        ? parseDisplayMetadata(message.display_metadata)?.semantic_turn_id
+        : undefined
+
+    const normalizedSemanticTurnId =
+      typeof semanticTurnId === 'string' && semanticTurnId.trim() ? semanticTurnId.trim() : undefined
+
     // Persisted user turns carry `@image:<path>` directive lines inline in
     // the text (see tui_gateway/server.py's persist-time rewrite). The
     // read-only bubble clamps its body to ~2 lines, and a large inline image
@@ -1227,12 +1241,51 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
     // reactions address this exact row later.
     const rowId = message.row_id ?? (typeof message.id === 'number' ? message.id : undefined)
 
+    if (displayRole === 'assistant' && normalizedSemanticTurnId) {
+      const semanticIndex = result.findLastIndex(
+        candidate =>
+          candidate.role === 'assistant' && candidate.semanticTurnId === normalizedSemanticTurnId
+      )
+
+      if (semanticIndex >= 0) {
+        const target = result[semanticIndex]
+        const needsSpace = !/\s$/.test(chatMessageText(target))
+
+        let prefixed = false
+
+        const continuationParts = parts.map(part => {
+          if (!prefixed && part.type === 'text') {
+            prefixed = true
+
+            return { ...part, text: `${needsSpace ? ' ' : ''}${part.text}` }
+          }
+
+          return part
+        })
+
+        target.parts = [...target.parts, ...continuationParts]
+        target.realtimeRowIds = [
+          ...(target.realtimeRowIds ?? []),
+          ...(rowId !== undefined ? [rowId] : [])
+        ]
+        activeAssistantIndex = semanticIndex
+
+        return
+      }
+    }
+
     result.push({
       id: `${message.timestamp || Date.now()}-${index}-${displayRole}`,
       role: displayRole,
       parts,
       timestamp: earliestTimestamp(message.timestamp, ...parts.map(part => part.timestamp)),
       ...(rowId !== undefined ? { rowId } : {}),
+      ...(normalizedSemanticTurnId
+        ? {
+            realtimeRowIds: rowId !== undefined ? [rowId] : [],
+            semanticTurnId: normalizedSemanticTurnId
+          }
+        : {}),
       ...(reactions.length ? { reactions } : {}),
       ...(extractedAttachmentRefs ? { attachmentRefs: extractedAttachmentRefs } : {})
     })

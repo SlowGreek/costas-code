@@ -29,6 +29,13 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/what would that look like/i)
   })
 
+  it('teaches the model to act sequentially across one human turn', () => {
+    expect(text).toMatch(/several response and tool rounds/i)
+    expect(text).toMatch(/inspect its result/i)
+    expect(text).toMatch(/do not schedule dependent actions together/i)
+    expect(text).toMatch(/search.*visualize/i)
+  })
+
   it('explains that visualize returns before the drawing exists', () => {
     // Without this the model waits for a result that never comes, or announces
     // a picture that has not arrived. Both were observed.
@@ -76,10 +83,10 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/call visualize with the requested arrangement/i)
   })
 
-  it('tells her to ring nodes while walking through them', () => {
-    // Observed: a five-step walkthrough with focus never called once, so the
-    // user heard a tour of a diagram with nothing lighting up.
-    expect(text).toMatch(/ring each|as you reach it|keeps pace/i)
+  it('uses streamed labels for walkthrough focus without spending a tool round per node', () => {
+    expect(text).toMatch(/without spending a tool round/i)
+    expect(text).toMatch(/exact node labels?/i)
+    expect(text).toMatch(/focus.*single/i)
   })
 
   it('asks her to say exact node labels during walkthroughs', () => {

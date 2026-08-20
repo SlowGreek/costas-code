@@ -213,6 +213,7 @@ describe('useRealtimeVoiceConversation', () => {
       connectionId: 'voice-connection-1',
       id: 'item-user-1',
       role: 'user',
+      semanticTurnId: 'voice-turn-1',
       text: 'Draw it as we talk.'
     })
     await waitFor(() =>
@@ -221,6 +222,7 @@ describe('useRealtimeVoiceConversation', () => {
         connection_id: 'voice-connection-1',
         item_id: 'item-user-1',
         role: 'user',
+        semantic_turn_id: 'voice-turn-1',
         text: 'Draw it as we talk.'
       })
     )

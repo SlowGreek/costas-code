@@ -19,6 +19,34 @@ import {
 } from './chat-messages'
 
 describe('toChatMessages', () => {
+  it('groups persisted Realtime assistant continuations by semantic turn', () => {
+    const messages = toChatMessages([
+      {
+        content: 'First segment.',
+        display_kind: 'realtime_transcript',
+        display_metadata: { semantic_turn_id: 'voice-turn-7' },
+        id: 51,
+        role: 'assistant',
+        timestamp: 1
+      },
+      {
+        content: 'Second segment.',
+        display_kind: 'realtime_transcript',
+        display_metadata: { semantic_turn_id: 'voice-turn-7' },
+        id: 52,
+        role: 'assistant',
+        timestamp: 2
+      }
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(chatMessageText(messages[0])).toBe('First segment. Second segment.')
+    expect(messages[0]).toMatchObject({
+      realtimeRowIds: [51, 52],
+      semanticTurnId: 'voice-turn-7'
+    })
+  })
+
   it('rebuilds the full command from a gateway tool row carrying args', () => {
     // Gateway watch-window hydration projects tool rows as
     // {role:'tool', name, context, args?}. `context` is an 80-char preview;

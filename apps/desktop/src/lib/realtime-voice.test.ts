@@ -6,7 +6,8 @@ import {
   MAX_WORKBENCH_CONTEXT_CHARS,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
-  startRealtimeVoiceConnection
+  startRealtimeVoiceConnection,
+  voiceToolLane
 } from './realtime-voice'
 
 describe('boundWorkbenchContext', () => {
@@ -108,6 +109,17 @@ describe('createPendingTranscriptionTracker', () => {
     await Promise.resolve()
     expect(settled).toHaveBeenCalled()
     vi.useRealTimers()
+  })
+})
+
+describe('voiceToolLane', () => {
+  it('classifies reads, gestures, edits, and slow detached work', () => {
+    expect(voiceToolLane({ name: 'session_snapshot' } as never)).toBe('read')
+    expect(voiceToolLane({ name: 'web_search' } as never)).toBe('read')
+    expect(voiceToolLane({ name: 'focus' } as never)).toBe('gesture')
+    expect(voiceToolLane({ name: 'rename' } as never)).toBe('edit')
+    expect(voiceToolLane({ name: 'visualize' } as never)).toBe('slow')
+    expect(voiceToolLane({ name: 'unknown' } as never)).toBe('serial')
   })
 })
 
@@ -409,7 +421,8 @@ describe('startRealtimeVoiceConnection', () => {
   /** Boot a connection over fake WebRTC and expose its data-channel traffic. */
   const connectHarness = async (
     tokenOverrides: Record<string, unknown> = {},
-    onTranscript?: (entry: RealtimeTranscript) => void
+    onTranscript?: (entry: RealtimeTranscript) => void,
+    requestOverride?: (method: string, params: Record<string, unknown>) => Promise<unknown>
   ) => {
     const sent: string[] = []
     const listeners = new Map<string, (event: { data?: string }) => void>()
@@ -445,12 +458,18 @@ describe('startRealtimeVoiceConnection', () => {
       mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
       peerConnectionFactory: () => peer as never,
       onTranscript,
-      request: vi.fn(async () => ({
-        client_secret: 'ek_short',
-        model: 'gpt-realtime-2.1',
-        voice: 'marin',
-        ...tokenOverrides
-      })),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        if (method !== 'voice.realtime.token' && requestOverride) {
+          return requestOverride(method, params)
+        }
+
+        return {
+          client_secret: 'ek_short',
+          model: 'gpt-realtime-2.1',
+          voice: 'marin',
+          ...tokenOverrides
+        }
+      }),
       runtimeSessionId: 'runtime-session'
     })
 
@@ -468,6 +487,7 @@ describe('startRealtimeVoiceConnection', () => {
     const onTranscript = vi.fn()
     const harness = await connectHarness({ connection_id: 'connection-a' }, onTranscript)
 
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-a' })
     harness.emit({
       type: 'conversation.item.input_audio_transcription.completed',
       item_id: 'user-a',
@@ -479,6 +499,7 @@ describe('startRealtimeVoiceConnection', () => {
         connectionId: 'connection-a',
         id: 'user-a',
         role: 'user',
+        semanticTurnId: 'voice-connection-a-turn-1',
         text: 'Keep ownership with this connection.'
       })
     )
@@ -538,6 +559,85 @@ describe('startRealtimeVoiceConnection', () => {
     unavailable.open()
     const disabledUpdate = JSON.parse(unavailable.sent[0]) as { session: { tools: { name: string }[] } }
     expect(disabledUpdate.session.tools.map(tool => tool.name)).not.toContain('web_search')
+  })
+
+  it('batches every function call in a provider response behind one continuation', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-snapshot-1',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-snapshot-2',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    await Promise.resolve()
+
+    expect(harness.sentTypes()).not.toContain('conversation.item.create')
+    expect(harness.sentTypes()).not.toContain('response.create')
+
+    harness.emit({ type: 'response.done', response: { id: 'response-1' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'conversation.item.create')).toHaveLength(2)
+    )
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+  })
+
+  it('does not resurrect an interrupted turn when a slow tool finishes late', async () => {
+    let finishSearch!: (value: unknown) => void
+
+    const search = new Promise<unknown>(resolve => {
+      finishSearch = resolve
+    })
+
+    const requestOverride = vi.fn(async (method: string) => {
+      expect(method).toBe('voice.realtime.web_search')
+
+      return search
+    })
+
+    const harness = await connectHarness(
+      { voice_capabilities: { web_search: true } },
+      undefined,
+      requestOverride
+    )
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-search',
+      name: 'web_search',
+      arguments: JSON.stringify({ query: 'latest realtime changes' })
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1' } })
+    await vi.waitFor(() => expect(requestOverride).toHaveBeenCalledOnce())
+
+    harness.emit({ type: 'input_audio_buffer.speech_started' })
+    finishSearch({ success: true })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const output = harness.sent
+      .map(raw => JSON.parse(raw) as { item?: { output?: string }; type: string })
+      .find(event => event.type === 'conversation.item.create')
+
+    expect(JSON.parse(output?.item?.output ?? '{}')).toEqual({ cancelled: true })
+    expect(harness.sentTypes()).not.toContain('response.create')
   })
 
   it('connects WebRTC with an ephemeral key and cleans up owned media', async () => {

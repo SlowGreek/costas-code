@@ -1,7 +1,15 @@
+import {
+  createRealtimeTurnController,
+  type RealtimeToolLane,
+  type RealtimeTurnController,
+  type RealtimeTurnToolCall
+} from './realtime-turn-controller'
+
 export interface RealtimeTranscript {
   connectionId?: string
   id: string
   role: 'assistant' | 'user'
+  semanticTurnId?: string
   text: string
 }
 
@@ -21,6 +29,7 @@ export interface RealtimeServerEventDeps {
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
   send: (event: Record<string, unknown>) => void
+  turnController?: RealtimeTurnController
 }
 
 export interface PendingTranscriptionTracker {
@@ -317,12 +326,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'The workbench summary places every node in plain language ("upper left", "centre", "far right", and neighbours like "left of: Planner"), and `pointing_at` is the node the user just clicked — they are literally pointing at it. ' +
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
-  'Speak locations the way a person would — "the box on the far right" — and use focus to ring a node as you talk about it, so the user can see which one you mean. ' +
-  // She narrated a five-step walkthrough without ever calling focus, so the
-  // user heard a tour of a diagram with nothing lighting up. Focus is 9ms; it
-  // is meant to be used mid-sentence, not announced.
-  'Walking through several parts in turn is the main thing focus is for: ring each one as you reach it, so the canvas keeps pace with your voice. That is what makes a step-by-step explanation feel alive, and it costs nothing. ' +
-  'During a walkthrough, say the node labels exactly as written in the workbench summary; the canvas follows those exact names while you keep speaking. ' +
+  'Speak locations the way a person would — "the box on the far right" — and use focus for a single node when the referent would otherwise be ambiguous. ' +
+  // Narration focus follows exact node labels in streamed transcript deltas,
+  // so a walkthrough stays visually alive without breaking speech into tools.
+  'During a walkthrough, say the exact node labels in order; the canvas follows those labels from your streamed speech without spending a tool round per node. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -330,12 +337,15 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
 const VOICE_OWNED_REDRAW_INSTRUCTIONS =
   'You decide when the drawing should change in this session. Call visualize silently when the user asks to see, map, sketch, organize, simplify, redraw, or visualize something, or when a visual would clearly help answer what they are asking. Explicit visual requests such as “show me,” “redraw that,” and “what would that look like?” always require a canvas tool action; spoken description alone does not satisfy them. The mute diagrammer edits in place with validated ops whenever possible and replaces the whole artifact only for a genuine wholesale rethink or kind change. Conversation alone is often enough, so let the decision follow the user’s intent rather than drawing every thought. `status: drawing` means the update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
+const VOICE_ACTION_LOOP_INSTRUCTIONS =
+  'One human turn may span several response and tool rounds. You do not need to finish the request in one response. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then visualize; snapshot, edit, then inspect again when confirmation matters. Speak naturally between actions when useful, keep the same conversational thought, and finish only when the user’s goal is satisfied or you genuinely need their input.'
+
 const WEB_SEARCH_INSTRUCTIONS =
   'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
 
 /** Test seam: assert behavior contracts for the voice-owned mode. */
 export const REALTIME_INSTRUCTIONS_FOR_TESTS =
-  `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}`
+  `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}`
 
 /**
  * Server-side turn taking. Sent on every `session.update` so a later context
@@ -514,9 +524,15 @@ export async function startRealtimeVoiceConnection(
   const fetchFn = options.fetchFn ?? fetch
   const peer = createPeer()
   const audio = createAudio()
+
+  const semanticConnectionId =
+    token.connection_id ||
+    globalThis.crypto?.randomUUID?.() ||
+    `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
   const webSearchAvailable = token.voice_capabilities?.web_search === true
   const configuredInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
-  const baseInstructions = `${configuredInstructions}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}${webSearchAvailable ? `\n\n${WEB_SEARCH_INSTRUCTIONS}` : ''}`
+  const baseInstructions = `${configuredInstructions}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}${webSearchAvailable ? `\n\n${WEB_SEARCH_INSTRUCTIONS}` : ''}`
 
   const stream = await mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -540,6 +556,19 @@ export async function startRealtimeVoiceConnection(
 
   const send = (event: Record<string, unknown>) => channel.send(JSON.stringify(event))
 
+  const voiceToolDeps = {
+    beforeToolCall: options.beforeToolCall,
+    request: options.request,
+    runtimeSessionId: options.runtimeSessionId
+  }
+
+  const turnController = createRealtimeTurnController({
+    execute: call => executeRealtimeVoiceTool(call, voiceToolDeps),
+    laneFor: voiceToolLane,
+    send,
+    turnIdPrefix: `voice-${semanticConnectionId}-turn`
+  })
+
   /**
    * Flush assistant audio already buffered in the browser. `interrupt_response`
    * only stops server-side generation; without this the tail keeps playing over
@@ -562,6 +591,7 @@ export async function startRealtimeVoiceConnection(
 
     closed = true
     channelOpen = false
+    turnController.close()
 
     if (token.connection_id) {
       void options
@@ -614,7 +644,8 @@ export async function startRealtimeVoiceConnection(
           pendingTranscription,
           request: options.request,
           runtimeSessionId: options.runtimeSessionId,
-          send
+          send,
+          turnController
         })
       } catch {
         // A malformed data-channel frame must not tear down live audio.
@@ -714,6 +745,7 @@ export async function startRealtimeVoiceConnection(
       }
 
       // Cancel generation first, then flush what already reached the browser.
+      turnController.interrupt()
       send({ type: 'response.cancel' })
       clearAssistantAudio()
     },
@@ -733,6 +765,8 @@ type RealtimeEvent = {
   delta?: unknown
   item_id?: unknown
   name?: unknown
+  response?: unknown
+  response_id?: unknown
   transcript?: unknown
   type?: unknown
 }
@@ -821,6 +855,118 @@ export function surgicalToolRequest(
 /** Tool names handled by the surgical (no-model, instant) write path. */
 export const SURGICAL_TOOL_NAMES = ['focus', 'rename', 'connect', 'disconnect', 'remove'] as const
 
+export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): RealtimeToolLane {
+  if (call.name === 'session_snapshot' || call.name === 'web_search') {
+    return 'read'
+  }
+
+  if (call.name === 'focus') {
+    return 'gesture'
+  }
+
+  if (call.name === 'visualize') {
+    return 'slow'
+  }
+
+  if (call.name === 'go_back' || (SURGICAL_TOOL_NAMES as readonly string[]).includes(call.name)) {
+    return 'edit'
+  }
+
+  return 'serial'
+}
+
+const realtimeResponseId = (event: RealtimeEvent): string => {
+  const response =
+    event.response && typeof event.response === 'object'
+      ? (event.response as Record<string, unknown>)
+      : null
+
+  return asTrimmedString(event.response_id) || asTrimmedString(response?.id)
+}
+
+/** Execute one voice-facade call without deciding when the provider continues. */
+export async function executeRealtimeVoiceTool(
+  call: RealtimeTurnToolCall,
+  deps: Pick<RealtimeServerEventDeps, 'beforeToolCall' | 'request' | 'runtimeSessionId'>
+): Promise<unknown> {
+  const { name } = call
+
+  if (name === 'session_snapshot') {
+    // Reads stored state, so it must see the user's last sentence.
+    await deps.beforeToolCall?.()
+
+    return deps.request('artifact.list', { session_id: deps.runtimeSessionId })
+  }
+
+  if (name === 'visualize') {
+    let prompt = ''
+
+    try {
+      const parsed = JSON.parse(call.arguments || '{}') as { prompt?: unknown }
+      prompt = asTrimmedString(parsed.prompt).slice(0, 1_000)
+    } catch {
+      // Invalid optional arguments degrade to transcript-only visualization.
+    }
+
+    // FIRE AND FORGET. The diagram reaches the canvas via artifact.updated;
+    // conversation continuity must not wait for the auxiliary model.
+    void (async () => {
+      await deps.beforeToolCall?.()
+      await deps.request('workbench.visualize', {
+        session_id: deps.runtimeSessionId,
+        prompt
+      })
+    })().catch(() => undefined)
+
+    return { status: 'drawing' }
+  }
+
+  if (name === 'web_search') {
+    let query = ''
+    let limit = 5
+
+    try {
+      const parsed = JSON.parse(call.arguments || '{}') as {
+        limit?: unknown
+        query?: unknown
+      }
+
+      query = asTrimmedString(parsed.query).slice(0, 500)
+
+      if (typeof parsed.limit === 'number' && Number.isFinite(parsed.limit)) {
+        limit = Math.min(Math.max(Math.trunc(parsed.limit), 1), 5)
+      }
+    } catch {
+      // Invalid search arguments become a structured tool error below.
+    }
+
+    return query
+      ? deps.request('voice.realtime.web_search', {
+          session_id: deps.runtimeSessionId,
+          query,
+          limit
+        })
+      : { error: 'web_search is missing a query' }
+  }
+
+  const surgical = surgicalToolRequest(name, call.arguments)
+
+  if (surgical) {
+    // Straight to persistence: these tools act on ids the model already holds
+    // and do not read transcript state, so they deliberately skip the gate.
+    return deps.request(surgical.method, {
+      session_id: deps.runtimeSessionId,
+      ...surgical.params
+    })
+  }
+
+  if ((SURGICAL_TOOL_NAMES as readonly string[]).includes(name)) {
+    return { error: `${name} is missing required arguments` }
+  }
+
+  return { error: `Unsupported voice tool: ${name || '<missing>'}` }
+}
+
 /**
  * Route server events that cross the Hermes/Realtime boundary.
  *
@@ -839,6 +985,7 @@ export async function routeRealtimeServerEvent(
   const type = asTrimmedString(event.type)
 
   if (type === 'response.created') {
+    deps.turnController?.responseCreated(realtimeResponseId(event))
     deps.onStatus?.('speaking')
 
     return
@@ -848,7 +995,14 @@ export async function routeRealtimeServerEvent(
     deps.onStatus?.('listening')
     // The response finished on its own, so nothing is left to flush.
     deps.onAssistantAudioEnded?.()
-    deps.onAssistantResponseDone?.()
+
+    const outcome = deps.turnController
+      ? await deps.turnController.responseDone(realtimeResponseId(event))
+      : { continued: false, settled: true }
+
+    if (outcome.settled) {
+      deps.onAssistantResponseDone?.()
+    }
 
     return
   }
@@ -864,6 +1018,7 @@ export async function routeRealtimeServerEvent(
   }
 
   if (type === 'input_audio_buffer.speech_started') {
+    deps.turnController?.interrupt()
     deps.onStatus?.('listening')
     // Barge-in. `interrupt_response` stops the SERVER generating, but audio
     // already pushed over WebRTC is sitting in the browser's jitter/playback
@@ -893,6 +1048,7 @@ export async function routeRealtimeServerEvent(
     // used too: both fire for the same utterance, so marking on each would
     // leave a permanently unbalanced counter.
     deps.pendingTranscription?.markPending()
+    deps.turnController?.beginTurn()
 
     return
   }
@@ -907,9 +1063,13 @@ export async function routeRealtimeServerEvent(
     const text = asTrimmedString(event.transcript)
 
     if (text) {
+      deps.turnController?.updateGoal(text)
+      const semanticTurnId = deps.turnController?.activeTurn()?.id
+
       deps.onTranscript?.({
         id: asTrimmedString(event.item_id),
         role: 'user',
+        ...(semanticTurnId ? { semanticTurnId } : {}),
         text
       })
     }
@@ -923,9 +1083,12 @@ export async function routeRealtimeServerEvent(
     const text = asTrimmedString(event.transcript)
 
     if (text) {
+      const semanticTurnId = deps.turnController?.turnIdForResponse(realtimeResponseId(event))
+
       deps.onTranscript?.({
         id: asTrimmedString(event.item_id),
         role: 'assistant',
+        ...(semanticTurnId ? { semanticTurnId } : {}),
         text
       })
     }
@@ -944,90 +1107,23 @@ export async function routeRealtimeServerEvent(
     return
   }
 
+  const toolCall: RealtimeTurnToolCall = {
+    arguments: asTrimmedString(event.arguments),
+    callId,
+    name,
+    responseId: realtimeResponseId(event)
+  }
+
+  if (deps.turnController) {
+    deps.turnController.functionCallDone(toolCall)
+
+    return
+  }
+
   let output: unknown
 
   try {
-    if (name === 'session_snapshot') {
-      // Reads stored state, so it must see the user's last sentence.
-      await deps.beforeToolCall?.()
-      output = await deps.request('artifact.list', { session_id: deps.runtimeSessionId })
-    } else if (name === 'visualize') {
-      let prompt = ''
-
-      try {
-        const parsed = JSON.parse(asTrimmedString(event.arguments) || '{}') as { prompt?: unknown }
-        prompt = asTrimmedString(parsed.prompt).slice(0, 1_000)
-      } catch {
-        // Invalid optional arguments degrade to transcript-only visualization.
-      }
-
-      // FIRE AND FORGET. A full redraw measured ~9s on the running app, and
-      // awaiting it froze the realtime turn for that entire time — the user
-      // heard "let me walk through it visually", then ten seconds of silence.
-      // The drawing reaches the canvas on its own via the `artifact.updated`
-      // gateway event, so the model has no reason to wait for it before
-      // carrying on talking.
-      //
-      // The transcription gate stays INSIDE the deferred work: the diagrammer
-      // reads the durable transcript, and drawing before the user's last
-      // sentence lands produces a diagram of the wrong conversation. Waiting
-      // here costs nothing now that nobody is waiting on us.
-      void (async () => {
-        await deps.beforeToolCall?.()
-        await deps.request('workbench.visualize', {
-          session_id: deps.runtimeSessionId,
-          prompt
-        })
-      })().catch(() => undefined)
-
-      // Deliberately NOT a success claim: the redraw may still fail, and the
-      // model must not announce a drawing that never arrived. `drawing` says
-      // the request is under way and nothing more.
-      output = { status: 'drawing' }
-    } else if (name === 'web_search') {
-      let query = ''
-      let limit = 5
-
-      try {
-        const parsed = JSON.parse(asTrimmedString(event.arguments) || '{}') as {
-          limit?: unknown
-          query?: unknown
-        }
-
-        query = asTrimmedString(parsed.query).slice(0, 500)
-
-        if (typeof parsed.limit === 'number' && Number.isFinite(parsed.limit)) {
-          limit = Math.min(Math.max(Math.trunc(parsed.limit), 1), 5)
-        }
-      } catch {
-        // Invalid search arguments become a structured tool error below.
-      }
-
-      output = query
-        ? await deps.request('voice.realtime.web_search', {
-            session_id: deps.runtimeSessionId,
-            query,
-            limit
-          })
-        : { error: 'web_search is missing a query' }
-    } else {
-      const surgical = surgicalToolRequest(name, asTrimmedString(event.arguments))
-
-      if (surgical) {
-        // Straight to persistence: no diagrammer, no multi-second redraw, and
-        // deliberately NO transcription gate. These tools act on ids the model
-        // already holds and never read the transcript, so gating them would
-        // add a stall to the one path whose whole purpose is to feel instant.
-        output = await deps.request(surgical.method, {
-          session_id: deps.runtimeSessionId,
-          ...surgical.params
-        })
-      } else if ((SURGICAL_TOOL_NAMES as readonly string[]).includes(name)) {
-        output = { error: `${name} is missing required arguments` }
-      } else {
-        output = { error: `Unsupported voice tool: ${name || '<missing>'}` }
-      }
-    }
+    output = await executeRealtimeVoiceTool(toolCall, deps)
   } catch (error) {
     output = { error: error instanceof Error ? error.message : String(error) }
   }

@@ -39,11 +39,29 @@ export function matchNarrationNode(
     return names.map(name => ({ ...name, nodeId: node.id }))
   })
 
-  candidates.sort((left, right) => {
+  const matches = candidates
+    .map(candidate => {
+      const needle = ` ${candidate.text} `
+      const start = haystack.lastIndexOf(needle)
+
+      return { ...candidate, end: start < 0 ? -1 : start + needle.length }
+    })
+    .filter(candidate => candidate.end >= 0)
+
+  // Follow speech chronologically. If two names end at the same position
+  // ("API Gateway" and "Gateway" in the same phrase), the longer exact label
+  // wins; otherwise the latest completed mention wins, regardless of length.
+  matches.sort((left, right) => {
+    const recency = right.end - left.end
+
+    if (recency) {
+      return recency
+    }
+
     const length = right.text.length - left.text.length
 
     return length || (left.type === right.type ? 0 : left.type === 'label' ? -1 : 1)
   })
 
-  return candidates.find(candidate => haystack.includes(` ${candidate.text} `))?.nodeId ?? null
+  return matches[0]?.nodeId ?? null
 }

@@ -57,6 +57,21 @@ describe('buildSketchDocument', () => {
     expect(html).toContain('overflow:hidden!important')
   })
 
+  it('wraps authored markup in a host-owned scale-to-fit viewport', () => {
+    // Real broken sketch: authored 866px of content inside a 484px grid. The
+    // outer iframe/body fit after the first fix, but the model's own overflow
+    // region still rendered a scrollbar. The host must fit the WHOLE authored
+    // scene, not only its outer box.
+    const { html } = buildSketchDocument(
+      '<style>.scene{height:900px;overflow:auto}</style><div class="scene">x</div>'
+    )
+
+    expect(html).toContain('id="hermes-sketch-root"')
+    expect(html).toContain('data-hermes-viewport-fit')
+    expect(html).toContain("addEventListener('resize',fit)")
+    expect(html).toContain('MutationObserver')
+  })
+
   it('strips <base> tags that would repoint relative URLs', () => {
     const { html } = buildSketchDocument('<base href="https://evil.test/"><p>x</p>')
     expect(html).not.toMatch(/<base\b/i)
@@ -105,8 +120,10 @@ describe('buildSketchDocument', () => {
     const result = buildSketchDocument(big)
     expect(result.truncated).toBe(true)
     // Wrapper overhead is the chrome plus the injected offline runtime; the
-    // model's own bytes are still capped at MAX_SKETCH_HTML_BYTES.
-    expect(result.html.length).toBeLessThan(big.length + 1000 + SKETCH_RUNTIME_BYTES)
+    // model's own bytes are still capped at MAX_SKETCH_HTML_BYTES. Keep the
+    // host-owned CSP/viewport/fit wrapper below a small fixed 4 KiB budget so
+    // this safeguard cannot quietly become another model-sized payload.
+    expect(result.html.length).toBeLessThan(big.length + 4 * 1024 + SKETCH_RUNTIME_BYTES)
     expect(result.html.length).toBeGreaterThan(MAX_SKETCH_HTML_BYTES)
   })
 

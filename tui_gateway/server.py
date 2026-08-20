@@ -1004,6 +1004,19 @@ def _teardown_popped_session(
                 )
         except Exception:
             logger.debug("failed waiting for session turn thread", exc_info=True)
+    # Retire background canvas work before tearing down the session. The
+    # watcher registry is keyed by the durable session id, not the runtime id;
+    # without this call a pending timer survives the chat and can spend a model
+    # request plus mutate its stored canvas after the user has left.
+    stored_session_id = str(session.get("session_key") or "").strip()
+    if stored_session_id:
+        try:
+            from workbench_watch_runtime import forget_session
+
+            forget_session(stored_session_id)
+        except Exception:
+            logger.debug("failed retiring workbench watcher", exc_info=True)
+
     _teardown_session(session, end_reason=end_reason)
     return True
 

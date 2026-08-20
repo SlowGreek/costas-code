@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createPendingTranscriptionTracker,
+  MAX_WORKBENCH_CONTEXT_CHARS,
   routeRealtimeServerEvent,
   startRealtimeVoiceConnection
 } from './realtime-voice'
@@ -600,6 +601,45 @@ describe('startRealtimeVoiceConnection', () => {
     expect(sent.some(e => e.type === 'conversation.item.create')).toBe(true)
     expect(sent.some(e => e.type === 'response.create')).toBe(false)
     expect(sent.find(e => e.type === 'conversation.item.create')?.item?.role).toBe('system')
+  })
+
+  it('does not truncate an authoritative canvas snapshot mid-object', async () => {
+    // Context sync appends a semantic event PLUS the current authoritative
+    // snapshot. On a real graph that is routinely >500 characters. The old
+    // cap sliced it mid-JSON, leaving the voice model with an unparsable/stale
+    // world view exactly when the canvas became interesting.
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+
+    const nodes = Array.from({ length: 40 }, (_, index) => ({
+      id: `node-${index}`,
+      label: `Meaningful node label ${index} with enough semantic detail to remain distinguishable`,
+      location: index % 2 ? 'far right' : 'upper left'
+    }))
+
+    const fact = `Canvas changed. Current canvas state (authoritative): ${JSON.stringify({
+      edges: Array.from({ length: 80 }, (_, index) => ({
+        from: `node-${index % 40}`,
+        id: `edge-${index}`,
+        to: `node-${(index + 1) % 40}`
+      })),
+      nodes
+    })}`
+
+    harness.connection.appendContext(fact)
+
+    const event = harness.sent
+      .map(raw => JSON.parse(raw) as { item?: { content?: { text?: string }[] }; type: string })
+      .find(item => item.type === 'conversation.item.create')
+
+    const received = event?.item?.content?.[0]?.text ?? ''
+
+    expect(fact.length).toBeGreaterThan(4_000)
+    expect(fact.length).toBeLessThan(MAX_WORKBENCH_CONTEXT_CHARS)
+    expect(received).toBe(fact)
+    expect(received.endsWith('}]}')).toBe(true)
   })
 
   it('ignores an empty append rather than sending a blank turn', async () => {

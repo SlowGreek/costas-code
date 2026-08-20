@@ -64,8 +64,61 @@ const BASE_STYLE =
   'max-width:100%!important;height:100%!important;min-height:0!important;max-height:100%!important;' +
   'background:#0b0d10;color:#e6e9ef;font-family:ui-sans-serif,system-ui,sans-serif;' +
   'overflow:hidden!important}' +
-  'body{position:relative}body>*{max-width:100%!important;max-height:100%!important}' +
+  'body{position:relative}' +
+  '#hermes-sketch-root{position:absolute;inset:0;overflow:hidden;transform-origin:0 0}' +
+  '#hermes-sketch-root>*{max-width:100%!important;max-height:100%!important}' +
   'canvas,svg,img,video{display:block;max-width:100%!important;max-height:100%!important}</style>'
+
+/**
+ * Scale an authored scene into the real iframe viewport.
+ *
+ * Bounding html/body is not enough: the reported sketch had a responsive
+ * `.grid` whose own overflow region was 866px tall inside a 484px box. The
+ * outer document fit perfectly while a nested scrollbar remained. Expanding
+ * the root's logical dimensions and scaling it back down gives authored
+ * percentage/calc layouts enough room without clipping any content.
+ */
+const VIEWPORT_FIT_SCRIPT = `<script data-hermes-viewport-fit>(function(){
+  var root=document.getElementById('hermes-sketch-root');if(!root)return;
+  var raf=0;
+  function fit(){
+    cancelAnimationFrame(raf);
+    raf=requestAnimationFrame(function(){
+      root.style.transform='none';root.style.width='100%';root.style.height='100%';
+      requestAnimationFrame(function(){
+        var needW=root.scrollWidth,needH=root.scrollHeight,rootRect=root.getBoundingClientRect();
+        root.querySelectorAll('*').forEach(function(el){
+          var rect=el.getBoundingClientRect();
+          needW=Math.max(needW,(rect.left-rootRect.left)+el.scrollWidth);
+          needH=Math.max(needH,(rect.top-rootRect.top)+el.scrollHeight);
+        });
+        var scale=Math.min(1,root.clientWidth/Math.max(1,needW),root.clientHeight/Math.max(1,needH));
+        var viewportW=root.clientWidth,viewportH=root.clientHeight;
+        function apply(next,attempt){
+          if(next>=0.999)return;
+          root.style.width=(100/next)+'%';root.style.height=(100/next)+'%';
+          root.style.transform='scale('+next+')';
+          if(attempt>=3)return;
+          requestAnimationFrame(function(){
+            var extraW=0,extraH=0;
+            root.querySelectorAll('*').forEach(function(el){
+              extraW=Math.max(extraW,el.scrollWidth-el.clientWidth);
+              extraH=Math.max(extraH,el.scrollHeight-el.clientHeight);
+            });
+            if(extraW>2||extraH>2){
+              var refined=Math.min(next,viewportW/Math.max(1,root.clientWidth+extraW),viewportH/Math.max(1,root.clientHeight+extraH));
+              if(refined<next-0.001)apply(refined,attempt+1);
+            }
+          });
+        }
+        apply(scale,0);
+      });
+    });
+  }
+  addEventListener('resize',fit);addEventListener('load',fit);
+  new MutationObserver(fit).observe(root,{childList:true,subtree:true});
+  fit();
+})()</script>`
 
 function stripBaseTags(html: string): string {
   return html.replace(/<base\b[^>]*>/gi, '')
@@ -145,8 +198,10 @@ export function buildSketchDocument(raw: unknown): SketchDocumentResult {
     '<meta name="referrer" content="no-referrer">' +
     BASE_STYLE +
     SKETCH_RUNTIME_SCRIPT +
-    '</head><body>' +
+    '</head><body><div id="hermes-sketch-root">' +
     inner +
+    '</div>' +
+    VIEWPORT_FIT_SCRIPT +
     '</body></html>'
 
   return { html, truncated }

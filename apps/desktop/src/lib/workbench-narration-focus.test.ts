@@ -6,7 +6,8 @@ const nodes = [
   { id: 'api-gateway', label: 'API Gateway' },
   { id: 'gateway', label: 'Gateway' },
   { id: 'database', label: 'DB' },
-  { id: 'worker-2', label: 'Background Worker' }
+  { id: 'worker-2', label: 'Background Worker' },
+  { id: 'ranker', label: 'Ranker' }
 ]
 
 describe('matchNarrationNode', () => {
@@ -20,7 +21,16 @@ describe('matchNarrationNode', () => {
     expect(matchNarrationNode('The background workers are next.', nodes)).toBeNull()
   })
 
-  it('chooses the longest exact label when matches overlap', () => {
+  it('follows the most recently named node during a walkthrough', () => {
+    // The hook accumulates the whole response so labels can span transcript
+    // chunks. Longest-match over that whole buffer gets stuck on an earlier
+    // long label; narration focus must move to the latest thing she said.
+    expect(
+      matchNarrationNode('Start with Background Worker. Next, the Ranker scores candidates.', nodes)
+    ).toBe('ranker')
+  })
+
+  it('uses longest-label priority only when matches share the same mention', () => {
     expect(matchNarrationNode('Start at API Gateway.', nodes)).toBe('api-gateway')
   })
 

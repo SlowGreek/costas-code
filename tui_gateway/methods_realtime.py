@@ -57,6 +57,17 @@ def _(rid, params: dict) -> dict:
         from workbench_watcher import watcher_config_from
 
         watcher = watcher_config_from(cfg)
+        frozen_watcher = {
+            "enabled": watcher.enabled,
+            "mode": watcher.mode,
+            "pipeline": watcher.pipeline,
+            "debounce_seconds": watcher.debounce_seconds,
+        }
+        # Ownership is a property of this Realtime session, not of the process's
+        # current config. The client tool list is fixed by this token response;
+        # freezing the same watcher config on the session prevents a later
+        # active↔shadow edit from creating zero or two redraw owners.
+        session["_workbench_watcher"] = frozen_watcher
         token["workbench_watcher"] = {
             "active": watcher.active,
             "pipeline": watcher.pipeline,
@@ -117,7 +128,10 @@ def _(rid, params: dict) -> dict:
                 # Handler bodies execute in the gateway's injected namespace,
                 # so this module's own globals are NOT visible here — import
                 # the helper, and hand it the server helpers explicitly.
-                from tui_gateway.methods_realtime import _watch_transcript
+                from tui_gateway.methods_realtime import (
+                    _watch_transcript,
+                    _watcher_cfg_for_session,
+                )
 
                 _watch_transcript(
                     session,
@@ -125,13 +139,27 @@ def _(rid, params: dict) -> dict:
                     role,
                     text,
                     str(params.get("session_id") or ""),
-                    cfg=_load_cfg(),
+                    cfg=_watcher_cfg_for_session(session, _load_cfg()),
                     open_db=_session_db,
                     emit=_emit,
                 )
             return _ok(rid, result)
         except Exception as exc:
             return _err(rid, 4613, f"could not persist Realtime transcript: {exc}")
+
+
+def _watcher_cfg_for_session(session: dict, cfg):
+    """Overlay this voice connection's frozen watcher ownership onto config."""
+    frozen = session.get("_workbench_watcher")
+    if not isinstance(frozen, dict):
+        return cfg
+
+    root = dict(cfg) if isinstance(cfg, dict) else {}
+    workbench = root.get("workbench")
+    workbench = dict(workbench) if isinstance(workbench, dict) else {}
+    workbench["watcher"] = dict(frozen)
+    root["workbench"] = workbench
+    return root
 
 
 def _watch_transcript(

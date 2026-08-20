@@ -84,6 +84,9 @@ export function createPendingTranscriptionTracker(): PendingTranscriptionTracker
   }
 }
 
+/** Bound for one authoritative canvas snapshot appended to Realtime context. */
+export const MAX_WORKBENCH_CONTEXT_CHARS = 16_000
+
 interface RealtimeTokenResponse {
   client_secret: string
   expires_at?: number
@@ -491,7 +494,12 @@ export async function startRealtimeVoiceConnection(
   return {
     awaitPendingTranscription: timeoutMs => pendingTranscription.awaitSettled(timeoutMs),
     appendContext: fact => {
-      const text = fact.trim().slice(0, 500)
+      // Match the authoritative snapshot budget used by
+      // updateWorkbenchContext. Five hundred characters truncated a normal
+      // 10–20-node JSON snapshot mid-object and made the event-source channel
+      // confidently stale. Sixteen thousand is bounded (~4K tokens) while
+      // preserving a maximum-size 40-node/80-edge semantic graph.
+      const text = fact.trim().slice(0, MAX_WORKBENCH_CONTEXT_CHARS)
 
       if (!channelOpen || closed || !text) {
         return
@@ -550,7 +558,7 @@ export async function startRealtimeVoiceConnection(
       clearAssistantAudio()
     },
     updateWorkbenchContext: summary => {
-      workbenchContext = summary.trim().slice(0, 4_000)
+      workbenchContext = summary.trim().slice(0, MAX_WORKBENCH_CONTEXT_CHARS)
 
       if (channelOpen && !closed) {
         send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))

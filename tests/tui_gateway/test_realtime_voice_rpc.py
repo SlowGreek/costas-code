@@ -117,6 +117,64 @@ def test_realtime_token_exposes_when_the_active_watcher_owns_redraws(monkeypatch
     }
 
 
+def test_realtime_token_freezes_watcher_ownership_for_the_voice_connection(monkeypatch):
+    """Mid-session config flips must not create zero or two redraw owners.
+
+    The voice tool list is fixed when the Realtime session opens. The watcher
+    used to re-read config on every utterance, so active→shadow left NO redraw
+    owner and shadow→active created TWO. Token mint must freeze the watcher
+    config onto the live session, and transcript handling must use that copy.
+    """
+    import copy
+    from tui_gateway import methods_realtime
+
+    runtime_id = "runtime-frozen-watcher"
+    live_session = {"session_key": "stored-frozen", "profile_home": None, "history": []}
+    server._sessions[runtime_id] = live_session
+    active_cfg = copy.deepcopy(DEFAULT_CONFIG)
+    active_cfg["workbench"]["watcher"].update(
+        {"enabled": True, "mode": "active", "pipeline": "direct"}
+    )
+    shadow_cfg = copy.deepcopy(active_cfg)
+    shadow_cfg["workbench"]["watcher"]["mode"] = "shadow"
+
+    monkeypatch.setattr(server, "_load_cfg", lambda: active_cfg)
+    monkeypatch.setattr(tool_backend_helpers, "resolve_openai_audio_api_key", lambda: "sk-test")
+    monkeypatch.setattr(
+        realtime_voice,
+        "create_realtime_client_secret",
+        lambda **_: {"client_secret": "ek_short"},
+    )
+
+    captured = {}
+    monkeypatch.setattr(
+        methods_realtime,
+        "_watch_transcript",
+        lambda *_args, **kwargs: captured.update(cfg=kwargs["cfg"]),
+    )
+
+    try:
+        server._methods["voice.realtime.token"]("token", {"session_id": runtime_id})
+        # User edits config while this voice connection remains open.
+        monkeypatch.setattr(server, "_load_cfg", lambda: shadow_cfg)
+        server._methods["voice.realtime.transcript"](
+            "transcript",
+            {
+                "session_id": runtime_id,
+                "item_id": "u1",
+                "role": "user",
+                "text": "show me this",
+            },
+        )
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    watcher = captured["cfg"]["workbench"]["watcher"]
+    assert watcher["enabled"] is True
+    assert watcher["mode"] == "active"
+    assert watcher["pipeline"] == "direct"
+
+
 def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
     db = SessionDB(db_path=tmp_path / "state.db")
     runtime_id = "runtime-session"

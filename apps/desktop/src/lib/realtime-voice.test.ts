@@ -738,6 +738,153 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(3)
   })
 
+  it('finishes ordinary conversation without invoking Stop recovery', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-1',
+      item_id: 'assistant-1',
+      transcript: 'Hey, how are you?'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+    await Promise.resolve()
+
+    expect(harness.sentTypes()).not.toContain('response.create')
+  })
+
+  it('finishes a one-shot tool answer without invoking Stop recovery', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-snapshot',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-2',
+      transcript: 'The canvas contains one map.'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+    await Promise.resolve()
+
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+  })
+
+  it('walks focus A then explanation A then focus B at the audio boundary', async () => {
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-mic',
+      name: 'focus',
+      arguments: '{"node_id":"mic"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'mic',
+        session_id: 'runtime-session'
+      })
+    )
+
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-mic',
+      transcript: 'Mic audio is where speech enters the system.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-vad',
+      name: 'focus',
+      arguments: '{"node_id":"vad"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+
+    await Promise.resolve()
+    expect(request).not.toHaveBeenCalledWith('workbench.focus', {
+      node_id: 'vad',
+      session_id: 'runtime-session'
+    })
+
+    harness.emit({ type: 'output_audio_buffer.stopped' })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'vad',
+        session_id: 'runtime-session'
+      })
+    )
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
+  })
+
+  it('drops a queued focus when the user barges in during its audio barrier', async () => {
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-1',
+      item_id: 'assistant-mic',
+      transcript: 'Mic audio is where speech enters.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-vad',
+      name: 'focus',
+      arguments: '{"node_id":"vad"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await Promise.resolve()
+    harness.emit({ type: 'input_audio_buffer.speech_started' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(request).not.toHaveBeenCalledWith('workbench.focus', {
+      node_id: 'vad',
+      session_id: 'runtime-session'
+    })
+    expect(harness.sentTypes()).toContain('response.cancel')
+    expect(harness.sentTypes()).toContain('output_audio_buffer.clear')
+    expect(harness.sentTypes()).not.toContain('response.create')
+  })
+
   it('releases every resource when closing with a pending tool call', async () => {
     const harness = await connectHarness()
 

@@ -116,10 +116,22 @@ jobs:
             ui-tui/packages/*/node_modules
             tests-js/node_modules
             web/node_modules
-          key: node-modules-scripts-${{ runner.os }}-node26-npm12-${{ hashFiles('package-lock.json') }}
+          key: node-modules-scripts-v2-${{ runner.os }}-node26-npm12-${{ hashFiles('package-lock.json') }}
+
+      - name: Validate cached native dependencies
+        id: native-cache
+        if: steps.node-modules-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          if node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "Cached node_modules is missing native optional dependencies; rebuilding."
+          fi
 
       - uses: ./.github/actions/retry
-        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        if: steps.node-modules-cache.outputs.cache-hit != 'true' || steps.native-cache.outputs.valid != 'true'
         with:
           command: npm ci
       - run: npm run --prefix ${{ matrix.package }} ${{ matrix.script }}

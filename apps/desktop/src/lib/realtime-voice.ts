@@ -115,10 +115,12 @@ export function boundWorkbenchContext(
   // independently so a pathological caller cannot consume the entire JSON
   // budget before compaction starts, while always preserving the marker.
   const prefixLimit = Math.min(1_000, Math.floor(maxChars / 4))
+
   const eventPrefix =
     rawEventPrefix.length > prefixLimit
       ? `${rawEventPrefix.slice(0, prefixLimit - 2)}… `
       : rawEventPrefix
+
   const prefix = markerAt >= 0 ? `${eventPrefix}${marker}` : ''
   const jsonText = markerAt >= 0 ? text.slice(markerAt + marker.length) : text
 
@@ -556,6 +558,7 @@ export async function startRealtimeVoiceConnection(
 
     closed = true
     channelOpen = false
+
     if (token.connection_id) {
       void options
         .request('voice.realtime.close', {
@@ -564,6 +567,7 @@ export async function startRealtimeVoiceConnection(
         })
         .catch(() => undefined)
     }
+
     tracks.forEach(track => track.stop())
     channel.close()
     peer.close()

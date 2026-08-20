@@ -4,9 +4,9 @@ import {
   boundWorkbenchContext,
   createPendingTranscriptionTracker,
   MAX_WORKBENCH_CONTEXT_CHARS,
+  type RealtimeTranscript,
   routeRealtimeServerEvent,
-  startRealtimeVoiceConnection,
-  type RealtimeTranscript
+  startRealtimeVoiceConnection
 } from './realtime-voice'
 
 describe('boundWorkbenchContext', () => {
@@ -34,7 +34,9 @@ describe('boundWorkbenchContext', () => {
         label: 'R'.repeat(190)
       }))
     }
+
     const result = boundWorkbenchContext(`Canvas changed. ${marker}${JSON.stringify(state)}`)
+
     const compacted = JSON.parse(result.slice(result.indexOf(marker) + marker.length)) as {
       context_truncated?: { nodes_total?: number }
     }

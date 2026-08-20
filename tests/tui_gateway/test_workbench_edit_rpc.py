@@ -65,6 +65,26 @@ def test_rename_bumps_semantic_rev_and_emits(wired):
     ] == "Planner"
 
 
+def test_add_node_bumps_semantic_rev_and_emits(wired):
+    _, runtime_id, emitted = wired
+    envelope = server._methods["workbench.edit"](
+        "r-add",
+        {
+            "session_id": runtime_id,
+            "edit": {"op": "add_node", "id": "planner", "label": "Planner", "kind": "agent"},
+        },
+    )
+    assert "error" not in envelope
+    artifact = envelope["result"]["artifact"]
+    assert artifact["semantic_rev"] == 2
+    assert artifact["payload"]["nodes"][-1] == {
+        "id": "planner",
+        "label": "Planner",
+        "kind": "agent",
+    }
+    assert ("artifact.updated", runtime_id, {"artifact": artifact}) in emitted
+
+
 def test_remove_drops_dangling_edges(wired):
     _, runtime_id, _ = wired
     envelope = server._methods["workbench.edit"](

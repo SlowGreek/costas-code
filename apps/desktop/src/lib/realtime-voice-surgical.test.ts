@@ -26,6 +26,20 @@ describe('surgicalToolRequest', () => {
     })
   })
 
+  it('routes add_node as one validated direct edit', () => {
+    expect(
+      surgicalToolRequest(
+        'add_node',
+        '{"id":"planner","label":"Planner","kind":"agent"}'
+      )
+    ).toEqual({
+      method: 'workbench.edit',
+      params: {
+        edit: { id: 'planner', kind: 'agent', label: 'Planner', op: 'add_node' }
+      }
+    })
+  })
+
   it('routes focus to a view-only RPC', () => {
     expect(surgicalToolRequest('focus', '{"node_id":"a"}')).toEqual({
       method: 'workbench.focus',
@@ -58,7 +72,7 @@ describe('surgicalToolRequest', () => {
   })
 
   it('never routes a surgical tool through the diagrammer RPC', () => {
-    for (const name of ['focus', 'rename', 'connect', 'disconnect', 'remove']) {
+    for (const name of ['focus', 'add_node', 'rename', 'connect', 'disconnect', 'remove']) {
       const routed = surgicalToolRequest(
         name,
         '{"node_id":"a","label":"x","from_id":"a","to_id":"b","edge_id":"e1"}'

@@ -348,7 +348,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
 
 const VOICE_OWNED_REDRAW_INSTRUCTIONS =
-  'You decide when the drawing should change in this session. Call visualize silently when the user asks to see, map, sketch, organize, simplify, redraw, or visualize something, or when a visual would clearly help answer what they are asking. Explicit visual requests such as “show me,” “redraw that,” and “what would that look like?” always require a canvas tool action; spoken description alone does not satisfy them. The mute diagrammer edits in place with validated ops whenever possible and replaces the whole artifact only for a genuine wholesale rethink or kind change. Conversation alone is often enough, so let the decision follow the user’s intent rather than drawing every thought. `status: drawing` means the update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
+  'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. Add and explain one presentation step before moving to the next. When the user asks “what would that look like?”, always perform a real canvas action. Use speed_draw—or the backward-compatible visualize alias—when the user asks for a fast whole-canvas draft, broad layout, or wholesale rethink without narration for every node. The mute diagrammer edits in place with validated operations whenever possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means a speed draw started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
   'You operate inside a real agent loop. One human turn may span several model responses and tool rounds; each response is one inference step, not necessarily the whole user turn. When you call a tool, the harness executes it, returns the tool result, and creates another inference in this same semantic turn. A tool-free response ends the loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. Return a tool-free response only when the original user request is satisfied or you genuinely need their input. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then visualize; snapshot, edit, then inspect again when confirmation matters. Keep the same conversational thought across every inference without greeting, restarting, or recapping.'
@@ -402,7 +402,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'visualize',
         description:
-          'Draw or redraw the whole diagram via the mute diagrammer. Use it for explicit visual requests including “show me,” “what would that look like?”, “simplify this,” “organize this,” map, sketch, redraw, and visualize. ' +
+          'Backward-compatible whole-diagram drawing through the mute diagrammer. Prefer direct add_node/connect/rename/remove for deliberate live drawing. Use this or speed_draw for a fast whole-canvas draft. ' +
           'After the first drawing, use it when the requested structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
           'It takes a few seconds, but the diagrammer edits in place with validated ops whenever possible; grouped removals/additions and layout-only changes do not require replacing the artifact. For one label, one link, or one box, use rename / connect / disconnect / remove instead, which are instant.',
         parameters: {
@@ -411,6 +411,22 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
             prompt: {
               type: 'string',
               description: 'Optional direction for what the diagrammer should emphasize or correct.'
+            }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'speed_draw',
+        description:
+          'Generate or restructure the whole canvas quickly through the mute diagrammer without narrating every node. Use for fast drafts, broad layouts, or wholesale redraws. For live narrated construction, use add_node and connect incrementally instead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'Direction for the fast whole-canvas draft.'
             }
           },
           additionalProperties: false
@@ -428,6 +444,22 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
             limit: { type: 'integer', minimum: 1, maximum: 5 }
           },
           required: ['query'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'add_node',
+        description:
+          'Add ONE new node directly to the current map. Use this to build ideas incrementally while talking. Add and explain one node before adding the next in a stepwise walkthrough. Use visualize/speed_draw only when the user wants a fast whole-canvas draft.',
+        parameters: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Stable unique node id.' },
+            label: { type: 'string', description: 'Visible node label.' },
+            kind: { type: 'string', description: 'Optional semantic kind such as agent, system, idea, or surface.' }
+          },
+          required: ['id', 'label'],
           additionalProperties: false
         }
       },
@@ -835,6 +867,21 @@ export function surgicalToolRequest(
     return nodeId ? { method: 'workbench.focus', params: { node_id: nodeId } } : null
   }
 
+  if (name === 'add_node') {
+    const id = text('id')
+    const label = text('label')
+    const kind = text('kind')
+
+    return id && label
+      ? {
+          method: 'workbench.edit',
+          params: {
+            edit: { id, label, op: 'add_node', ...(kind ? { kind } : {}) }
+          }
+        }
+      : null
+  }
+
   if (name === 'rename') {
     const nodeId = text('node_id')
     const label = text('label')
@@ -879,7 +926,14 @@ export function surgicalToolRequest(
 }
 
 /** Tool names handled by the surgical (no-model, instant) write path. */
-export const SURGICAL_TOOL_NAMES = ['focus', 'rename', 'connect', 'disconnect', 'remove'] as const
+export const SURGICAL_TOOL_NAMES = [
+  'focus',
+  'add_node',
+  'rename',
+  'connect',
+  'disconnect',
+  'remove'
+] as const
 
 export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): RealtimeToolLane {
   if (call.name === 'session_snapshot' || call.name === 'web_search') {
@@ -890,7 +944,11 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
     return 'gesture'
   }
 
-  if (call.name === 'visualize') {
+  if (call.name === 'add_node') {
+    return 'presentation'
+  }
+
+  if (call.name === 'visualize' || call.name === 'speed_draw') {
     return 'slow'
   }
 
@@ -933,7 +991,7 @@ export async function executeRealtimeVoiceTool(
     return deps.request('artifact.list', { session_id: deps.runtimeSessionId })
   }
 
-  if (name === 'visualize') {
+  if (name === 'visualize' || name === 'speed_draw') {
     let prompt = ''
 
     try {

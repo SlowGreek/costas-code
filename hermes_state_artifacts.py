@@ -382,12 +382,10 @@ def validate_semantic_payload(payload: Dict[str, Any], kind: str = "map") -> Non
 # only shrink the graph or add one edge, so it can never exceed a cap that the
 # stored payload already respected.
 
-SURGICAL_EDIT_OPS = ("rename", "connect", "disconnect", "remove")
+SURGICAL_EDIT_OPS = ("rename", "connect", "disconnect", "remove", "add_node")
 
-# A diff the diagrammer can emit instead of a whole new payload. `add_node` is
-# the one op a surgical edit never needed (the voice model only edits what is
-# already there) but a redraw always does.
-GRAPH_OPS = SURGICAL_EDIT_OPS + ("add_node",)
+# The diagrammer and direct voice tools deliberately share one operation set.
+GRAPH_OPS = SURGICAL_EDIT_OPS
 
 
 class GraphOpsError(ValueError):
@@ -438,6 +436,9 @@ def apply_surgical_edit(payload: Dict[str, Any], edit: Dict[str, Any]) -> Dict[s
 
     node_ids = {n.get("id") for n in nodes if isinstance(n, dict)}
     result = dict(payload)
+
+    if op == "add_node":
+        return _apply_add_node(payload, edit)
 
     if op == "rename":
         node_id = _edit_text(edit.get("node_id"), "node_id", MAX_GRAPH_ID_CHARS)

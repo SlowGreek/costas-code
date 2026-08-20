@@ -118,8 +118,10 @@ describe('voiceToolLane', () => {
     expect(voiceToolLane({ name: 'session_snapshot' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'web_search' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'focus' } as never)).toBe('gesture')
+    expect(voiceToolLane({ name: 'add_node' } as never)).toBe('presentation')
     expect(voiceToolLane({ name: 'rename' } as never)).toBe('edit')
     expect(voiceToolLane({ name: 'visualize' } as never)).toBe('slow')
+    expect(voiceToolLane({ name: 'speed_draw' } as never)).toBe('slow')
     expect(voiceToolLane({ name: 'unknown' } as never)).toBe('serial')
   })
 })
@@ -543,6 +545,8 @@ describe('startRealtimeVoiceConnection', () => {
     const names = update.session.tools.map(tool => tool.name)
 
     expect(names).toContain('visualize')
+    expect(names).toContain('speed_draw')
+    expect(names).toContain('add_node')
     expect(names).toContain('focus')
     expect(names).toContain('go_back')
     expect(update.session.tools.find(tool => tool.name === 'visualize')?.description).toMatch(
@@ -847,6 +851,62 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
   })
 
+  it('draws node A then explains A before drawing node B', async () => {
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-planner',
+      name: 'add_node',
+      arguments: '{"id":"planner","label":"Planner","kind":"agent"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.edit', {
+        edit: { id: 'planner', kind: 'agent', label: 'Planner', op: 'add_node' },
+        session_id: 'runtime-session'
+      })
+    )
+
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-planner',
+      transcript: 'Planner decides what should happen next.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-executor',
+      name: 'add_node',
+      arguments: '{"id":"executor","label":"Executor","kind":"system"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+
+    await Promise.resolve()
+    expect(request).not.toHaveBeenCalledWith('workbench.edit', {
+      edit: { id: 'executor', kind: 'system', label: 'Executor', op: 'add_node' },
+      session_id: 'runtime-session'
+    })
+
+    harness.emit({ type: 'output_audio_buffer.stopped' })
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.edit', {
+        edit: { id: 'executor', kind: 'system', label: 'Executor', op: 'add_node' },
+        session_id: 'runtime-session'
+      })
+    )
+  })
+
   it('drops a queued focus when the user barges in during its audio barrier', async () => {
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
     const harness = await connectHarness({}, undefined, request)
@@ -980,7 +1040,9 @@ describe('startRealtimeVoiceConnection', () => {
     expect(sessionUpdate.session.tools.map((tool: { name: string }) => tool.name)).toEqual([
       'session_snapshot',
       'visualize',
+      'speed_draw',
       // Surgical tools: one thing, instantly, with no diagrammer round trip.
+      'add_node',
       'focus',
       'go_back',
       'rename',

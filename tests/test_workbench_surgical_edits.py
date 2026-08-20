@@ -32,6 +32,18 @@ def test_rename_keeps_id_and_edges():
     validate_semantic_payload(out, "map")
 
 
+def test_add_node_appends_one_valid_node_without_mutating_input():
+    original = graph()
+    out = apply_surgical_edit(
+        original,
+        {"op": "add_node", "id": "planner", "label": "Planner", "kind": "agent"},
+    )
+    assert out["nodes"][-1] == {"id": "planner", "label": "Planner", "kind": "agent"}
+    assert out["edges"] == original["edges"]
+    assert original == graph()
+    validate_semantic_payload(out, "map")
+
+
 def test_remove_drops_node_and_dangling_edges():
     out = apply_surgical_edit(graph(), {"op": "remove", "node_id": "b"})
     assert [n["id"] for n in out["nodes"]] == ["a", "c"]

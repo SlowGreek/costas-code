@@ -36,7 +36,7 @@ export type RealtimeStopOutcome =
   | { kind: 'allow' }
   | { context: string; kind: 'continue_once' }
 
-export type RealtimeToolLane = 'edit' | 'gesture' | 'read' | 'serial' | 'slow'
+export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 'serial' | 'slow'
 
 interface RealtimeTurnControllerOptions {
   baseInstructions?: () => string
@@ -459,8 +459,9 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         }
 
         const lane = options.laneFor?.(call) ?? 'serial'
+        const presentation = lane === 'gesture' || lane === 'presentation'
 
-        if (lane === 'gesture' && turn.gestureNarrationPending) {
+        if (presentation && turn.gestureNarrationPending) {
           results.set(call.callId, {
             executed: false,
             output: {
@@ -473,7 +474,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
-        if (lane === 'gesture' && response.assistantText.trim() && audioPlaying) {
+        if (presentation && response.assistantText.trim() && audioPlaying) {
           await audioEndedPromise
 
           if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {
@@ -602,7 +603,9 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         if (result.executed) {
           turn.completedActions.push(call.name)
 
-          if ((options.laneFor?.(call) ?? 'serial') === 'gesture' && result.status === 'success') {
+          const lane = options.laneFor?.(call) ?? 'serial'
+
+          if ((lane === 'gesture' || lane === 'presentation') && result.status === 'success') {
             turn.gestureNarrationPending = true
           }
         }

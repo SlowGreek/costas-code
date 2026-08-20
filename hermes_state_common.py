@@ -452,9 +452,6 @@ CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_realtime_item
-    ON messages(session_id, platform_message_id)
-    WHERE platform_message_id LIKE 'realtime:%';
 -- Partial index for the Insights assistant tool-call scan
 -- (agent/insights.py _get_tool_usage / _get_skill_usage): those queries filter
 -- messages by role='assistant' AND tool_calls IS NOT NULL, a small fraction of
@@ -478,6 +475,9 @@ CREATE INDEX IF NOT EXISTS idx_async_delegations_delivery
 # existing databases. SCHEMA_SQL above is run by sqlite executescript
 # which would otherwise fail on legacy DBs ("no such column: active").
 DEFERRED_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_realtime_item
+    ON messages(session_id, platform_message_id)
+    WHERE platform_message_id LIKE 'realtime:%';
 CREATE INDEX IF NOT EXISTS idx_messages_session_active
     ON messages(session_id, active, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_active_null

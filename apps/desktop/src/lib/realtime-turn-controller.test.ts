@@ -153,19 +153,19 @@ describe('RealtimeTurnController', () => {
     ).toHaveLength(1)
   })
 
-  it('correlates child events without response ids to the current response', async () => {
+  it('rejects call events without response identity', async () => {
     const execute = vi.fn(async () => ({ ok: true }))
     const send = vi.fn()
     const controller = createRealtimeTurnController({ execute, send })
 
     controller.beginTurn('Inspect the canvas.')
-    controller.responseCreated('')
+    controller.responseCreated('response-1')
     controller.functionCallDone(call('', 'call-1', 'session_snapshot'))
-    const outcome = await controller.responseDone('')
+    const outcome = await controller.responseDone('response-1')
 
-    expect(execute).toHaveBeenCalledOnce()
-    expect(outcome).toEqual({ continued: true, settled: false })
-    expect(send.mock.calls.filter(([event]) => event.type === 'response.create')).toHaveLength(1)
+    expect(execute).not.toHaveBeenCalled()
+    expect(outcome).toEqual({ continued: false, settled: true })
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('settles a response with no tool calls', async () => {
@@ -235,12 +235,85 @@ describe('RealtimeTurnController', () => {
     expect(controller.activeTurn()).toBeNull()
   })
 
+  it('does not let stale response completion settle the next user turn', async () => {
+    const execute = vi.fn(async () => ({ ok: true }))
+    const controller = createRealtimeTurnController({ execute, send: vi.fn() })
+
+    controller.beginTurn('Turn A')
+    controller.responseCreated('response-a')
+    controller.interrupt()
+
+    const turnB = controller.beginTurn('Turn B')
+    controller.responseCreated('response-b')
+
+    await expect(controller.responseDone('response-a')).resolves.toEqual({
+      continued: false,
+      settled: false
+    })
+    expect(controller.activeTurn()?.id).toBe(turnB)
+
+    controller.functionCallDone(call('response-b', 'call-b', 'session_snapshot'))
+    await expect(controller.responseDone('response-b')).resolves.toEqual({
+      continued: true,
+      settled: false
+    })
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('does not execute calls from a cancelled provider response', async () => {
+    const execute = vi.fn(async () => ({ shouldNot: 'run' }))
+    const send = vi.fn()
+    const controller = createRealtimeTurnController({ execute, send })
+
+    controller.beginTurn('Cancelled request')
+    controller.responseCreated('response-cancelled')
+    controller.functionCallDone(
+      call('response-cancelled', 'call-cancelled', 'web_search')
+    )
+
+    await expect(controller.responseDone('response-cancelled', 'cancelled')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
+    expect(execute).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('freezes the call set when response completion begins', async () => {
+    const first = deferred<unknown>()
+
+    const execute = vi.fn(({ callId }: { callId: string }) =>
+      callId === 'call-first' ? first.promise : Promise.resolve({ late: true })
+    )
+
+    const send = vi.fn()
+    const controller = createRealtimeTurnController({ execute, send })
+
+    controller.beginTurn('One closed response batch')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-first', 'web_search'))
+    const completing = controller.responseDone('response-1')
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce())
+
+    controller.functionCallDone(call('response-1', 'call-late', 'session_snapshot'))
+    first.resolve({ first: true })
+    await completing
+
+    expect(execute).toHaveBeenCalledOnce()
+    expect(
+      send.mock.calls.filter(([event]) => event.type === 'conversation.item.create')
+    ).toHaveLength(1)
+    expect(send.mock.calls.filter(([event]) => event.type === 'response.create')).toHaveLength(1)
+  })
+
   it('bounds a stalled tool by the remaining semantic-turn deadline', async () => {
     vi.useFakeTimers()
     const sent: Record<string, unknown>[] = []
 
     const controller = createRealtimeTurnController({
       execute: () => new Promise(() => undefined),
+      laneFor: () => 'read',
       maxTurnMs: 1_000,
       send: event => sent.push(event)
     })
@@ -260,5 +333,38 @@ describe('RealtimeTurnController', () => {
     })
     expect(sent.at(-1)).toMatchObject({ response: { tool_choice: 'none' }, type: 'response.create' })
     vi.useRealTimers()
+  })
+
+  it('does not start another action after the turn deadline has elapsed', async () => {
+    let now = 0
+
+    const execute = vi.fn(async () => {
+      now = 1_000
+
+      return { ok: true }
+    })
+
+    const send = vi.fn()
+
+    const controller = createRealtimeTurnController({
+      execute,
+      maxTurnMs: 1_000,
+      now: () => now,
+      send
+    })
+
+    controller.beginTurn('Use at most the remaining time.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-1', 'rename'))
+    controller.functionCallDone(call('response-1', 'call-2', 'connect'))
+    await controller.responseDone('response-1')
+
+    expect(execute).toHaveBeenCalledOnce()
+
+    const outputs = send.mock.calls
+      .filter(([event]) => event.type === 'conversation.item.create')
+      .map(([event]) => JSON.parse(event.item.output))
+
+    expect(outputs).toEqual([{ ok: true }, { error: 'Voice tool timed out' }])
   })
 })

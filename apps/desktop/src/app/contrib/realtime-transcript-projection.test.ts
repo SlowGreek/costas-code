@@ -78,6 +78,7 @@ describe('appendRealtimeTranscript', () => {
     expect(grouped).toHaveLength(1)
     expect(chatMessageText(grouped[0])).toBe('First segment. Second segment.')
     expect(grouped[0]).toMatchObject({
+      id: 'realtime-turn:voice-turn-7',
       realtimeItemIds: ['assistant-1', 'assistant-2'],
       realtimeRowIds: [51, 52],
       semanticTurnId: 'voice-turn-7'
@@ -95,6 +96,46 @@ describe('appendRealtimeTranscript', () => {
         3
       )
     ).toBe(grouped)
+  })
+
+  it('does not move a late assistant continuation above a newer user turn', () => {
+    const first = appendRealtimeTranscript(
+      [],
+      {
+        item_id: 'assistant-1',
+        message_id: 51,
+        role: 'assistant',
+        semantic_turn_id: 'voice-turn-7',
+        text: 'Old answer.'
+      },
+      1
+    )
+
+    const withUser = appendRealtimeTranscript(
+      first,
+      {
+        item_id: 'user-2',
+        message_id: 52,
+        role: 'user',
+        semantic_turn_id: 'voice-turn-8',
+        text: 'New question.'
+      },
+      2
+    )
+
+    const late = appendRealtimeTranscript(
+      withUser,
+      {
+        item_id: 'assistant-late',
+        message_id: 53,
+        role: 'assistant',
+        semantic_turn_id: 'voice-turn-7',
+        text: 'Late old tail.'
+      },
+      3
+    )
+
+    expect(late.map(chatMessageText)).toEqual(['Old answer.', 'New question.', 'Late old tail.'])
   })
 
   it('ignores malformed or unsupported transcript events', () => {

@@ -26,12 +26,12 @@ export function appendRealtimeTranscript(
     return messages
   }
 
-  const id = `realtime:${itemId}`
+  const sourceId = `realtime:${itemId}`
 
   if (
     messages.some(
       message =>
-        message.id === id ||
+        message.id === sourceId ||
         message.rowId === rowId ||
         message.realtimeItemIds?.includes(itemId) ||
         message.realtimeRowIds?.includes(rowId)
@@ -40,12 +40,18 @@ export function appendRealtimeTranscript(
     return messages
   }
 
-  if (role === 'assistant' && semanticTurnId) {
-    const targetIndex = messages.findLastIndex(
-      message => message.role === 'assistant' && message.semanticTurnId === semanticTurnId
-    )
+  const targetIndex =
+    role === 'assistant' && semanticTurnId
+      ? messages.findLastIndex(
+          message => message.role === 'assistant' && message.semanticTurnId === semanticTurnId
+        )
+      : -1
 
-    if (targetIndex >= 0) {
+  const newerUserExists =
+    targetIndex >= 0 && messages.slice(targetIndex + 1).some(message => message.role === 'user')
+
+  if (role === 'assistant' && semanticTurnId) {
+    if (targetIndex >= 0 && !newerUserExists) {
       const target = messages[targetIndex]
 
       const priorText = target.parts
@@ -72,7 +78,10 @@ export function appendRealtimeTranscript(
   return [
     ...messages,
     {
-      id,
+      id:
+        role === 'assistant' && semanticTurnId && targetIndex < 0
+          ? `realtime-turn:${semanticTurnId}`
+          : sourceId,
       parts: [{ text, timestamp, type: 'text' }],
       ...(semanticTurnId
         ? {

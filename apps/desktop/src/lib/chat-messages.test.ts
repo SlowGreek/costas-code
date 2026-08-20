@@ -42,9 +42,34 @@ describe('toChatMessages', () => {
     expect(messages).toHaveLength(1)
     expect(chatMessageText(messages[0])).toBe('First segment. Second segment.')
     expect(messages[0]).toMatchObject({
+      id: 'realtime-turn:voice-turn-7',
       realtimeRowIds: [51, 52],
       semanticTurnId: 'voice-turn-7'
     })
+  })
+
+  it('does not hydrate a late assistant continuation above a newer user row', () => {
+    const messages = toChatMessages([
+      {
+        content: 'Old answer.',
+        display_kind: 'realtime_transcript',
+        display_metadata: { semantic_turn_id: 'voice-turn-7' },
+        id: 51,
+        role: 'assistant',
+        timestamp: 1
+      },
+      { content: 'New question.', id: 52, role: 'user', timestamp: 2 },
+      {
+        content: 'Late old tail.',
+        display_kind: 'realtime_transcript',
+        display_metadata: { semantic_turn_id: 'voice-turn-7' },
+        id: 53,
+        role: 'assistant',
+        timestamp: 3
+      }
+    ])
+
+    expect(messages.map(chatMessageText)).toEqual(['Old answer.', 'New question.', 'Late old tail.'])
   })
 
   it('rebuilds the full command from a gateway tool row carrying args', () => {

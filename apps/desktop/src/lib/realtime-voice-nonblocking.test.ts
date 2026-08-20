@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { routeRealtimeServerEvent } from './realtime-voice'
+import { executeRealtimeVoiceTool } from './realtime-voice'
 
 /**
  * `visualize` must not block the conversation.
@@ -18,36 +18,36 @@ import { routeRealtimeServerEvent } from './realtime-voice'
  */
 const deps = (request: ReturnType<typeof vi.fn>) => ({
   request,
-  runtimeSessionId: 'sess-1',
-  send: vi.fn()
+  runtimeSessionId: 'sess-1'
 })
 
 const visualizeEvent = {
-  type: 'response.function_call_arguments.done',
-  call_id: 'call-1',
+  arguments: '{"prompt":"add the memory layer"}',
+  callId: 'call-1',
   name: 'visualize',
-  arguments: '{"prompt":"add the memory layer"}'
+  responseId: 'response-1'
 }
 
 describe('visualize does not block the conversation', () => {
   it('returns a tool result immediately instead of awaiting the redraw', async () => {
     let resolveRedraw: ((value: unknown) => void) | undefined
+
     const request = vi.fn(
       () =>
         new Promise(resolve => {
           resolveRedraw = resolve
         })
     )
+
     const d = deps(request)
 
-    await routeRealtimeServerEvent(visualizeEvent, d as never)
+    const output = await executeRealtimeVoiceTool(visualizeEvent, d as never)
 
     // The slow redraw is still in flight...
     expect(request).toHaveBeenCalledWith('workbench.visualize', expect.anything())
-    // ...but the model already has its result and can keep speaking.
-    const sent = d.send.mock.calls.map(c => c[0] as { item?: { type?: string }; type: string })
-    expect(sent.some(e => e.item?.type === 'function_call_output')).toBe(true)
-    expect(sent.some(e => e.type === 'response.create')).toBe(true)
+    // ...but the controller already has its result and can keep the semantic
+    // turn moving once the enclosing provider response closes.
+    expect(output).toEqual({ status: 'drawing' })
 
     resolveRedraw?.({ artifact: { semantic_rev: 2 } })
   })
@@ -56,17 +56,11 @@ describe('visualize does not block the conversation', () => {
     const request = vi.fn(() => new Promise(() => {}))
     const d = deps(request)
 
-    await routeRealtimeServerEvent(visualizeEvent, d as never)
-
-    const output = d.send.mock.calls
-      .map(c => c[0] as { item?: { output?: string; type?: string } })
-      .find(e => e.item?.type === 'function_call_output')
-
-    const parsed = JSON.parse(output?.item?.output ?? '{}') as { status?: string }
+    const output = (await executeRealtimeVoiceTool(visualizeEvent, d as never)) as { status?: string }
 
     // Claiming success would make the model announce a drawing that may still
     // fail; claiming nothing would make it think the tool broke.
-    expect(parsed.status).toBe('drawing')
+    expect(output.status).toBe('drawing')
   })
 
   it('still awaits surgical edits, which are milliseconds not seconds', async () => {
@@ -75,22 +69,16 @@ describe('visualize does not block the conversation', () => {
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 5 } }))
     const d = deps(request)
 
-    await routeRealtimeServerEvent(
+    const output = await executeRealtimeVoiceTool(
       {
-        type: 'response.function_call_arguments.done',
-        call_id: 'call-2',
+        arguments: '{"node_id":"a","label":"Planner"}',
+        callId: 'call-2',
         name: 'rename',
-        arguments: '{"node_id":"a","label":"Planner"}'
+        responseId: 'response-1'
       },
       d as never
     )
 
-    const output = d.send.mock.calls
-      .map(c => c[0] as { item?: { output?: string; type?: string } })
-      .find(e => e.item?.type === 'function_call_output')
-
-    const parsed = JSON.parse(output?.item?.output ?? '{}') as { artifact?: unknown }
-
-    expect(parsed.artifact).toBeDefined()
+    expect((output as { artifact?: unknown }).artifact).toBeDefined()
   })
 })

@@ -554,7 +554,13 @@ export async function startRealtimeVoiceConnection(
       ? `${baseInstructions}\n\nCurrent workbench state (authoritative summary):\n${workbenchContext}`
       : baseInstructions
 
-  const send = (event: Record<string, unknown>) => channel.send(JSON.stringify(event))
+  const send = (event: Record<string, unknown>) => {
+    if (!channelOpen || closed) {
+      return
+    }
+
+    channel.send(JSON.stringify(event))
+  }
 
   const voiceToolDeps = {
     beforeToolCall: options.beforeToolCall,
@@ -884,6 +890,15 @@ const realtimeResponseId = (event: RealtimeEvent): string => {
   return asTrimmedString(event.response_id) || asTrimmedString(response?.id)
 }
 
+const realtimeResponseStatus = (event: RealtimeEvent): string => {
+  const response =
+    event.response && typeof event.response === 'object'
+      ? (event.response as Record<string, unknown>)
+      : null
+
+  return asTrimmedString(response?.status) || 'completed'
+}
+
 /** Execute one voice-facade call without deciding when the provider continues. */
 export async function executeRealtimeVoiceTool(
   call: RealtimeTurnToolCall,
@@ -997,7 +1012,10 @@ export async function routeRealtimeServerEvent(
     deps.onAssistantAudioEnded?.()
 
     const outcome = deps.turnController
-      ? await deps.turnController.responseDone(realtimeResponseId(event))
+      ? await deps.turnController.responseDone(
+          realtimeResponseId(event),
+          realtimeResponseStatus(event)
+        )
       : { continued: false, settled: true }
 
     if (outcome.settled) {
@@ -1018,6 +1036,7 @@ export async function routeRealtimeServerEvent(
   }
 
   if (type === 'input_audio_buffer.speech_started') {
+    deps.send({ type: 'response.cancel' })
     deps.turnController?.interrupt()
     deps.onStatus?.('listening')
     // Barge-in. `interrupt_response` stops the SERVER generating, but audio
@@ -1114,27 +1133,9 @@ export async function routeRealtimeServerEvent(
     responseId: realtimeResponseId(event)
   }
 
-  if (deps.turnController) {
-    deps.turnController.functionCallDone(toolCall)
-
+  if (!deps.turnController) {
     return
   }
 
-  let output: unknown
-
-  try {
-    output = await executeRealtimeVoiceTool(toolCall, deps)
-  } catch (error) {
-    output = { error: error instanceof Error ? error.message : String(error) }
-  }
-
-  deps.send({
-    type: 'conversation.item.create',
-    item: {
-      type: 'function_call_output',
-      call_id: callId,
-      output: JSON.stringify(output)
-    }
-  })
-  deps.send({ type: 'response.create' })
+  deps.turnController.functionCallDone(toolCall)
 }

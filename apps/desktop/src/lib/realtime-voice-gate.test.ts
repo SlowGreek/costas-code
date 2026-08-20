@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { routeRealtimeServerEvent } from './realtime-voice'
+import { executeRealtimeVoiceTool } from './realtime-voice'
 
 /**
  * The transcription gate belongs on the SLOW path only.
@@ -27,25 +27,22 @@ const slowGate = () => {
 }
 
 const call = (name: string, args: string) => ({
-  type: 'response.function_call_arguments.done',
-  call_id: `call-${name}`,
+  arguments: args,
+  callId: `call-${name}`,
   name,
-  arguments: args
+  responseId: 'response-1'
 })
 
 describe('the transcription gate does not slow the instant tools', () => {
   it('does not gate focus behind pending transcription', async () => {
     const { beforeToolCall } = slowGate()
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 2 } }))
-    const send = vi.fn()
-
     // The gate is never released. If focus waited on it, this would hang.
-    await routeRealtimeServerEvent(call('focus', '{"node_id":"planner"}'), {
+    await executeRealtimeVoiceTool(call('focus', '{"node_id":"planner"}'), {
       beforeToolCall,
       request,
-      runtimeSessionId: 'sess-1',
-      send
-    } as never)
+      runtimeSessionId: 'sess-1'
+    })
 
     expect(request).toHaveBeenCalledWith('workbench.focus', {
       node_id: 'planner',
@@ -64,12 +61,11 @@ describe('the transcription gate does not slow the instant tools', () => {
       const { beforeToolCall } = slowGate()
       const request = vi.fn(async () => ({ artifact: { semantic_rev: 2 } }))
 
-      await routeRealtimeServerEvent(call(name, args), {
+      await executeRealtimeVoiceTool(call(name, args), {
         beforeToolCall,
         request,
-        runtimeSessionId: 'sess-1',
-        send: vi.fn()
-      } as never)
+        runtimeSessionId: 'sess-1'
+      })
 
       expect(request, `${name} should not wait for transcription`).toHaveBeenCalled()
     }
@@ -80,33 +76,32 @@ describe('the transcription gate does not slow the instant tools', () => {
     // last sentence lands draws the wrong conversation.
     const { beforeToolCall, release } = slowGate()
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 2 } }))
-    const send = vi.fn()
 
-    const routed = routeRealtimeServerEvent(call('visualize', '{}'), {
+    const routed = executeRealtimeVoiceTool(call('visualize', '{}'), {
       beforeToolCall,
       request,
-      runtimeSessionId: 'sess-1',
-      send
-    } as never)
+      runtimeSessionId: 'sess-1'
+    })
 
     await Promise.resolve()
     expect(request).not.toHaveBeenCalled()
 
     release()
     await routed
-    expect(request).toHaveBeenCalledWith('workbench.visualize', expect.anything())
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.visualize', expect.anything())
+    )
   })
 
   it('STILL gates session_snapshot, which reads stored state', async () => {
     const { beforeToolCall, release } = slowGate()
     const request = vi.fn(async () => ({ artifacts: [] }))
 
-    const routed = routeRealtimeServerEvent(call('session_snapshot', '{}'), {
+    const routed = executeRealtimeVoiceTool(call('session_snapshot', '{}'), {
       beforeToolCall,
       request,
-      runtimeSessionId: 'sess-1',
-      send: vi.fn()
-    } as never)
+      runtimeSessionId: 'sess-1'
+    })
 
     await Promise.resolve()
     expect(request).not.toHaveBeenCalled()

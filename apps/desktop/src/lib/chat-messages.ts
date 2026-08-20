@@ -1241,13 +1241,19 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
     // reactions address this exact row later.
     const rowId = message.row_id ?? (typeof message.id === 'number' ? message.id : undefined)
 
-    if (displayRole === 'assistant' && normalizedSemanticTurnId) {
-      const semanticIndex = result.findLastIndex(
-        candidate =>
-          candidate.role === 'assistant' && candidate.semanticTurnId === normalizedSemanticTurnId
-      )
+    const semanticIndex =
+      displayRole === 'assistant' && normalizedSemanticTurnId
+        ? result.findLastIndex(
+            candidate =>
+              candidate.role === 'assistant' && candidate.semanticTurnId === normalizedSemanticTurnId
+          )
+        : -1
 
-      if (semanticIndex >= 0) {
+    const newerUserExists =
+      semanticIndex >= 0 && result.slice(semanticIndex + 1).some(candidate => candidate.role === 'user')
+
+    if (displayRole === 'assistant' && normalizedSemanticTurnId) {
+      if (semanticIndex >= 0 && !newerUserExists) {
         const target = result[semanticIndex]
         const needsSpace = !/\s$/.test(chatMessageText(target))
 
@@ -1275,7 +1281,10 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
     }
 
     result.push({
-      id: `${message.timestamp || Date.now()}-${index}-${displayRole}`,
+      id:
+        displayRole === 'assistant' && normalizedSemanticTurnId && semanticIndex < 0
+          ? `realtime-turn:${normalizedSemanticTurnId}`
+          : `${message.timestamp || Date.now()}-${index}-${displayRole}`,
       role: displayRole,
       parts,
       timestamp: earliestTimestamp(message.timestamp, ...parts.map(part => part.timestamp)),

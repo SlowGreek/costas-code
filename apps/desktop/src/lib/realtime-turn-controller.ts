@@ -104,7 +104,7 @@ export interface RealtimeTurnController {
   functionCallDone: (call: RealtimeTurnToolCall) => void
   interrupt: () => void
   responseCreated: (responseId: string) => void
-  responseDone: (responseId: string) => Promise<RealtimeTurnOutcome>
+  responseDone: (responseId: string, status?: string) => Promise<RealtimeTurnOutcome>
   turnIdForResponse: (responseId?: string) => null | string
   updateGoal: (goal: string) => void
 }
@@ -218,13 +218,19 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       }
 
       const turn = current
+      const responseId = call.responseId.trim()
 
-      if (!turn || turn.cancelled || turn.callIds.has(call.callId)) {
+      if (!turn || turn.cancelled || !responseId || turn.callIds.has(call.callId)) {
+        return
+      }
+
+      const response = turn.responses.get(responseId)
+
+      if (!response || response.done || responseTurnIds.get(responseId) !== turn.id) {
         return
       }
 
       turn.callIds.add(call.callId)
-      const response = ensureResponse(turn, call.responseId)
       response.calls.push({ ...call, outputSent: false })
     },
     interrupt,
@@ -241,20 +247,32 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
       ensureResponse(turn, responseId)
     },
-    responseDone: async responseId => {
+    responseDone: async (responseId, status = 'completed') => {
       const turn = current
 
       if (closed || !turn || turn.cancelled) {
         return { continued: false, settled: false }
       }
 
-      const response = ensureResponse(turn, responseId)
+      const id = responseId.trim()
+      const response = id ? turn.responses.get(id) : undefined
+
+      if (!response || responseTurnIds.get(id) !== turn.id) {
+        return { continued: false, settled: false }
+      }
 
       if (response.done) {
         return { continued: false, settled: current === null }
       }
 
       response.done = true
+
+      if (status !== 'completed') {
+        current = null
+        options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
+
+        return { continued: false, settled: true }
+      }
 
       if (!response.calls.length) {
         current = null
@@ -297,22 +315,36 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
+        const remainingMs = maxTurnMs - (now() - turn.startedAt)
+
+        if (remainingMs <= 0) {
+          results.set(call.callId, {
+            executed: false,
+            output: { error: 'Voice tool timed out' }
+          })
+
+          return
+        }
+
         turn.actions += 1
         let output: unknown
         let timeoutId: ReturnType<typeof setTimeout> | undefined
 
         try {
-          const timeout = Symbol('voice-tool-timeout')
-          const remainingMs = Math.max(0, maxTurnMs - (now() - turn.startedAt))
+          if (lane === 'read') {
+            const timeout = Symbol('voice-tool-timeout')
 
-          const result = await Promise.race([
-            options.execute(call),
-            new Promise<typeof timeout>(resolve => {
-              timeoutId = setTimeout(() => resolve(timeout), remainingMs)
-            })
-          ])
+            const result = await Promise.race([
+              options.execute(call),
+              new Promise<typeof timeout>(resolve => {
+                timeoutId = setTimeout(() => resolve(timeout), remainingMs)
+              })
+            ])
 
-          output = result === timeout ? { error: 'Voice tool timed out' } : result
+            output = result === timeout ? { error: 'Voice tool timed out' } : result
+          } else {
+            output = await options.execute(call)
+          }
         } catch (error) {
           output = { error: error instanceof Error ? error.message : String(error) }
         } finally {

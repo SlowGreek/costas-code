@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   boundWorkbenchContext,
   createPendingTranscriptionTracker,
+  executeRealtimeVoiceTool,
   MAX_WORKBENCH_CONTEXT_CHARS,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
@@ -248,35 +249,24 @@ describe('routeRealtimeServerEvent', () => {
       stored_session_id: 'stored-session'
     }))
 
-    const send = vi.fn()
-
-    await routeRealtimeServerEvent(
+    const output = await executeRealtimeVoiceTool(
       {
-        type: 'response.function_call_arguments.done',
-        call_id: 'call-1',
+        arguments: '{}',
+        callId: 'call-1',
         name: 'session_snapshot',
-        arguments: '{}'
+        responseId: 'response-1'
       },
       {
         request,
-        runtimeSessionId: 'runtime-session',
-        send
+        runtimeSessionId: 'runtime-session'
       }
     )
 
     expect(request).toHaveBeenCalledWith('artifact.list', { session_id: 'runtime-session' })
-    expect(send).toHaveBeenNthCalledWith(1, {
-      type: 'conversation.item.create',
-      item: {
-        type: 'function_call_output',
-        call_id: 'call-1',
-        output: JSON.stringify({
-          artifacts: [{ artifact_id: 'map.main', kind: 'map', semantic_rev: 2, view_rev: 1 }],
-          stored_session_id: 'stored-session'
-        })
-      }
+    expect(output).toEqual({
+      artifacts: [{ artifact_id: 'map.main', kind: 'map', semantic_rev: 2, view_rev: 1 }],
+      stored_session_id: 'stored-session'
     })
-    expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
   })
 
   it('delegates visualize calls to the mute workbench agent without blocking', async () => {
@@ -284,53 +274,47 @@ describe('routeRealtimeServerEvent', () => {
       artifact: { artifact_id: 'map.main', semantic_rev: 3, payload: { nodes: [], edges: [] } }
     }))
 
-    const send = vi.fn()
-
-    await routeRealtimeServerEvent(
+    const output = await executeRealtimeVoiceTool(
       {
-        type: 'response.function_call_arguments.done',
-        call_id: 'call-visualize',
+        arguments: JSON.stringify({ prompt: 'Show voice and canvas as separate consumers.' }),
+        callId: 'call-visualize',
         name: 'visualize',
-        arguments: JSON.stringify({ prompt: 'Show voice and canvas as separate consumers.' })
+        responseId: 'response-1'
       },
-      { request, runtimeSessionId: 'runtime-session', send }
+      { request, runtimeSessionId: 'runtime-session' }
     )
 
-    expect(request).toHaveBeenCalledWith('workbench.visualize', {
-      session_id: 'runtime-session',
-      prompt: 'Show voice and canvas as separate consumers.'
-    })
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.visualize', {
+        session_id: 'runtime-session',
+        prompt: 'Show voice and canvas as separate consumers.'
+      })
+    )
     // The redraw takes ~9s in production. The model is told it STARTED, not
     // that it finished — waiting for the artifact froze the conversation.
-    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({ status: 'drawing' })
+    expect(output).toEqual({ status: 'drawing' })
   })
 
   it('does not fail the turn when a redraw fails after the model moved on', async () => {
-    const send = vi.fn()
-
-    await expect(
-      routeRealtimeServerEvent(
+    const output = await executeRealtimeVoiceTool(
         {
-          type: 'response.function_call_arguments.done',
-          call_id: 'call-visualize',
+          arguments: '{}',
+          callId: 'call-visualize',
           name: 'visualize',
-          arguments: '{}'
+          responseId: 'response-1'
         },
         {
           request: vi.fn(async () => {
             throw new Error('diagram JSON was invalid')
           }),
-          runtimeSessionId: 'runtime-session',
-          send
+          runtimeSessionId: 'runtime-session'
         }
       )
-    ).resolves.toBeUndefined()
 
     // The failure arrives after the turn is already over, so it cannot be
     // reported as a tool error. It surfaces through the canvas instead: the
     // drawing indicator clears and the artifact simply does not change.
-    expect(JSON.parse(send.mock.calls[0][0].item.output)).toEqual({ status: 'drawing' })
-    expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
+    expect(output).toEqual({ status: 'drawing' })
   })
 
   it('routes current-information searches through the configured backend provider', async () => {
@@ -339,16 +323,14 @@ describe('routeRealtimeServerEvent', () => {
       data: { web: [{ title: 'Current', url: 'https://example.com', description: 'Live result' }] }
     }))
 
-    const send = vi.fn()
-
-    await routeRealtimeServerEvent(
+    const output = await executeRealtimeVoiceTool(
       {
-        type: 'response.function_call_arguments.done',
-        call_id: 'call-search',
+        arguments: JSON.stringify({ query: 'latest realtime api', limit: 99 }),
+        callId: 'call-search',
         name: 'web_search',
-        arguments: JSON.stringify({ query: 'latest realtime api', limit: 99 })
+        responseId: 'response-1'
       },
-      { request, runtimeSessionId: 'runtime-session', send }
+      { request, runtimeSessionId: 'runtime-session' }
     )
 
     expect(request).toHaveBeenCalledWith('voice.realtime.web_search', {
@@ -356,8 +338,7 @@ describe('routeRealtimeServerEvent', () => {
       query: 'latest realtime api',
       limit: 5
     })
-    expect(JSON.parse(send.mock.calls[0][0].item.output).data.web[0].title).toBe('Current')
-    expect(send).toHaveBeenNthCalledWith(2, { type: 'response.create' })
+    expect((output as { data: { web: { title: string }[] } }).data.web[0].title).toBe('Current')
   })
 
   it('publishes completed user and assistant transcripts', async () => {
@@ -446,10 +427,10 @@ describe('startRealtimeVoiceConnection', () => {
     }
 
     const track = { enabled: true, stop: vi.fn() }
+    const audio = { autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }
 
     const connection = await startRealtimeVoiceConnection({
-      audioFactory: () =>
-        ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
+      audioFactory: () => audio as never,
       fetchFn: vi.fn(async () => ({
         ok: true,
         status: 200,
@@ -474,12 +455,16 @@ describe('startRealtimeVoiceConnection', () => {
     })
 
     return {
+      audio,
+      channel,
       connection,
       emit: (event: Record<string, unknown>) =>
         listeners.get('message')?.({ data: JSON.stringify(event) }),
       open: () => listeners.get('open')?.({}),
+      peer,
       sent,
-      sentTypes: () => sent.map(payload => JSON.parse(payload).type as string)
+      sentTypes: () => sent.map(payload => JSON.parse(payload).type as string),
+      track
     }
   }
 
@@ -638,6 +623,58 @@ describe('startRealtimeVoiceConnection', () => {
 
     expect(JSON.parse(output?.item?.output ?? '{}')).toEqual({ cancelled: true })
     expect(harness.sentTypes()).not.toContain('response.create')
+  })
+
+  it('does not execute finalized arguments from a cancelled provider response', async () => {
+    const requestOverride = vi.fn(async () => ({ shouldNot: 'run' }))
+    const harness = await connectHarness({}, undefined, requestOverride)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-cancelled' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-cancelled',
+      call_id: 'call-cancelled',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    harness.emit({
+      type: 'response.done',
+      response: { id: 'response-cancelled', status: 'cancelled' }
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(requestOverride).not.toHaveBeenCalled()
+    expect(harness.sentTypes()).not.toContain('conversation.item.create')
+    expect(harness.sentTypes()).not.toContain('response.create')
+  })
+
+  it('releases every resource when closing with a pending tool call', async () => {
+    const harness = await connectHarness()
+
+    harness.open()
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-pending',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    harness.channel.send.mockImplementation(() => {
+      throw new Error('channel closing')
+    })
+
+    expect(() => harness.connection.close()).not.toThrow()
+    expect(harness.track.stop).toHaveBeenCalledOnce()
+    expect(harness.channel.close).toHaveBeenCalledOnce()
+    expect(harness.peer.close).toHaveBeenCalledOnce()
+    expect(harness.audio.pause).toHaveBeenCalledOnce()
+    expect(harness.audio.remove).toHaveBeenCalledOnce()
   })
 
   it('connects WebRTC with an ephemeral key and cleans up owned media', async () => {
@@ -914,7 +951,11 @@ describe('startRealtimeVoiceConnection', () => {
 
     harness.emit({ type: 'output_audio_buffer.started' })
     harness.emit({ type: 'input_audio_buffer.speech_started' })
+    expect(harness.sentTypes()).toContain('response.cancel')
     expect(harness.sentTypes()).toContain('output_audio_buffer.clear')
+    expect(harness.sentTypes().indexOf('response.cancel')).toBeLessThan(
+      harness.sentTypes().indexOf('output_audio_buffer.clear')
+    )
 
     // A second barge-in with an already-flushed buffer must not re-clear.
     const clears = harness.sentTypes().filter(type => type === 'output_audio_buffer.clear').length

@@ -141,7 +141,7 @@ jobs:
           if ! node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"; then
             ESBUILD_VERSION=$(node -p "require('./node_modules/esbuild/package.json').version")
             ROLLDOWN_VERSION=$(node -p "require('./node_modules/rolldown/package.json').version")
-            npm install --no-save --package-lock=false --ignore-scripts \
+            npm install --no-save --package-lock=false --ignore-scripts --legacy-peer-deps \
               "@esbuild/linux-x64@${ESBUILD_VERSION}" \
               "@rolldown/binding-linux-x64-gnu@${ROLLDOWN_VERSION}"
           fi

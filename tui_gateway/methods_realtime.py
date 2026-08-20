@@ -108,6 +108,11 @@ def _(rid, params: dict) -> dict:
         forget_session(connection_id)
     except Exception:
         pass
+    _emit(
+        "artifact.visualizing",
+        str(params.get("session_id") or ""),
+        {"artifact_id": "map.main", "active": False},
+    )
     return _ok(rid, {"closed": True})
 
 
@@ -255,6 +260,13 @@ def _watch_transcript(
             )
 
         def _busy(active: bool) -> None:
+            closed_connections = session.get("_workbench_closed_connections")
+            if (
+                connection_id
+                and isinstance(closed_connections, set)
+                and connection_id in closed_connections
+            ):
+                return
             emit(
                 "artifact.visualizing",
                 sid,
@@ -288,13 +300,21 @@ def _visualize_from_watcher(
     # A timer can be cancelled before it starts, but a model request already
     # executing cannot. Session pop stamps this lease before teardown; discard
     # the completed result instead of mutating a chat the user has left.
-    if session.get("_closing"):
+    def _retired() -> bool:
+        closed_connections = session.get("_workbench_closed_connections")
+        return bool(
+            watcher_key
+            and isinstance(closed_connections, set)
+            and watcher_key in closed_connections
+        )
+
+    if session.get("_closing") or _retired():
         return
 
     from workbench_watch_runtime import set_in_flight
 
     with open_db(session) as db:
-        if db is None or session.get("_closing"):
+        if db is None or session.get("_closing") or _retired():
             return
         runtime_key = watcher_key or sid
         set_in_flight(runtime_key, True)

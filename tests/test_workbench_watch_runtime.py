@@ -91,6 +91,40 @@ def test_action_failure_requeues_once_then_succeeds(monkeypatch):
     assert watcher.has_pending is False
 
 
+def test_close_after_registry_check_blocks_model_entry_and_busy(monkeypatch):
+    key = "close-entry-race"
+    events = []
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=lambda **_kwargs: events.append("model")
+        or '{"draw":false,"reason":"no"}',
+    )
+    watcher.observe("draw", now=0.0)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+    monkeypatch.setitem(runtime._watchers, key, watcher)
+    is_current = runtime._is_current
+
+    def close_after_check(session_key, candidate):
+        current = is_current(session_key, candidate)
+        if current:
+            events.append("close")
+            runtime.forget_session(session_key)
+        return current
+
+    monkeypatch.setattr(runtime, "_is_current", close_after_check)
+
+    runtime._fire(
+        key,
+        watcher,
+        lambda _decision: events.append("decision"),
+        lambda active: events.append(f"busy:{active}"),
+    )
+
+    assert events == ["close"]
+    assert key not in runtime._watchers
+    assert watcher.last_skip == "cancelled"
+
+
 def test_teardown_during_failed_model_call_cannot_resurrect_retry(monkeypatch):
     key = "closing-runtime"
     calls = []

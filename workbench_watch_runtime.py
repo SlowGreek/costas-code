@@ -52,8 +52,10 @@ def refresh_canvas(session_key: str, canvas: Optional[Dict[str, Any]]) -> None:
 
 def forget_session(session_key: str) -> None:
     with _lock:
-        _watchers.pop(session_key, None)
+        watcher = _watchers.pop(session_key, None)
         timer = _timers.pop(session_key, None)
+    if watcher is not None:
+        watcher.cancel()
     if timer is not None:
         timer.cancel()
 
@@ -149,24 +151,25 @@ def _fire(
     if not _is_current(session_key, watcher):
         return
 
-    # In direct mode watcher.poll() IS the visual generation. Surface busy
-    # before entering the model call and keep it true through persistence. The
-    # two-stage preflight is only a decision and its callback owns draw state.
-    due = watcher.due_at()
-    direct_busy = (
-        watcher.config.active
-        and watcher.config.pipeline == "direct"
-        and watcher.has_pending
-        and not watcher.in_flight
-        and due is not None
-        and time.monotonic() >= due
-    )
-    if direct_busy:
+    # In direct mode watcher.poll() IS the visual generation. The start event is
+    # emitted from inside the watcher's cancellation-safe generation section,
+    # so close cannot land between a stale lease check and a new busy/model call.
+    busy_started = False
+
+    def _model_start() -> None:
+        nonlocal busy_started
+        busy_started = True
         _notify_busy(on_busy, True)
+
+    model_start = (
+        _model_start
+        if watcher.config.active and watcher.config.pipeline == "direct"
+        else None
+    )
 
     try:
         try:
-            decision = watcher.poll(now=time.monotonic())
+            decision = watcher.poll(now=time.monotonic(), on_model_start=model_start)
         except Exception as exc:
             logger.debug("workbench watcher poll failed: %s", exc)
             return
@@ -191,7 +194,7 @@ def _fire(
             # persistence. Also makes callback failures unable to wedge the session.
             watcher.set_in_flight(False)
     finally:
-        if direct_busy:
+        if busy_started:
             _notify_busy(on_busy, False)
 
 

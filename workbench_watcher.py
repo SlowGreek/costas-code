@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -151,6 +152,7 @@ class SkipReason:
     IN_FLIGHT = "in_flight"
     MODEL_FAILED = "model_failed"
     ACTION_FAILED = "action_failed"
+    CANCELLED = "cancelled"
     DISABLED = "disabled"
 
 
@@ -171,6 +173,12 @@ class TranscriptWatcher:
     _in_flight: bool = field(default=False, init=False)
     _direct_retry_count: int = field(default=0, init=False)
     _action_retry_count: int = field(default=0, init=False)
+    _generation_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    _cancelled: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
     current_kind: str = field(default="map", init=False)
     current_summary: str = field(default="", init=False)
     current_payload: Dict[str, Any] = field(
@@ -213,6 +221,10 @@ class TranscriptWatcher:
     def has_pending(self) -> bool:
         return bool(self._pending)
 
+    def cancel(self) -> None:
+        """Prevent any generation that has not entered its critical section."""
+        self._cancelled.set()
+
     def requeue_action_failure(self, utterance: str, *, now: float) -> bool:
         """Retry one failed persistence/action against refreshed canvas state."""
         if self._action_retry_count >= 1 or not utterance.strip():
@@ -234,7 +246,25 @@ class TranscriptWatcher:
 
     # -- decision -------------------------------------------------------
 
-    def poll(self, *, now: float) -> WatchDecision | None:
+    def poll(
+        self,
+        *,
+        now: float,
+        on_model_start: Optional[Callable[[], None]] = None,
+    ) -> WatchDecision | None:
+        """Enter one cancellation-safe generation critical section."""
+        with self._generation_lock:
+            if self._cancelled.is_set():
+                self.last_skip = SkipReason.CANCELLED
+                return None
+            return self._poll_locked(now=now, on_model_start=on_model_start)
+
+    def _poll_locked(
+        self,
+        *,
+        now: float,
+        on_model_start: Optional[Callable[[], None]] = None,
+    ) -> WatchDecision | None:
         """Decide, if a settled utterance is waiting and nothing is in flight.
 
         Returns ``None`` when there is nothing to decide yet. The skip reason
@@ -288,6 +318,8 @@ class TranscriptWatcher:
             # the same guard across generation so a second settled utterance
             # cannot start another full artifact response concurrently.
             self._in_flight = True
+        if direct and on_model_start is not None:
+            on_model_start()
         verdict = self._ask(
             utterance,
             recent,

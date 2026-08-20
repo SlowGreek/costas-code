@@ -123,7 +123,7 @@ jobs:
         if: steps.node-modules-cache.outputs.cache-hit == 'true'
         shell: bash
         run: |
-          if node -e "require('esbuild'); require('lightningcss'); import('rolldown').catch(() => process.exit(1))"; then
+          if node -e "require('esbuild'); require('lightningcss'); require('@tailwindcss/oxide'); import('rolldown').catch(() => process.exit(1))"; then
             echo "valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "valid=false" >> "$GITHUB_OUTPUT"

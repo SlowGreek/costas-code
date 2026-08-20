@@ -123,7 +123,7 @@ jobs:
         if: steps.node-modules-cache.outputs.cache-hit == 'true'
         shell: bash
         run: |
-          if node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"; then
+          if node -e "require('esbuild'); require('lightningcss'); import('rolldown').catch(() => process.exit(1))"; then
             echo "valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "valid=false" >> "$GITHUB_OUTPUT"
@@ -138,8 +138,9 @@ jobs:
       - name: Repair npm optional native dependencies
         shell: bash
         run: |
-          if ! node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"; then
+          if ! node -e "require('esbuild'); require('lightningcss'); import('rolldown').catch(() => process.exit(1))"; then
             ESBUILD_VERSION=$(node -p "require('./node_modules/esbuild/package.json').version")
+            LIGHTNINGCSS_VERSION=$(node -p "require('./node_modules/lightningcss/package.json').version")
             ROLLDOWN_VERSION=$(node -p "require('./node_modules/rolldown/package.json').version")
 
             ESBUILD_TARBALL=$(npm pack "@esbuild/linux-x64@${ESBUILD_VERSION}" --silent)
@@ -147,10 +148,15 @@ jobs:
             tar -xzf "$ESBUILD_TARBALL" -C node_modules/@esbuild/linux-x64 --strip-components=1
             rm -f "$ESBUILD_TARBALL"
 
+            LIGHTNINGCSS_TARBALL=$(npm pack "lightningcss-linux-x64-gnu@${LIGHTNINGCSS_VERSION}" --silent)
+            mkdir -p node_modules/lightningcss-linux-x64-gnu
+            tar -xzf "$LIGHTNINGCSS_TARBALL" -C node_modules/lightningcss-linux-x64-gnu --strip-components=1
+            rm -f "$LIGHTNINGCSS_TARBALL"
+
             ROLLDOWN_TARBALL=$(npm pack "@rolldown/binding-linux-x64-gnu@${ROLLDOWN_VERSION}" --silent)
             mkdir -p node_modules/@rolldown/binding-linux-x64-gnu
             tar -xzf "$ROLLDOWN_TARBALL" -C node_modules/@rolldown/binding-linux-x64-gnu --strip-components=1
             rm -f "$ROLLDOWN_TARBALL"
           fi
-          node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"
+          node -e "require('esbuild'); require('lightningcss'); import('rolldown').catch(() => process.exit(1))"
       - run: npm run --prefix ${{ matrix.package }} ${{ matrix.script }}

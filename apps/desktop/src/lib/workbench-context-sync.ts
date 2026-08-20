@@ -145,6 +145,8 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
   let timer: null | number = null
   let lastSent: null | string = null
   let lastArtifact: null | WorkbenchArtifact = null
+  let lastSelection: null | string = null
+  let lastDrawing = false
   let stopped = false
 
   const flush = () => {
@@ -163,20 +165,25 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
       return
     }
 
+    const selection = $workbenchSelection.get()
+    const drawing = $workbenchDrawing.get()
+
     const summary = summarizeWorkbench(artifact, {
-      drawing: $workbenchDrawing.get(),
+      drawing,
       layout: $workbenchLayout.get(),
       overlay: options.overlay?.(),
-      selection: $workbenchSelection.get()
+      selection
     })
 
-    // The transition, appended as its own fact. This is what the model can
-    // actually speak to — the snapshot only ever says what IS.
-    const event = describeWorkbenchChange(lastArtifact, artifact)
+    const previousArtifact = lastArtifact
+    const event = describeWorkbenchChange(previousArtifact, artifact)
+    const firstSnapshot = lastSent === null
+    const selectionChanged = !firstSnapshot && selection !== lastSelection
+    const drawingChanged = !firstSnapshot && drawing !== lastDrawing
 
     lastArtifact = artifact
-
-    const firstSnapshot = lastSent === null
+    lastSelection = selection
+    lastDrawing = drawing
 
     // Identical payloads are pure noise on the data channel.
     if (summary === lastSent) {
@@ -189,22 +196,33 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
 
     lastSent = summary
 
+    let fact: string
+
     if (firstSnapshot) {
-      // Exactly one system-instruction snapshot. The connection setup also
-      // sends one explicitly; before the connection exists this call is a
-      // harmless no-op. Crucially, later changes never rewrite instructions.
-      options.push(summary)
+      // The connection setup sends its snapshot explicitly. If the first
+      // drawing appears after connect, this append supplies the baseline
+      // without rewriting the system instructions.
+      fact = [event, `Current canvas state (authoritative): ${summary}`].filter(Boolean).join(' ')
+    } else if (event) {
+      const wholesale = previousArtifact?.kind !== artifact.kind || /^You redrew/i.test(event)
+      fact = wholesale ? `${event} Current canvas state (authoritative): ${summary}` : event
+    } else if (selectionChanged) {
+      const state = JSON.parse(summary) as {
+        pointing_at?: null | string
+        pointing_at_label?: null | string
+        pointing_at_location?: null | string
+      }
 
-      return
+      fact = state.pointing_at
+        ? `The user is now pointing at ${state.pointing_at_label ?? state.pointing_at} (id ${state.pointing_at})${state.pointing_at_location ? `, ${state.pointing_at_location}` : ''}.`
+        : 'The user stopped pointing at a canvas item.'
+    } else if (drawingChanged) {
+      fact = drawing ? 'The canvas started updating.' : 'The canvas finished updating.'
+    } else {
+      // Debounced layout/pin/hide changes need a fresh spatial snapshot so
+      // phrases like "the box on the left" remain grounded.
+      fact = `The canvas view changed. Current canvas state (authoritative): ${summary}`
     }
-
-    // Every later change is appended as a conversation fact, without
-    // `response.create`. Include the fresh authoritative snapshot so old
-    // events cannot leave the model confidently holding stale positions or a
-    // stale `pointing_at` value.
-    const fact = [event, `Current canvas state (authoritative): ${summary}`]
-      .filter(Boolean)
-      .join(' ')
 
     options.appendEvent?.(fact)
   }

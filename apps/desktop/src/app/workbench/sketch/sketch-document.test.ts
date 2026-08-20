@@ -70,6 +70,7 @@ describe('buildSketchDocument', () => {
     expect(html).toContain('data-hermes-viewport-fit')
     expect(html).toContain("addEventListener('resize',fit)")
     expect(html).toContain('MutationObserver')
+    expect(html).toContain("setProperty(name,value,'important')")
   })
 
   it('strips <base> tags that would repoint relative URLs', () => {

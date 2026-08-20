@@ -114,6 +114,16 @@ def _arm(
     timer.start()
 
 
+def _notify_busy(on_busy: Optional[Callable[[bool], None]], active: bool) -> None:
+    """Best-effort observer: UI event failure never owns the worker lifecycle."""
+    if on_busy is None:
+        return
+    try:
+        on_busy(active)
+    except Exception:
+        logger.debug("workbench watcher busy notification failed", exc_info=True)
+
+
 def _fire(
     session_key: str,
     watcher: TranscriptWatcher,
@@ -135,8 +145,8 @@ def _fire(
         and due is not None
         and time.monotonic() >= due
     )
-    if direct_busy and on_busy is not None:
-        on_busy(True)
+    if direct_busy:
+        _notify_busy(on_busy, True)
 
     try:
         try:
@@ -147,7 +157,7 @@ def _fire(
         if decision is None:
             # A skip for IN_FLIGHT leaves the utterance pending on purpose: retry
             # once the current redraw finishes rather than dropping what was said.
-            if watcher.last_skip == "in_flight" and watcher.has_pending:
+            if watcher.last_skip in {"in_flight", "model_failed"} and watcher.has_pending:
                 _retry_later(session_key, watcher, on_decision, on_busy)
             return
         if not decision.should_draw:
@@ -161,8 +171,8 @@ def _fire(
             # persistence. Also makes callback failures unable to wedge the session.
             watcher.set_in_flight(False)
     finally:
-        if direct_busy and on_busy is not None:
-            on_busy(False)
+        if direct_busy:
+            _notify_busy(on_busy, False)
 
 
 _RETRY_SECONDS = 2.0

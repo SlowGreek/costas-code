@@ -614,18 +614,21 @@ describe('startRealtimeVoiceConnection', () => {
     harness.sent.length = 0
 
     const nodes = Array.from({ length: 40 }, (_, index) => ({
-      id: `node-${index}`,
-      label: `Meaningful node label ${index} with enough semantic detail to remain distinguishable`,
+      id: `node-${index}-${'i'.repeat(118)}`,
+      label: `Node ${index} ${'L'.repeat(190)}`,
       location: index % 2 ? 'far right' : 'upper left'
     }))
 
     const fact = `Canvas changed. Current canvas state (authoritative): ${JSON.stringify({
       edges: Array.from({ length: 80 }, (_, index) => ({
-        from: `node-${index % 40}`,
-        id: `edge-${index}`,
-        to: `node-${(index + 1) % 40}`
+        from: nodes[index % 40].id,
+        id: `edge-${index}-${'e'.repeat(118)}`,
+        label: `Relationship ${index} ${'R'.repeat(180)}`,
+        to: nodes[(index + 1) % 40].id
       })),
-      nodes
+      kind: 'map',
+      nodes,
+      revision: 9
     })}`
 
     harness.connection.appendContext(fact)
@@ -636,10 +639,25 @@ describe('startRealtimeVoiceConnection', () => {
 
     const received = event?.item?.content?.[0]?.text ?? ''
 
-    expect(fact.length).toBeGreaterThan(4_000)
-    expect(fact.length).toBeLessThan(MAX_WORKBENCH_CONTEXT_CHARS)
-    expect(received).toBe(fact)
-    expect(received.endsWith('}]}')).toBe(true)
+    expect(fact.length).toBeGreaterThan(MAX_WORKBENCH_CONTEXT_CHARS)
+    expect(received.length).toBeLessThanOrEqual(MAX_WORKBENCH_CONTEXT_CHARS)
+    const marker = 'Current canvas state (authoritative): '
+
+    const compacted = JSON.parse(received.slice(received.lastIndexOf(marker) + marker.length)) as {
+      context_truncated: {
+        edges_shown: number
+        edges_total: number
+        nodes_shown: number
+        nodes_total: number
+      }
+      nodes: { id: string }[]
+    }
+
+    expect(compacted.context_truncated.nodes_total).toBe(40)
+    expect(compacted.context_truncated.edges_total).toBe(80)
+    expect(compacted.context_truncated.nodes_shown).toBe(compacted.nodes.length)
+    expect(compacted.context_truncated.edges_shown).toBeLessThan(80)
+    expect(compacted.nodes[0].id).toContain('node-0')
   })
 
   it('ignores an empty append rather than sending a blank turn', async () => {

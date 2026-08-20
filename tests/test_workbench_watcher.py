@@ -370,6 +370,49 @@ def test_direct_is_the_default_pipeline_and_two_stage_remains_selectable():
     ).pipeline == "direct"
 
 
+def test_direct_failure_requeues_once_for_the_sole_owner():
+    replies = iter(["not json", _direct_reply({"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []})])
+    calls = []
+
+    def model(**kwargs):
+        calls.append(kwargs)
+        return next(replies)
+
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=model,
+    )
+    watcher.observe("draw A", now=0.0)
+
+    assert watcher.poll(now=0.1) is None
+    assert watcher.last_skip == "model_failed"
+    assert watcher.has_pending is True
+
+    decision = watcher.poll(now=0.2)
+    assert decision is not None and decision.should_draw
+    assert len(calls) == 2
+    assert watcher.has_pending is False
+
+
+def test_direct_failure_retry_is_bounded():
+    calls = []
+
+    def model(**kwargs):
+        calls.append(kwargs)
+        return "still not json"
+
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=model,
+    )
+    watcher.observe("draw A", now=0.0)
+
+    assert watcher.poll(now=0.1) is None
+    assert watcher.poll(now=0.2) is None
+    assert len(calls) == 2
+    assert watcher.has_pending is False
+
+
 def test_direct_first_draw_emits_a_validated_full_payload():
     model = _Model(
         _direct_reply({"kind": "map", "nodes": [{"id": "a", "label": "A"}], "edges": []})

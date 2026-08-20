@@ -35,7 +35,7 @@ def _(rid, params: dict) -> dict:
         try:
             from workbench_watch_runtime import set_in_flight
 
-            set_in_flight(stored_session_id, True)
+            set_in_flight(sid, True)
         except Exception:
             set_in_flight = None
         try:
@@ -52,7 +52,7 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4621, f"workbench visualization failed: {exc}")
         finally:
             if set_in_flight is not None:
-                set_in_flight(stored_session_id, False)
+                set_in_flight(sid, False)
             # Clears on success AND on failure: the pending state must never
             # outlive the work it describes.
             _emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})

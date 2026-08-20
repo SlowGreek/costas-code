@@ -1004,16 +1004,17 @@ def _teardown_popped_session(
                 )
         except Exception:
             logger.debug("failed waiting for session turn thread", exc_info=True)
-    # Retire background canvas work before tearing down the session. The
-    # watcher registry is keyed by the durable session id, not the runtime id;
-    # without this call a pending timer survives the chat and can spend a model
-    # request plus mutate its stored canvas after the user has left.
-    stored_session_id = str(session.get("session_key") or "").strip()
-    if stored_session_id:
+    # Retire background canvas work before tearing down the session. Watcher
+    # ownership is keyed by the runtime voice connection, not the durable chat:
+    # two windows may temporarily resume the same stored session, and closing
+    # the older one must not cancel the newer one's timer. Without cleanup a
+    # pending timer can still spend a model request after the user has left.
+    watcher_key = str(session.get("_sid") or "").strip()
+    if watcher_key:
         try:
             from workbench_watch_runtime import forget_session
 
-            forget_session(stored_session_id)
+            forget_session(watcher_key)
         except Exception:
             logger.debug("failed retiring workbench watcher", exc_info=True)
 

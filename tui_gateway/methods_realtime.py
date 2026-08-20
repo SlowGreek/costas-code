@@ -207,7 +207,7 @@ def _watch_transcript(
             )
 
         observe_transcript(
-            stored_session_id,
+            sid,
             role=role,
             text=text,
             cfg=cfg,
@@ -234,7 +234,7 @@ def _visualize_from_watcher(
     with open_db(session) as db:
         if db is None or session.get("_closing"):
             return
-        set_in_flight(stored_session_id, True)
+        set_in_flight(sid, True)
         direct = decision.visual is not None
         if not direct:
             # In direct mode the runtime already emitted busy before entering
@@ -259,7 +259,7 @@ def _visualize_from_watcher(
         except Exception:
             pass
         finally:
-            set_in_flight(stored_session_id, False)
+            set_in_flight(sid, False)
             if not direct:
                 emit("artifact.visualizing", sid, {"artifact_id": "map.main", "active": False})
 

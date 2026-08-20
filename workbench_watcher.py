@@ -149,6 +149,7 @@ class SkipReason:
     NOT_DUE = "not_due"
     NOTHING_PENDING = "nothing_pending"
     IN_FLIGHT = "in_flight"
+    MODEL_FAILED = "model_failed"
     DISABLED = "disabled"
 
 
@@ -167,6 +168,7 @@ class TranscriptWatcher:
     _recent: List[str] = field(default_factory=list, init=False)
     _last_fragment_at: Optional[float] = field(default=None, init=False)
     _in_flight: bool = field(default=False, init=False)
+    _direct_retry_count: int = field(default=0, init=False)
     current_kind: str = field(default="map", init=False)
     current_summary: str = field(default="", init=False)
     current_payload: Dict[str, Any] = field(
@@ -280,7 +282,20 @@ class TranscriptWatcher:
         if verdict is None:
             if direct:
                 self._in_flight = False
+                if self._direct_retry_count < 1:
+                    # Sole-owner mode has no voice fallback. Put the exact
+                    # settled utterance back once and make it immediately due;
+                    # runtime schedules the retry after a short delay. A second
+                    # failure is terminal so a broken provider cannot loop.
+                    self._direct_retry_count += 1
+                    self._pending.insert(0, utterance)
+                    self._last_fragment_at = now - self.config.debounce_seconds
+                    self.last_skip = SkipReason.MODEL_FAILED
+                else:
+                    self._direct_retry_count = 0
             return None
+
+        self._direct_retry_count = 0
 
         draw, reason, direction, visual = verdict
         decision = WatchDecision(

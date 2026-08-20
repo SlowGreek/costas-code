@@ -5,6 +5,7 @@ import {
   $workbenchSelection,
   resetWorkbenchForTests,
   setWorkbenchArtifact,
+  setWorkbenchDrawing,
   setWorkbenchLayout,
   setWorkbenchSelection,
   type WorkbenchArtifact
@@ -116,7 +117,7 @@ describe('startWorkbenchContextSync', () => {
     expect(push).not.toHaveBeenCalled()
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('Memory')
-    expect(appendEvent.mock.calls[0][0]).toContain('Current canvas state')
+    expect(appendEvent.mock.calls[0][0]).not.toContain('Current canvas state')
     stop()
   })
 
@@ -135,7 +136,29 @@ describe('startWorkbenchContextSync', () => {
 
     expect(push).not.toHaveBeenCalled()
     expect(appendEvent).toHaveBeenCalledTimes(1)
-    expect(appendEvent.mock.calls[0][0]).toContain('"pointing_at":"planner"')
+    expect(appendEvent.mock.calls[0][0]).toContain('pointing at Planner')
+    expect(appendEvent.mock.calls[0][0]).toContain('id planner')
+    stop()
+  })
+
+  it('appends drawing lifecycle as short events, not repeated snapshots', () => {
+    setWorkbenchArtifact(artifact())
+    setWorkbenchLayout(layout)
+
+    const push = vi.fn()
+    const appendEvent = vi.fn()
+    const scheduler = makeScheduler()
+    const stop = startWorkbenchContextSync({ appendEvent, push, scheduler })
+
+    appendEvent.mockClear()
+    setWorkbenchDrawing(true)
+    setWorkbenchDrawing(false)
+
+    expect(appendEvent.mock.calls.map(call => call[0])).toEqual([
+      'The canvas started updating.',
+      'The canvas finished updating.'
+    ])
+    expect(appendEvent.mock.calls.flat().join(' ')).not.toContain('Current canvas state')
     stop()
   })
 
@@ -154,7 +177,8 @@ describe('startWorkbenchContextSync', () => {
 
     expect(push).not.toHaveBeenCalled()
     expect(appendEvent).toHaveBeenCalledTimes(1)
-    expect(appendEvent.mock.calls[0][0]).toContain('"pointing_at":"planner"')
+    expect(appendEvent.mock.calls[0][0]).toContain('pointing at Planner')
+    expect(appendEvent.mock.calls[0][0]).toContain('id planner')
     stop()
   })
 

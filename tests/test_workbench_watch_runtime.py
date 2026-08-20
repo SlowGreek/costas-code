@@ -37,6 +37,29 @@ def test_direct_generation_reports_busy_for_the_actual_model_call(monkeypatch):
     assert watcher.in_flight is False
 
 
+def test_busy_notification_failure_does_not_drop_the_utterance(monkeypatch):
+    events = []
+    watcher = TranscriptWatcher(
+        config=WatcherConfig(enabled=True, mode="active", debounce_seconds=0.1, pipeline="direct"),
+        run_oneshot_fn=lambda **_kwargs: events.append("model")
+        or '{"draw":false,"reason":"no visible change"}',
+    )
+    watcher.observe("okay", now=0.0)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 0.1)
+
+    def broken_busy(active):
+        events.append(f"busy:{active}")
+        raise RuntimeError("renderer event unavailable")
+
+    # Busy reporting is observational; it must not own whether the model call
+    # happens or whether pending speech is consumed/retried.
+    runtime._fire("stored-session", watcher, lambda _decision: None, broken_busy)
+
+    assert "model" in events
+    assert watcher.has_pending is False
+    assert watcher.in_flight is False
+
+
 def test_two_stage_decision_does_not_claim_the_diagrammer_is_already_drawing(monkeypatch):
     """Two-stage mode's first call only DECIDES; its callback owns draw state."""
     events = []

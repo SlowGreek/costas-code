@@ -81,10 +81,12 @@ const BASE_STYLE =
 const VIEWPORT_FIT_SCRIPT = `<script data-hermes-viewport-fit>(function(){
   var root=document.getElementById('hermes-sketch-root');if(!root)return;
   var raf=0;
+  function own(name,value){root.style.setProperty(name,value,'important')}
+  own('position','absolute');own('inset','0');own('overflow','hidden');own('transform-origin','0 0');
   function fit(){
     cancelAnimationFrame(raf);
     raf=requestAnimationFrame(function(){
-      root.style.transform='none';root.style.width='100%';root.style.height='100%';
+      own('transform','none');own('width','100%');own('height','100%');
       requestAnimationFrame(function(){
         var needW=root.scrollWidth,needH=root.scrollHeight,rootRect=root.getBoundingClientRect();
         root.querySelectorAll('*').forEach(function(el){
@@ -96,8 +98,8 @@ const VIEWPORT_FIT_SCRIPT = `<script data-hermes-viewport-fit>(function(){
         var viewportW=root.clientWidth,viewportH=root.clientHeight;
         function apply(next,attempt){
           if(next>=0.999)return;
-          root.style.width=(100/next)+'%';root.style.height=(100/next)+'%';
-          root.style.transform='scale('+next+')';
+          own('width',(100/next)+'%');own('height',(100/next)+'%');
+          own('transform','scale('+next+')');
           if(attempt>=3)return;
           requestAnimationFrame(function(){
             var extraW=0,extraH=0;

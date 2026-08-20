@@ -87,6 +87,130 @@ export function createPendingTranscriptionTracker(): PendingTranscriptionTracker
 /** Bound for one authoritative canvas snapshot appended to Realtime context. */
 export const MAX_WORKBENCH_CONTEXT_CHARS = 16_000
 
+const truncateContextString = (value: unknown, limit: number): unknown =>
+  typeof value === 'string' && value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+
+/**
+ * Keep an authoritative canvas fact valid and bounded — never slice JSON.
+ *
+ * Backend limits allow a graph whose desktop summary exceeds 64K. The voice
+ * model needs every node referent far more than every edge label, so compaction
+ * trims verbose strings and edge detail first, then records exact totals.
+ */
+export function boundWorkbenchContext(
+  input: string,
+  maxChars = MAX_WORKBENCH_CONTEXT_CHARS
+): string {
+  const text = input.trim()
+
+  if (text.length <= maxChars) {
+    return text
+  }
+
+  const marker = 'Current canvas state (authoritative): '
+  const markerAt = text.lastIndexOf(marker)
+  const prefix = markerAt >= 0 ? text.slice(0, markerAt + marker.length) : ''
+  const jsonText = markerAt >= 0 ? text.slice(markerAt + marker.length) : text
+
+  let parsed: Record<string, unknown>
+
+  try {
+    const value = JSON.parse(jsonText) as unknown
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('not an object')
+    }
+
+    parsed = value as Record<string, unknown>
+  } catch {
+    // Worst-case JSON escaping doubles backslashes/quotes; half-budget keeps
+    // this fallback structurally complete without another blind slice.
+    return JSON.stringify({
+      context_truncated: true,
+      summary: text.slice(0, Math.max(0, Math.floor(maxChars / 2) - 80))
+    })
+  }
+
+  const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : []
+  const rawEdges = Array.isArray(parsed.edges) ? parsed.edges : []
+  const pointingAt = typeof parsed.pointing_at === 'string' ? parsed.pointing_at : null
+
+  const nodes = rawNodes.map(item => {
+    const node = item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+
+    return {
+      ...node,
+      id: truncateContextString(node.id, 128),
+      kind: truncateContextString(node.kind, 32),
+      label: truncateContextString(node.label, 96),
+      location: truncateContextString(node.location, 80)
+    }
+  })
+
+  if (pointingAt) {
+    nodes.sort(
+      (left, right) => Number(right.id === pointingAt) - Number(left.id === pointingAt)
+    )
+  }
+
+  const edges = rawEdges.map(item => {
+    const edge = item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+
+    return {
+      ...edge,
+      from: truncateContextString(edge.from, 128),
+      id: truncateContextString(edge.id, 128),
+      label: truncateContextString(edge.label, 80),
+      to: truncateContextString(edge.to, 128)
+    }
+  })
+
+  let nodeCount = nodes.length
+  let edgeCount = edges.length
+
+  const render = () =>
+    `${prefix}${JSON.stringify({
+      ...parsed,
+      context_truncated: {
+        edges_shown: edgeCount,
+        edges_total: rawEdges.length,
+        nodes_shown: nodeCount,
+        nodes_total: rawNodes.length
+      },
+      edges: edges.slice(0, edgeCount),
+      nodes: nodes.slice(0, nodeCount)
+    })}`
+
+  let result = render()
+
+  while (result.length > maxChars && edgeCount > 0) {
+    edgeCount = Math.max(0, edgeCount - Math.max(1, Math.ceil(edgeCount / 4)))
+    result = render()
+  }
+
+  while (result.length > maxChars && nodeCount > 1) {
+    nodeCount -= 1
+    result = render()
+  }
+
+  if (result.length <= maxChars) {
+    return result
+  }
+
+  // Pathological metadata still gets a complete object, never malformed JSON.
+  return `${prefix}${JSON.stringify({
+    context_truncated: {
+      edges_shown: 0,
+      edges_total: rawEdges.length,
+      nodes_shown: 0,
+      nodes_total: rawNodes.length
+    },
+    kind: parsed.kind,
+    pointing_at: parsed.pointing_at,
+    revision: parsed.revision
+  })}`
+}
+
 interface RealtimeTokenResponse {
   client_secret: string
   expires_at?: number
@@ -504,9 +628,10 @@ export async function startRealtimeVoiceConnection(
       // Match the authoritative snapshot budget used by
       // updateWorkbenchContext. Five hundred characters truncated a normal
       // 10–20-node JSON snapshot mid-object and made the event-source channel
-      // confidently stale. Sixteen thousand is bounded (~4K tokens) while
-      // preserving a maximum-size 40-node/80-edge semantic graph.
-      const text = fact.trim().slice(0, MAX_WORKBENCH_CONTEXT_CHARS)
+      // confidently stale. The shared compactor preserves complete valid JSON
+      // under a 16K (~4K token) budget, retaining node referents before edge
+      // detail and recording exact shown/total counts.
+      const text = boundWorkbenchContext(fact)
 
       if (!channelOpen || closed || !text) {
         return
@@ -565,7 +690,7 @@ export async function startRealtimeVoiceConnection(
       clearAssistantAudio()
     },
     updateWorkbenchContext: summary => {
-      workbenchContext = summary.trim().slice(0, MAX_WORKBENCH_CONTEXT_CHARS)
+      workbenchContext = boundWorkbenchContext(summary)
 
       if (channelOpen && !closed) {
         send(sessionUpdateEvent(instructions(), watcherOwnsRedraws))

@@ -30,10 +30,19 @@ describe('realtime instructions', () => {
   })
 
   it('teaches the model to act sequentially across one human turn', () => {
-    expect(text).toMatch(/several response and tool rounds/i)
+    expect(text).toMatch(/several (?:model )?responses and tool rounds/i)
     expect(text).toMatch(/inspect its result/i)
     expect(text).toMatch(/do not schedule dependent actions together/i)
     expect(text).toMatch(/search.*visualize/i)
+  })
+
+  it('explains the voice agent loop and its completion signal', () => {
+    expect(text).toMatch(/each response is one inference step/i)
+    expect(text).toMatch(/not necessarily the whole user turn/i)
+    expect(text).toMatch(/tool result.*another inference/i)
+    expect(text).toMatch(/tool-free response ends the loop/i)
+    expect(text).toMatch(/while work remains.*call the next tool/i)
+    expect(text).toMatch(/original user request is satisfied/i)
   })
 
   it('paces walkthrough highlights with one focus action per explanation', () => {

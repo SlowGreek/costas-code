@@ -141,9 +141,16 @@ jobs:
           if ! node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"; then
             ESBUILD_VERSION=$(node -p "require('./node_modules/esbuild/package.json').version")
             ROLLDOWN_VERSION=$(node -p "require('./node_modules/rolldown/package.json').version")
-            npm install --no-save --package-lock=false --ignore-scripts --legacy-peer-deps \
-              "@esbuild/linux-x64@${ESBUILD_VERSION}" \
-              "@rolldown/binding-linux-x64-gnu@${ROLLDOWN_VERSION}"
+
+            ESBUILD_TARBALL=$(npm pack "@esbuild/linux-x64@${ESBUILD_VERSION}" --silent)
+            mkdir -p node_modules/@esbuild/linux-x64
+            tar -xzf "$ESBUILD_TARBALL" -C node_modules/@esbuild/linux-x64 --strip-components=1
+            rm -f "$ESBUILD_TARBALL"
+
+            ROLLDOWN_TARBALL=$(npm pack "@rolldown/binding-linux-x64-gnu@${ROLLDOWN_VERSION}" --silent)
+            mkdir -p node_modules/@rolldown/binding-linux-x64-gnu
+            tar -xzf "$ROLLDOWN_TARBALL" -C node_modules/@rolldown/binding-linux-x64-gnu --strip-components=1
+            rm -f "$ROLLDOWN_TARBALL"
           fi
           node -e "require('esbuild'); import('rolldown').catch(() => process.exit(1))"
       - run: npm run --prefix ${{ matrix.package }} ${{ matrix.script }}

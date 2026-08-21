@@ -325,6 +325,76 @@ describe('failed-turn-aware ordinal space', () => {
     expect(plan?.sourceText).toBe('text u1')
   })
 
+  it('planEdit resubmits unchanged text for the latest unanswered user turn', async () => {
+    const messages: ChatMessage[] = [user('u0', 11), assistant('a0', 12), user('u1', 13)]
+
+    const plan = planEdit(messages, {
+      role: 'user',
+      sourceId: 'u1',
+      parentId: null,
+      content: [{ type: 'text', text: 'text u1' }]
+    } as never)
+
+    expect(plan).not.toBeNull()
+    expect(plan?.truncateOrdinal).toBe(1)
+    expect(plan?.truncateRowId).toBe(13)
+    expect(plan?.text).toBe('text u1')
+
+    const calls: { method: string; params?: Record<string, unknown> }[] = []
+    const requestGateway = (async (method: string, params?: Record<string, unknown>) => {
+      calls.push({ method, params })
+
+      return { status: 'streaming' }
+    }) as <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number) => Promise<T>
+
+    await runRewindSubmit(
+      requestGateway,
+      'sid',
+      plan!.text,
+      plan!.truncateOrdinal,
+      plan!.truncateMessageId,
+      false,
+      undefined,
+      plan!.truncateRowId,
+      plan!.sourceText
+    )
+
+    expect(calls.find(call => call.method === 'prompt.submit')?.params).toMatchObject({
+      text: 'text u1',
+      truncate_before_row_id: 13,
+      truncate_before_user_ordinal: 1,
+      confirm_truncate: true
+    })
+  })
+
+  it('planEdit keeps unchanged text as a no-op when inference is attached', () => {
+    const messages: ChatMessage[] = [user('u0', 11), assistant('a0', 12)]
+
+    const plan = planEdit(messages, {
+      role: 'user',
+      sourceId: 'u0',
+      parentId: null,
+      content: [{ type: 'text', text: 'text u0' }]
+    } as never)
+
+    expect(plan).toBeNull()
+  })
+
+  it('planEdit retries unchanged text after a failed inference', () => {
+    const messages: ChatMessage[] = [user('u0', undefined), failedAssistant('a0')]
+
+    const plan = planEdit(messages, {
+      role: 'user',
+      sourceId: 'u0',
+      parentId: null,
+      content: [{ type: 'text', text: 'text u0' }]
+    } as never)
+
+    expect(plan?.isFailedTurn).toBe(true)
+    expect(plan?.truncateOrdinal).toBeUndefined()
+    expect(plan?.truncateRowId).toBeUndefined()
+  })
+
   it('planReload degrades a failed turn to a plain resubmit (#86623)', () => {
     const messages: ChatMessage[] = [user('u0', 11), assistant('a0', 12), user('u1', undefined), failedAssistant('a1')]
 

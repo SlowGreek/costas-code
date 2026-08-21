@@ -1422,7 +1422,7 @@ def cmd_enable(name: str, allow_tool_override: Optional[bool] = None) -> None:
     if name in LEGACY_RELAY_PLUGIN_KEYS:
         console.print(
             f"[red]Plugin '{name}' was removed.[/red] Relay lifecycle is owned "
-            f"by Hermes core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
+            f"by Catalyst core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
         )
         sys.exit(1)
 
@@ -1437,7 +1437,7 @@ def cmd_enable(name: str, allow_tool_override: Optional[bool] = None) -> None:
     if key in LEGACY_RELAY_PLUGIN_KEYS:
         console.print(
             f"[red]Plugin '{key}' was removed.[/red] Relay lifecycle is owned "
-            f"by Hermes core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
+            f"by Catalyst core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
         )
         sys.exit(1)
 

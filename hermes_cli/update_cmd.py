@@ -5250,7 +5250,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             if _ledger_backends:
                 print(
                     f"  ⚠ {len(_ledger_backends)} ledger-identified orphaned "
-                    "Hermes backend process(es) hold the venv; stopping their trees"
+                    "Catalyst backend process(es) hold the venv; stopping their trees"
                 )
                 _m()._stop_process_trees(_ledger_backends)
                 _time.sleep(1.0)
@@ -5305,7 +5305,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 _handoff_backends = _m()._handoff_reapable_backend_pids(_venv_holders)
                 if _handoff_backends:
                     print(
-                        f"  ⚠ {len(_handoff_backends)} Hermes backend process(es) "
+                        f"  ⚠ {len(_handoff_backends)} Catalyst backend process(es) "
                         "still hold the venv after the Desktop hand-off; "
                         "stopping their trees"
                     )

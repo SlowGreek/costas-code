@@ -240,7 +240,7 @@ class RelayOperationLease:
         with self._lock:
             runtime = self._runtime
             if runtime is None:
-                raise RuntimeError("Hermes Relay operation lease is released")
+                raise RuntimeError("Catalyst Relay operation lease is released")
             return runtime._run_in_session_untracked(
                 session,
                 callback,
@@ -338,7 +338,7 @@ class _ProcessRelayPluginConfiguration:
                         self._activation = activation
                     except Exception as exc:
                         raise RuntimeError(
-                            "Hermes Relay dynamic plugin activation failed"
+                            "Catalyst Relay dynamic plugin activation failed"
                         ) from exc
 
                 if self._activation is None:
@@ -827,7 +827,7 @@ class RelayRuntime:
         """Admit one Relay call while keeping process plugins alive."""
         with self._sessions_lock:
             if self._closing:
-                raise RuntimeError("Hermes Relay runtime is shutting down")
+                raise RuntimeError("Catalyst Relay runtime is shutting down")
             self._active_operations += 1
             self._operations_idle.clear()
 
@@ -2003,7 +2003,7 @@ def _configured_plugin_inputs(
             config = tomllib.load(config_file)
         if "dynamic_plugins" in config:
             raise ValueError(
-                "Hermes [[dynamic_plugins]] records are unsupported; use Relay "
+                "Catalyst [[dynamic_plugins]] records are unsupported; use Relay "
                 "[[plugins.dynamic]] records"
             )
         dynamic_plugins: list[Any] = []
@@ -2016,7 +2016,7 @@ def _configured_plugin_inputs(
         return plugin_config, dynamic_plugins
     except Exception as exc:
         raise _RelayPluginConfigurationLoadError(
-            "Hermes Relay plugin configuration could not be loaded from "
+            "Catalyst Relay plugin configuration could not be loaded from "
             f"{config_path}; continuing without Relay plugins"
         ) from exc
 

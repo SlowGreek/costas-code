@@ -212,8 +212,16 @@ class TestCheckWebApiKey:
         monkeypatch.setattr(web_tools, "check_firecrawl_api_key", lambda: False)
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: False)
         # Disable the keyless free tier — with it on, zero credentials still
-        # resolves (Parallel/Exa anonymous MCP; see test_web_keyless_fallback.py).
+        # resolves (the anonymous MCP tier; see test_web_keyless_fallback.py).
+        #
+        # Both doors have to be shut. `_keyless_tier_enabled` gates the
+        # registry's own keyless walk, but `check_web_api_key` also reaches a
+        # provider through `_provider_is_ready`, which calls
+        # `is_keyless_available()` DIRECTLY without consulting that flag — so
+        # patching the flag alone leaves the plugin path reporting ready and
+        # the assertion below flips to True.
         monkeypatch.setattr(web_search_registry, "_keyless_tier_enabled", lambda: False)
+        monkeypatch.setattr(web_tools, "_provider_is_ready", lambda provider: False)
         assert web_tools.check_web_api_key() is False
 
 

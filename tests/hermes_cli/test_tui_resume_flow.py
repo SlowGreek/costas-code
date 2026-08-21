@@ -349,27 +349,35 @@ def test_termux_fast_cli_launch_oneshot_uses_light_parser(monkeypatch, main_mod)
 
     assert exc.value.code == 17
     assert prepared == [None]
-    assert captured == {
-        "prompt": "hello",
-        "model": "gpt-test",
-        "provider": "openai",
-        "toolsets": None,
-        "usage_file": "usage.json",
-    }
+    # Assert the forwarding contract, not a frozen kwarg set: upstream adds
+    # pass-through options to run_oneshot over time (skills=, ...), and an
+    # exact-dict comparison turns every such addition into a false failure.
+    assert captured["prompt"] == "hello"
+    assert captured["model"] == "gpt-test"
+    assert captured["provider"] == "openai"
+    assert captured["toolsets"] is None
+    assert captured["usage_file"] == "usage.json"
 
 
-def test_termux_fast_cli_launch_version_skips_update_check(monkeypatch, main_mod):
+def test_termux_fast_cli_launch_prints_version_report(monkeypatch, main_mod):
+    """The Termux fast path serves `--version` and reports update status.
+
+    Upstream e69b8e561d removed the `hermes version` SUBCOMMAND (only
+    `--version`/`-V` take the fast path now) and made the Termux fast paths
+    include the update check rather than skipping it. This asserts the
+    current contract: the flag is served here, with update status on.
+    """
     captured = []
 
     monkeypatch.setenv("TERMUX_VERSION", "1")
     monkeypatch.delenv("HERMES_TUI", raising=False)
-    monkeypatch.setattr(sys, "argv", ["hermes", "version"])
+    monkeypatch.setattr(sys, "argv", ["hermes", "--version"])
     monkeypatch.setattr(
         main_mod, "_print_version_info", lambda *, check_updates: captured.append(check_updates)
     )
 
     assert main_mod._try_termux_fast_cli_launch() is True
-    assert captured == [False]
+    assert captured == [True]
 
 
 def test_termux_ultrafast_version_runs_before_heavy_startup(

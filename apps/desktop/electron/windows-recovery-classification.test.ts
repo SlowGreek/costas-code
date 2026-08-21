@@ -47,13 +47,9 @@ test('interpreter present but no CLI entry point is NOT usable', () => {
 })
 
 test('a half-built venv routes to --repair', () => {
-  const usable = hasUsableInstall({
-    venvPython: true,
-    venvHermes: false,
-    bootstrapMarker: false
-  })
+  const signals = { hasBootstrapMarker: false, hasVenvHermes: false, hasVenvPython: true }
 
-  assert.deepEqual(chooseUpdaterArgs(usable, 'costas-code'), [
+  assert.deepEqual(chooseUpdaterArgs(signals, 'costas-code'), [
     '--repair',
     '--branch',
     'costas-code'
@@ -61,14 +57,10 @@ test('a half-built venv routes to --repair', () => {
 })
 
 test('a completed install (marker + CLI) is usable and gets the gentle --update', () => {
-  const usable = hasUsableInstall({
-    venvPython: true,
-    venvHermes: true,
-    bootstrapMarker: true
-  })
+  const signals = { hasBootstrapMarker: true, hasVenvHermes: true, hasVenvPython: true }
 
-  assert.equal(usable, true)
-  assert.deepEqual(chooseUpdaterArgs(usable, 'main'), ['--update', '--branch', 'main'])
+  assert.equal(hasUsableInstall({ venvPython: true, venvHermes: true, bootstrapMarker: true }), true)
+  assert.deepEqual(chooseUpdaterArgs(signals, 'main'), ['--update', '--branch', 'main'])
 })
 
 test('a CLI shim without the marker is still usable', () => {

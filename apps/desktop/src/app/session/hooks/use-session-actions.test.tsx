@@ -56,6 +56,7 @@ import {
 } from '@/store/workbench'
 
 import sessionResumeActiveTurn from '../../../../../../tests/fixtures/session-resume-active-turn.json'
+import { deferred } from '../../../test/deferred'
 import { sessionRoute } from '../../routes'
 import type { ClientSessionState } from '../../types'
 
@@ -85,16 +86,6 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 }))
 
 const RUNTIME_SESSION_ID = 'rt-new-001'
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void
-
-  const promise = new Promise<T>(done => {
-    resolve = done
-  })
-
-  return { promise, resolve }
-}
 
 type HarnessHandle = Pick<
   ReturnType<typeof useSessionActions>,

@@ -331,8 +331,15 @@ def _make_update_side_effect(
     fetch_fails=False,
     fetch_stderr="",
 ):
-    """Build a subprocess.run side_effect for cmd_update tests."""
+    """Build a subprocess.run side_effect for cmd_update tests.
+
+    HEAD is stateful: a successful `git checkout` moves it. The upstream
+    post-pull guard re-reads `rev-parse --abbrev-ref HEAD` and refuses to
+    claim success when the checkout is parked on another branch, so a
+    constant HEAD made the switch-to-costas-code path exit 1.
+    """
     recorded = []
+    state = {"head": current_branch}
 
     def side_effect(cmd, **kwargs):
         recorded.append(cmd)
@@ -342,8 +349,10 @@ def _make_update_side_effect(
                 return SimpleNamespace(stdout="", stderr=fetch_stderr, returncode=128)
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if "rev-parse" in joined and "--abbrev-ref" in joined:
-            return SimpleNamespace(stdout=f"{current_branch}\n", stderr="", returncode=0)
+            return SimpleNamespace(stdout=f"{state['head']}\n", stderr="", returncode=0)
         if "checkout" in joined and "costas-code" in joined:
+            state["head"] = "costas-code"
+
             return SimpleNamespace(stdout="", stderr="", returncode=0)
         if "rev-list" in joined:
             return SimpleNamespace(stdout=f"{commit_count}\n", stderr="", returncode=0)
@@ -419,7 +428,10 @@ def test_cmd_update_switches_to_costas_code_from_feature_branch(
 
     out = capsys.readouterr().out
     assert "fix/something" in out
-    assert "switching to costas-code" in out
+    # Upstream reworded this to "switching back to <branch>" for the parked
+    # case and "switching to <branch>" for detached HEAD; assert the behaviour
+    # (it announces the switch to costas-code), not the exact phrasing.
+    assert "costas-code" in out and "switching" in out
 
 
 def test_cmd_update_switches_to_costas_code_from_detached_head(
@@ -469,12 +481,16 @@ def test_cmd_update_restores_stash_and_branch_when_already_up_to_date(monkeypatc
     # Stash should have been restored
     assert len(restore_calls) == 1
 
-    # Should have checked out back to the original branch
+    # Upstream changed the intent here: when the parked branch was FULLY
+    # MERGED, update deliberately leaves the checkout on the distribution
+    # branch instead of switching back to the stale feature branch (it says
+    # so explicitly). Only an unmerged branch is restored.
     checkout_back = [c for c in recorded if "checkout" in c and "fix/something" in c]
-    assert len(checkout_back) == 1
+    assert len(checkout_back) == 0
 
     out = capsys.readouterr().out
     assert "Already up to date" in out
+    assert "switched back to costas-code" in out
 
 
 def test_cmd_update_no_checkout_when_already_on_costas_code(monkeypatch, tmp_path):
@@ -585,6 +601,104 @@ def _setup_setting_test(monkeypatch, tmp_path, mode):
     side_effect, recorded = _make_update_side_effect()
     monkeypatch.setattr(hermes_main.subprocess, "run", side_effect)
     return restore_calls, discard_calls, recorded
+
+
+# ---------------------------------------------------------------------------
+# --keep-stash (desktop updater): stash for the update, never re-apply.
+# ---------------------------------------------------------------------------
+
+def _setup_keep_stash_test(monkeypatch, tmp_path):
+    """Wiring for --keep-stash tests: stash returns a ref; restore, discard,
+    and park are all recorded."""
+    _setup_update_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+    monkeypatch.setattr(
+        hermes_main, "_stash_local_changes_if_needed",
+        lambda *a, **kw: "abc123deadbeef",
+    )
+    restore_calls = []
+    discard_calls = []
+    park_calls = []
+    monkeypatch.setattr(
+        hermes_main, "_restore_stashed_changes",
+        lambda *a, **kw: restore_calls.append(1) or True,
+    )
+    monkeypatch.setattr(
+        hermes_main, "_discard_stashed_changes",
+        lambda *a, **kw: discard_calls.append(1) or True,
+    )
+    monkeypatch.setattr(
+        hermes_main, "_park_stashed_changes",
+        lambda *a, **kw: park_calls.append(a) or None,
+    )
+    # Keep the update flow away from the real gateway fleet on this machine —
+    # a live gateway PID would trip the test-suite kill guard and turn the
+    # run into exit 1 (gateway_fleet_restart_incomplete).
+    monkeypatch.setattr(
+        "hermes_cli.gateway.find_gateway_pids", lambda **kw: [], raising=False
+    )
+    return restore_calls, discard_calls, park_calls
+
+
+def test_update_keep_stash_parks_instead_of_restoring(monkeypatch, tmp_path):
+    """--keep-stash: after a successful update, the autostash is parked (left
+    in git stash) — never re-applied, never discarded."""
+    restore_calls, discard_calls, park_calls = _setup_keep_stash_test(monkeypatch, tmp_path)
+    side_effect, _ = _make_update_side_effect()
+    monkeypatch.setattr(hermes_main.subprocess, "run", side_effect)
+
+    hermes_main.cmd_update(SimpleNamespace(yes=True, keep_stash=True))
+
+    assert len(park_calls) == 1
+    assert park_calls[0][0] == "abc123deadbeef"
+    assert restore_calls == []
+    assert discard_calls == []
+
+
+def test_update_without_keep_stash_still_restores(monkeypatch, tmp_path):
+    """Regression guard: default behavior (no --keep-stash) is unchanged —
+    the autostash is auto-restored under --yes."""
+    restore_calls, discard_calls, park_calls = _setup_keep_stash_test(monkeypatch, tmp_path)
+    side_effect, _ = _make_update_side_effect()
+    monkeypatch.setattr(hermes_main.subprocess, "run", side_effect)
+
+    hermes_main.cmd_update(SimpleNamespace(yes=True, keep_stash=False))
+
+    assert restore_calls == [1]
+    assert park_calls == []
+    assert discard_calls == []
+
+
+def test_update_keep_stash_failure_path_still_preserves(monkeypatch, tmp_path, capsys):
+    """--keep-stash + failed update: neither restore nor park runs; the
+    existing preserved-in-stash message fires (working tree unknown)."""
+    restore_calls, discard_calls, park_calls = _setup_keep_stash_test(monkeypatch, tmp_path)
+    side_effect, _ = _make_update_side_effect(ff_only_fails=True, reset_fails=True)
+    monkeypatch.setattr(hermes_main.subprocess, "run", side_effect)
+
+    with pytest.raises(SystemExit, match="1"):
+        hermes_main.cmd_update(SimpleNamespace(yes=True, keep_stash=True))
+
+    assert restore_calls == []
+    assert park_calls == []
+    assert discard_calls == []
+    assert "preserved in stash" in capsys.readouterr().out
+
+
+def test_update_parser_accepts_keep_stash():
+    """The flag parses and defaults off."""
+    import argparse
+
+    from hermes_cli.subcommands.update import build_update_parser
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    build_update_parser(subparsers, cmd_update=lambda args: None)
+
+    args = parser.parse_args(["update", "--keep-stash"])
+    assert args.keep_stash is True
+    args = parser.parse_args(["update"])
+    assert args.keep_stash is False
 
 
 

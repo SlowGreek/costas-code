@@ -11,14 +11,33 @@ from hermes_cli.main import cmd_update, PROJECT_ROOT
 
 
 def _make_run_side_effect(branch="main", verify_ok=True, commit_count="0"):
-    """Build a side_effect function for subprocess.run that simulates git commands."""
+    """Build a side_effect function for subprocess.run that simulates git commands.
+
+    The stub models a real checkout rather than a constant: `git checkout X`
+    moves the simulated HEAD, so the post-pull branch guard added upstream
+    (which re-reads `rev-parse --abbrev-ref HEAD` and refuses to claim success
+    when the checkout is parked elsewhere) sees the branch the code actually
+    switched to. A constant HEAD made every fork-default (`costas-code`) run
+    look like a parked checkout and exit 1.
+    """
+
+    state = {"head": branch}
 
     def side_effect(cmd, **kwargs):
         joined = " ".join(str(c) for c in cmd)
 
+        # git checkout <branch> / git checkout -B <branch>  (moves HEAD)
+        if "checkout" in joined:
+            parts = [str(c) for c in cmd]
+            target = parts[-1]
+            if target not in {"checkout", "-B", "-b", "--"}:
+                state["head"] = target
+
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
         # git rev-parse --abbrev-ref HEAD  (get current branch)
         if "rev-parse" in joined and "--abbrev-ref" in joined:
-            return subprocess.CompletedProcess(cmd, 0, stdout=f"{branch}\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{state['head']}\n", stderr="")
 
         # git rev-parse --verify origin/{branch}  (check remote branch exists)
         if "rev-parse" in joined and "--verify" in joined:
@@ -645,20 +664,31 @@ class TestCmdUpdateBranchFlag:
         - ``commit_count``    rev-list count returned (0 = up-to-date, >0 = behind)
         """
 
+        # A successful checkout moves the simulated HEAD, so the upstream
+        # post-pull guard (which re-reads HEAD and refuses to claim success on
+        # a parked checkout) sees the branch the code actually switched to.
+        state = {"head": current_branch}
+
         def side_effect(cmd, **kwargs):
             joined = " ".join(str(c) for c in cmd)
 
             if "rev-parse" in joined and "--abbrev-ref" in joined:
-                return subprocess.CompletedProcess(cmd, 0, stdout=f"{current_branch}\n", stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout=f"{state['head']}\n", stderr="")
 
             if "checkout" in joined and "-B" in joined:
                 rc = 128 if track_fails else 0
                 err = f"fatal: '{target_branch}' did not match any file(s) known to git\n" if track_fails else ""
+                if rc == 0:
+                    state["head"] = target_branch
+
                 return subprocess.CompletedProcess(cmd, rc, stdout="", stderr=err)
 
             if "checkout" in joined and "-B" not in joined and "rev-parse" not in joined:
                 rc = 128 if checkout_fails else 0
                 err = f"error: pathspec '{target_branch}' did not match\n" if checkout_fails else ""
+                if rc == 0:
+                    state["head"] = target_branch
+
                 return subprocess.CompletedProcess(cmd, rc, stdout="", stderr=err)
 
             if "rev-list" in joined:
@@ -727,7 +757,9 @@ class TestCmdUpdateBranchFlag:
         assert "bb/gui" in checkout_cmds[0]
 
         out = capsys.readouterr().out
-        assert "switching to bb/gui" in out
+        # Upstream reworded the parked-branch notice to "switching back to
+        # <branch>"; assert it announces the switch, not the exact phrasing.
+        assert "bb/gui" in out and "switching" in out
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")

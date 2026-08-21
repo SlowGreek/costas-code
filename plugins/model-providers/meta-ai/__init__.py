@@ -38,10 +38,9 @@ from providers.base import ProviderProfile
 def _resolve_effort(reasoning_config: dict | None) -> str:
     """Map Hermes' reasoning_config to a Meta-safe ``reasoning_effort`` value.
 
-    - reasoning disabled / effort "none"  -> "minimal"  (Meta 400s on "none")
-    - low | medium | high                 -> passthrough
-    - max | xhigh | ultra                 -> "xhigh"
-    - unset / unknown                     -> "medium"
+    Meta's vocabulary (minimal..xhigh; rejects ``none``) is declared in
+    agent.reasoning_effort. Disabled/"none" maps to ``minimal`` (the closest
+    Meta has to off); unset/bespoke levels fall to ``medium``.
     """
     rc = reasoning_config or {}
     if rc.get("enabled") is False:
@@ -49,11 +48,11 @@ def _resolve_effort(reasoning_config: dict | None) -> str:
     effort = str(rc.get("effort") or "").strip().lower()
     if effort in {"", "none"}:
         return "minimal" if effort == "none" else "medium"
-    if effort in {"low", "medium", "high"}:
-        return effort
-    if effort in {"max", "xhigh", "ultra"}:
-        return "xhigh"
-    return "medium"
+
+    from agent.reasoning_effort import META_AI_EFFORTS, clamp_effort
+
+    clamped = clamp_effort(effort, META_AI_EFFORTS)
+    return clamped if clamped in META_AI_EFFORTS else "medium"
 
 
 class MetaAIProfile(ProviderProfile):
@@ -91,7 +90,14 @@ meta_ai = MetaAIProfile(
     env_vars=("MODEL_API_KEY", "META_API_KEY", "META_MODEL_API_KEY", "META_BASE_URL"),
     base_url=_base_url(),
     auth_type="api_key",
-    api_mode="chat_completions",
+    # Responses API is the wire that engages Muse prompt caching: measured
+    # 0 cached tokens on /v1/chat/completions vs 93-99% cache hits on
+    # /v1/responses with prompt_cache_retention (see host_mandated_api_mode
+    # in hermes_cli/providers.py and the retention hint in
+    # agent/transports/codex.py). The MetaAIProfile chat-completions hook
+    # above still covers custom OpenAI-compatible endpoints configured with
+    # a non-api.meta.ai base URL, which fall through to chat_completions.
+    api_mode="codex_responses",
     # Muse Spark is natively multimodal (image/video/pdf/audio in, text out).
     supports_vision=True,
     # Cheap contributor tier is a good default for auxiliary tasks

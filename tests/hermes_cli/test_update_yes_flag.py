@@ -18,13 +18,28 @@ from hermes_cli.main import cmd_update
 def _make_run_side_effect(
     branch="main", verify_ok=True, commit_count="1", dirty=False
 ):
-    """Minimal subprocess.run side_effect for the update flow."""
+    """Minimal subprocess.run side_effect for the update flow.
+
+    HEAD is stateful: a `git checkout` moves it, so the upstream post-pull
+    guard (which re-reads HEAD and refuses to claim success on a checkout
+    parked elsewhere) sees the branch the code switched to.
+    """
+
+    state = {"head": branch}
 
     def side_effect(cmd, **kwargs):
         joined = " ".join(str(c) for c in cmd)
 
+        if "checkout" in joined:
+            parts = [str(c) for c in cmd]
+            target = parts[-1]
+            if target not in {"checkout", "-B", "-b", "--"}:
+                state["head"] = target
+
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
         if "rev-parse" in joined and "--abbrev-ref" in joined:
-            return subprocess.CompletedProcess(cmd, 0, stdout=f"{branch}\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{state['head']}\n", stderr="")
         if "rev-parse" in joined and "--verify" in joined:
             return subprocess.CompletedProcess(
                 cmd, 0 if verify_ok else 128, stdout="", stderr=""

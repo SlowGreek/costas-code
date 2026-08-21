@@ -19326,6 +19326,73 @@ def test_prompt_submit_row_id_resolves_after_model_switch_marker(
         server._sessions.pop(sid, None)
 
 
+def test_prompt_submit_row_id_resolves_interrupted_inflight_user(
+    monkeypatch, tmp_path
+):
+    """Restore/rerun can target the durable user row of an interrupted turn.
+
+    While a turn is in flight, the user row is durable but is not appended to
+    ``session["history"]`` until completion. Interrupting before the provider
+    answers leaves that row immediately after the complete in-memory prefix.
+    """
+    from hermes_state import SessionDB
+
+    db = SessionDB(db_path=tmp_path / "rowid-interrupted-turn.db")
+    session_key = "real-db-row-interrupted-turn"
+    db.create_session(session_key, "desktop")
+    durable_messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply 1"},
+        {"role": "user", "content": "rerun this interrupted prompt"},
+    ]
+    with db._lock:
+        assert db._conn is not None
+        db._insert_message_rows(db._conn, session_key, durable_messages)
+        db._conn.commit()
+    target_row_id = durable_messages[-1]["_row_id"]
+
+    # The in-flight user is intentionally absent: this is the gateway's live
+    # state until a completed result rewrites session["history"].
+    live_history = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply 1"},
+    ]
+    sess = _session(history=live_history, session_key=session_key)
+    sid = "real-db-row-interrupted-turn-sid"
+    server._sessions[sid] = sess
+    monkeypatch.setattr(server, "_get_db", lambda: db)
+    monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_start_inflight_turn", lambda *a, **k: None)
+
+    try:
+        resp = server.handle_request(
+            {
+                "id": "1",
+                "method": "prompt.submit",
+                "params": {
+                    "session_id": sid,
+                    "text": "rerun this interrupted prompt",
+                    "truncate_before_row_id": target_row_id,
+                    "truncate_before_user_ordinal": 1,
+                    "confirm_truncate": True,
+                },
+            }
+        )
+
+        assert resp is not None
+        assert resp.get("error") is None, resp
+        assert [(m["role"], m["content"]) for m in sess["history"]] == [
+            ("user", "first"),
+            ("assistant", "reply 1"),
+        ]
+        assert [m["content"] for m in db.get_messages_as_conversation(session_key)] == [
+            "first",
+            "reply 1",
+        ]
+    finally:
+        server._sessions.pop(sid, None)
+
+
 def test_prompt_submit_row_id_real_sessiondb_unknown_refuses_despite_ordinal(
     monkeypatch, tmp_path
 ):

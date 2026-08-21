@@ -143,17 +143,35 @@ def _resolve_truncate_row_id(session: dict, history: list, target_row_id: int):
         return None
     db_ord, db_idx = db_hit
     mem_user_indices = _history_user_indices(history)
-    if db_ord < 0 or db_ord >= len(mem_user_indices):
+
+    if 0 <= db_ord < len(mem_user_indices):
+        mem_idx = mem_user_indices[db_ord]
+        # Same-ordinal mapping across two lists that can diverge. Trust the
+        # mapping only when the mapped live turn shows the same content as the
+        # durable target — otherwise it may be shifted by alternation repair.
+        if _mem_db_pair_agrees(history[mem_idx], db_history[db_idx]):
+            return db_ord, mem_idx
+
+    # An interrupted in-flight turn has already persisted its user row, but the
+    # gateway does not append it to session["history"] until completion. A
+    # resumed history can differ for the same reason: alternation repair may
+    # merge a display-only user marker with the following real prompt. Rebuild
+    # the durable prefix exactly as live replay does and adopt the raw durable
+    # projection only when that repaired prefix agrees with memory end-to-end.
+    # This proves the target is the first omitted durable row without weakening
+    # the fail-closed behavior for swapped or otherwise misaligned histories.
+    candidate_prefix = [dict(msg) for msg in db_history[:db_idx]]
+    from agent.agent_runtime_helpers import repair_message_sequence
+
+    repair_message_sequence(None, candidate_prefix)
+    if len(candidate_prefix) != len(history) or not all(
+        _mem_db_pair_agrees(mem, durable)
+        for mem, durable in zip(history, candidate_prefix)
+    ):
         return None
-    mem_idx = mem_user_indices[db_ord]
-    # Same-ordinal mapping across two lists that can diverge (the repaired
-    # durable copy may have merged a user;user pair, shifting every later
-    # user ordinal). Trust the mapping only when the mapped live turn shows
-    # the same content as the durable target — otherwise refuse (the caller
-    # returns fail-closed 4018) rather than cut the wrong turn (#82959).
-    if not _mem_db_pair_agrees(history[mem_idx], db_history[db_idx]):
-        return None
-    return db_ord, mem_idx
+
+    history[:] = [dict(msg) for msg in db_history]
+    return db_hit
 
 
 def _coerce_truncate_int(rid, value, param_name="truncate_before_user_ordinal"):
@@ -480,6 +498,7 @@ def _(rid, params: dict) -> dict:
                 }
 
             ordinal = None
+            target_history_index = None
 
             if target_row_id is not None:
                 # Durable address first — never degrade a missing row_id into a
@@ -504,7 +523,10 @@ def _(rid, params: dict) -> dict:
                         data=_stale_target_data(),
                     )
 
-                msg_ordinal, _ = found_match
+                # The durable-only fallback may replace a repaired/in-flight
+                # memory prefix with its equivalent raw durable projection.
+                user_indices = _history_user_indices(history)
+                msg_ordinal, target_history_index = found_match
                 ordinal, err = _reconcile_client_ordinal(
                     rid, sid, client_ordinal, msg_ordinal,
                     "truncate_before_row_id", target_row_id,
@@ -538,7 +560,7 @@ def _(rid, params: dict) -> dict:
                         data=_stale_target_data(),
                     )
 
-                msg_ordinal, _ = found_match
+                msg_ordinal, target_history_index = found_match
                 ordinal, err = _reconcile_client_ordinal(
                     rid, sid, client_ordinal, msg_ordinal,
                     "truncate_before_message_id", msg_id_str,
@@ -596,14 +618,27 @@ def _(rid, params: dict) -> dict:
             # indexing below (user_indices[-1] -> the LAST user turn), silently
             # truncating history to everything before it and persisting that loss
             # via replace_messages — an unrecoverable overwrite of the session DB.
-            if ordinal < 0 or ordinal >= len(user_indices):
+            if (
+                ordinal is None
+                or ordinal < 0
+                or ordinal > len(user_indices)
+                or (
+                    ordinal == len(user_indices)
+                    and target_history_index != len(history)
+                )
+            ):
                 return _err(
                     rid,
                     4018,
                     "target user message is no longer in session history",
                     data=_stale_target_data(resolved_ordinal=ordinal),
                 )
-            truncated = history[: user_indices[ordinal]]
+            truncate_index = (
+                target_history_index
+                if target_history_index is not None
+                else user_indices[ordinal]
+            )
+            truncated = history[:truncate_index]
             # Second gate, on top of confirm_truncate: ordinal 0 resolves to
             # history[:0] == [] and replace_messages() DELETEs every durable
             # row. A confirmed rewind that happens to erase the whole

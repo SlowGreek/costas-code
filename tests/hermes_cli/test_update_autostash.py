@@ -93,14 +93,16 @@ def test_cmd_update_retries_optional_extras_individually_when_all_fails(monkeypa
             return SimpleNamespace(stdout="1\n", stderr="", returncode=0)
         if cmd == ["git", "merge", "--ff-only", "origin/costas-code"]:
             return SimpleNamespace(stdout="Updating\n", stderr="", returncode=0)
-        if cmd == ["/usr/bin/uv", "pip", "install", "-e", ".[all]"]:
-            raise CalledProcessError(returncode=1, cmd=cmd)
-        if cmd == ["/usr/bin/uv", "pip", "install", "-e", "."]:
-            return SimpleNamespace(returncode=0)
-        if cmd == ["/usr/bin/uv", "pip", "install", "-e", ".[matrix]"]:
-            raise CalledProcessError(returncode=1, cmd=cmd)
-        if cmd == ["/usr/bin/uv", "pip", "install", "-e", ".[mcp]"]:
-            return SimpleNamespace(returncode=0)
+        # Match on the install TARGET, not the whole argv: upstream now injects
+        # `--python <venv>` between "install" and "-e", and an exact-argv match
+        # silently stopped firing — the ladder never ran and the test asserted
+        # against a single install.
+        if "pip" in cmd and "install" in cmd and "-e" in cmd:
+            target = cmd[cmd.index("-e") + 1]
+            if target in {".[all]", ".[matrix]"}:
+                raise CalledProcessError(returncode=1, cmd=cmd)
+            if target in {".", ".[mcp]"}:
+                return SimpleNamespace(returncode=0)
         # Catch-all must include stdout/stderr so consumers that parse
         # output (e.g. the dashboard-restart `ps -A` scan added in the
         # updater) don't crash on AttributeError.
@@ -116,12 +118,17 @@ def test_cmd_update_retries_optional_extras_individually_when_all_fails(monkeypa
     # (faster-whisper etc.) after the project install; they are orthogonal to
     # the extras-retry ladder this test pins.
     project_installs = [c for c in install_cmds if "-e" in c]
-    assert project_installs == [
-        ["/usr/bin/uv", "pip", "install", "-e", ".[all]"],
-        ["/usr/bin/uv", "pip", "install", "-e", "."],
-        ["/usr/bin/uv", "pip", "install", "-e", ".[matrix]"],
-        ["/usr/bin/uv", "pip", "install", "-e", ".[mcp]"],
+    # Assert the extras-retry LADDER (all -> bare -> per-extra), not the whole
+    # argv: upstream now injects `--python <venv>` ahead of `-e`, and pinning
+    # the exact command turns any future uv-invocation change into a false
+    # failure here. The target of each install is what this test is about.
+    assert [c[c.index("-e") + 1] for c in project_installs] == [
+        ".[all]",
+        ".",
+        ".[matrix]",
+        ".[mcp]",
     ]
+    assert all(c[:3] == ["/usr/bin/uv", "pip", "install"] for c in project_installs)
 
     out = capsys.readouterr().out
     assert "retrying extras individually" in out

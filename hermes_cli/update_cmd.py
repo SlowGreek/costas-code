@@ -6316,9 +6316,14 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # commit_count == 0 branch, which returns immediately after: an update
         # that pulled hundreds of upstream commits printed "Already up to
         # date!" and verified nothing).
-        if commit_count == 0 and is_fork and branch == "main":
+        # Upstream only ran this for "main". The fork's distribution branch is
+        # costas-code, and it trails upstream exactly the same way — so it
+        # needs the same head-moved detection, not the dead-end sync in the
+        # commit_count == 0 branch below (#73108: a sync that pulled hundreds
+        # of commits printed "Already up to date!" and verified nothing).
+        if commit_count == 0 and is_fork and branch in {"main", _m().COSTAS_UPDATE_BRANCH}:
             pre_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
-            _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT)
+            _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT, branch)
             post_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
             if pre_sync_sha and post_sync_sha and pre_sync_sha != post_sync_sha:
                 synced_count = _count_commits_between(
@@ -6333,10 +6338,6 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         if commit_count == 0:
             _invalidate_update_cache()
-
-            # Even if origin is up to date, the fork may be behind upstream
-            if is_fork and branch == _m().COSTAS_UPDATE_BRANCH:
-                _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT, branch)
 
             # Restore stash and switch back to original branch if we moved.
             # EXCEPTION: a parked feature branch we verified clean + fully

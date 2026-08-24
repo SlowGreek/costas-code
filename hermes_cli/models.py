@@ -127,8 +127,8 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # MiniMax
     ("minimax/minimax-m3",                     ""),
     # Z-AI
+    ("z-ai/glm-5.3",                           ""),
     ("z-ai/glm-5.2",                           "default"),
-    ("z-ai/glm-5.1",                           ""),
     # Xiaomi
     ("xiaomi/mimo-v2.5-pro",                   ""),
     # Tencent
@@ -189,8 +189,8 @@ def _codex_curated_models() -> list[str]:
     This keeps the gateway /model picker in sync with the CLI `hermes model`
     flow without maintaining a separate static list.
     """
-    from hermes_cli.codex_models import DEFAULT_CODEX_MODELS, _add_forward_compat_models
-    return _add_forward_compat_models(list(DEFAULT_CODEX_MODELS))
+    from hermes_cli.codex_models import DEFAULT_CODEX_MODELS, _finalize_codex_models
+    return _finalize_codex_models(list(DEFAULT_CODEX_MODELS))
 
 
 # Static fallback for xAI when the models.dev disk cache is empty (fresh
@@ -305,8 +305,8 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # MiniMax
         "minimax/minimax-m3",
         # Z-AI
+        "z-ai/glm-5.3",
         "z-ai/glm-5.2",
-        "z-ai/glm-5.1",
         # Xiaomi
         "xiaomi/mimo-v2.5-pro",
         # Tencent
@@ -317,6 +317,11 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "nvidia/nemotron-3-super-120b-a12b",
         # Sakana
         "sakana/fugu-ultra",
+        # Stealth — "Ox Alpha" reasoning model, free ($0/$0 on the portal),
+        # 1M ctx / 131K max output. Same model as OpenCode Zen's
+        # x-preview-f-free; metadata entries live under the bare "ox-alpha"
+        # slug (model_metadata.py / reasoning_timeouts.py).
+        "stealth/ox-alpha",
     ],
     # Native OpenAI Chat Completions (api.openai.com). Used by /model counts and
     # provider_model_ids fallback when /v1/models is unavailable.
@@ -379,6 +384,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-3.1-flash-lite-preview",
     ],
     "zai": [
+        "glm-5.3",
         "glm-5.2",
         "glm-5.1",
         "glm-5",
@@ -397,6 +403,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
         # Third-party agentic models hosted on build.nvidia.com
         # (map to OpenRouter defaults — users get familiar picks on NIM)
+        "z-ai/glm-5.3",
         "z-ai/glm-5.2",
         "moonshotai/kimi-k2.6",
         "minimaxai/minimax-m3",
@@ -548,6 +555,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "minimax-m3",
         "minimax-m2.7",
         "minimax-m2.5",
+        "glm-5.3",
         "glm-5.2",
         "glm-5.1",
         "glm-5",
@@ -675,6 +683,10 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "us.anthropic.claude-opus-4-6-v1",
         "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "openai.gpt-5.5",
+        "openai.gpt-5.6-sol",
+        "openai.gpt-5.6-terra",
+        "openai.gpt-5.6-luna",
         "us.amazon.nova-pro-v1:0",
         "us.amazon.nova-lite-v1:0",
         "us.amazon.nova-micro-v1:0",
@@ -2309,15 +2321,13 @@ def compute_sale_discount(
     that rounds below 1% is treated as no sale (never render "-0%"). Returns
     ``None`` when there is no sale (missing/equal/invalid original), so UIs
     show normal prices.
+
+    Free / $0 models are a special case: they are always "-100%" sale chrome
+    (Teknium, Aug 2026 — the picker's discount column should say 100% off
+    rather than sit blank on free rows). The ``was_*`` raws come from
+    ``original`` when the gateway serves one and are empty strings otherwise;
+    callers must skip the "was" segment when both are empty.
     """
-    if not isinstance(original, dict):
-        return None
-
-    was_prompt = original.get("prompt")
-    was_completion = original.get("completion")
-    if was_prompt in (None, "") and was_completion in (None, ""):
-        return None
-
     def _finite(raw: Any) -> float | None:
         try:
             n = float(raw)
@@ -2332,11 +2342,26 @@ def compute_sale_discount(
             return None
         return n if n >= 0 and n == n else None
 
-    # Free / $0 models never show sale chrome, even if a leftover list price
-    # is higher (e.g. a :free sibling that inherited pricing.original).
+    orig_dict = original if isinstance(original, dict) else {}
+    was_prompt = orig_dict.get("prompt")
+    was_completion = orig_dict.get("completion")
+
+    # Free / $0 models: flat 100% off, with "was" prices only when the
+    # gateway actually served an original (e.g. a :free sibling); a
+    # natively-free model (stealth/ox-alpha) gets bare "-100%" chrome.
     cur_prompt_any = _nonneg(prompt) if prompt not in (None, "") else None
     cur_comp_any = _nonneg(completion) if completion not in (None, "") else None
-    if cur_prompt_any == 0 and cur_comp_any == 0:
+    if cur_prompt_any == 0 and cur_comp_any in (0, None):
+        return (
+            100,
+            str(was_prompt) if was_prompt not in (None, "") else "",
+            str(was_completion) if was_completion not in (None, "") else "",
+        )
+
+    if not isinstance(original, dict):
+        return None
+
+    if was_prompt in (None, "") and was_completion in (None, ""):
         return None
 
     cur_prompt = _finite(prompt) if prompt not in (None, "") else None
@@ -4505,6 +4530,36 @@ def clear_provider_models_cache(provider: Optional[str] = None) -> None:
         pass
 
 
+def _resolve_anthropic_pool_catalog_credentials() -> tuple[str, str]:
+    """Return a read-only API-key pool credential for model discovery.
+
+    ``resolve_anthropic_token()`` intentionally ignores ``api_key`` pool
+    entries because its runtime contract is OAuth-oriented. The model catalog
+    supports regular ``x-api-key`` auth, so it needs a narrow fallback that
+    preserves the credential's configured endpoint instead of sending a
+    proxy-scoped key to Anthropic's public host.
+    """
+    try:
+        from agent.credential_pool import AUTH_TYPE_API_KEY
+        from hermes_cli.auth import read_credential_pool
+
+        for entry in read_credential_pool("anthropic"):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("auth_type") != AUTH_TYPE_API_KEY:
+                continue
+            token = str(entry.get("access_token") or "").strip()
+            if not token:
+                continue
+            endpoint = str(
+                entry.get("base_url") or entry.get("inference_base_url") or ""
+            ).strip()
+            return token, endpoint
+    except Exception:
+        pass
+    return "", ""
+
+
 def _fetch_anthropic_models(
     timeout: float = 5.0,
     *,
@@ -4513,8 +4568,9 @@ def _fetch_anthropic_models(
 ) -> Optional[list[str]]:
     """Fetch available models from the Anthropic /v1/models endpoint.
 
-    Uses resolve_anthropic_token() to find credentials (env vars or
-    Claude Code auto-discovery) unless api_key is provided explicitly.
+    Uses resolve_anthropic_token() to find credentials (env vars, OAuth,
+    or Claude Code auto-discovery) unless api_key is provided explicitly. If
+    those sources are empty, a read-only API-key credential_pool entry is used.
     Returns sorted model IDs or None.
     """
     try:
@@ -4522,7 +4578,12 @@ def _fetch_anthropic_models(
     except ImportError:
         return None
 
+    resolved_base_url = base_url
     token = (api_key or "").strip() or resolve_anthropic_token()
+    if not token:
+        # A pool credential and its endpoint are one security boundary. Never
+        # pair the selected pool key with a caller-provided model endpoint.
+        token, resolved_base_url = _resolve_anthropic_pool_catalog_credentials()
     if not token:
         return None
 
@@ -4537,7 +4598,7 @@ def _fetch_anthropic_models(
 
     def _do_request(h: dict[str, str]):
         req = urllib.request.Request(
-            _anthropic_models_url(base_url),
+            _anthropic_models_url(resolved_base_url),
             headers=h,
         )
         with _urlopen_model_catalog_request(req, timeout=timeout) as resp:
@@ -6556,6 +6617,45 @@ def validate_requested_model(
             catalog_models = provider_model_ids(normalized)
         except Exception:
             catalog_models = []
+        # Ineligible ``-900k`` aliases (e.g. `gpt-5.5-900k`) must be rejected
+        # BEFORE the hidden-slug soft-accept below: the suffix is a Hermes
+        # picker convention, so an unknown `*-900k` name can never be a real
+        # hidden provider slug — soft-accepting one silently runs at 272K on
+        # a different model than the user thinks (#92797 review).
+        if normalized == "openai-codex":
+            from agent.model_metadata import (
+                CODEX_CONTEXT_VARIANT_SUFFIX,
+                is_codex_context_variant,
+            )
+            _req_lower = requested_for_lookup.strip().lower()
+            if (
+                _req_lower.endswith(CODEX_CONTEXT_VARIANT_SUFFIX)
+                and requested_for_lookup not in set(catalog_models)
+            ):
+                if is_codex_context_variant(requested_for_lookup):
+                    # Valid variant that a stale catalog hasn't synthesized
+                    # yet. Accept it directly — falling through would let the
+                    # typo auto-corrector "fix" it to the base slug and
+                    # silently drop the large-context opt-in.
+                    return {
+                        "accepted": True,
+                        "persist": True,
+                        "recognized": True,
+                        "message": None,
+                    }
+                _base_guess = requested_for_lookup[: -len(CODEX_CONTEXT_VARIANT_SUFFIX)]
+                return {
+                    "accepted": False,
+                    "persist": False,
+                    "recognized": False,
+                    "message": (
+                        f"`{requested}` is not a valid large-context variant — "
+                        f"`{_base_guess}` enforces the standard 272K window on "
+                        f"Codex, so no `-900k` option exists for it. Pick the "
+                        f"base model, or a verified variant from the `/model` "
+                        f"picker (e.g. `gpt-5.6-sol-900k`)."
+                    ),
+                }
         if catalog_models:
             if requested_for_lookup in set(catalog_models):
                 return {
@@ -6842,8 +6942,8 @@ def validate_requested_model(
     # AWS SDK control plane (ListFoundationModels + ListInferenceProfiles).
     if normalized == "bedrock":
         try:
-            from agent.bedrock_adapter import discover_bedrock_models, resolve_bedrock_region
-            region = resolve_bedrock_region()
+            from agent.bedrock_adapter import discover_bedrock_models, resolve_bedrock_runtime_region
+            region = resolve_bedrock_runtime_region()
             discovered = discover_bedrock_models(region)
             discovered_ids = {m["id"] for m in discovered}
             if requested in discovered_ids:

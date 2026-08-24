@@ -29,7 +29,6 @@ import { stableArray, stableRecord } from '@/lib/stable-array'
 
 import { $backgroundRunningSessionIds } from './composer-status'
 import {
-  $cronSessions,
   $erroredSessionIds,
   $messagingSessions,
   $sessions,
@@ -256,7 +255,12 @@ export function unreadSessionCount(
   return n
 }
 
+/** The titlebar badge. Cron sessions are deliberately EXCLUDED: cron runs
+ *  finish unwatched by design, so counting them turns the badge into a cron
+ *  run counter that is permanently lit (#93552). Their unread state stays
+ *  visible where it belongs — the sidebar's cron section rows — and
+ *  "mark all as read" still acks them (ackAllSessionsRead iterates cron rows). */
 export const $unreadSessionCount = computed(
-  [$sessionDotStateById, $sessions, $cronSessions, $messagingSessions],
-  (byId, sessions, cron, messaging) => unreadSessionCount(byId, sessions, cron, messaging)
+  [$sessionDotStateById, $sessions, $messagingSessions],
+  (byId, sessions, messaging) => unreadSessionCount(byId, sessions, messaging)
 )

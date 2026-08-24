@@ -131,10 +131,22 @@ Talk to Hermes and hear it back, the same [voice mode](./features/voice-mode.md)
 
 **⌘/Ctrl+Shift+H** (or the titlebar button) detaches the chat into a chrome-free, always-on-top floating bar that sits over whatever you are working in. The app window steps aside; the HUD keeps your live conversation and a composer. Where you park it is context — the bar's position tells Hermes which app and screen you're asking about, so "this", "here", and "that page" resolve to what's underneath it.
 
-- **Moving the bar** — **press and hold** anywhere on the composer for a beat, then drag. A quick press still types; a held press grabs the window. This is the only way to move the HUD — there is no titlebar to drag.
-- **Resizing** — drag the bottom-right corner of the bar.
-- **Snap to pointer** — **⌘/Ctrl+Shift+G** (a global hotkey, works from any app) jumps the HUD to wherever your cursor is.
+- **Moving the bar** — on macOS and Windows, **press and hold** anywhere on the composer for a beat, then drag. On Linux/X11, hold **Ctrl** and drag with the primary mouse button for an immediate grab (including over selected text); press-and-hold remains available too. Keep the grab held while invoking your desktop switch shortcut to carry the HUD onto another virtual desktop. On native Wayland the composer bar is a compositor drag handle (the only way to move it, because an app cannot place its own window).
+- **Resizing** — drag any edge or corner of the bar; the opposite edge stays anchored. Native Wayland exposes the right and bottom edges because the compositor does not allow apps to position top-level windows themselves.
+- **Reset layout** — the discard control on the bar restores the default size and (on X11 / macOS / Windows) position. Use this if a persisted size leaves the HUD unusable.
+- **Snap to pointer** — **⌘/Ctrl+Shift+G** (a global hotkey, works from any app) jumps the HUD to wherever your cursor is. On native Wayland this is a no-op — the compositor owns placement.
 - **Exiting** — click the exit button on the bar, or press **⌘/Ctrl+Shift+H** again. The app window comes back with your session intact.
+
+#### Linux / Wayland
+
+Electron 20+ already runs as a native Wayland client on a Wayland session. Drag, click-through, and resize work on that path. A few compositors (notably COSMIC) ignore `always-on-top` for native Wayland windows. To restore pinning, run the app under XWayland:
+
+```yaml
+desktop:
+  ozone_platform_hint: x11
+```
+
+That bridges to `ELECTRON_OZONE_PLATFORM_HINT` at launch (an explicit env var still wins). The trade: X11 cannot restore a window that has ignored the mouse, so the HUD stays a solid window instead of click-through. Some KDE setups also report keyboard breakage with the X11 ozone backend — leave the hint on `auto` unless you need always-on-top.
 
 ### Settings & onboarding
 
@@ -408,6 +420,37 @@ another profile's agent plugins without switching the whole app (the backend
 `plugins.manage` RPC accepts an optional `profile` parameter for this).
 
 ## Troubleshooting
+
+### Failed turns name the failing layer
+
+When a turn fails, the chat renders an error card that names **which layer
+failed** — provider/model, custom endpoint, streaming connection,
+authentication, billing, gateway, local runtime, or disk — instead of a
+generic error toast. The card offers recovery actions matched to the failure:
+
+- **Retry** — re-runs the failed turn in place (hidden when retrying would
+  deterministically reproduce the failure, e.g. a content-policy rejection).
+- **Switch provider** — jumps to Settings → Models for provider, endpoint,
+  auth, and billing failures.
+- **Open logs** — opens `HERMES_HOME/logs` in your file manager. On a remote
+  or Cloud connection the button reads **Open Desktop logs**: it opens the
+  local Desktop-side logs (transport evidence), since the failed turn's
+  gateway/agent logs live on the remote machine.
+- **Send diagnostics** — uploads a redacted debug bundle to Nous-internal
+  storage after an explicit consent prompt (same pipeline as
+  `hermes debug share --nous`; secrets are always redacted, the bundle is
+  viewable by Nous staff only and auto-deletes after 14 days). On success you
+  get a private view link to paste into your support thread, plus quick links
+  to GitHub Issues, Nous Portal Support, and Discord. On a remote or Cloud
+  connection the backend bundles its own agent/gateway logs and the local
+  Desktop log is attached alongside, so support sees both halves.
+- **Copy error details** — copies a compact plain-text summary (layer, code,
+  provider/model, error message) you can paste into a bug report or Discord.
+
+The layer comes from the same error classifier the agent's retry loop uses,
+so it reflects the real failure semantics, not a guess from the message text.
+Older backends that predate the descriptor still render the card with a
+generic title and the Retry / Open logs / Copy error details actions.
 
 Boot logs land in `HERMES_HOME/logs/desktop.log` (it includes backend output and recent Python tracebacks) — check it first if the app reports a boot failure. You can also tail it from the CLI:
 

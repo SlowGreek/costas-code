@@ -31,7 +31,7 @@ import weakref
 from concurrent.futures import (
     TimeoutError as FuturesTimeoutError,
 )
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from toolsets import TOOLSETS
@@ -3669,6 +3669,7 @@ def delegate_task(
     suppress_completion_delivery: bool = False,
     reject_if_async_capacity: bool = False,
     credentials_cfg: Optional[Dict[str, Any]] = None,
+    completion_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> str:
     """
     Spawn one or more child agents to handle delegated tasks, or control
@@ -4350,6 +4351,7 @@ def delegate_task(
             delegation_id=live_deleg_id,
             progress_fn=_batch_progress,
             suppress_completion_delivery=suppress_completion_delivery,
+            completion_callback=completion_callback,
         )
 
         if dispatch.get("status") == "dispatched":

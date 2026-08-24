@@ -787,6 +787,7 @@ def dispatch_async_delegation(
     max_async_children: int = _DEFAULT_MAX_ASYNC_CHILDREN,
     progress_fn: Optional[Callable[[], tuple]] = None,
     suppress_completion_delivery: bool = False,
+    completion_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Spawn ``runner`` on the daemon executor and return a handle immediately.
 
@@ -850,6 +851,7 @@ def dispatch_async_delegation(
         "interrupt_fn": interrupt_fn,
         "progress_fn": progress_fn,
         "suppress_completion_delivery": bool(suppress_completion_delivery),
+        "completion_callback": completion_callback,
         # Stale-monitor bookkeeping (see _stale_monitor_loop).
         "_progress_token": None,
         "_progress_ts": dispatched_at,
@@ -960,6 +962,20 @@ def _finish_finalization(delegation_id: str, status: str) -> None:
         _prune_completed_locked()
 
 
+def _notify_terminal_callback(record: Dict[str, Any], event: Dict[str, Any]) -> None:
+    """Notify an internal terminal consumer without affecting chat delivery."""
+    completion_callback = record.get("completion_callback")
+    if not callable(completion_callback):
+        return
+    try:
+        completion_callback(event)
+    except Exception:
+        logger.exception(
+            "Async delegation %s terminal callback failed",
+            record.get("delegation_id"),
+        )
+
+
 def _push_completion_event(
     record: Dict[str, Any], result: Dict[str, Any], status: str
 ) -> None:
@@ -1030,6 +1046,7 @@ def _push_completion_event(
         result,
         delivery_state="suppressed" if suppress_delivery else "pending",
     )
+    _notify_terminal_callback(record, evt)
     if suppress_delivery:
         return
     try:
@@ -1059,6 +1076,7 @@ def dispatch_async_delegation_batch(
     delegation_id: Optional[str] = None,
     progress_fn: Optional[Callable[[], tuple]] = None,
     suppress_completion_delivery: bool = False,
+    completion_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Dispatch a WHOLE fan-out batch as ONE background unit.
 
@@ -1107,6 +1125,7 @@ def dispatch_async_delegation_batch(
         "is_batch": True,
         "progress_fn": progress_fn,
         "suppress_completion_delivery": bool(suppress_completion_delivery),
+        "completion_callback": completion_callback,
         "_progress_token": None,
         "_progress_ts": dispatched_at,
         "_interrupted_at": None,
@@ -1253,6 +1272,7 @@ def _push_batch_completion_event(
         combined,
         delivery_state="suppressed" if suppress_delivery else "pending",
     )
+    _notify_terminal_callback(event_record, evt)
     if suppress_delivery:
         return
     try:

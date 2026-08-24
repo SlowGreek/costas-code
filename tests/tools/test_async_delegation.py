@@ -204,6 +204,72 @@ def test_silent_completion_stays_durable_without_entering_parent_chat():
     assert ad.restore_undelivered_completions(process_registry.completion_queue) == 0
 
 
+def test_silent_completion_invokes_terminal_callback_after_persistence():
+    callback_events = []
+
+    def on_completion(event):
+        durable = ad.get_durable_delegation(event["delegation_id"])
+        callback_events.append((event, durable))
+
+    res = ad.dispatch_async_delegation(
+        goal="research quietly",
+        context=None,
+        toolsets=["web", "file"],
+        role="leaf",
+        model="test-model",
+        session_key="voice-session",
+        runner=lambda: {"status": "completed", "summary": "written"},
+        max_async_children=3,
+        suppress_completion_delivery=True,
+        completion_callback=on_completion,
+    )
+    assert res["status"] == "dispatched"
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not callback_events:
+        time.sleep(0.02)
+
+    assert len(callback_events) == 1
+    event, durable = callback_events[0]
+    assert event["delegation_id"] == res["delegation_id"]
+    assert event["status"] == "completed"
+    assert durable["state"] == "completed"
+    assert durable["delivery_state"] == "suppressed"
+    assert _drain_for(res["delegation_id"], timeout=0.2) is None
+
+
+def test_terminal_callback_failure_does_not_restore_parent_chat_delivery():
+    callback_called = threading.Event()
+
+    def broken_callback(_event):
+        callback_called.set()
+        raise RuntimeError("consumer disconnected")
+
+    res = ad.dispatch_async_delegation(
+        goal="research quietly",
+        context=None,
+        toolsets=None,
+        role="leaf",
+        model="test-model",
+        session_key="voice-session",
+        runner=lambda: {"status": "error", "error": "failed"},
+        max_async_children=3,
+        suppress_completion_delivery=True,
+        completion_callback=broken_callback,
+    )
+
+    assert callback_called.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    durable = None
+    while time.monotonic() < deadline:
+        durable = ad.get_durable_delegation(res["delegation_id"])
+        if durable and durable["state"] == "error":
+            break
+        time.sleep(0.02)
+    assert durable["delivery_state"] == "suppressed"
+    assert _drain_for(res["delegation_id"], timeout=0.2) is None
+
+
 def test_silent_batch_completion_stays_durable_without_entering_parent_chat():
     res = ad.dispatch_async_delegation_batch(
         goals=["research quietly"],

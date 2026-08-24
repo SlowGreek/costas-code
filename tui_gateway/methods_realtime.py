@@ -108,6 +108,13 @@ def _(rid, params: dict) -> dict:
     query = str(params.get("query") or "").strip()[:1_000]
     if not query:
         return _err(rid, 4618, "research query is required")
+    mission_id = str(params.get("mission_id") or "").strip()
+    if (
+        not mission_id
+        or len(mission_id) > 256
+        or any(ord(character) < 32 for character in mission_id)
+    ):
+        return _err(rid, 4618, "a valid mission_id is required")
 
     from tui_gateway.realtime_research import (
         bind_research_delegation,
@@ -115,7 +122,31 @@ def _(rid, params: dict) -> dict:
         prepare_research_artifact,
     )
 
-    artifact_id, paths = prepare_research_artifact(session, query)
+    artifact_id, paths = prepare_research_artifact(session, query, mission_id)
+    runtime_session_id = str(params.get("session_id") or "")
+
+    def _on_research_terminal(event: dict) -> None:
+        from tools.async_delegation import get_durable_delegation
+        from tui_gateway.realtime_research import research_status
+
+        delegation_id = str(event.get("delegation_id") or "")
+        # A very fast worker may finish before delegate_task returns to bind the
+        # durable id. Bind here too; both writers store the same identity.
+        bind_research_delegation(paths, delegation_id)
+        status = research_status(session, artifact_id, get_durable_delegation)
+        payload = {
+            "mission_id": mission_id,
+            "artifact_id": artifact_id,
+            "delegation_id": delegation_id,
+        }
+        if status.get("status") == "ready":
+            _emit("voice.realtime.research.ready", runtime_session_id, payload)
+            return
+        payload["error"] = str(
+            status.get("error") or "research delegation failed"
+        )[:500]
+        _emit("voice.realtime.research.failed", runtime_session_id, payload)
+
     goal = (
         f"Research the following request using substantial, relevant sources: {query}\n\n"
         f"Write the complete cited research report to this exact path: {paths.research}\n"
@@ -142,6 +173,7 @@ def _(rid, params: dict) -> dict:
             parent_agent=session.get("agent"),
             suppress_completion_delivery=True,
             reject_if_async_capacity=True,
+            completion_callback=_on_research_terminal,
         )
         dispatch = json.loads(raw)
         if dispatch.get("status") != "dispatched" or not dispatch.get("delegation_id"):
@@ -157,6 +189,7 @@ def _(rid, params: dict) -> dict:
             rid,
             {
                 "status": "dispatched",
+                "mission_id": mission_id,
                 "artifact_id": artifact_id,
                 "delegation_id": delegation_id,
             },

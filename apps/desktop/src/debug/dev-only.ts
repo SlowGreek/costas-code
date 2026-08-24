@@ -14,6 +14,14 @@
 // `dev-only.noop.ts` whenever the build isn't serving dev, so neither bippy
 // nor the counters reach a shipped renderer.
 
+import { disableReactPerformanceTracks } from './react-performance-tracks'
+
+// React 19.2's DEV Performance Tracks retain native PerformanceMeasure
+// objects and repeatedly serialize component props on every render. Disable
+// the capability before main.tsx evaluates react-dom; our bippy probes below
+// remain available for explicit profiling without the permanent idle cost.
+disableReactPerformanceTracks()
+
 import './index'
 
 export {}

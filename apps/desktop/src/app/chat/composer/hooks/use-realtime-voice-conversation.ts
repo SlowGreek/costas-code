@@ -23,6 +23,7 @@ import {
   publishRealtimeMission,
   type RealtimeResearchEventPayload
 } from '@/store/realtime-mission'
+import { $gatewayState } from '@/store/session'
 import {
   $workbenchArtifact,
   $workbenchLayout,
@@ -119,6 +120,39 @@ export function useRealtimeVoiceConversation({
     setMuted(false)
     setStatus('idle')
   }, [missionRuntime])
+
+  const reconcileActiveMission = useCallback(async () => {
+    const gateway = $gateway.get()
+    const mission = missionRuntime.snapshot()
+    const generation = startGenerationRef.current
+
+    if (
+      !gateway ||
+      !connectionRef.current ||
+      !runtimeSessionId ||
+      mission?.runtimeSessionId !== runtimeSessionId ||
+      mission.state !== 'researching'
+    ) {
+      return
+    }
+
+    try {
+      const researchStatus = await gateway.request<RealtimeResearchStatusSnapshot>(
+        'voice.realtime.research_status',
+        {
+          artifact_id: mission.artifactId,
+          session_id: runtimeSessionId
+        }
+      )
+
+      if (generation === startGenerationRef.current && connectionRef.current) {
+        reconcileRealtimeMissionStatus(missionRuntime, researchStatus)
+      }
+    } catch {
+      // The live terminal event remains authoritative. Reconnect status is
+      // best-effort recovery for a callback lost with the prior process.
+    }
+  }, [missionRuntime, runtimeSessionId])
 
   const start = useCallback(async () => {
     const gateway = $gateway.get()
@@ -220,29 +254,7 @@ export function useRealtimeVoiceConversation({
       missionRuntime.connectionOpened()
       pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
 
-      const recoveringMission = missionRuntime.snapshot()
-
-      if (
-        recoveringMission?.runtimeSessionId === runtimeSessionId &&
-        recoveringMission.state === 'researching'
-      ) {
-        try {
-          const researchStatus = await gateway.request<RealtimeResearchStatusSnapshot>(
-            'voice.realtime.research_status',
-            {
-              artifact_id: recoveringMission.artifactId,
-              session_id: runtimeSessionId
-            }
-          )
-
-          if (generation === startGenerationRef.current) {
-            reconcileRealtimeMissionStatus(missionRuntime, researchStatus)
-          }
-        } catch {
-          // The live terminal event remains authoritative. Reconnect status is
-          // best-effort recovery for a callback lost with the prior process.
-        }
-      }
+      await reconcileActiveMission()
 
       // Continue the conversation rather than starting cold. The typed chat and
       // the voice session share one session, so whatever was already discussed
@@ -289,6 +301,7 @@ export function useRealtimeVoiceConversation({
     missionRuntime,
     onFatalError,
     onTranscript,
+    reconcileActiveMission,
     runtimeSessionId,
     t.notifications.voice.couldNotStartSession,
     t.notifications.voice.transcriptionFailed
@@ -311,6 +324,19 @@ export function useRealtimeVoiceConversation({
   useEffect(() => {
     missionRuntime.focusSession(runtimeSessionId ?? null)
   }, [missionRuntime, runtimeSessionId])
+
+  useEffect(() => {
+    let previousState = $gatewayState.get()
+
+    return $gatewayState.subscribe(state => {
+      const reopened = state === 'open' && previousState !== 'open'
+      previousState = state
+
+      if (reopened) {
+        void reconcileActiveMission()
+      }
+    })
+  }, [reconcileActiveMission])
 
   useEffect(() => {
     const handle = (event: RpcEvent) => {

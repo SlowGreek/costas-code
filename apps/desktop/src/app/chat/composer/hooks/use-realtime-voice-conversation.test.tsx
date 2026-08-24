@@ -5,6 +5,7 @@ import { emitGatewayEvent } from '@/contrib/events'
 import { startRealtimeVoiceConnection } from '@/lib/realtime-voice'
 import { $gateway } from '@/store/gateway'
 import { $realtimeMissions } from '@/store/realtime-mission'
+import { setGatewayState } from '@/store/session'
 import { setWorkbenchArtifact } from '@/store/workbench'
 
 import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
@@ -42,6 +43,7 @@ describe('useRealtimeVoiceConversation', () => {
     setWorkbenchArtifact(null)
     $realtimeMissions.set({})
     $gateway.set({ request: vi.fn(async () => ({})) } as never)
+    setGatewayState('open')
   })
 
   it('gates a tool call on the real transcription event, with no fixed sleep', async () => {
@@ -271,7 +273,7 @@ describe('useRealtimeVoiceConversation', () => {
     expect($realtimeMissions.get()['runtime-session']?.state).toBe('resuming')
   })
 
-  it('reconciles an active research mission from durable status after reconnect', async () => {
+  it('reconciles an active research mission when the gateway reconnects', async () => {
     const request = vi.fn(async (method: string) => {
       if (method === 'voice.realtime.research_status') {
         return {
@@ -304,11 +306,12 @@ describe('useRealtimeVoiceConversation', () => {
         missionId: 'mission_reconnect',
         runtimeSessionId: 'runtime-session'
       })
-      hook.result.current.end()
+      setGatewayState('closed')
     })
 
     await act(async () => {
-      await hook.result.current.start()
+      setGatewayState('open')
+      await Promise.resolve()
     })
 
     expect(request).toHaveBeenCalledWith('voice.realtime.research_status', {

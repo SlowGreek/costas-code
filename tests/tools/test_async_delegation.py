@@ -175,6 +175,67 @@ def test_completion_event_lands_on_shared_queue_with_session_key():
     assert evt["delegation_id"] == res["delegation_id"]
 
 
+def test_silent_completion_stays_durable_without_entering_parent_chat():
+    res = ad.dispatch_async_delegation(
+        goal="research quietly",
+        context=None,
+        toolsets=["web", "file"],
+        role="leaf",
+        model="test-model",
+        session_key="voice-session",
+        runner=lambda: {"status": "completed", "summary": "written"},
+        max_async_children=3,
+        suppress_completion_delivery=True,
+    )
+    assert res["status"] == "dispatched"
+
+    deadline = time.monotonic() + 5
+    durable = None
+    while time.monotonic() < deadline:
+        durable = ad.get_durable_delegation(res["delegation_id"])
+        if durable and durable["state"] == "completed":
+            break
+        time.sleep(0.02)
+
+    assert durable is not None
+    assert durable["state"] == "completed"
+    assert durable["delivery_state"] == "suppressed"
+    assert _drain_for(res["delegation_id"], timeout=0.2) is None
+    assert ad.restore_undelivered_completions(process_registry.completion_queue) == 0
+
+
+def test_silent_batch_completion_stays_durable_without_entering_parent_chat():
+    res = ad.dispatch_async_delegation_batch(
+        goals=["research quietly"],
+        context=None,
+        toolsets=["web", "file"],
+        role="leaf",
+        model="test-model",
+        session_key="voice-session",
+        runner=lambda: {
+            "status": "completed",
+            "results": [{"status": "completed", "summary": "written"}],
+        },
+        max_async_children=3,
+        suppress_completion_delivery=True,
+    )
+    assert res["status"] == "dispatched"
+
+    deadline = time.monotonic() + 5
+    durable = None
+    while time.monotonic() < deadline:
+        durable = ad.get_durable_delegation(res["delegation_id"])
+        if durable and durable["state"] == "completed":
+            break
+        time.sleep(0.02)
+
+    assert durable is not None
+    assert durable["state"] == "completed"
+    assert durable["delivery_state"] == "suppressed"
+    assert _drain_for(res["delegation_id"], timeout=0.2) is None
+    assert ad.restore_undelivered_completions(process_registry.completion_queue) == 0
+
+
 def test_rich_reinjection_block_is_self_contained():
     def runner():
         return {"status": "completed", "summary": "The answer is 42.",

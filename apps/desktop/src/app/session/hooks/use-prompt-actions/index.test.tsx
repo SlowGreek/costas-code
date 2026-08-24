@@ -5514,6 +5514,42 @@ describe('usePromptActions stale-closure session routing', () => {
       }
     }
   })
+
+  it('resubmits an unchanged latest user turn when no assistant response exists', async () => {
+    const requestGateway = vi.fn(async () => ({}) as never) as unknown as GatewayMock
+
+    const seed = [
+      {
+        id: 'u1',
+        parts: [textPart('retry this unanswered prompt')],
+        role: 'user' as const,
+        rowId: 321,
+        timestamp: 0
+      }
+    ]
+
+    const { handle } = await renderWithStaleClosure(requestGateway, seed)
+
+    await handle.editMessage({
+      content: [{ text: 'retry this unanswered prompt', type: 'text' }],
+      parentId: null,
+      role: 'user',
+      sourceId: 'u1'
+    } as never)
+
+    expect(requestGateway).toHaveBeenCalledWith(
+      'prompt.submit',
+      expect.objectContaining({
+        confirm_empty_truncate: true,
+        confirm_truncate: true,
+        session_id: RUNTIME_SESSION_B,
+        text: 'retry this unanswered prompt',
+        truncate_before_row_id: 321,
+        truncate_before_user_ordinal: 0
+      }),
+      expect.anything()
+    )
+  })
 })
 
 describe('usePromptActions editMessage stale-target recovery (#82462)', () => {

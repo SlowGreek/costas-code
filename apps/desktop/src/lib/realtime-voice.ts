@@ -353,12 +353,15 @@ const VOICE_OWNED_REDRAW_INSTRUCTIONS =
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
   'You operate inside a real agent loop. One human turn may span several model responses and tool rounds; each response is one inference step, not necessarily the whole user turn. When you call a tool, the harness executes it, returns the tool result, and creates another inference in this same semantic turn. A tool-free response ends the loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. Return a tool-free response only when the original user request is satisfied or you genuinely need their input. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then visualize; snapshot, edit, then inspect again when confirmation matters. Keep the same conversational thought across every inference without greeting, restarting, or recapping.'
 
+const VOICE_RESEARCH_INSTRUCTIONS =
+  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned artifact_id. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. On a later user turn, call research_status; when ready, use research_search to locate relevant evidence and research_read to inspect only the needed sections before drawing or answering.'
+
 const WEB_SEARCH_INSTRUCTIONS =
   'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
 
 /** Test seam: assert behavior contracts for the voice-owned mode. */
 export const REALTIME_INSTRUCTIONS_FOR_TESTS =
-  `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}`
+  `${DEFAULT_REALTIME_INSTRUCTIONS}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}\n\n${VOICE_RESEARCH_INSTRUCTIONS}`
 
 /**
  * Server-side turn taking. Sent on every `session.update` so a later context
@@ -429,6 +432,64 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
               description: 'Direction for the fast whole-canvas draft.'
             }
           },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'delegate_research',
+        description:
+          'Reluctantly dispatch a silent Hermes research worker for substantial multi-source or deep investigation. Prefer web_search for quick facts. Returns an artifact_id immediately; the worker cannot speak to the user or control the canvas.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'The complete research question and evidence needed.' }
+          },
+          required: ['query'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'research_status',
+        description:
+          'Check a previously dispatched research artifact once on a later turn. Do not busy-poll. Returns running, ready, or failed.',
+        parameters: {
+          type: 'object',
+          properties: {
+            artifact_id: { type: 'string', description: 'Optional artifact_id. Omit after reconnect to recover the latest research for this session.' }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'research_search',
+        description:
+          'Search a READY research artifact for relevant evidence before reading it. Returns bounded matching lines.',
+        parameters: {
+          type: 'object',
+          properties: {
+            artifact_id: { type: 'string', description: 'Opaque ready research artifact id.' },
+            query: { type: 'string', description: 'Literal evidence phrase or concept to locate.' }
+          },
+          required: ['artifact_id', 'query'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'research_read',
+        description:
+          'Read a bounded line range from a READY cited research artifact after locating relevant sections.',
+        parameters: {
+          type: 'object',
+          properties: {
+            artifact_id: { type: 'string', description: 'Opaque ready research artifact id.' },
+            start_line: { type: 'integer', minimum: 1 },
+            line_count: { type: 'integer', minimum: 1, maximum: 100 }
+          },
+          required: ['artifact_id'],
           additionalProperties: false
         }
       },
@@ -577,7 +638,7 @@ export async function startRealtimeVoiceConnection(
 
   const webSearchAvailable = token.voice_capabilities?.web_search === true
   const configuredInstructions = options.instructions ?? DEFAULT_REALTIME_INSTRUCTIONS
-  const baseInstructions = `${configuredInstructions}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}${webSearchAvailable ? `\n\n${WEB_SEARCH_INSTRUCTIONS}` : ''}`
+  const baseInstructions = `${configuredInstructions}\n\n${VOICE_OWNED_REDRAW_INSTRUCTIONS}\n\n${VOICE_ACTION_LOOP_INSTRUCTIONS}\n\n${VOICE_RESEARCH_INSTRUCTIONS}${webSearchAvailable ? `\n\n${WEB_SEARCH_INSTRUCTIONS}` : ''}`
 
   const stream = await mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -936,7 +997,13 @@ export const SURGICAL_TOOL_NAMES = [
 ] as const
 
 export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): RealtimeToolLane {
-  if (call.name === 'session_snapshot' || call.name === 'web_search') {
+  if (
+    call.name === 'session_snapshot' ||
+    call.name === 'web_search' ||
+    call.name === 'research_status' ||
+    call.name === 'research_search' ||
+    call.name === 'research_read'
+  ) {
     return 'read'
   }
 
@@ -948,7 +1015,11 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
     return 'presentation'
   }
 
-  if (call.name === 'visualize' || call.name === 'speed_draw') {
+  if (
+    call.name === 'visualize' ||
+    call.name === 'speed_draw' ||
+    call.name === 'delegate_research'
+  ) {
     return 'slow'
   }
 
@@ -989,6 +1060,79 @@ export async function executeRealtimeVoiceTool(
     await deps.beforeToolCall?.()
 
     return deps.request('artifact.list', { session_id: deps.runtimeSessionId })
+  }
+
+  if (name === 'delegate_research') {
+    let query = ''
+
+    try {
+      const parsed = JSON.parse(call.arguments || '{}') as { query?: unknown }
+      query = asTrimmedString(parsed.query).slice(0, 1_000)
+    } catch {
+      // Invalid arguments become a structured tool error below.
+    }
+
+    if (!query) {
+      return { error: 'delegate_research is missing a query' }
+    }
+
+    await deps.beforeToolCall?.()
+
+    return deps.request('voice.realtime.delegate_research', {
+      session_id: deps.runtimeSessionId,
+      query
+    })
+  }
+
+  if (name === 'research_status' || name === 'research_search' || name === 'research_read') {
+    let artifactId = ''
+    let query = ''
+    let startLine = 1
+    let lineCount = 40
+
+    try {
+      const parsed = JSON.parse(call.arguments || '{}') as Record<string, unknown>
+      artifactId = asTrimmedString(parsed.artifact_id).slice(0, 100)
+      query = asTrimmedString(parsed.query).slice(0, 500)
+
+      if (typeof parsed.start_line === 'number' && Number.isFinite(parsed.start_line)) {
+        startLine = Math.max(1, Math.trunc(parsed.start_line))
+      }
+
+      if (typeof parsed.line_count === 'number' && Number.isFinite(parsed.line_count)) {
+        lineCount = Math.min(Math.max(1, Math.trunc(parsed.line_count)), 100)
+      }
+    } catch {
+      // Invalid arguments become a structured tool error below.
+    }
+
+    if (!artifactId && name !== 'research_status') {
+      return { error: `${name} is missing an artifact_id` }
+    }
+
+    if (name === 'research_status') {
+      return deps.request('voice.realtime.research_status', {
+        session_id: deps.runtimeSessionId,
+        ...(artifactId ? { artifact_id: artifactId } : {})
+      })
+    }
+
+    if (name === 'research_search') {
+      return query
+        ? deps.request('voice.realtime.research_search', {
+            session_id: deps.runtimeSessionId,
+            artifact_id: artifactId,
+            query
+          })
+        : { error: 'research_search is missing a query' }
+    }
+
+    return deps.request('voice.realtime.research_read', {
+      session_id: deps.runtimeSessionId,
+      artifact_id: artifactId,
+      start_line: startLine,
+      line_count: lineCount
+    })
   }
 
   if (name === 'visualize' || name === 'speed_draw') {

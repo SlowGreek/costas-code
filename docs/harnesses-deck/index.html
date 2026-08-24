@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Harnesses — From First Principles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f2efe8;
+    --paper-2:#e9e5db;
+    --ink:#16150f;
+    --ink-2:#4a4740;
+    --ink-3:#8a857a;
+    --rule:#d5cfc2;
+    --accent:#8c2f1e;
+    --accent-2:#1f4d52;
+    --serif:"Instrument Serif", "Iowan Old Style", Georgia, serif;
+    --sans:"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden; background:#0e0e0c}
+  body{font-family:var(--sans); -webkit-font-smoothing:antialiased}
+
+  /* ---- fixed canvas, scaled to viewport ---- */
+  #stage{position:fixed; inset:0; overflow:hidden}
+  #canvas{
+    width:1920px; height:1080px; position:absolute; left:50%; top:50%;
+    background:var(--paper); color:var(--ink);
+    transform-origin:center center; overflow:hidden;
+    box-shadow:0 40px 120px rgba(0,0,0,.55);
+  }
+
+  /* paper grain */
+  #canvas:after{
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+    background-image:radial-gradient(var(--rule) .5px, transparent .5px);
+    background-size:5px 5px;
+    mix-blend-mode:multiply;
+  }
+
+  .slide{
+    position:absolute; inset:0; padding:110px 130px 96px;
+    display:none; flex-direction:column;
+  }
+  .slide.on{display:flex}
+  .slide.on .anim{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
+  .slide.on .anim:nth-child(2){animation-delay:.05s}
+  .slide.on .anim:nth-child(3){animation-delay:.1s}
+  .slide.on .anim:nth-child(4){animation-delay:.15s}
+  @keyframes rise{from{opacity:0; transform:translateY(18px)} to{opacity:1; transform:none}}
+  @media (prefers-reduced-motion:reduce){ .slide.on .anim{animation:none} }
+
+  /* ---- type ---- */
+  .eyebrow{
+    font-family:var(--mono); font-size:22px; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--accent); margin-bottom:36px;
+    display:flex; align-items:center; gap:20px;
+  }
+  .eyebrow:after{content:""; height:1px; flex:1; background:var(--rule)}
+
+  h2{
+    font-family:var(--serif); font-weight:400; font-size:104px; line-height:1.02;
+    letter-spacing:-.015em; max-width:1500px;
+  }
+  h2 em{font-style:italic; color:var(--accent)}
+  h2.sm{font-size:82px}
+
+  .lede{
+    font-size:34px; line-height:1.42; color:var(--ink-2);
+    max-width:1180px; margin-top:34px; font-weight:400; text-wrap:pretty;
+  }
+  p{font-size:30px; line-height:1.55; color:var(--ink-2); max-width:1180px; text-wrap:pretty}
+  p + p{margin-top:22px}
+  strong{color:var(--ink); font-weight:600}
+  .k{font-family:var(--mono); font-size:.92em; color:var(--accent-2)}
+
+  .flow-body{flex:1; display:flex; flex-direction:column; justify-content:center}
+  .pad{margin-top:52px}
+
+  /* ---- statement slide ---- */
+  .statement{
+    font-family:var(--serif); font-size:92px; line-height:1.12;
+    letter-spacing:-.01em; max-width:1500px; color:var(--ink);
+  }
+  .statement em{font-style:italic; color:var(--accent)}
+
+  /* ---- numbered editorial list ---- */
+  ol.big{list-style:none; counter-reset:n; max-width:1480px}
+  ol.big li{
+    counter-increment:n; display:grid; grid-template-columns:120px 1fr;
+    gap:36px; padding:18px 0; border-top:1px solid var(--rule); align-items:baseline;
+  }
+  ol.big li:last-child{border-bottom:1px solid var(--rule)}
+  ol.big li:before{
+    content:counter(n,decimal-leading-zero);
+    font-family:var(--mono); font-size:30px; color:var(--accent);
+    letter-spacing:.06em;
+  }
+  ol.big .t{font-size:34px; font-weight:600; color:var(--ink); margin-bottom:8px}
+  ol.big .d{font-size:27px; line-height:1.5; color:var(--ink-2)}
+
+  /* ---- plain rules list ---- */
+  ul.rules{list-style:none; max-width:1350px}
+  ul.rules li{
+    font-size:31px; line-height:1.5; color:var(--ink-2);
+    padding:22px 0 22px 46px; border-bottom:1px solid var(--rule); position:relative;
+  }
+  ul.rules li:first-child{border-top:1px solid var(--rule)}
+  ul.rules li:before{
+    content:"→"; position:absolute; left:0; top:22px;
+    font-family:var(--mono); color:var(--accent); font-size:28px;
+  }
+
+  /* ---- split ---- */
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:0; max-width:1600px; border-top:2px solid var(--ink)}
+  .split > div{padding:38px 46px 42px}
+  .split > div:first-child{border-right:1px solid var(--rule)}
+  .split .lbl{
+    font-family:var(--mono); font-size:21px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:18px;
+  }
+  .split .hd{font-family:var(--serif); font-size:46px; line-height:1.1; margin-bottom:18px}
+  .split p{font-size:27px; max-width:none}
+  .split .a .hd{color:var(--accent)}
+  .split .b .hd{color:var(--accent-2)}
+
+  /* ---- diagram ---- */
+  .chain{display:flex; align-items:stretch; gap:0; margin:16px 0 0; max-width:1660px}
+  .chain .step{
+    flex:1; border:1px solid var(--rule); border-right:none;
+    padding:30px 26px; background:rgba(255,255,255,.45);
+  }
+  .chain .step:last-child{border-right:1px solid var(--rule)}
+  .chain .step.hot{background:var(--accent); border-color:var(--accent)}
+  .chain .step.hot .n, .chain .step.hot .l{color:#f7efe9}
+  .chain .n{font-family:var(--mono); font-size:20px; color:var(--ink-3); letter-spacing:.14em; display:block; margin-bottom:12px}
+  .chain .l{font-size:29px; line-height:1.25; color:var(--ink); font-weight:500}
+  .loopback{
+    margin-top:0; border:1px dashed var(--rule); border-top:none;
+    max-width:1660px; padding:14px 26px; text-align:right;
+    font-family:var(--mono); font-size:23px; color:var(--ink-3);
+  }
+
+  /* ---- three-turn list diagram ---- */
+  .turns{display:flex; gap:26px; align-items:flex-start; max-width:1660px; margin-top:12px}
+  .turn{flex:1; border:1px solid var(--rule); background:rgba(255,255,255,.45); padding:0 0 20px}
+  .thd{
+    font-family:var(--mono); font-size:22px; letter-spacing:.1em; text-transform:uppercase;
+    padding:16px 22px 14px; border-bottom:1px solid var(--rule); color:var(--ink);
+    display:flex; justify-content:space-between; align-items:baseline;
+  }
+  .thd span{font-size:17px; letter-spacing:.08em; color:var(--ink-3); text-transform:none}
+  .msg{
+    font-family:var(--mono); font-size:21px; line-height:1.35;
+    margin:12px 22px 0; padding:11px 14px; border-left:3px solid var(--rule);
+    background:rgba(255,255,255,.7); color:var(--ink-2);
+  }
+  .msg.u{border-left-color:var(--ink); color:var(--ink)}
+  .msg.m{border-left-color:var(--accent-2)}
+  .msg.r{border-left-color:var(--accent)}
+  .msg.n{border-left-color:var(--accent); background:var(--accent); color:#f7efe9}
+  .ask{
+    margin:18px 22px 0; padding-top:14px; border-top:1px dashed var(--rule);
+    font-family:var(--mono); font-size:20px; color:var(--ink-3);
+  }
+
+  /* ---- Q&A ---- */
+  .qa{
+    display:grid; grid-template-columns:1fr 1fr; gap:30px 54px;
+    max-width:1660px; margin-top:14px;
+  }
+  .qi{border-top:1px solid var(--rule); padding-top:18px}
+  .qi .q{
+    font-family:var(--serif); font-size:34px; line-height:1.15;
+    color:var(--accent); margin-bottom:12px;
+  }
+  .qi .a{font-size:25px; line-height:1.5; color:var(--ink-2)}
+  .qi .a em{color:var(--ink); font-style:italic}
+
+  /* ---- loop vs runtime comparison ---- */
+  .vs{display:grid; grid-template-columns:1fr 1fr; gap:0; max-width:1660px; margin-top:14px}
+  .vs > div{border:1px solid var(--rule); padding:26px 30px 30px}
+  .vs > div:first-child{border-right:none}
+  .vs .cap{
+    font-family:var(--mono); font-size:20px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:20px;
+  }
+  .vs .rt .cap{color:var(--accent)}
+  .node{
+    border:1px solid var(--rule); background:rgba(255,255,255,.6);
+    padding:13px 18px; font-family:var(--mono); font-size:21px;
+    margin-bottom:9px; color:var(--ink-2);
+  }
+  .node.hot{background:var(--accent); border-color:var(--accent); color:#f7efe9}
+  .node.dash{border-style:dashed; background:none}
+  .drop{
+    font-family:var(--mono); font-size:19px; color:var(--ink-3);
+    margin:0 0 9px 18px;
+  }
+  .vs .note{
+    margin-top:18px; padding-top:16px; border-top:1px dashed var(--rule);
+    font-size:24px; line-height:1.45; color:var(--ink-2);
+  }
+
+  /* ---- event bus flow ---- */
+  .bus-fig{max-width:1660px; margin-top:14px; position:relative; padding-left:22px}
+  .bus-fig:before{
+    content:""; position:absolute; left:0; top:62px; bottom:14px;
+    width:3px; background:var(--accent);
+  }
+  .lane{display:flex; align-items:center; gap:24px; margin-bottom:14px}
+  .lane.heads{margin-bottom:16px}
+  .ev-h{
+    flex:0 0 400px; font-family:var(--mono); font-size:19px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); padding-left:20px;
+  }
+  .hear-h{
+    font-family:var(--mono); font-size:19px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3);
+  }
+  .lane .ev{
+    flex:0 0 400px; background:var(--accent); color:#f7efe9;
+    font-family:var(--mono); font-size:23px; padding:14px 20px;
+    position:relative;
+  }
+  .lane .ev:before{
+    content:""; position:absolute; left:-22px; top:50%; width:22px; height:1px;
+    background:var(--accent);
+  }
+  .lane .hear{display:flex; gap:12px; flex-wrap:wrap}
+  .lane .hear span{
+    border:1px dashed var(--rule); background:rgba(255,255,255,.5);
+    font-family:var(--mono); font-size:20px; color:var(--ink-2);
+    padding:11px 16px;
+  }
+
+  /* ---- code mode: calling vs writing ---- */
+  .cm{display:grid; grid-template-columns:1fr 1fr; gap:0; max-width:1660px; margin-top:14px; border-top:2px solid var(--ink)}
+  .cm-side{padding:20px 30px 18px}
+  .cm-side:first-child{border-right:1px solid var(--rule)}
+  .cm-side.hot{background:rgba(255,255,255,.55)}
+  .cm-cap{
+    font-family:var(--mono); font-size:19px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:18px;
+  }
+  .pp{display:flex; flex-direction:column; gap:6px}
+  .pp-row{display:flex; align-items:baseline; gap:14px}
+  .pp-row.dim{opacity:.5}
+  .pp .who{
+    font-family:var(--mono); font-size:16px; letter-spacing:.1em;
+    text-transform:uppercase; width:86px; flex:none;
+  }
+  .pp .who.m{color:var(--accent-2)}
+  .pp .who.h{color:var(--ink-3)}
+  .pp .what{font-family:var(--mono); font-size:21px; color:var(--ink)}
+  .pp-row.r .what{color:var(--ink-3)}
+  .cm-code{font-size:20px; line-height:1.55; padding:20px 24px}
+  .cm-foot{
+    margin-top:16px; padding-top:12px; border-top:1px dashed var(--rule);
+    font-size:21px; line-height:1.4; color:var(--ink-2);
+  }
+
+  /* ---- tool collapse ---- */
+  .fold{
+    display:grid; grid-template-columns:1fr 210px 1fr; align-items:center;
+    max-width:1660px; margin-top:14px;
+  }
+  .fold .cap{
+    font-family:var(--mono); font-size:19px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:16px;
+  }
+  .fold .before, .fold .after{border:1px solid var(--rule); padding:24px 26px 22px}
+  .swarm{display:flex; flex-wrap:wrap; gap:8px}
+  .swarm span{
+    font-family:var(--mono); font-size:18px; color:var(--ink-3);
+    border:1px solid var(--rule); padding:7px 11px; background:rgba(255,255,255,.5);
+  }
+  .fold .cost{
+    margin-top:18px; padding-top:14px; border-top:1px dashed var(--rule);
+    font-family:var(--mono); font-size:19px; color:var(--accent);
+  }
+  .fold .cost.fixed{color:var(--accent-2)}
+  .fold .mid{text-align:center; position:relative}
+  .fold .mid:before{
+    content:""; position:absolute; left:14px; right:14px; top:50%; height:1px;
+    background:var(--rule);
+  }
+  .fold .mid span{
+    position:relative; background:var(--paper); padding:0 14px;
+    font-family:var(--mono); font-size:19px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3);
+  }
+  .fold .after{background:rgba(255,255,255,.55)}
+  .fold .one{
+    background:var(--accent); color:#f7efe9; font-family:var(--mono);
+    font-size:30px; padding:24px 26px; text-align:center;
+  }
+  .fold .sub{
+    margin-top:16px; font-size:23px; line-height:1.4; color:var(--ink-2);
+  }
+
+  /* ---- context budget bar ---- */
+  .budget{max-width:1620px; margin-top:10px}
+  .budget .row{display:flex; height:104px; border:1px solid var(--rule)}
+  .budget .seg{
+    display:flex; flex-direction:column; justify-content:center;
+    padding:0 24px; border-right:1px solid var(--rule);
+  }
+  .budget .seg:last-child{border-right:none}
+  .budget .seg small{
+    font-family:var(--mono); font-size:18px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:6px;
+  }
+  .budget .seg strong{font-size:25px; font-weight:500}
+  .budget .tools{background:var(--accent); color:#f7efe9}
+  .budget .tools small,.budget .tools strong{color:#f7efe9}
+  .budget .work{background:rgba(31,77,82,.1)}
+  .budget .lab{
+    display:flex; justify-content:space-between; margin-top:14px;
+    font-family:var(--mono); font-size:20px; color:var(--ink-3);
+  }
+
+  /* ---- stack diagram ---- */
+  .stack{max-width:1560px; margin-top:8px}
+  .stack .lay{
+    border:1px solid var(--rule); padding:22px 30px; margin-bottom:10px;
+    display:flex; align-items:baseline; gap:26px; background:rgba(255,255,255,.4);
+  }
+  .stack .lay .nm{font-size:29px; font-weight:600; flex:0 0 400px}
+  .stack .lay .ds{font-size:25px; color:var(--ink-2)}
+  .stack .plug{border-style:dashed}
+  .stack .core{background:var(--accent); border-color:var(--accent)}
+  .stack .core .nm,.stack .core .ds{color:#f7efe9}
+  .stack .bus{
+    font-family:var(--mono); font-size:20px; color:var(--ink-3);
+    letter-spacing:.14em; text-transform:uppercase; margin:16px 0 10px;
+  }
+
+  /* ---- code ---- */
+  .code{
+    background:#16150f; color:#ded9cc; border-radius:2px;
+    padding:34px 40px; font-family:var(--mono); font-size:26px; line-height:1.72;
+    max-width:1300px; white-space:pre; overflow:hidden;
+  }
+  .code .c{color:#7d7768}
+  .code .kw{color:#d99a6c}
+  .code .st{color:#8fae8b}
+  .code-label{
+    font-family:var(--mono); font-size:21px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-3); margin-bottom:14px;
+  }
+
+  /* ---- pull quote ---- */
+  .pull{max-width:1450px; border-left:3px solid var(--accent); padding-left:44px}
+  .pull q{
+    font-family:var(--serif); font-size:52px; line-height:1.24; font-style:italic;
+    color:var(--ink); quotes:none; display:block;
+  }
+  .pull .src{
+    display:block; margin-top:24px; font-family:var(--mono); font-size:23px;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3);
+  }
+
+  /* ---- title slide ---- */
+  .title-wrap{flex:1; display:flex; flex-direction:column; justify-content:center}
+  .title-wrap h1{
+    font-family:var(--serif); font-weight:400; font-size:152px; line-height:.98;
+    letter-spacing:-.02em; max-width:1500px;
+  }
+  .title-wrap h1 em{font-style:italic; color:var(--accent)}
+  .path{
+    display:flex; gap:0; margin-top:80px; border-top:1px solid var(--rule); max-width:1560px;
+  }
+  .path span{
+    flex:1; padding:26px 0 0; font-family:var(--mono); font-size:24px;
+    color:var(--ink-3); letter-spacing:.04em; position:relative;
+  }
+  .path span:before{
+    content:""; position:absolute; top:-1px; left:0; width:40%; height:3px; background:var(--accent);
+  }
+
+  /* ---- chrome ---- */
+  .chrome{
+    position:absolute; left:130px; right:130px; bottom:52px;
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:var(--mono); font-size:21px; color:var(--ink-3);
+    letter-spacing:.1em; text-transform:uppercase;
+  }
+  .chrome .sec{color:var(--ink-2)}
+  .rail{
+    position:absolute; left:0; right:0; top:0; height:4px; background:var(--paper-2);
+  }
+  .rail i{display:block; height:100%; background:var(--accent); transition:width .45s cubic-bezier(.2,.7,.3,1)}
+
+  /* nav hint */
+  #hint{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:12px; color:#5d5a52; letter-spacing:.16em;
+    text-transform:uppercase; pointer-events:none; transition:opacity .4s; z-index:5;
+  }
+  /* contents overlay */
+  #toc{
+    position:fixed; inset:0; background:rgba(14,14,12,.96); z-index:10;
+    display:none; padding:70px 90px; overflow-y:auto;
+  }
+  #toc.on{display:block}
+  #toc h3{
+    font-family:var(--mono); font-size:13px; letter-spacing:.24em; text-transform:uppercase;
+    color:#8a857a; margin-bottom:34px;
+  }
+  #toc .grp{margin-bottom:30px}
+  #toc .gl{
+    font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase;
+    color:#6f6a60; margin-bottom:12px;
+  }
+  #toc a{
+    display:block; color:#e6e1d6; text-decoration:none; font-family:var(--serif);
+    font-size:30px; line-height:1.35; padding:5px 0 5px 34px; position:relative;
+  }
+  #toc a:before{
+    content:attr(data-n); position:absolute; left:0; top:12px;
+    font-family:var(--mono); font-size:13px; color:#6f6a60;
+  }
+  #toc a:hover{color:#e0a06a}
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="canvas"></div></div>
+<div id="hint">← → navigate · C contents</div>
+<div id="toc"><h3>Contents</h3><div id="toclist"></div></div>
+
+<script>
+const SECTIONS = [
+{ label:"Opening", slides:[
+
+{id:"title", html:`
+  <div class="rail"><i style="width:0"></i></div>
+  <div class="title-wrap">
+    <div class="eyebrow anim">A living document</div>
+    <h1 class="anim">Agentic<br>harnesses,<br><em>from first<br>principles</em></h1>
+    <div class="path anim">
+      <span>01 &nbsp;the loop</span>
+      <span>02 &nbsp;four tools</span>
+      <span>03 &nbsp;the runtime</span>
+      <span>04 &nbsp;code mode</span>
+    </div>
+  </div>`},
+
+{id:"what", html:`
+  <div class="eyebrow anim">Opening — the premise</div>
+  <h2 class="anim">The model can't<br>do <em>anything</em>.</h2>
+  <div class="flow-body">
+    <p class="anim pad">It can't read your files. It can't run a command. It can't reach an API. Everything an agent <em>appears</em> to do is done by ordinary code sitting around the model.</p>
+    <p class="anim">That code is the harness — and it is the entire engineering surface. Safety, cost, speed, reliability: all of it lives there, not in the model.</p>
+  </div>`},
+
+]},
+
+{ label:"01 — The loop", slides:[
+
+{id:"loop", html:`
+  <div class="eyebrow anim">01 — The loop</div>
+  <h2 class="sm anim">It's a list you<br>keep adding to.</h2>
+  <div class="flow-body">
+    <div class="turns anim">
+      <div class="turn">
+        <div class="thd">turn 1<span>you send this</span></div>
+        <div class="msg n">goal — "fix the failing test"</div>
+        <div class="ask">model asks: read file</div>
+      </div>
+      <div class="turn">
+        <div class="thd">turn 2<span>you send this</span></div>
+        <div class="msg u">goal — "fix the failing test"</div>
+        <div class="msg m">model: read file</div>
+        <div class="msg n">result — &lt;file contents&gt;</div>
+        <div class="ask">model asks: edit file</div>
+      </div>
+      <div class="turn">
+        <div class="thd">turn 3<span>you send this</span></div>
+        <div class="msg u">goal — "fix the failing test"</div>
+        <div class="msg m">model: read file</div>
+        <div class="msg r">result — &lt;file contents&gt;</div>
+        <div class="msg m">model: edit file</div>
+        <div class="msg n">result — ok, patched</div>
+        <div class="ask">model asks: run tests</div>
+      </div>
+    </div>
+    <p class="anim pad">Every turn you resend the <em>whole</em> list. The only new thing is the last line in red — the result of what it just asked for.</p>
+  </div>`},
+
+{id:"stateless", html:`
+  <div class="eyebrow anim">01 — The loop</div>
+  <h2 class="sm anim">Nothing is remembered.</h2>
+  <div class="flow-body">
+    <div class="split anim">
+      <div class="a">
+        <div class="lbl">What people assume</div>
+        <div class="hd">It's thinking<br>between messages</div>
+        <p>Sitting there holding the conversation, mulling your problem over.</p>
+      </div>
+      <div class="b">
+        <div class="lbl">What happens</div>
+        <div class="hd">A cold start,<br>every single turn</div>
+        <p>A fresh call handed a transcript, with no idea it ever ran before.</p>
+      </div>
+    </div>
+    <p class="anim pad">So every turn costs more than the last, the list has a hard ceiling, and <strong>what you put in it is the whole game.</strong></p>
+  </div>`},
+
+]},
+
+{ label:"02 — The tools", slides:[
+
+{id:"four", html:`
+  <div class="eyebrow anim">02 — The tools</div>
+  <h2 class="sm anim">Four tools go a<br>very long way.</h2>
+  <div class="flow-body">
+    <ol class="big anim">
+      <li><div><div class="t">read file</div><div class="d">Give it a path, get the contents back.</div></div></li>
+      <li><div><div class="t">write file</div><div class="d">Give it a path and content, it lands on disk.</div></div></li>
+      <li><div><div class="t">apply patch</div><div class="d">A targeted edit instead of rewriting the whole file.</div></div></li>
+      <li><div><div class="t">run command</div><div class="d">Shell out — build, test, git, anything.</div></div></li>
+    </ol>
+    <p class="anim pad">Read, change, verify. Nearly all software work reduces to those three moves.</p>
+  </div>`},
+
+{id:"asks", html:`
+  <div class="eyebrow anim">02 — The tools</div>
+  <div class="flow-body">
+    <div class="statement anim">The harness does<br>the real work.<br><em>The model just asks.</em></div>
+    <p class="anim pad">The model never touches your filesystem. It produces a request. Your code decides whether to honour it, how, and under what limits.</p>
+  </div>`},
+
+{id:"firstclass", html:`
+  <div class="eyebrow anim">02 — The tools</div>
+  <h2 class="sm anim">Why <span class="k">read</span> isn't<br>just <span class="k">cat</span>.</h2>
+  <div class="flow-body">
+    <p class="anim">You already have <span class="k">run command</span>. Pi builds a separate read tool anyway.</p>
+    <div class="split anim pad">
+      <div class="a">
+        <div class="lbl">a shell string</div>
+        <div class="hd">opaque</div>
+        <p>You can run it. That's all you can do with it.</p>
+      </div>
+      <div class="b">
+        <div class="lbl">a structured call</div>
+        <div class="hd">something you<br>can reason about</div>
+        <p>Swap the backend, sandbox it, log it, point it at another machine.</p>
+      </div>
+    </div>
+    <p class="anim pad">And the model never knows anything changed.</p>
+  </div>`},
+
+]},
+
+{ label:"03 — DeepSeek", slides:[
+
+{id:"ds-what", html:`
+  <div class="eyebrow anim">03 — DeepSeek</div>
+  <h2 class="sm anim">What DeepSeek's<br>harness actually is.</h2>
+  <div class="flow-body">
+    <p class="anim">Good tools don't tell you how to build the thing that holds them. Most harnesses hard-code the loop. DeepSeek turns the pieces into plugins around a small kernel.</p>
+    <div class="vs anim pad">
+      <div>
+        <div class="cap">standard agent loop</div>
+        <div class="node">build the prompt</div>
+        <div class="node">call the model</div>
+        <div class="node">run the tool</div>
+        <div class="node">append, repeat</div>
+        <div class="note">One function knows every step. Want different behaviour? Edit the function.</div>
+      </div>
+      <div class="rt">
+        <div class="cap">deepseek runtime</div>
+        <div class="node hot">kernel + event bus</div>
+        <div class="drop">↓ loads, in any order</div>
+        <div class="node dash">agent loop plugin</div>
+        <div class="node dash">provider · shell · fs plugins</div>
+        <div class="node dash">skills · compaction · sub-agents</div>
+        <div class="note">Nothing knows the whole sequence. Want different behaviour? Add a plugin.</div>
+      </div>
+    </div>
+  </div>`},
+
+{id:"eventdriven", html:`
+  <div class="eyebrow anim">03 — DeepSeek</div>
+  <h2 class="sm anim">"Event-driven,"<br>in plain words.</h2>
+  <div class="flow-body">
+    <div class="anim" style="display:grid; grid-template-columns:1fr 1fr; gap:60px; max-width:1560px; margin-top:20px">
+      <div>
+        <div class="code-label">The usual way</div>
+        <div class="code">function run() {
+  doStepOne()
+  doStepTwo()
+  doStepThree()
+}</div>
+      </div>
+      <div>
+        <div class="code-label">Flipped</div>
+        <div class="code">emit(<span class="st">"tool.requested"</span>)
+emit(<span class="st">"tool.finished"</span>)
+
+<span class="c">// elsewhere, in a plugin</span>
+ctx.on(<span class="st">"tool.finished"</span>, fn)</div>
+      </div>
+    </div>
+    <p class="anim pad">Something happens, you announce it, and anything that cares reacts — the announcer never knows who's listening.</p>
+  </div>`},
+
+{id:"ds-flow", html:`
+  <div class="eyebrow anim">03 — DeepSeek</div>
+  <h2 class="sm anim">One turn,<br>through the bus.</h2>
+  <div class="flow-body">
+    <div class="bus-fig anim">
+      <div class="lane heads"><div class="ev-h">the loop emits</div><div class="hear-h">plugins that happen to be listening</div></div>
+      <div class="lane">
+        <div class="ev">turn.started</div>
+        <div class="hear"><span>session</span><span>logger</span></div>
+      </div>
+      <div class="lane">
+        <div class="ev">prompt.assemble</div>
+        <div class="hear"><span>identity</span><span>workspace</span><span>skills</span></div>
+      </div>
+      <div class="lane">
+        <div class="ev">tool.requested</div>
+        <div class="hear"><span>approval</span><span>sandbox</span></div>
+      </div>
+      <div class="lane">
+        <div class="ev">tool.finished</div>
+        <div class="hear"><span>fs plugin</span><span>usage meter</span></div>
+      </div>
+      <div class="lane">
+        <div class="ev">turn.ended</div>
+        <div class="hear"><span>compaction</span><span>ui</span></div>
+      </div>
+    </div>
+    <p class="anim pad">The loop emits the left column and waits. Everything in the right column is optional, swappable, and invisible to it.</p>
+  </div>`},
+
+{id:"runtime", html:`
+  <div class="eyebrow anim">03 — DeepSeek</div>
+  <h2 class="sm anim">The core is<br>the small part.</h2>
+  <div class="flow-body">
+    <div class="stack anim">
+      <div class="bus">plugins — swappable, none of them privileged</div>
+      <div class="lay plug"><span class="nm">agent loop</span><span class="ds">just another plugin — declares what it needs, doesn't know who provides it</span></div>
+      <div class="lay plug"><span class="nm">providers · shell · fs</span><span class="ds">the things that actually touch the world</span></div>
+      <div class="lay plug"><span class="nm">skills · compaction · sub-agents</span><span class="ds">behaviour layered on from outside</span></div>
+      <div class="bus">core — small enough to hold in your head</div>
+      <div class="lay core"><span class="nm">kernel + event bus</span><span class="ds">lifecycle for sessions, tools, prompt assembly. that's all of it.</span></div>
+    </div>
+    <p class="anim pad">You change behaviour by swapping plugins, not by rewriting the loop.</p>
+  </div>`},
+
+{id:"waterfall", html:`
+  <div class="eyebrow anim">03 — DeepSeek</div>
+  <h2 class="sm anim">Waterfalls:<br>the other half.</h2>
+  <div class="flow-body">
+    <p class="anim">Events are “this happened, react.” A waterfall is a chain where each plugin gets a pass at <em>transforming</em> the value.</p>
+    <div class="chain anim" style="margin-top:44px">
+      <div class="step"><span class="n">start</span><span class="l">empty prompt</span></div>
+      <div class="step"><span class="n">+</span><span class="l">identity</span></div>
+      <div class="step"><span class="n">+</span><span class="l">workspace rules</span></div>
+      <div class="step"><span class="n">+</span><span class="l">skills</span></div>
+      <div class="step hot"><span class="n">out</span><span class="l">system prompt</span></div>
+    </div>
+    <p class="anim pad">Nobody owns the system prompt. Each plugin adds its piece and hands it down the line — the same pattern works for tool lists and message history.</p>
+  </div>`},
+
+]},
+
+{ label:"04 — Code mode", slides:[
+
+{id:"mcp", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">The problem:<br>too many tools.</h2>
+  <div class="flow-body">
+    <div class="budget anim">
+      <div class="row">
+        <div class="seg tools" style="flex:0 0 62%"><small>tool definitions</small><strong>dozens of schemas, shipped every single call</strong></div>
+        <div class="seg work" style="flex:1"><small>what's left</small><strong>your actual task</strong></div>
+      </div>
+      <div class="lab"><span>one GitHub MCP server connected</span><span>before the model has done anything</span></div>
+    </div>
+    <div class="pull anim pad">
+      <q>You don't want to bloat your context. Giving it too many tools up front confuses it, starts to do weird things.</q>
+      <span class="src">Dax — OpenCode</span>
+    </div>
+    <p class="anim pad">So you choose: a capable agent with a wrecked context, or a clean context with a crippled agent.</p>
+  </div>`},
+
+{id:"cm-what", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">So what <em>is</em><br>code mode?</h2>
+  <div class="flow-body">
+    <p class="anim">Same job either way: get the last seven days of my GitHub activity. The difference is whether the model <strong>calls</strong> tools, or <strong>writes a small program</strong> that calls them.</p>
+    <div class="cm anim">
+      <div class="cm-side">
+        <div class="cm-cap">tool calling — results come back raw</div>
+        <div class="pp">
+          <div class="pp-row"><span class="who m">model</span><span class="what">list_prs(me, 7d)</span></div>
+          <div class="pp-row r"><span class="who h">harness</span><span class="what">→ 6 pull requests</span></div>
+          <div class="pp-row"><span class="who m">model</span><span class="what">list_issues(me, 7d)</span></div>
+          <div class="pp-row r"><span class="who h">harness</span><span class="what">→ 11 issues</span></div>
+          <div class="pp-row"><span class="who m">model</span><span class="what">list_commits(me, 7d)</span></div>
+          <div class="pp-row r"><span class="who h">harness</span><span class="what">→ 94 commits</span></div>
+          <div class="pp-row dim"><span class="who m">model</span><span class="what">…and now filter it all by hand</span></div>
+        </div>
+        <div class="cm-foot">All 94 commits land in the list before anything is filtered.</div>
+      </div>
+      <div class="cm-side hot">
+        <div class="cm-cap">code mode — only the answer comes back</div>
+        <div class="code cm-code">const [p, i, c] = await Promise.all([
+  gh.listPRs(me, "7d"),
+  gh.listIssues(me, "7d"),
+  gh.listCommits(me, "7d"),
+])
+return summarise(p, i, c.filter(x =&gt; x.mine))</div>
+        <div class="cm-foot">1 round trip. The 94 commits are filtered <em>where they live</em> — only the summary comes back.</div>
+      </div>
+    </div>
+  </div>`},
+
+{id:"compress", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">Hundreds of tools,<br>collapsed into <em>one</em>.</h2>
+  <div class="flow-body">
+    <div class="fold anim">
+      <div class="before">
+        <div class="cap">before — every tool in the prompt</div>
+        <div class="swarm">
+          <span>list_prs</span><span>get_pr</span><span>create_issue</span><span>list_issues</span>
+          <span>search_code</span><span>get_commit</span><span>list_repos</span><span>add_comment</span>
+          <span>merge_pr</span><span>get_file</span><span>list_branches</span><span>create_pr</span>
+          <span>get_user</span><span>list_runs</span><span>rerun_job</span><span>…+ 60 more</span>
+        </div>
+        <div class="cost">grows with every server you connect</div>
+      </div>
+      <div class="mid"><span>collapses to</span></div>
+      <div class="after">
+        <div class="cap">after — one tool</div>
+        <div class="one">execute(script)</div>
+        <div class="sub">one schema in the prompt —<br>however many you plug in behind it</div>
+        <div class="cost fixed">prompt cost stays flat</div>
+      </div>
+    </div>
+    <p class="anim pad">The tools didn't go away — their schemas moved out of the prompt. You can keep adding MCP servers without every one of them costing you context on every call.</p>
+  </div>`},
+
+{id:"search", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">Don't load the tools.<br>Let it go <em>find</em> them.</h2>
+  <div class="flow-body">
+    <p class="anim">So how does the script know <span class="k">gh.listPRs</span> exists? It doesn't — not up front. GitHub was never in the prompt.</p>
+    <div class="chain anim" style="margin-top:38px">
+      <div class="step"><span class="n">01</span><span class="l">search for tools</span></div>
+      <div class="step hot"><span class="n">02</span><span class="l">discover the GitHub set</span></div>
+      <div class="step"><span class="n">03</span><span class="l">write the script</span></div>
+    </div>
+    <p class="anim pad">Tools become something the agent <strong>looks up when it needs them</strong>, the way you'd search docs — not a catalogue it must carry everywhere.</p>
+  </div>`},
+
+{id:"interpreter", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">"Isn't that<br>dangerous?"</h2>
+  <div class="flow-body">
+    <div class="pull anim">
+      <q>We did something a little bit different. We just wrote a really basic JavaScript interpreter in JavaScript.</q>
+      <span class="src">Dax — OpenCode</span>
+    </div>
+    <div class="split anim pad">
+      <div class="b">
+        <div class="lbl">The usual answer</div>
+        <div class="hd">Contain a<br>powerful thing</div>
+        <p>Unrestricted host JavaScript reaches the filesystem, the network, the process. So you need a VM, a container, syscall filtering.</p>
+      </div>
+      <div class="a">
+        <div class="lbl">Code mode</div>
+        <div class="hd">Build a<br>weak thing</div>
+        <p>Loops, conditionals, calls in parallel — the whole vocabulary an agent needs. It runs in your process, and what it can <em>reach</em> is still your permissions and approvals.</p>
+      </div>
+    </div>
+  </div>`},
+
+{id:"when", html:`
+  <div class="eyebrow anim">04 — Code mode</div>
+  <h2 class="sm anim">When to actually<br>reach for it.</h2>
+  <div class="flow-body">
+    <div class="split anim">
+      <div class="b">
+        <div class="lbl">Native tools · most of the time</div>
+        <div class="hd">A normal<br>repo task</div>
+        <p>Read a file, patch it, run the tests. The four tools are simpler and fine.</p>
+      </div>
+      <div class="a">
+        <div class="lbl">Code mode · the escape hatch</div>
+        <div class="hd">Fifty items<br>and a filter</div>
+        <p>Call a tool for each, aggregate, run some in parallel, return the shape you need — when you'd rather write a small for-loop than sit through twenty round trips.</p>
+      </div>
+    </div>
+  </div>`},
+
+]},
+
+{ label:"Close", slides:[
+
+{id:"takeaways", html:`
+  <div class="eyebrow anim">Close — what to keep</div>
+  <h2 class="sm anim">Five things.</h2>
+  <div class="flow-body">
+    <ul class="rules anim">
+      <li><strong>The loop is a list you append to.</strong> No magic layer underneath.</li>
+      <li><strong>The model only ever asks.</strong> The harness is your entire control surface.</li>
+      <li><strong>Four tools go a long way</strong> — if you make them first-class, not shell strings.</li>
+      <li><strong>A good harness is a runtime, not a script.</strong> Small core, everything else a plugin.</li>
+      <li><strong>Context is the scarce resource.</strong> Don't load every tool up front — give the model one way to find and call them.</li>
+    </ul>
+  </div>`},
+
+{id:"open", html:`
+  <div class="eyebrow anim">Close — answered</div>
+  <h2 class="sm anim">Answered.</h2>
+  <div class="flow-body">
+    <div class="qa anim">
+      <div class="qi">
+        <div class="q">Plugin or skill?</div>
+        <div class="a">Plugin = code that adds a capability. Skill = text that improves judgement.</div>
+      </div>
+      <div class="qi">
+        <div class="q">How do you debug a fault three plugins deep?</div>
+        <div class="a">Trace the event, not the stack. The runtime has to log every emit and handler, or it's undebuggable.</div>
+      </div>
+      <div class="qi">
+        <div class="q">Does tool search reliably find the right tool?</div>
+        <div class="a">No — it's retrieval, so it misses. That's the trade: an occasional miss beats permanent bloat.</div>
+      </div>
+      <div class="qi">
+        <div class="q">Can waterfalls do compression?</div>
+        <div class="a">Naturally. Each pass shrinks the list — prompt assembly, run in reverse.</div>
+      </div>
+    </div>
+  </div>`},
+
+{id:"onething", html:`
+  <div class="eyebrow anim">Close</div>
+  <div class="flow-body">
+    <div class="statement anim">Every hard problem here<br>is a <em>context problem</em><br>wearing a costume.</div>
+    <p class="anim pad">Watch what goes in the list.</p>
+  </div>`},
+
+]},
+];
+
+const flat=[]; SECTIONS.forEach((s,si)=>s.slides.forEach(x=>flat.push({...x,sec:si})));
+const canvas=document.getElementById('canvas');
+
+flat.forEach((s,i)=>{
+  const d=document.createElement('div');
+  d.className='slide'; d.id='sl-'+i;
+  const rail=`<div class="rail"><i style="width:${((i)/(flat.length-1))*100}%"></i></div>`;
+  const chrome=`<div class="chrome"><span class="sec">${SECTIONS[s.sec].label}</span><span>${String(i+1).padStart(2,'0')} / ${flat.length}</span></div>`;
+  d.innerHTML=(s.id==='title'? '' : rail)+s.html+chrome;
+  canvas.appendChild(d);
+});
+
+// contents
+const tl=document.getElementById('toclist');
+SECTIONS.forEach((sec,si)=>{
+  const g=document.createElement('div'); g.className='grp';
+  g.innerHTML=`<div class="gl">${sec.label}</div>`;
+  flat.forEach((s,i)=>{
+    if(s.sec!==si) return;
+    const a=document.createElement('a');
+    a.href='#'; a.dataset.n=String(i+1).padStart(2,'0');
+    const m=s.html.match(/<h1[^>]*>([\s\S]*?)<\/h1>|<h2[^>]*>([\s\S]*?)<\/h2>|<div class="statement[^>]*>([\s\S]*?)<\/div>/);
+    a.textContent=(m?(m[1]||m[2]||m[3]):'Slide')
+      .replace(/<br\s*\/?>/g,' ').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+    a.onclick=e=>{e.preventDefault(); toc(false); go(i);};
+    g.appendChild(a);
+  });
+  tl.appendChild(g);
+});
+
+let cur=-1;
+function go(i){
+  if(i<0||i>=flat.length) return;
+  if(cur>=0) document.getElementById('sl-'+cur).classList.remove('on');
+  cur=i;
+  document.getElementById('sl-'+cur).classList.add('on');
+  history.replaceState(null,'','#'+flat[cur].id);
+  try{ localStorage.setItem('harness-deck-slide', String(cur)); }catch(e){}
+}
+function toc(on){ document.getElementById('toc').classList.toggle('on', on); }
+
+function fit(){
+  const s=Math.min(innerWidth/1920, innerHeight/1080);
+  canvas.style.transform='translate(-50%,-50%) scale('+s+')';
+}
+addEventListener('resize',fit); fit();
+
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ toc(false); return; }
+  if(e.key==='c'||e.key==='C'){ toc(!document.getElementById('toc').classList.contains('on')); return; }
+  if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault(); go(cur+1);}
+  if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault(); go(cur-1);}
+  if(e.key==='Home') go(0);
+  if(e.key==='End') go(flat.length-1);
+});
+canvas.addEventListener('click',e=>{ go(e.clientX < innerWidth/2 ? cur-1 : cur+1); });
+
+let hideT; const hint=document.getElementById('hint');
+addEventListener('mousemove',()=>{ hint.style.opacity=1; clearTimeout(hideT); hideT=setTimeout(()=>hint.style.opacity=0,2200); });
+hideT=setTimeout(()=>hint.style.opacity=0,3000);
+
+let start=flat.findIndex(s=>'#'+s.id===location.hash);
+if(start<0){ const v=parseInt(localStorage.getItem('harness-deck-slide')||'',10); if(!isNaN(v)&&v>=0&&v<flat.length) start=v; }
+go(start>=0?start:0);
+</script>
+</body>
+</html>

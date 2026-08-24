@@ -140,6 +140,84 @@ def test_apiserver_session_with_id_dispatches_background(monkeypatch):
     assert evt["origin_session_id"] == "raw-sid-7"
 
 
+def test_realtime_style_delegation_suppresses_parent_chat_completion(monkeypatch):
+    from tools import async_delegation as ad
+
+    ad._reset_for_tests()
+    dt = _patch_delegate(monkeypatch)
+    set_session_vars(
+        platform="api_server",
+        chat_id="voice-session",
+        session_key="voice-session",
+        session_id="voice-session",
+        async_delivery=False,
+    )
+
+    try:
+        parsed = json.loads(
+            dt.delegate_task(
+                goal="write cited research",
+                background=True,
+                parent_agent=_fake_parent(),
+                suppress_completion_delivery=True,
+                reject_if_async_capacity=True,
+            )
+        )
+        assert parsed["status"] == "dispatched"
+
+        deadline = time.monotonic() + 5
+        durable = None
+        while time.monotonic() < deadline:
+            durable = ad.get_durable_delegation(parsed["delegation_id"])
+            if durable and durable["state"] == "completed":
+                break
+            time.sleep(0.02)
+
+        assert durable is not None
+        assert durable["delivery_state"] == "suppressed"
+        assert process_registry.completion_queue.empty()
+    finally:
+        ad._reset_for_tests()
+
+
+def test_realtime_style_delegation_never_falls_back_to_sync_at_capacity(monkeypatch):
+    from tools import async_delegation as ad
+
+    dt = _patch_delegate(monkeypatch)
+    child = MagicMock()
+    child._delegate_role = "leaf"
+    child._subagent_id = "research-child"
+    monkeypatch.setattr(dt, "_build_child_agent", lambda **_: child)
+    run_child = MagicMock(side_effect=AssertionError("must not run synchronously"))
+    monkeypatch.setattr(dt, "_run_single_child", run_child)
+    monkeypatch.setattr(
+        ad,
+        "dispatch_async_delegation_batch",
+        lambda **_: {"status": "rejected", "error": "capacity reached"},
+    )
+    set_session_vars(
+        platform="api_server",
+        chat_id="voice-session",
+        session_key="voice-session",
+        session_id="voice-session",
+        async_delivery=False,
+    )
+
+    parsed = json.loads(
+        dt.delegate_task(
+            goal="research without blocking",
+            background=True,
+            parent_agent=_fake_parent(),
+            suppress_completion_delivery=True,
+            reject_if_async_capacity=True,
+        )
+    )
+
+    assert parsed == {"status": "rejected", "error": "capacity reached"}
+    run_child.assert_not_called()
+    child.close.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # _current_origin_session_id — the clobber-proof origin capture helper
 # ---------------------------------------------------------------------------

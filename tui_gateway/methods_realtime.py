@@ -99,6 +99,151 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 4617, f"Realtime web search failed: {exc}")
 
 
+@method("voice.realtime.delegate_research")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    query = str(params.get("query") or "").strip()[:1_000]
+    if not query:
+        return _err(rid, 4618, "research query is required")
+
+    from tui_gateway.realtime_research import (
+        bind_research_delegation,
+        discard_research_artifact,
+        prepare_research_artifact,
+    )
+
+    artifact_id, paths = prepare_research_artifact(session, query)
+    goal = (
+        f"Research the following request using substantial, relevant sources: {query}\n\n"
+        f"Write the complete cited research report to this exact path: {paths.research}\n"
+        "Use the write_file tool to create or overwrite that file. Include source URLs "
+        "beside the claims they support and clearly separate evidence from inference. "
+        "Do not modify any other file. Before finishing, use read_file on the exact "
+        "research path and verify the report is non-empty. Your final response should "
+        "only state that the artifact was verified."
+    )
+    try:
+        import json
+
+        from tools.delegate_tool import delegate_task
+
+        raw = delegate_task(
+            goal=goal,
+            context=(
+                "You are a subordinate research worker. The GPT Realtime voice agent "
+                "remains the sole conversational and decision authority. Produce evidence "
+                "for it to inspect; do not attempt to continue the user's conversation."
+            ),
+            role="leaf",
+            background=True,
+            parent_agent=session.get("agent"),
+            suppress_completion_delivery=True,
+            reject_if_async_capacity=True,
+        )
+        dispatch = json.loads(raw)
+        if dispatch.get("status") != "dispatched" or not dispatch.get("delegation_id"):
+            discard_research_artifact(paths)
+            return _err(
+                rid,
+                4618,
+                str(dispatch.get("error") or "research delegation was not dispatched"),
+            )
+        delegation_id = str(dispatch["delegation_id"])
+        bind_research_delegation(paths, delegation_id)
+        return _ok(
+            rid,
+            {
+                "status": "dispatched",
+                "artifact_id": artifact_id,
+                "delegation_id": delegation_id,
+            },
+        )
+    except Exception as exc:
+        discard_research_artifact(paths)
+        return _err(rid, 4618, f"Realtime research dispatch failed: {exc}")
+
+
+@method("voice.realtime.research_status")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    try:
+        from tools.async_delegation import get_durable_delegation
+        from tui_gateway.realtime_research import (
+            latest_research_artifact_id,
+            research_status,
+        )
+
+        artifact_id = str(params.get("artifact_id") or "")
+        if not artifact_id:
+            artifact_id = latest_research_artifact_id(session)
+        if not artifact_id:
+            return _err(rid, 4618, "no research artifact exists for this session")
+
+        return _ok(
+            rid,
+            research_status(
+                session,
+                artifact_id,
+                get_durable_delegation,
+            ),
+        )
+    except Exception as exc:
+        return _err(rid, 4618, str(exc))
+
+
+@method("voice.realtime.research_read")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    try:
+        from tools.async_delegation import get_durable_delegation
+        from tui_gateway.realtime_research import read_research
+
+        return _ok(
+            rid,
+            read_research(
+                session,
+                str(params.get("artifact_id") or ""),
+                get_durable_delegation,
+                start_line=int(params.get("start_line") or 1),
+                line_count=int(params.get("line_count") or 40),
+            ),
+        )
+    except Exception as exc:
+        return _err(rid, 4618, str(exc))
+
+
+@method("voice.realtime.research_search")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    try:
+        from tools.async_delegation import get_durable_delegation
+        from tui_gateway.realtime_research import search_research
+
+        return _ok(
+            rid,
+            search_research(
+                session,
+                str(params.get("artifact_id") or ""),
+                get_durable_delegation,
+                query=str(params.get("query") or "")[:500],
+            ),
+        )
+    except Exception as exc:
+        return _err(rid, 4618, str(exc))
+
+
 @method("voice.realtime.close")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)

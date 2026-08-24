@@ -565,8 +565,38 @@ export function planEdit(messages: ChatMessage[], edited: AppendMessage): EditPl
   const sourceIndex = messages.findIndex(m => m.id === sourceId)
   const source = messages[sourceIndex]
 
-  if (!source || source.role !== 'user' || chatMessageText(source).trim() === text) {
+  if (!source || source.role !== 'user') {
     return null
+  }
+
+  const unchanged = chatMessageText(source).trim() === text
+
+  if (unchanged) {
+    let latestVisibleUserIndex = -1
+
+    for (let index = 0; index < messages.length; index += 1) {
+      if (messages[index].role === 'user' && !messages[index].hidden) {
+        latestVisibleUserIndex = index
+      }
+    }
+
+    const hasAttachedInference = messages
+      .slice(sourceIndex + 1)
+      .some(
+        message =>
+          message.role === 'assistant' &&
+          !message.hidden &&
+          !message.error &&
+          (chatMessageText(message).trim().length > 0 || message.parts.some(part => part.type !== 'text'))
+      )
+
+    // Sending an unchanged edit is normally a no-op. The exception is the
+    // latest unanswered/failed turn: there is nothing to edit visually, but
+    // Send is the user's only in-place retry affordance. Re-run that turn with
+    // its durable truncation address instead of silently closing the composer.
+    if (sourceIndex !== latestVisibleUserIndex || hasAttachedInference) {
+      return null
+    }
   }
 
   // Failed turn: the optimistic user msg never reached the gateway, so a

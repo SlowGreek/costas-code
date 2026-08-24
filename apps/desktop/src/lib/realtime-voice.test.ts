@@ -117,11 +117,15 @@ describe('voiceToolLane', () => {
   it('classifies reads, gestures, edits, and slow detached work', () => {
     expect(voiceToolLane({ name: 'session_snapshot' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'web_search' } as never)).toBe('read')
+    expect(voiceToolLane({ name: 'research_status' } as never)).toBe('read')
+    expect(voiceToolLane({ name: 'research_search' } as never)).toBe('read')
+    expect(voiceToolLane({ name: 'research_read' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'focus' } as never)).toBe('gesture')
     expect(voiceToolLane({ name: 'add_node' } as never)).toBe('presentation')
     expect(voiceToolLane({ name: 'rename' } as never)).toBe('edit')
     expect(voiceToolLane({ name: 'visualize' } as never)).toBe('slow')
     expect(voiceToolLane({ name: 'speed_draw' } as never)).toBe('slow')
+    expect(voiceToolLane({ name: 'delegate_research' } as never)).toBe('slow')
     expect(voiceToolLane({ name: 'unknown' } as never)).toBe('serial')
   })
 })
@@ -353,6 +357,96 @@ describe('routeRealtimeServerEvent', () => {
       limit: 5
     })
     expect((output as { data: { web: { title: string }[] } }).data.web[0].title).toBe('Current')
+  })
+
+  it('dispatches substantial research silently and returns its durable artifact handle', async () => {
+    const beforeToolCall = vi.fn(async () => undefined)
+
+    const request = vi.fn(async () => ({
+      status: 'dispatched',
+      artifact_id: 'research_abc123def456',
+      delegation_id: 'deleg_123'
+    }))
+
+    const output = await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({ query: 'Trace Claude Code architecture with citations' }),
+        callId: 'call-research',
+        name: 'delegate_research',
+        responseId: 'response-1'
+      },
+      { beforeToolCall, request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(beforeToolCall).toHaveBeenCalledOnce()
+    expect(request).toHaveBeenCalledWith('voice.realtime.delegate_research', {
+      session_id: 'runtime-session',
+      query: 'Trace Claude Code architecture with citations'
+    })
+    expect(output).toMatchObject({ status: 'dispatched', artifact_id: 'research_abc123def456' })
+  })
+
+  it('routes bounded research status, search, and read calls', async () => {
+    const request = vi.fn(async (method: string) => ({ method }))
+    const base = { callId: 'call-research', responseId: 'response-1' }
+
+    await executeRealtimeVoiceTool(
+      { ...base, name: 'research_status', arguments: '{"artifact_id":"research_abc123def456"}' },
+      { request, runtimeSessionId: 'runtime-session' }
+    )
+    await executeRealtimeVoiceTool(
+      {
+        ...base,
+        name: 'research_search',
+        arguments: '{"artifact_id":"research_abc123def456","query":"orchestrator"}'
+      },
+      { request, runtimeSessionId: 'runtime-session' }
+    )
+    await executeRealtimeVoiceTool(
+      {
+        ...base,
+        name: 'research_read',
+        arguments: '{"artifact_id":"research_abc123def456","start_line":2,"line_count":999}'
+      },
+      { request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(request).toHaveBeenNthCalledWith(1, 'voice.realtime.research_status', {
+      session_id: 'runtime-session',
+      artifact_id: 'research_abc123def456'
+    })
+    expect(request).toHaveBeenNthCalledWith(2, 'voice.realtime.research_search', {
+      session_id: 'runtime-session',
+      artifact_id: 'research_abc123def456',
+      query: 'orchestrator'
+    })
+    expect(request).toHaveBeenNthCalledWith(3, 'voice.realtime.research_read', {
+      session_id: 'runtime-session',
+      artifact_id: 'research_abc123def456',
+      start_line: 2,
+      line_count: 100
+    })
+  })
+
+  it('can recover the latest research handle after a voice reconnect', async () => {
+    const request = vi.fn(async () => ({
+      status: 'ready',
+      artifact_id: 'research_abc123def456'
+    }))
+
+    await executeRealtimeVoiceTool(
+      {
+        callId: 'call-status',
+        responseId: 'response-1',
+        name: 'research_status',
+        arguments: '{}'
+      },
+      { request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(request).toHaveBeenCalledWith('voice.realtime.research_status', {
+      session_id: 'runtime-session'
+    })
   })
 
   it('publishes completed user and assistant transcripts', async () => {
@@ -1041,6 +1135,10 @@ describe('startRealtimeVoiceConnection', () => {
       'session_snapshot',
       'visualize',
       'speed_draw',
+      'delegate_research',
+      'research_status',
+      'research_search',
+      'research_read',
       // Surgical tools: one thing, instantly, with no diagrammer round trip.
       'add_node',
       'focus',

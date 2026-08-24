@@ -25,7 +25,7 @@ def research_session(tmp_path):
         server._sessions.pop(runtime_id, None)
 
 
-def _dispatch(runtime_id, monkeypatch, *, result=None):
+def _dispatch(runtime_id, monkeypatch, *, result=None, mission_id="mission_alpha"):
     captured = {}
 
     def fake_delegate_task(**kwargs):
@@ -41,7 +41,11 @@ def _dispatch(runtime_id, monkeypatch, *, result=None):
     monkeypatch.setattr(delegate_tool, "delegate_task", fake_delegate_task)
     envelope = server._methods["voice.realtime.delegate_research"](
         "dispatch",
-        {"session_id": runtime_id, "query": "Trace Claude Code architecture"},
+        {
+            "session_id": runtime_id,
+            "query": "Trace Claude Code architecture",
+            "mission_id": mission_id,
+        },
     )
     return envelope, captured
 
@@ -56,6 +60,7 @@ def test_delegate_research_is_silent_bounded_and_server_paths_the_artifact(
     result = envelope["result"]
     assert result["status"] == "dispatched"
     assert result["delegation_id"] == "deleg_research123"
+    assert result["mission_id"] == "mission_alpha"
     assert result["artifact_id"].startswith("research_")
     assert captured["background"] is True
     assert captured["role"] == "leaf"
@@ -69,6 +74,7 @@ def test_delegate_research_is_silent_bounded_and_server_paths_the_artifact(
     assert len(metadata_files) == 1
     metadata = json.loads(metadata_files[0].read_text())
     assert metadata["delegation_id"] == "deleg_research123"
+    assert metadata["mission_id"] == "mission_alpha"
     assert metadata["query"] == "Trace Claude Code architecture"
     research_path = metadata_files[0].with_name("research.md")
     assert str(research_path) in captured["goal"]
@@ -136,7 +142,100 @@ def test_research_status_requires_terminal_delegation_and_nonempty_artifact(
         "status-latest", {"session_id": runtime_id}
     )
     assert recovered["result"]["artifact_id"] == artifact_id
+    assert recovered["result"]["mission_id"] == "mission_alpha"
     assert recovered["result"]["status"] == "ready"
+
+
+def test_delegate_research_requires_mission_identity(research_session, monkeypatch):
+    runtime_id, _, _ = research_session
+    envelope, captured = _dispatch(runtime_id, monkeypatch, mission_id="")
+
+    assert envelope["error"]["code"] == 4618
+    assert "mission_id" in envelope["error"]["message"]
+    assert captured == {}
+
+
+def test_terminal_research_emits_ready_on_originating_runtime_session(
+    research_session, monkeypatch
+):
+    runtime_id, session, _ = research_session
+    emitted = []
+    monkeypatch.setattr(
+        server,
+        "_emit",
+        lambda event, sid, payload=None: emitted.append((event, sid, payload)),
+    )
+    dispatched, captured = _dispatch(runtime_id, monkeypatch)
+    result = dispatched["result"]
+
+    from tui_gateway.realtime_research import research_artifact_paths
+
+    research_artifact_paths(session, result["artifact_id"]).research.write_text(
+        "Evidence https://example.com\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        async_delegation,
+        "get_durable_delegation",
+        lambda _: {
+            "delegation_id": result["delegation_id"],
+            "origin_session": "stored-research",
+            "state": "completed",
+            "result": {"status": "completed"},
+        },
+    )
+
+    captured["completion_callback"](
+        {"delegation_id": result["delegation_id"], "status": "completed"}
+    )
+
+    assert emitted == [
+        (
+            "voice.realtime.research.ready",
+            runtime_id,
+            {
+                "mission_id": "mission_alpha",
+                "artifact_id": result["artifact_id"],
+                "delegation_id": result["delegation_id"],
+            },
+        )
+    ]
+
+
+def test_terminal_research_emits_failed_without_worker_error_details(
+    research_session, monkeypatch
+):
+    runtime_id, _, _ = research_session
+    emitted = []
+    monkeypatch.setattr(
+        server,
+        "_emit",
+        lambda event, sid, payload=None: emitted.append((event, sid, payload)),
+    )
+    dispatched, captured = _dispatch(runtime_id, monkeypatch)
+    result = dispatched["result"]
+    monkeypatch.setattr(
+        async_delegation,
+        "get_durable_delegation",
+        lambda _: {
+            "delegation_id": result["delegation_id"],
+            "origin_session": "stored-research",
+            "state": "error",
+            "result": {"error": "secret token at /Users/private/report"},
+        },
+    )
+
+    captured["completion_callback"](
+        {"delegation_id": result["delegation_id"], "status": "error"}
+    )
+
+    event, sid, payload = emitted[-1]
+    assert event == "voice.realtime.research.failed"
+    assert sid == runtime_id
+    assert payload["mission_id"] == "mission_alpha"
+    assert payload["artifact_id"] == result["artifact_id"]
+    assert payload["delegation_id"] == result["delegation_id"]
+    assert payload["error"] == "research delegation ended with error"
+    assert "secret" not in payload["error"]
 
 
 def test_research_read_and_search_are_bounded_and_session_scoped(research_session, monkeypatch):

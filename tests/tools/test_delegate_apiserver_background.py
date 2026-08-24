@@ -153,6 +153,7 @@ def test_realtime_style_delegation_suppresses_parent_chat_completion(monkeypatch
         async_delivery=False,
     )
 
+    terminal_events = []
     try:
         parsed = json.loads(
             dt.delegate_task(
@@ -161,6 +162,7 @@ def test_realtime_style_delegation_suppresses_parent_chat_completion(monkeypatch
                 parent_agent=_fake_parent(),
                 suppress_completion_delivery=True,
                 reject_if_async_capacity=True,
+                completion_callback=terminal_events.append,
             )
         )
         assert parsed["status"] == "dispatched"
@@ -169,12 +171,15 @@ def test_realtime_style_delegation_suppresses_parent_chat_completion(monkeypatch
         durable = None
         while time.monotonic() < deadline:
             durable = ad.get_durable_delegation(parsed["delegation_id"])
-            if durable and durable["state"] == "completed":
+            if durable and durable["state"] == "completed" and terminal_events:
                 break
             time.sleep(0.02)
 
         assert durable is not None
         assert durable["delivery_state"] == "suppressed"
+        assert len(terminal_events) == 1
+        assert terminal_events[0]["delegation_id"] == parsed["delegation_id"]
+        assert terminal_events[0]["status"] == "completed"
         assert process_registry.completion_queue.empty()
     finally:
         ad._reset_for_tests()

@@ -96,7 +96,7 @@ def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
 
 
 def prepare_research_artifact(
-    session: dict[str, Any], query: str
+    session: dict[str, Any], query: str, mission_id: str
 ) -> tuple[str, ResearchArtifactPaths]:
     artifact_id = f"research_{uuid.uuid4().hex[:12]}"
     paths = research_artifact_paths(session, artifact_id)
@@ -108,6 +108,7 @@ def prepare_research_artifact(
             "artifact_id": artifact_id,
             "session_key": str(session.get("session_key") or ""),
             "query": query,
+            "mission_id": mission_id,
             "delegation_id": "",
             "created_at": time.time(),
         },
@@ -169,11 +170,13 @@ def research_status(
     get_delegation: Callable[[str], dict[str, Any] | None],
 ) -> dict[str, Any]:
     paths, metadata = _load_metadata(session, artifact_id)
+    mission_id = str(metadata.get("mission_id") or "")
     delegation_id = str(metadata.get("delegation_id") or "")
     durable = get_delegation(delegation_id) if delegation_id else None
     if not durable:
         return {
             "artifact_id": artifact_id,
+            "mission_id": mission_id,
             "delegation_id": delegation_id,
             "status": "failed",
             "error": "research delegation record is unavailable",
@@ -185,18 +188,18 @@ def research_status(
     if state in {"running", "stalling", "finalizing"}:
         return {
             "artifact_id": artifact_id,
+            "mission_id": mission_id,
             "delegation_id": delegation_id,
             "status": "running",
             "query": metadata.get("query", ""),
         }
     if state not in {"completed", "success"}:
-        raw_result = durable.get("result")
-        result = raw_result if isinstance(raw_result, dict) else {}
         return {
             "artifact_id": artifact_id,
+            "mission_id": mission_id,
             "delegation_id": delegation_id,
             "status": "failed",
-            "error": str(result.get("error") or f"research delegation ended with {state}"),
+            "error": f"research delegation ended with {state}",
         }
 
     try:
@@ -204,12 +207,14 @@ def research_status(
     except RealtimeResearchError as exc:
         return {
             "artifact_id": artifact_id,
+            "mission_id": mission_id,
             "delegation_id": delegation_id,
             "status": "failed",
             "error": str(exc),
         }
     return {
         "artifact_id": artifact_id,
+        "mission_id": mission_id,
         "delegation_id": delegation_id,
         "status": "ready",
         "query": metadata.get("query", ""),

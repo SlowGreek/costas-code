@@ -68,7 +68,21 @@ const initialBoundary: RealtimeMissionBoundary = {
   userSpeaking: false
 }
 
-const cancellableStates = new Set<RealtimeMissionState>(['researching', 'ready', 'awaiting_boundary'])
+const cancellableStates = new Set<RealtimeMissionState>([
+  'researching',
+  'ready',
+  'awaiting_boundary',
+  'resuming',
+  'presenting'
+])
+
+const bargeInStates = new Set<RealtimeMissionState>([
+  'ready',
+  'awaiting_boundary',
+  'resuming',
+  'presenting'
+])
+
 const failureStates = new Set<RealtimeMissionState>(['researching', 'ready', 'awaiting_boundary', 'resuming'])
 
 export function createRealtimeMissionController(options: RealtimeMissionControllerOptions): RealtimeMissionController {
@@ -117,7 +131,11 @@ export function createRealtimeMissionController(options: RealtimeMissionControll
   }
 
   return {
-    bargeIn: cancelActive,
+    bargeIn() {
+      if (active && bargeInStates.has(active.state)) {
+        active = { ...active, state: 'cancelled' }
+      }
+    },
     cancelMission(missionId) {
       if (active?.missionId === missionId) {
         cancelActive()

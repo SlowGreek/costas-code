@@ -1,8 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { emitGatewayEvent } from '@/contrib/events'
 import { startRealtimeVoiceConnection } from '@/lib/realtime-voice'
 import { $gateway } from '@/store/gateway'
+import { $realtimeMissions } from '@/store/realtime-mission'
 import { setWorkbenchArtifact } from '@/store/workbench'
 
 import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
@@ -14,12 +16,14 @@ const updateWorkbenchContext = vi.fn()
 const awaitPendingTranscription = vi.fn(async () => {})
 const stopTurn = vi.fn()
 const seedHistory = vi.fn()
+const resumeMission = vi.fn(() => true)
 
 vi.mock('@/lib/realtime-voice', () => ({
   startRealtimeVoiceConnection: vi.fn(async () => ({
     appendContext,
     awaitPendingTranscription,
     close,
+    resumeMission,
     seedHistory,
     setMuted,
     stopTurn,
@@ -36,6 +40,7 @@ describe('useRealtimeVoiceConversation', () => {
     vi.clearAllMocks()
     awaitPendingTranscription.mockImplementation(async () => {})
     setWorkbenchArtifact(null)
+    $realtimeMissions.set({})
     $gateway.set({ request: vi.fn(async () => ({})) } as never)
   })
 
@@ -174,6 +179,105 @@ describe('useRealtimeVoiceConversation', () => {
     expect(stopTurn).toHaveBeenCalled()
   })
 
+  it('resumes a ready research mission exactly once at a safe voice boundary', async () => {
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+
+    const mission = {
+      artifactId: 'research_1',
+      delegationId: 'deleg_1',
+      label: 'Claude Code architecture',
+      missionId: 'mission_1',
+      runtimeSessionId: 'runtime-session'
+    }
+
+    act(() => options.onResearchDispatched?.(mission))
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('researching')
+
+    act(() => {
+      emitGatewayEvent({
+        type: 'voice.realtime.research.ready',
+        session_id: 'runtime-session',
+        payload: {
+          mission_id: 'mission_1',
+          artifact_id: 'research_1',
+          delegation_id: 'deleg_1'
+        }
+      })
+    })
+
+    expect(resumeMission).toHaveBeenCalledOnce()
+    expect(resumeMission).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'response.create' })
+    )
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('resuming')
+
+    act(() => {
+      emitGatewayEvent({
+        type: 'voice.realtime.research.ready',
+        session_id: 'runtime-session',
+        payload: {
+          mission_id: 'mission_1',
+          artifact_id: 'research_1',
+          delegation_id: 'deleg_1'
+        }
+      })
+    })
+    expect(resumeMission).toHaveBeenCalledOnce()
+  })
+
+  it('waits for an active provider response and cancels auto-resume on barge-in', async () => {
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+
+    const mission = {
+      artifactId: 'research_1',
+      delegationId: 'deleg_1',
+      label: 'Claude Code architecture',
+      missionId: 'mission_1',
+      runtimeSessionId: 'runtime-session'
+    }
+
+    act(() => {
+      options.onResearchDispatched?.(mission)
+      options.onProviderResponseStarted?.()
+      emitGatewayEvent({
+        type: 'voice.realtime.research.ready',
+        session_id: 'runtime-session',
+        payload: {
+          mission_id: 'mission_1',
+          artifact_id: 'research_1',
+          delegation_id: 'deleg_1'
+        }
+      })
+    })
+    expect(resumeMission).not.toHaveBeenCalled()
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('awaiting_boundary')
+
+    act(() => {
+      options.onUserSpeechStarted?.()
+      options.onProviderResponseEnded?.('cancelled', false)
+      options.onUserSpeechEnded?.()
+    })
+
+    expect(resumeMission).not.toHaveBeenCalled()
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('cancelled')
+  })
+
   it('starts and ends the WebRTC session from the existing conversation controls', async () => {
     const hook = renderHook(() =>
       useRealtimeVoiceConversation({
@@ -254,6 +358,7 @@ describe('useRealtimeVoiceConversation', () => {
     await act(async () => {
       await hook.result.current.start()
     })
+
     const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
     options.onTranscript?.({
       connectionId: 'voice-connection-retry',
@@ -300,6 +405,7 @@ describe('useRealtimeVoiceConversation', () => {
     await act(async () => {
       await hook.result.current.start()
     })
+
     const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
     options.onTranscript?.({ id: 'first', role: 'user', text: 'First turn.' })
     await vi.advanceTimersByTimeAsync(2_000)
@@ -352,6 +458,7 @@ describe('useRealtimeVoiceConversation', () => {
     await act(async () => {
       await hook.result.current.start()
     })
+
     const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
     options.onTranscript?.({ id: 'first', role: 'user', text: 'First.' })
     await vi.advanceTimersByTimeAsync(2_000)

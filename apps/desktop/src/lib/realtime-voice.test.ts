@@ -361,9 +361,11 @@ describe('routeRealtimeServerEvent', () => {
 
   it('dispatches substantial research silently and returns its durable artifact handle', async () => {
     const beforeToolCall = vi.fn(async () => undefined)
+    const onResearchDispatched = vi.fn()
 
     const request = vi.fn(async () => ({
       status: 'dispatched',
+      mission_id: 'mission_test',
       artifact_id: 'research_abc123def456',
       delegation_id: 'deleg_123'
     }))
@@ -375,13 +377,27 @@ describe('routeRealtimeServerEvent', () => {
         name: 'delegate_research',
         responseId: 'response-1'
       },
-      { beforeToolCall, request, runtimeSessionId: 'runtime-session' }
+      {
+        beforeToolCall,
+        createMissionId: () => 'mission_test',
+        onResearchDispatched,
+        request,
+        runtimeSessionId: 'runtime-session'
+      }
     )
 
     expect(beforeToolCall).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith('voice.realtime.delegate_research', {
       session_id: 'runtime-session',
+      mission_id: 'mission_test',
       query: 'Trace Claude Code architecture with citations'
+    })
+    expect(onResearchDispatched).toHaveBeenCalledWith({
+      artifactId: 'research_abc123def456',
+      delegationId: 'deleg_123',
+      label: 'Trace Claude Code architecture with citations',
+      missionId: 'mission_test',
+      runtimeSessionId: 'runtime-session'
     })
     expect(output).toMatchObject({ status: 'dispatched', artifact_id: 'research_abc123def456' })
   })
@@ -528,6 +544,41 @@ describe('routeRealtimeServerEvent', () => {
     expect(onStatus).toHaveBeenNthCalledWith(1, 'speaking')
     expect(onStatus).toHaveBeenNthCalledWith(2, 'listening')
   })
+
+  it('reports provider, speech, and playback boundaries for mission resumption', async () => {
+    const callbacks = {
+      onAssistantAudioEnded: vi.fn(),
+      onAssistantAudioStarted: vi.fn(),
+      onProviderResponseEnded: vi.fn(),
+      onProviderResponseStarted: vi.fn(),
+      onUserSpeechEnded: vi.fn(),
+      onUserSpeechStarted: vi.fn()
+    }
+
+    const deps = {
+      ...callbacks,
+      request: vi.fn(),
+      runtimeSessionId: 'runtime-session',
+      send: vi.fn()
+    }
+
+    await routeRealtimeServerEvent({ type: 'response.created', response: { id: 'r1' } }, deps)
+    await routeRealtimeServerEvent({ type: 'output_audio_buffer.started' }, deps)
+    await routeRealtimeServerEvent({ type: 'output_audio_buffer.stopped' }, deps)
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.speech_started' }, deps)
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.speech_stopped' }, deps)
+    await routeRealtimeServerEvent(
+      { type: 'response.done', response: { id: 'r1', status: 'completed' } },
+      deps
+    )
+
+    expect(callbacks.onProviderResponseStarted).toHaveBeenCalledOnce()
+    expect(callbacks.onAssistantAudioStarted).toHaveBeenCalledOnce()
+    expect(callbacks.onAssistantAudioEnded).toHaveBeenCalledOnce()
+    expect(callbacks.onUserSpeechStarted).toHaveBeenCalledOnce()
+    expect(callbacks.onUserSpeechEnded).toHaveBeenCalledOnce()
+    expect(callbacks.onProviderResponseEnded).toHaveBeenCalledWith('completed', false)
+  })
 })
 
 describe('startRealtimeVoiceConnection', () => {
@@ -620,6 +671,23 @@ describe('startRealtimeVoiceConnection', () => {
         text: 'Keep ownership with this connection.'
       })
     )
+  })
+
+  it('sends one transient mission continuation only while the channel is open', async () => {
+    const harness = await connectHarness()
+
+    const event = {
+      type: 'response.create' as const,
+      response: { instructions: 'Continue the active mission.' }
+    }
+
+    expect(harness.connection.resumeMission(event)).toBe(false)
+    harness.open()
+    expect(harness.connection.resumeMission(event)).toBe(true)
+    expect(JSON.parse(harness.sent.at(-1) ?? '{}')).toEqual(event)
+
+    harness.connection.close()
+    expect(harness.connection.resumeMission(event)).toBe(false)
   })
 
   it('keeps voice as the redraw owner even for a legacy watcher token', async () => {

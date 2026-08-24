@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { onGatewayEvent } from '@/contrib/events'
 import { useI18n } from '@/i18n'
+import { createRealtimeMissionRuntime } from '@/lib/realtime-mission-runtime'
 import {
   type RealtimeTranscript,
   type RealtimeVoiceConnection,
@@ -13,11 +15,16 @@ import {
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
 import {
+  applyRealtimeMissionGatewayEvent,
+  publishRealtimeMission,
+  type RealtimeResearchEventPayload
+} from '@/store/realtime-mission'
+import {
   $workbenchArtifact,
   $workbenchLayout,
   $workbenchSelection
 } from '@/store/workbench'
-import type { SessionMessage } from '@/types/hermes'
+import type { RpcEvent, SessionMessage } from '@/types/hermes'
 
 import { recentRealtimeSeedTurns } from './realtime-history-seed'
 import { realtimeTranscriptRpcParams } from './realtime-transcript-persistence'
@@ -78,6 +85,16 @@ export function useRealtimeVoiceConversation({
   const [muted, setMuted] = useState(false)
   const [status, setStatus] = useState<ConversationStatus>('idle')
   const connectionRef = useRef<RealtimeVoiceConnection | null>(null)
+  const missionRuntimeRef = useRef<ReturnType<typeof createRealtimeMissionRuntime> | null>(null)
+
+  if (!missionRuntimeRef.current) {
+    missionRuntimeRef.current = createRealtimeMissionRuntime({
+      publish: publishRealtimeMission,
+      resume: event => connectionRef.current?.resumeMission(event) ?? false
+    })
+  }
+
+  const missionRuntime = missionRuntimeRef.current
   const startGenerationRef = useRef(0)
   // A start attempted before the chat had a session, waiting for one.
   const pendingStartRef = useRef(false)
@@ -93,10 +110,11 @@ export function useRealtimeVoiceConversation({
     startGenerationRef.current += 1
     connectionRef.current?.close()
     connectionRef.current = null
+    missionRuntime.connectionClosed()
     pendingTranscriptionRef.current = null
     setMuted(false)
     setStatus('idle')
-  }, [])
+  }, [missionRuntime])
 
   const start = useCallback(async () => {
     const gateway = $gateway.get()
@@ -156,6 +174,11 @@ export function useRealtimeVoiceConversation({
             failedTranscriptsRef.current.shift()
           }
         },
+        onAssistantAudioEnded: missionRuntime.assistantAudioEnded,
+        onAssistantAudioStarted: missionRuntime.assistantAudioStarted,
+        onProviderResponseEnded: missionRuntime.providerResponseEnded,
+        onProviderResponseStarted: missionRuntime.providerResponseStarted,
+        onResearchDispatched: missionRuntime.startMission,
         onStatus: setStatus,
         onTranscript: entry => {
           transcriptWriteChainRef.current = transcriptWriteChainRef.current
@@ -175,6 +198,8 @@ export function useRealtimeVoiceConversation({
             })
           onTranscript?.(entry)
         },
+        onUserSpeechEnded: missionRuntime.userSpeechEnded,
+        onUserSpeechStarted: missionRuntime.userSpeechStarted,
         request: (method, params) => gateway.request(method, params),
         runtimeSessionId
       })
@@ -186,6 +211,8 @@ export function useRealtimeVoiceConversation({
       }
 
       connectionRef.current = connection
+      missionRuntime.focusSession(runtimeSessionId)
+      missionRuntime.connectionOpened()
       pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
 
       // Continue the conversation rather than starting cold. The typed chat and
@@ -230,6 +257,7 @@ export function useRealtimeVoiceConversation({
   }, [
     beforeConnect,
     end,
+    missionRuntime,
     onFatalError,
     onTranscript,
     runtimeSessionId,
@@ -247,8 +275,50 @@ export function useRealtimeVoiceConversation({
   }, [])
 
   const stopTurn = useCallback(() => {
+    missionRuntime.cancelActive()
     connectionRef.current?.stopTurn()
-  }, [])
+  }, [missionRuntime])
+
+  useEffect(() => {
+    missionRuntime.focusSession(runtimeSessionId ?? null)
+  }, [missionRuntime, runtimeSessionId])
+
+  useEffect(() => {
+    const handle = (event: RpcEvent) => {
+      if (event.session_id !== runtimeSessionId || !applyRealtimeMissionGatewayEvent(event)) {
+        return
+      }
+
+      const payload = event.payload as RealtimeResearchEventPayload | undefined
+
+      if (!payload?.mission_id || !payload.artifact_id) {
+        return
+      }
+
+      const identity = {
+        artifactId: payload.artifact_id,
+        delegationId: payload.delegation_id,
+        missionId: payload.mission_id
+      }
+
+      if (event.type === 'voice.realtime.research.ready') {
+        missionRuntime.researchReady(identity)
+      } else {
+        missionRuntime.researchFailed({
+          ...identity,
+          error: payload.error?.trim() || 'Research failed'
+        })
+      }
+    }
+
+    const stopReady = onGatewayEvent('voice.realtime.research.ready', handle)
+    const stopFailed = onGatewayEvent('voice.realtime.research.failed', handle)
+
+    return () => {
+      stopReady()
+      stopFailed()
+    }
+  }, [missionRuntime, runtimeSessionId])
 
   // Contract invariant §8: exactly ONE owner of context freshness. Every
   // source that can change what the model believes about the canvas —

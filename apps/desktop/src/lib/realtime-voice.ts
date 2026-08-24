@@ -1,3 +1,7 @@
+import type {
+  RealtimeMission,
+  RealtimeMissionResumeAction
+} from './realtime-mission-controller'
 import {
   createRealtimeTurnController,
   type RealtimeStopInput,
@@ -33,14 +37,20 @@ export type RealtimeVoiceStatus = 'listening' | 'speaking'
 
 export interface RealtimeServerEventDeps {
   beforeToolCall?: () => Promise<void>
+  createMissionId?: () => string
   /** Flush assistant audio already buffered in the browser (barge-in). */
   clearAssistantAudio?: () => void
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
+  onProviderResponseEnded?: (status: string, continued: boolean) => void
+  onProviderResponseStarted?: () => void
+  onResearchDispatched?: (mission: RealtimeMission) => void
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
+  onUserSpeechEnded?: () => void
+  onUserSpeechStarted?: () => void
   pendingTranscription?: PendingTranscriptionTracker
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
@@ -279,6 +289,8 @@ export interface RealtimeVoiceConnection {
   close: () => void
   /** Seed prior conversation turns so voice continues rather than restarts. */
   seedHistory: (turns: RealtimeTranscript[]) => void
+  /** Continue a ready mission without injecting a synthetic user message. */
+  resumeMission: (event: RealtimeMissionResumeAction['event']) => boolean
   setMuted: (muted: boolean) => void
   /** Manual interrupt: cancel generation and flush buffered assistant audio. */
   stopTurn: () => void
@@ -288,13 +300,21 @@ export interface RealtimeVoiceConnection {
 export interface StartRealtimeVoiceOptions {
   audioFactory?: () => HTMLAudioElement
   beforeToolCall?: () => Promise<void>
+  createMissionId?: () => string
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  onAssistantAudioEnded?: () => void
+  onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
+  onProviderResponseEnded?: (status: string, continued: boolean) => void
+  onProviderResponseStarted?: () => void
+  onResearchDispatched?: (mission: RealtimeMission) => void
   onStatus?: (status: RealtimeVoiceStatus) => void
   onTranscript?: (entry: RealtimeTranscript) => void
+  onUserSpeechEnded?: () => void
+  onUserSpeechStarted?: () => void
   peerConnectionFactory?: () => RTCPeerConnection
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
@@ -670,6 +690,8 @@ export async function startRealtimeVoiceConnection(
 
   const voiceToolDeps = {
     beforeToolCall: options.beforeToolCall,
+    createMissionId: options.createMissionId,
+    onResearchDispatched: options.onResearchDispatched,
     request: options.request,
     runtimeSessionId: options.runtimeSessionId
   }
@@ -751,15 +773,21 @@ export async function startRealtimeVoiceConnection(
           clearAssistantAudio,
           onAssistantAudioEnded: () => {
             assistantSpeaking = false
+            options.onAssistantAudioEnded?.()
           },
           onAssistantAudioStarted: () => {
             assistantSpeaking = true
+            options.onAssistantAudioStarted?.()
           },
           onAssistantResponseDone: options.onAssistantResponseDone,
           onAssistantTranscriptDelta: options.onAssistantTranscriptDelta,
+          onProviderResponseEnded: options.onProviderResponseEnded,
+          onProviderResponseStarted: options.onProviderResponseStarted,
           onStatus: options.onStatus,
           onTranscript: entry =>
             options.onTranscript?.({ ...entry, connectionId: token.connection_id }),
+          onUserSpeechEnded: options.onUserSpeechEnded,
+          onUserSpeechStarted: options.onUserSpeechStarted,
           pendingTranscription,
           request: options.request,
           runtimeSessionId: options.runtimeSessionId,
@@ -852,6 +880,15 @@ export async function startRealtimeVoiceConnection(
           }
         })
       }
+    },
+    resumeMission: event => {
+      if (!channelOpen || closed) {
+        return false
+      }
+
+      send(event)
+
+      return true
     },
     setMuted: muted => {
       tracks.forEach(track => {
@@ -1051,7 +1088,14 @@ const realtimeResponseStatus = (event: RealtimeEvent): string => {
 /** Execute one voice-facade call without deciding when the provider continues. */
 export async function executeRealtimeVoiceTool(
   call: RealtimeTurnToolCall,
-  deps: Pick<RealtimeServerEventDeps, 'beforeToolCall' | 'request' | 'runtimeSessionId'>
+  deps: Pick<
+    RealtimeServerEventDeps,
+    | 'beforeToolCall'
+    | 'createMissionId'
+    | 'onResearchDispatched'
+    | 'request'
+    | 'runtimeSessionId'
+  >
 ): Promise<unknown> {
   const { name } = call
 
@@ -1078,10 +1122,35 @@ export async function executeRealtimeVoiceTool(
 
     await deps.beforeToolCall?.()
 
-    return deps.request('voice.realtime.delegate_research', {
+    const missionId = deps.createMissionId?.() ?? `mission_${crypto.randomUUID().replaceAll('-', '')}`
+
+    const result = await deps.request('voice.realtime.delegate_research', {
       session_id: deps.runtimeSessionId,
+      mission_id: missionId,
       query
     })
+
+    const dispatched = result && typeof result === 'object' ? (result as Record<string, unknown>) : null
+    const artifactId = asTrimmedString(dispatched?.artifact_id)
+    const delegationId = asTrimmedString(dispatched?.delegation_id)
+    const returnedMissionId = asTrimmedString(dispatched?.mission_id)
+
+    if (
+      dispatched?.status === 'dispatched' &&
+      artifactId &&
+      delegationId &&
+      (!returnedMissionId || returnedMissionId === missionId)
+    ) {
+      deps.onResearchDispatched?.({
+        artifactId,
+        delegationId,
+        label: query.length > 60 ? `${query.slice(0, 59)}…` : query,
+        missionId,
+        runtimeSessionId: deps.runtimeSessionId
+      })
+    }
+
+    return result
   }
 
   if (name === 'research_status' || name === 'research_search' || name === 'research_read') {
@@ -1223,6 +1292,7 @@ export async function routeRealtimeServerEvent(
 
   if (type === 'response.created') {
     deps.turnController?.responseCreated(realtimeResponseId(event))
+    deps.onProviderResponseStarted?.()
     deps.onStatus?.('speaking')
 
     return
@@ -1230,17 +1300,20 @@ export async function routeRealtimeServerEvent(
 
   if (type === 'response.done') {
     deps.onStatus?.('listening')
+    const responseStatus = realtimeResponseStatus(event)
 
     const outcome = deps.turnController
       ? await deps.turnController.responseDone(
           realtimeResponseId(event),
-          realtimeResponseStatus(event)
+          responseStatus
         )
       : { continued: false, settled: true }
 
     if (outcome.settled) {
       deps.onAssistantResponseDone?.()
     }
+
+    deps.onProviderResponseEnded?.(responseStatus, outcome.continued)
 
     return
   }
@@ -1256,6 +1329,7 @@ export async function routeRealtimeServerEvent(
   }
 
   if (type === 'input_audio_buffer.speech_started') {
+    deps.onUserSpeechStarted?.()
     deps.send({ type: 'response.cancel' })
     deps.turnController?.interrupt()
     deps.onStatus?.('listening')
@@ -1265,6 +1339,12 @@ export async function routeRealtimeServerEvent(
     // output_audio_buffer.clear flushes that tail — and only if the assistant
     // is actually speaking, since clearing an empty buffer is an API error.
     deps.clearAssistantAudio?.()
+
+    return
+  }
+
+  if (type === 'input_audio_buffer.speech_stopped') {
+    deps.onUserSpeechEnded?.()
 
     return
   }

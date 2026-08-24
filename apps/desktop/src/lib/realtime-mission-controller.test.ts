@@ -176,6 +176,29 @@ describe('RealtimeMissionController', () => {
     expect(onResume).not.toHaveBeenCalled()
   })
 
+  it('keeps background research alive while the user continues the conversation', () => {
+    const onResume = vi.fn()
+    const controller = createRealtimeMissionController({ onResume })
+    controller.updateBoundary(safeBoundary)
+    controller.startMission(mission)
+
+    controller.bargeIn()
+
+    expect(controller.snapshot()?.state).toBe('researching')
+    expect(onResume).not.toHaveBeenCalled()
+  })
+
+  it('allows cancellation after automatic resume is issued but before presentation starts', () => {
+    const { controller, onResume } = startReadyMission()
+    expect(controller.snapshot()?.state).toBe('resuming')
+    expect(onResume).toHaveBeenCalledOnce()
+
+    controller.cancelMission(mission.missionId)
+    controller.markPresenting(mission.missionId)
+
+    expect(controller.snapshot()?.state).toBe('cancelled')
+  })
+
   it('invalidates an awaiting mission when focus switches runtime sessions', () => {
     const { controller, onResume } = startReadyMission({ userSpeaking: true })
 

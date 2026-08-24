@@ -106,7 +106,12 @@ def _needs_interpreter(bin_path: Path) -> bool:
     # A python shebang pointing INSIDE the running interpreter's environment
     # already resolves correctly; anything else (``/usr/bin/env python3``,
     # a system path) would escape the venv when spawned by the DE.
-    exe_dir = str(Path(sys.executable).resolve().parent)
+    #
+    # Compare case-insensitively: ``shebang`` was lowercased above, so a
+    # non-lowercased ``exe_dir`` never matched a path containing an uppercase
+    # character (``/Users/...`` vs ``/users/...``). That made a correct venv
+    # console-script look like it needed the interpreter prefix.
+    exe_dir = str(Path(sys.executable).resolve().parent).lower()
     return exe_dir not in shebang
 
 

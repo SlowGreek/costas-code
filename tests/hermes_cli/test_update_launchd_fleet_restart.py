@@ -642,13 +642,21 @@ class TestWaitForLaunchdServicePid:
 
 
 class TestIncompleteWarningMentionsLaunchctl:
-    def test_launchd_labels_get_launchctl_hint(self, capsys):
+    # `_warn_incomplete_gateway_fleet_restart` branches on the LIVE host via
+    # `hermes_cli.gateway.is_macos()`, so both cases must pin it. Without that
+    # these read as Linux-only assertions while the module only skips on
+    # Windows — on any macOS box the macOS branch returns early (bootstrap
+    # recovery, no "kickstart"/"systemctl") and both fail for the host, not
+    # for the behaviour.
+    def test_launchd_labels_get_launchctl_hint(self, capsys, monkeypatch):
+        monkeypatch.setattr(gw, "is_macos", lambda: False)
         _warn_incomplete_gateway_fleet_restart(["ai.hermes.gateway-merit-ops"])
         out = capsys.readouterr().out
         assert "Update incomplete" in out
         assert "launchctl kickstart -k" in out
 
-    def test_systemd_units_keep_systemctl_hint(self, capsys):
+    def test_systemd_units_keep_systemctl_hint(self, capsys, monkeypatch):
+        monkeypatch.setattr(gw, "is_macos", lambda: False)
         _warn_incomplete_gateway_fleet_restart(["hermes-gateway-coder"])
         out = capsys.readouterr().out
         assert "systemctl" in out

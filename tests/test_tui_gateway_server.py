@@ -20449,6 +20449,82 @@ def test_prompt_submit_row_id_resolves_interrupted_inflight_user(
         server._sessions.pop(sid, None)
 
 
+def test_prompt_submit_durable_tail_row_truncates_past_live_history(
+    monkeypatch, tmp_path
+):
+    """The durable-only tail: target sits PAST the end of live history.
+
+    Regression guard for the fork/upstream seam. Upstream truncates via
+    ``history_before_user_originated_turn(history, user_indices[ordinal])``,
+    which is only defined for an index INSIDE the transcript. The fork's guard
+    deliberately admits ``ordinal == len(user_indices)`` when the resolved
+    target is ``len(history)`` — an interrupted turn's durable row that never
+    reached memory. On that path there is no ``user_indices`` entry to hand the
+    helper (it would IndexError), so truncation must fall back to the verbatim
+    durable prefix.
+
+    Without this test the fallback branch is invisible: every other
+    truncation test passes with it replaced by ``raise AssertionError``.
+    """
+    from hermes_state import SessionDB
+
+    db = SessionDB(db_path=tmp_path / "rowid-durable-tail.db")
+    session_key = "real-db-row-durable-tail"
+    db.create_session(session_key, "desktop")
+    durable_messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply 1"},
+        {"role": "user", "content": "tail prompt never seen by memory"},
+    ]
+    with db._lock:
+        assert db._conn is not None
+        db._insert_message_rows(db._conn, session_key, durable_messages)
+        db._conn.commit()
+    target_row_id = durable_messages[-1]["_row_id"]
+
+    # Live history holds the complete prefix and NOTHING for the tail row, so
+    # the resolved target index == len(history) — past the last live entry.
+    live_history = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply 1"},
+    ]
+    sess = _session(history=live_history, session_key=session_key)
+    sid = "real-db-row-durable-tail-sid"
+    server._sessions[sid] = sess
+    monkeypatch.setattr(server, "_get_db", lambda: db)
+    monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_start_inflight_turn", lambda *a, **k: None)
+
+    try:
+        resp = server.handle_request(
+            {
+                "id": "1",
+                "method": "prompt.submit",
+                "params": {
+                    "session_id": sid,
+                    "text": "tail prompt never seen by memory",
+                    "truncate_before_row_id": target_row_id,
+                    "confirm_truncate": True,
+                },
+            }
+        )
+
+        assert resp is not None
+        assert resp.get("error") is None, resp
+        # The complete prefix survives on BOTH sides — the tail row is what
+        # gets rerun, and nothing before it is lost.
+        assert [(m["role"], m["content"]) for m in sess["history"]] == [
+            ("user", "first"),
+            ("assistant", "reply 1"),
+        ]
+        assert [m["content"] for m in db.get_messages_as_conversation(session_key)] == [
+            "first",
+            "reply 1",
+        ]
+    finally:
+        server._sessions.pop(sid, None)
+
+
 def test_prompt_submit_row_id_real_sessiondb_unknown_refuses_despite_ordinal(
     monkeypatch, tmp_path
 ):

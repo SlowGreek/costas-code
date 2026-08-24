@@ -660,11 +660,15 @@ def _(rid, params: dict) -> dict:
             if (
                 ordinal is None
                 or ordinal < 0
-                or ordinal > len(user_indices)
-                or (
-                    ordinal == len(user_indices)
-                    and target_history_index != len(history)
-                )
+                # `>=`, not `>`: every downstream path indexes
+                # `user_indices[ordinal]`. The fork previously admitted
+                # `ordinal == len(user_indices)` for an interrupted turn's
+                # durable row, but `_resolve_truncate_row_id` now re-projects
+                # `history` to include that row before we get here, so a
+                # resolved target always has a `user_indices` entry. Letting
+                # the equal case through would IndexError instead of returning
+                # the 4018 refusal.
+                or ordinal >= len(user_indices)
             ):
                 return _err(
                     rid,
@@ -685,14 +689,18 @@ def _(rid, params: dict) -> dict:
             # durable prompts"). There the target is not `user_indices[ordinal]`
             # — and it can be `len(history)`, which the helper rejects outright
             # — so fall back to the verbatim prefix for that path only.
-            resolved_user_index = user_indices[ordinal] if ordinal < len(user_indices) else None
-
-            if target_history_index is not None and target_history_index != resolved_user_index:
-                truncated = history[:target_history_index]
-            else:
-                truncated, _live_view = history_before_user_originated_turn(
-                    history, resolved_user_index
-                )
+            # Always the helper: it keeps a compaction handoff carrier at the
+            # new head, which is the ONLY surviving representation of
+            # already-compacted turns (a plain slice drops it).
+            #
+            # There is deliberately no verbatim-slice fallback for the fork's
+            # interrupted-turn case. `_resolve_truncate_row_id` re-projects
+            # `history` to include the durable row before this point, so the
+            # target is always INSIDE the transcript and `user_indices` always
+            # has an entry for it — a slice branch here would be unreachable.
+            truncated, _live_view = history_before_user_originated_turn(
+                history, user_indices[ordinal]
+            )
             # Second gate, on top of confirm_truncate: ordinal 0 resolves to
             # history[:0] == [] and replace_messages() DELETEs every durable
             # row. A confirmed rewind that happens to erase the whole

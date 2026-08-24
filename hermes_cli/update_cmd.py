@@ -1305,11 +1305,11 @@ def _refuse_update_for_contended_shims(exc: BaseException) -> None:
     launch after the holder exits. Exits 2 (refused) so the command-boundary
     receipt net records it as a refusal, not a failure.
     """
-    print("✗ Cannot continue the update: live Hermes launcher(s) could not be")
+    print("✗ Cannot continue the update: live Catalyst launcher(s) could not be")
     print("  moved aside:")
     for name in getattr(exc, "failed_shims", []) or ["hermes.exe"]:
         print(f"    {name}")
-    print("  Another process is holding this install's venv — typically Hermes")
+    print("  Another process is holding this install's venv — typically Catalyst")
     print("  Desktop, a gateway, or another hermes REPL — and mutating the venv")
     print("  now would strand it half-updated.")
     print("  The dependency install has been deferred: close the process(es)")
@@ -2322,6 +2322,18 @@ def _is_fork(origin_url: Optional[str]) -> bool:
         if normalized == official_normalized:
             return False
     return True
+
+def _upstream_syncable_branch(branch: Optional[str]) -> bool:
+    """True for branches that should be fast-forwarded from the upstream repo.
+
+    Only this fork's distribution branch. ``main`` is deliberately EXCLUDED:
+    in this fork ``main`` is the pure upstream mirror, and the sync path can
+    prompt interactively for an ``upstream`` remote — so a non-fork checkout
+    whose origin is NousResearch (which this fork's ``_is_fork`` reports as a
+    fork) must not be dragged into it.
+    """
+    return bool(branch) and branch == _m().COSTAS_UPDATE_BRANCH
+
 
 def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
     """Check if an 'upstream' remote already exists."""
@@ -6316,12 +6328,20 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # commit_count == 0 branch, which returns immediately after: an update
         # that pulled hundreds of upstream commits printed "Already up to
         # date!" and verified nothing).
-        # Upstream only ran this for "main". The fork's distribution branch is
-        # costas-code, and it trails upstream exactly the same way — so it
-        # needs the same head-moved detection, not the dead-end sync in the
-        # commit_count == 0 branch below (#73108: a sync that pulled hundreds
-        # of commits printed "Already up to date!" and verified nothing).
-        if commit_count == 0 and is_fork and branch in {"main", _m().COSTAS_UPDATE_BRANCH}:
+        # Upstream only ran this for "main". In THIS fork "official" is
+        # SlowGreek/costas-code, so the distribution branch is costas-code and
+        # it trails the NousResearch upstream the same way — it needs the same
+        # head-moved detection, not the dead-end sync in the commit_count == 0
+        # branch below (#73108: a sync that pulled hundreds of commits printed
+        # "Already up to date!" and verified nothing).
+        #
+        # `_upstream_syncable_branch` keeps the branch set in ONE place. It is
+        # deliberately narrow: any branch that syncs here reaches an
+        # interactive "add upstream remote?" prompt, so widening it strands
+        # non-interactive callers (and upstream's parked-branch regressions,
+        # which run against a NousResearch origin that this fork classifies as
+        # a fork) on a blocking read.
+        if commit_count == 0 and is_fork and _upstream_syncable_branch(branch):
             pre_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
             _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT, branch)
             post_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)

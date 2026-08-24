@@ -943,7 +943,7 @@ manifest_ref = "relay-plugin.toml"
             is relay_runtime._RelayPluginConfigurationState.FAILED
         )
         assert relay.events == []
-        assert "Hermes [[dynamic_plugins]] records are unsupported" in caplog.text
+        assert "Catalyst [[dynamic_plugins]] records are unsupported" in caplog.text
         assert "use Relay [[plugins.dynamic]] records" in caplog.text
         assert "continuing without Relay plugins" in caplog.text
     finally:

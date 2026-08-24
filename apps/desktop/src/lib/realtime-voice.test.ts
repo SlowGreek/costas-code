@@ -586,7 +586,8 @@ describe('startRealtimeVoiceConnection', () => {
   const connectHarness = async (
     tokenOverrides: Record<string, unknown> = {},
     onTranscript?: (entry: RealtimeTranscript) => void,
-    requestOverride?: (method: string, params: Record<string, unknown>) => Promise<unknown>
+    requestOverride?: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+    onConnectionClosed?: () => void
   ) => {
     const sent: string[] = []
     const listeners = new Map<string, (event: { data?: string }) => void>()
@@ -620,6 +621,7 @@ describe('startRealtimeVoiceConnection', () => {
         text: async () => 'answer-sdp'
       })) as never,
       mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
+      onConnectionClosed,
       peerConnectionFactory: () => peer as never,
       onTranscript,
       request: vi.fn(async (method: string, params: Record<string, unknown>) => {
@@ -641,6 +643,7 @@ describe('startRealtimeVoiceConnection', () => {
       audio,
       channel,
       connection,
+      disconnect: () => listeners.get('close')?.({}),
       emit: (event: Record<string, unknown>) =>
         listeners.get('message')?.({ data: JSON.stringify(event) }),
       open: () => listeners.get('open')?.({}),
@@ -688,6 +691,39 @@ describe('startRealtimeVoiceConnection', () => {
 
     harness.connection.close()
     expect(harness.connection.resumeMission(event)).toBe(false)
+  })
+
+  it('closes the mission boundary when the remote data channel closes', async () => {
+    const onConnectionClosed = vi.fn()
+    const harness = await connectHarness({}, undefined, undefined, onConnectionClosed)
+    harness.open()
+
+    harness.disconnect()
+
+    expect(onConnectionClosed).toHaveBeenCalledOnce()
+    expect(
+      harness.connection.resumeMission({
+        type: 'response.create',
+        response: { instructions: 'Continue the active mission.' }
+      })
+    ).toBe(false)
+  })
+
+  it('returns a failed mission resume when the data channel send throws', async () => {
+    const onConnectionClosed = vi.fn()
+    const harness = await connectHarness({}, undefined, undefined, onConnectionClosed)
+    harness.open()
+    harness.channel.send.mockImplementationOnce(() => {
+      throw new Error('channel closed remotely')
+    })
+
+    expect(
+      harness.connection.resumeMission({
+        type: 'response.create',
+        response: { instructions: 'Continue the active mission.' }
+      })
+    ).toBe(false)
+    expect(onConnectionClosed).toHaveBeenCalledOnce()
   })
 
   it('keeps voice as the redraw owner even for a legacy watcher token', async () => {

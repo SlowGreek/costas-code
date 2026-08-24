@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RealtimeMission } from './realtime-mission-controller'
-import { createRealtimeMissionRuntime } from './realtime-mission-runtime'
+import {
+  createRealtimeMissionRuntime,
+  reconcileRealtimeMissionStatus
+} from './realtime-mission-runtime'
 
 const mission: RealtimeMission = {
   artifactId: 'research_1',
@@ -29,6 +32,67 @@ const setup = () => {
 }
 
 describe('RealtimeMissionRuntime', () => {
+  it('consumes exact readiness that arrives before mission registration', () => {
+    const resume = vi.fn(() => true)
+    const runtime = createRealtimeMissionRuntime({ publish: vi.fn(), resume })
+    runtime.focusSession('runtime-1')
+    runtime.connectionOpened()
+
+    runtime.researchReady(ready)
+    expect(resume).not.toHaveBeenCalled()
+
+    runtime.startMission(mission)
+
+    expect(resume).toHaveBeenCalledOnce()
+    expect(runtime.snapshot()?.state).toBe('resuming')
+  })
+
+  it('reconciles the exact active mission from durable status after reconnect', () => {
+    const { resume, runtime } = setup()
+    runtime.connectionClosed()
+    runtime.connectionOpened()
+
+    expect(
+      reconcileRealtimeMissionStatus(runtime, {
+        artifact_id: mission.artifactId,
+        delegation_id: mission.delegationId,
+        mission_id: mission.missionId,
+        status: 'ready'
+      })
+    ).toBe(true)
+
+    expect(resume).toHaveBeenCalledOnce()
+    expect(runtime.snapshot()?.state).toBe('resuming')
+  })
+
+  it('marks an abandoned exact mission failed without adopting another mission', () => {
+    const { runtime } = setup()
+
+    expect(
+      reconcileRealtimeMissionStatus(runtime, {
+        artifact_id: mission.artifactId,
+        delegation_id: mission.delegationId,
+        error: 'research delegation ended with unknown',
+        mission_id: mission.missionId,
+        status: 'failed'
+      })
+    ).toBe(true)
+    expect(runtime.snapshot()).toMatchObject({
+      error: 'research delegation ended with unknown',
+      state: 'failed'
+    })
+
+    expect(
+      reconcileRealtimeMissionStatus(runtime, {
+        artifact_id: 'research_other',
+        delegation_id: 'deleg_other',
+        mission_id: 'mission_other',
+        status: 'ready'
+      })
+    ).toBe(false)
+    expect(runtime.snapshot()?.state).toBe('failed')
+  })
+
   it('resumes exact ready research once and publishes the resuming state', () => {
     const { publish, resume, runtime } = setup()
 

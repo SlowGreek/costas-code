@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { onGatewayEvent } from '@/contrib/events'
 import { useI18n } from '@/i18n'
-import { createRealtimeMissionRuntime } from '@/lib/realtime-mission-runtime'
+import {
+  createRealtimeMissionRuntime,
+  type RealtimeResearchStatusSnapshot,
+  reconcileRealtimeMissionStatus
+} from '@/lib/realtime-mission-runtime'
 import {
   type RealtimeTranscript,
   type RealtimeVoiceConnection,
@@ -176,6 +180,7 @@ export function useRealtimeVoiceConversation({
         },
         onAssistantAudioEnded: missionRuntime.assistantAudioEnded,
         onAssistantAudioStarted: missionRuntime.assistantAudioStarted,
+        onConnectionClosed: missionRuntime.connectionClosed,
         onProviderResponseEnded: missionRuntime.providerResponseEnded,
         onProviderResponseStarted: missionRuntime.providerResponseStarted,
         onResearchDispatched: missionRuntime.startMission,
@@ -214,6 +219,30 @@ export function useRealtimeVoiceConversation({
       missionRuntime.focusSession(runtimeSessionId)
       missionRuntime.connectionOpened()
       pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
+
+      const recoveringMission = missionRuntime.snapshot()
+
+      if (
+        recoveringMission?.runtimeSessionId === runtimeSessionId &&
+        recoveringMission.state === 'researching'
+      ) {
+        try {
+          const researchStatus = await gateway.request<RealtimeResearchStatusSnapshot>(
+            'voice.realtime.research_status',
+            {
+              artifact_id: recoveringMission.artifactId,
+              session_id: runtimeSessionId
+            }
+          )
+
+          if (generation === startGenerationRef.current) {
+            reconcileRealtimeMissionStatus(missionRuntime, researchStatus)
+          }
+        } catch {
+          // The live terminal event remains authoritative. Reconnect status is
+          // best-effort recovery for a callback lost with the prior process.
+        }
+      }
 
       // Continue the conversation rather than starting cold. The typed chat and
       // the voice session share one session, so whatever was already discussed
@@ -285,9 +314,11 @@ export function useRealtimeVoiceConversation({
 
   useEffect(() => {
     const handle = (event: RpcEvent) => {
-      if (event.session_id !== runtimeSessionId || !applyRealtimeMissionGatewayEvent(event)) {
+      if (event.session_id !== runtimeSessionId) {
         return
       }
+
+      applyRealtimeMissionGatewayEvent(event)
 
       const payload = event.payload as RealtimeResearchEventPayload | undefined
 

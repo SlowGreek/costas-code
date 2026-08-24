@@ -29,10 +29,73 @@ export interface RealtimeMissionRuntime {
   userSpeechStarted(): void
 }
 
+export interface RealtimeResearchStatusSnapshot {
+  artifact_id?: unknown
+  delegation_id?: unknown
+  error?: unknown
+  mission_id?: unknown
+  status?: unknown
+}
+
+type PendingTerminalEvent =
+  | { event: RealtimeMissionFailedEvent; type: 'failed' }
+  | { event: RealtimeMissionReadyEvent; type: 'ready' }
+
+const terminalIdentity = (event: RealtimeMissionReadyEvent): string =>
+  `${event.missionId}\u0000${event.artifactId}\u0000${event.delegationId ?? ''}`
+
+const missionIdentity = (mission: RealtimeMission): string => terminalIdentity(mission)
+
+export function reconcileRealtimeMissionStatus(
+  runtime: RealtimeMissionRuntime,
+  status: RealtimeResearchStatusSnapshot
+): boolean {
+  const mission = runtime.snapshot()
+
+  const identity = {
+    artifactId: typeof status.artifact_id === 'string' ? status.artifact_id.trim() : '',
+    delegationId: typeof status.delegation_id === 'string' ? status.delegation_id.trim() : '',
+    missionId: typeof status.mission_id === 'string' ? status.mission_id.trim() : ''
+  }
+
+  if (!mission || missionIdentity(mission) !== terminalIdentity(identity)) {
+    return false
+  }
+
+  if (status.status === 'ready') {
+    runtime.researchReady(identity)
+
+    return true
+  }
+
+  if (status.status === 'failed') {
+    runtime.researchFailed({
+      ...identity,
+      error:
+        typeof status.error === 'string' && status.error.trim()
+          ? status.error.trim()
+          : 'Research failed'
+    })
+
+    return true
+  }
+
+  return false
+}
+
 export function createRealtimeMissionRuntime(
   options: RealtimeMissionRuntimeOptions
 ): RealtimeMissionRuntime {
   let controller: ReturnType<typeof createRealtimeMissionController>
+  const pendingTerminalEvents = new Map<string, PendingTerminalEvent>()
+
+  const bufferTerminalEvent = (pending: PendingTerminalEvent) => {
+    pendingTerminalEvents.set(terminalIdentity(pending.event), pending)
+
+    if (pendingTerminalEvents.size > 8) {
+      pendingTerminalEvents.delete(pendingTerminalEvents.keys().next().value as string)
+    }
+  }
 
   const publish = () => {
     const snapshot = controller.snapshot()
@@ -102,16 +165,44 @@ export function createRealtimeMissionRuntime(
       publish()
     },
     researchFailed(event) {
+      const mission = controller.snapshot()
+
+      if (!mission || missionIdentity(mission) !== terminalIdentity(event)) {
+        bufferTerminalEvent({ event, type: 'failed' })
+
+        return
+      }
+
       controller.researchFailed(event)
       publish()
     },
     researchReady(event) {
+      const mission = controller.snapshot()
+
+      if (!mission || missionIdentity(mission) !== terminalIdentity(event)) {
+        bufferTerminalEvent({ event, type: 'ready' })
+
+        return
+      }
+
       controller.researchReady(event)
       publish()
     },
     snapshot: () => controller.snapshot(),
     startMission(mission) {
       controller.startMission(mission)
+      const pending = pendingTerminalEvents.get(missionIdentity(mission))
+
+      if (pending) {
+        pendingTerminalEvents.delete(missionIdentity(mission))
+
+        if (pending.type === 'ready') {
+          controller.researchReady(pending.event)
+        } else {
+          controller.researchFailed(pending.event)
+        }
+      }
+
       publish()
     },
     userSpeechEnded: () => updateBoundary({ userSpeaking: false }),

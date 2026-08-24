@@ -181,7 +181,6 @@ export function createRealtimeMissionController(options: RealtimeMissionControll
       if (
         active &&
         previousFocusedSession === active.runtimeSessionId &&
-        boundary.focusedRuntimeSessionId !== null &&
         boundary.focusedRuntimeSessionId !== active.runtimeSessionId
       ) {
         cancelActive()

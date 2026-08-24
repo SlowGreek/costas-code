@@ -233,6 +233,92 @@ describe('useRealtimeVoiceConversation', () => {
     expect(resumeMission).toHaveBeenCalledOnce()
   })
 
+  it('consumes readiness that arrives before research dispatch acceptance', async () => {
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+
+    const mission = {
+      artifactId: 'research_fast',
+      delegationId: 'deleg_fast',
+      label: 'Fast research',
+      missionId: 'mission_fast',
+      runtimeSessionId: 'runtime-session'
+    }
+
+    act(() => {
+      emitGatewayEvent({
+        type: 'voice.realtime.research.ready',
+        session_id: 'runtime-session',
+        payload: {
+          mission_id: mission.missionId,
+          artifact_id: mission.artifactId,
+          delegation_id: mission.delegationId
+        }
+      })
+    })
+    expect(resumeMission).not.toHaveBeenCalled()
+
+    act(() => options.onResearchDispatched?.(mission))
+
+    expect(resumeMission).toHaveBeenCalledOnce()
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('resuming')
+  })
+
+  it('reconciles an active research mission from durable status after reconnect', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'voice.realtime.research_status') {
+        return {
+          artifact_id: 'research_reconnect',
+          delegation_id: 'deleg_reconnect',
+          mission_id: 'mission_reconnect',
+          status: 'ready'
+        }
+      }
+
+      return { messages: [] }
+    })
+
+    $gateway.set({ request } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+    const firstOptions = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+
+    act(() => {
+      firstOptions.onResearchDispatched?.({
+        artifactId: 'research_reconnect',
+        delegationId: 'deleg_reconnect',
+        label: 'Reconnect research',
+        missionId: 'mission_reconnect',
+        runtimeSessionId: 'runtime-session'
+      })
+      hook.result.current.end()
+    })
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    expect(request).toHaveBeenCalledWith('voice.realtime.research_status', {
+      artifact_id: 'research_reconnect',
+      session_id: 'runtime-session'
+    })
+    expect(resumeMission).toHaveBeenCalledOnce()
+    expect($realtimeMissions.get()['runtime-session']?.state).toBe('resuming')
+  })
+
   it('waits for an active provider response and cancels auto-resume on barge-in', async () => {
     const hook = renderHook(() =>
       useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })

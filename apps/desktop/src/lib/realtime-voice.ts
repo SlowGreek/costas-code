@@ -308,6 +308,7 @@ export interface StartRealtimeVoiceOptions {
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
+  onConnectionClosed?: () => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
   onProviderResponseStarted?: () => void
   onResearchDispatched?: (mission: RealtimeMission) => void
@@ -680,12 +681,29 @@ export async function startRealtimeVoiceConnection(
       ? `${baseInstructions}\n\nCurrent workbench state (authoritative summary):\n${workbenchContext}`
       : baseInstructions
 
-  const send = (event: Record<string, unknown>) => {
-    if (!channelOpen || closed) {
+  const markRemoteClosed = () => {
+    if (!channelOpen) {
       return
     }
 
-    channel.send(JSON.stringify(event))
+    channelOpen = false
+    options.onConnectionClosed?.()
+  }
+
+  const send = (event: Record<string, unknown>): boolean => {
+    if (!channelOpen || closed) {
+      return false
+    }
+
+    try {
+      channel.send(JSON.stringify(event))
+
+      return true
+    } catch {
+      markRemoteClosed()
+
+      return false
+    }
   }
 
   const voiceToolDeps = {
@@ -764,6 +782,7 @@ export async function startRealtimeVoiceConnection(
       channelOpen = true
       send(sessionUpdateEvent(instructions(), webSearchAvailable))
     })
+    channel.addEventListener('close', markRemoteClosed)
     channel.addEventListener('message', event => {
       try {
         const serverEvent = JSON.parse(event.data) as unknown
@@ -886,9 +905,7 @@ export async function startRealtimeVoiceConnection(
         return false
       }
 
-      send(event)
-
-      return true
+      return send(event)
     },
     setMuted: muted => {
       tracks.forEach(track => {

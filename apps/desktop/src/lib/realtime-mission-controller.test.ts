@@ -209,6 +209,17 @@ describe('RealtimeMissionController', () => {
     expect(onResume).not.toHaveBeenCalled()
   })
 
+  it('invalidates an awaiting mission when focus clears during a session switch', () => {
+    const { controller, onResume } = startReadyMission({ userSpeaking: true })
+
+    controller.updateBoundary({ focusedRuntimeSessionId: null })
+    controller.updateBoundary({ focusedRuntimeSessionId: 'runtime-2' })
+    controller.updateBoundary({ focusedRuntimeSessionId: 'runtime-1', userSpeaking: false })
+
+    expect(controller.snapshot()?.state).toBe('cancelled')
+    expect(onResume).not.toHaveBeenCalled()
+  })
+
   it('allows a closed connection to reopen for the same focused session', () => {
     const { controller, onResume } = startReadyMission({ connectionOpen: false })
 

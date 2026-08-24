@@ -18,7 +18,7 @@ voice.realtime.research.ready
 }
 ```
 
-- A failed or abandoned delegation emits `voice.realtime.research.failed` with the same identities and a safe error string.
+- A failed delegation emits `voice.realtime.research.failed` with the same identities and a safe error string while the owning backend process is alive.
 - Events are routed through the existing runtime-session `_emit` channel. They never enter normal chat completion delivery.
 - Duplicate events are legal. Consumers must be idempotent.
 
@@ -59,6 +59,13 @@ Resume with a transient provider continuation, never a fake user message:
 ```
 
 If the boundary is uncertain, remain `awaiting_boundary`. Manual “go on” still works through the normal user turn.
+
+## Backend restart recovery
+
+Delegation completion callbacks are process-local. If the backend restarts while research is running, the worker does not survive and the durable delegation is recovered as `unknown`; the old process cannot replay its terminal event.
+
+- A Desktop connection that still owns the exact active mission reconciles its profile- and session-scoped `research_status` once after reconnect. `ready` continues through the normal safe-boundary gates; `unknown` or another terminal failure becomes `failed`.
+- A fresh renderer does not auto-adopt the latest artifact as a new mission. The next normal user turn can recover the latest verified evidence through `research_status` without a synthetic user message or unsolicited speech.
 
 ## UI contract
 

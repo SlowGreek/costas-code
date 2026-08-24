@@ -36,6 +36,15 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/search.*visualize/i)
   })
 
+  it('delegates research reluctantly without creating a second conversation authority', () => {
+    expect(text).toMatch(/delegate_research/i)
+    expect(text).toMatch(/substantial.*multi-source|deep research/i)
+    expect(text).toMatch(/prefer web_search/i)
+    expect(text).toMatch(/do not busy-poll/i)
+    expect(text).toMatch(/research_search.*research_read/i)
+    expect(text).toMatch(/you remain.*conversation|sole conversational authority/i)
+  })
+
   it('explains the voice agent loop and its completion signal', () => {
     expect(text).toMatch(/each response is one inference step/i)
     expect(text).toMatch(/not necessarily the whole user turn/i)

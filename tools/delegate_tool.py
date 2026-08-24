@@ -3509,6 +3509,8 @@ def delegate_task(
     subagent_id: Optional[str] = None,
     message: Optional[str] = None,
     parent_agent=None,
+    suppress_completion_delivery: bool = False,
+    reject_if_async_capacity: bool = False,
 ) -> str:
     """
     Spawn one or more child agents to handle delegated tasks, or control
@@ -4177,6 +4179,7 @@ def delegate_task(
             # returned delegation_id matches cache/delegation/live/<id>/.
             delegation_id=live_deleg_id,
             progress_fn=_batch_progress,
+            suppress_completion_delivery=suppress_completion_delivery,
         )
 
         if dispatch.get("status") == "dispatched":
@@ -4222,6 +4225,17 @@ def delegate_task(
                     "a child work while it runs."
                 )
             return json.dumps(payload, ensure_ascii=False)
+
+        if reject_if_async_capacity:
+            for _child in _child_agents:
+                _sid = getattr(_child, "_subagent_id", None)
+                if _sid:
+                    _unregister_subagent(_sid, agent=_child)
+                try:
+                    _child.close()
+                except Exception:
+                    pass
+            return json.dumps(dispatch, ensure_ascii=False)
 
         # Pool at capacity / schedule failure — children are still attached
         # (we detach above only on the parent list, but the async unit was

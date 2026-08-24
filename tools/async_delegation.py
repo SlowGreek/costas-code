@@ -247,7 +247,7 @@ def _persist_dispatch(record: Dict[str, Any]) -> None:
             # Routing origin (scope_id/user_id/user_name): persisted so a
             # restart-recovered completion can reconstruct a full
             # SessionSource — see _capture_routing_origin.
-            "scope_id", "user_id", "user_name",
+            "scope_id", "user_id", "user_name", "suppress_completion_delivery",
         )
         if key in record
     }
@@ -279,7 +279,8 @@ def _prune_durable_records() -> None:
     cutoff = now - _DURABLE_RETENTION_SECONDS
     with _DB_LOCK, _transaction() as conn:
         conn.execute(
-            "DELETE FROM async_delegations WHERE delivery_state='delivered' AND updated_at < ?",
+            """DELETE FROM async_delegations
+               WHERE delivery_state IN ('delivered','suppressed') AND updated_at < ?""",
             (cutoff,),
         )
         terminal_count = conn.execute(
@@ -291,7 +292,8 @@ def _prune_durable_records() -> None:
                 """DELETE FROM async_delegations WHERE delegation_id IN (
                      SELECT delegation_id FROM async_delegations
                      WHERE state NOT IN ('running','finalizing')
-                     ORDER BY CASE delivery_state WHEN 'delivered' THEN 0 ELSE 1 END,
+                     ORDER BY CASE WHEN delivery_state IN ('delivered','suppressed')
+                                   THEN 0 ELSE 1 END,
                               updated_at ASC LIMIT ?
                    )""",
                 (excess,),
@@ -312,15 +314,24 @@ def _prune_durable_records() -> None:
             )
 
 
-def _persist_completion(event: Dict[str, Any], result: Dict[str, Any]) -> None:
+def _persist_completion(
+    event: Dict[str, Any], result: Dict[str, Any], *, delivery_state: str = "pending"
+) -> None:
     now = time.time()
     with _DB_LOCK, _transaction() as conn:
         conn.execute(
             """UPDATE async_delegations SET state=?, completed_at=?, updated_at=?,
-               event_json=?, result_json=?, delivery_state='pending'
+               event_json=?, result_json=?, delivery_state=?
                WHERE delegation_id=?""",
-            (event.get("status", "completed"), event.get("completed_at", now), now,
-             json.dumps(event), json.dumps(result), event["delegation_id"]),
+            (
+                event.get("status", "completed"),
+                event.get("completed_at", now),
+                now,
+                json.dumps(event),
+                json.dumps(result),
+                delivery_state,
+                event["delegation_id"],
+            ),
         )
 
 
@@ -379,11 +390,21 @@ def recover_abandoned_delegations() -> int:
                 if task.get(_k):
                     event[_k] = task[_k]
             result = {"status": "unknown", "summary": None, "error": event["error"]}
+            delivery_state = (
+                "suppressed" if task.get("suppress_completion_delivery") else "pending"
+            )
             conn.execute(
                 """UPDATE async_delegations SET state='unknown', completed_at=?,
-                   updated_at=?, event_json=?, result_json=?, delivery_state='pending'
+                   updated_at=?, event_json=?, result_json=?, delivery_state=?
                    WHERE delegation_id=?""",
-                (now, now, json.dumps(event), json.dumps(result), delegation_id),
+                (
+                    now,
+                    now,
+                    json.dumps(event),
+                    json.dumps(result),
+                    delivery_state,
+                    delegation_id,
+                ),
             )
             recovered += 1
     return recovered
@@ -765,6 +786,7 @@ def dispatch_async_delegation(
     interrupt_fn: Optional[Callable[[], None]] = None,
     max_async_children: int = _DEFAULT_MAX_ASYNC_CHILDREN,
     progress_fn: Optional[Callable[[], tuple]] = None,
+    suppress_completion_delivery: bool = False,
 ) -> Dict[str, Any]:
     """Spawn ``runner`` on the daemon executor and return a handle immediately.
 
@@ -827,6 +849,7 @@ def dispatch_async_delegation(
         "completed_at": None,
         "interrupt_fn": interrupt_fn,
         "progress_fn": progress_fn,
+        "suppress_completion_delivery": bool(suppress_completion_delivery),
         # Stale-monitor bookkeeping (see _stale_monitor_loop).
         "_progress_token": None,
         "_progress_ts": dispatched_at,
@@ -1001,7 +1024,14 @@ def _push_completion_event(
     ):
         if _k in result:
             evt[_k] = result[_k]
-    _persist_completion(evt, result)
+    suppress_delivery = bool(record.get("suppress_completion_delivery"))
+    _persist_completion(
+        evt,
+        result,
+        delivery_state="suppressed" if suppress_delivery else "pending",
+    )
+    if suppress_delivery:
+        return
     try:
         process_registry.completion_queue.put(evt)
     except Exception as exc:  # pragma: no cover
@@ -1028,6 +1058,7 @@ def dispatch_async_delegation_batch(
     max_async_children: int = _DEFAULT_MAX_ASYNC_CHILDREN,
     delegation_id: Optional[str] = None,
     progress_fn: Optional[Callable[[], tuple]] = None,
+    suppress_completion_delivery: bool = False,
 ) -> Dict[str, Any]:
     """Dispatch a WHOLE fan-out batch as ONE background unit.
 
@@ -1075,6 +1106,7 @@ def dispatch_async_delegation_batch(
         "interrupt_fn": interrupt_fn,
         "is_batch": True,
         "progress_fn": progress_fn,
+        "suppress_completion_delivery": bool(suppress_completion_delivery),
         "_progress_token": None,
         "_progress_ts": dispatched_at,
         "_interrupted_at": None,
@@ -1215,7 +1247,14 @@ def _push_batch_completion_event(
     ):
         if _k in combined:
             evt[_k] = combined[_k]
-    _persist_completion(evt, combined)
+    suppress_delivery = bool(event_record.get("suppress_completion_delivery"))
+    _persist_completion(
+        evt,
+        combined,
+        delivery_state="suppressed" if suppress_delivery else "pending",
+    )
+    if suppress_delivery:
+        return
     try:
         process_registry.completion_queue.put(evt)
     except Exception as exc:  # pragma: no cover

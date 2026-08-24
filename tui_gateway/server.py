@@ -298,6 +298,8 @@ _LONG_HANDLERS = frozenset(
         "voice.realtime.token",
         # Searches the configured live web provider for the Realtime voice model.
         "voice.realtime.web_search",
+        # Builds the parent agent and dispatches a bounded silent research worker.
+        "voice.realtime.delegate_research",
         # Runs a bounded auxiliary-model call over transcript + current graph.
         "workbench.visualize",
         # wake.start calls check_wake_word_requirements() → _stt_ready() →

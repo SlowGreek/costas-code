@@ -1,11 +1,13 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
 import {
+  $workbenchSelection,
   animateWorkbenchCameraTo,
   resetWorkbenchForTests,
+  setWorkbenchSelection,
   type WorkbenchArtifact,
   type WorkbenchEdge
 } from '@/store/workbench'
@@ -220,5 +222,25 @@ describe('cinematic camera rendering', () => {
 
     act(() => frames.shift()?.(600))
     expect(canvas.getAttribute('viewBox')).toBe('100 40 360 210')
+  })
+
+  it('does not clear selection when the click follows a canvas pan', () => {
+    setWorkbenchSelection('planner')
+    render(
+      createElement(MapRenderer, {
+        artifact,
+        height: 420,
+        positions: { planner: { x: 360, y: 210 } },
+        width: 720
+      })
+    )
+    const canvas = screen.getByTestId('workbench-canvas')
+
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(canvas, { clientX: 140, clientY: 100 })
+    fireEvent.pointerUp(canvas, { clientX: 140, clientY: 100 })
+    fireEvent.click(canvas)
+
+    expect($workbenchSelection.get()).toBe('planner')
   })
 })

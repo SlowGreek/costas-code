@@ -1336,10 +1336,19 @@ export async function executeRealtimeVoiceTool(
       }
     } else if (name === 'frame_nodes') {
       const rawIds = Array.isArray(parsed.node_ids) ? parsed.node_ids : []
-      const nodeIds = [...new Set(rawIds.map(asTrimmedString).filter(Boolean))]
 
-      if (rawIds.length < 2 || rawIds.length > 8 || nodeIds.length < 2) {
-        return { error: 'frame_nodes requires 2 to 8 existing node ids' }
+      if (
+        rawIds.length < 2 ||
+        rawIds.length > 8 ||
+        rawIds.some(nodeId => typeof nodeId !== 'string' || !nodeId.trim())
+      ) {
+        return { error: 'frame_nodes requires 2 to 8 non-empty node ids' }
+      }
+
+      const nodeIds = rawIds.map(nodeId => (nodeId as string).trim())
+
+      if (new Set(nodeIds).size !== nodeIds.length) {
+        return { error: 'frame_nodes requires unique node ids' }
       }
 
       const padding =

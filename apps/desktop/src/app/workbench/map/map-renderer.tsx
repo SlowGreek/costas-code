@@ -498,6 +498,7 @@ export default function MapRenderer({
 
   const camera = useStore($workbenchCamera)
   const panRef = useRef<null | { camera: WorkbenchCamera; origin: Point; panning: boolean }>(null)
+  const panConsumedClickRef = useRef(false)
 
   useEffect(() => {
     const svg = svgRef.current
@@ -557,6 +558,7 @@ export default function MapRenderer({
       return
     }
 
+    panConsumedClickRef.current = false
     panRef.current = {
       camera: $workbenchCamera.get(),
       origin: { x: event.clientX, y: event.clientY },
@@ -580,6 +582,7 @@ export default function MapRenderer({
       }
 
       pan.panning = true
+      panConsumedClickRef.current = true
 
       const rect = svgRef.current?.getBoundingClientRect()
       // Convert element pixels to on-screen pixels of the letterboxed viewBox
@@ -608,8 +611,11 @@ export default function MapRenderer({
       data-testid="workbench-canvas"
       onClick={() => {
         // A pan is not a click: only a press that never moved clears the
-        // user's referent.
-        if (panRef.current?.panning) {
+        // user's referent. Pointer-up happens before click, so preserve this
+        // consumed-click bit until the click itself has been suppressed.
+        if (panConsumedClickRef.current || panRef.current?.panning) {
+          panConsumedClickRef.current = false
+
           return
         }
 

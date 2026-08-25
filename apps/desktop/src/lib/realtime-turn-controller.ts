@@ -193,14 +193,25 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
   let audioEndedPromise = Promise.resolve()
   let resolveAudioEnded: null | (() => void) = null
 
+  const expectAudio = () => {
+    if (resolveAudioEnded) {
+      return
+    }
+
+    audioEndedPromise = new Promise<void>(resolve => {
+      resolveAudioEnded = resolve
+    })
+  }
+
   const finishAudio = () => {
-    if (!audioPlaying) {
+    if (!audioPlaying && !resolveAudioEnded) {
       return
     }
 
     audioPlaying = false
     resolveAudioEnded?.()
     resolveAudioEnded = null
+    audioEndedPromise = Promise.resolve()
   }
 
   const startAudio = () => {
@@ -209,9 +220,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     }
 
     audioPlaying = true
-    audioEndedPromise = new Promise<void>(resolve => {
-      resolveAudioEnded = resolve
-    })
+    expectAudio()
   }
 
   const currentSnapshot = (): null | RealtimeTurnSnapshot =>
@@ -309,6 +318,12 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       }
 
       response.assistantText = text.trim()
+
+      if (response.assistantText) {
+        // Transcript completion proves this response has spoken output even
+        // when response.done beats output_audio_buffer.started over the wire.
+        expectAudio()
+      }
     },
     beginTurn: start,
     close: () => {
@@ -474,7 +489,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
-        if (presentation && response.assistantText.trim() && audioPlaying) {
+        if (presentation && response.assistantText.trim()) {
           await audioEndedPromise
 
           if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {

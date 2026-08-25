@@ -80,6 +80,7 @@ import { isHudWindow } from '@/store/windows'
 import {
   $workbenchArtifact,
   $workbenchVoiceActive,
+  clearWorkbenchForSessionTransition,
   setWorkbenchArtifact,
   setWorkbenchDrawing,
   shouldShowWorkbenchPane,
@@ -761,9 +762,7 @@ $gateway.subscribe(() => {
 // nothing to load from until the resume lands, and the runtime subscription
 // above fills it in the moment it does.
 $selectedStoredSessionId.subscribe(() => {
-  setWorkbenchArtifact(null)
-  // A pending draw belongs to the chat that started it.
-  setWorkbenchDrawing(false)
+  clearWorkbenchForSessionTransition()
 })
 
 // The workbench appears only once there is something to show. Starting a voice

@@ -1,4 +1,5 @@
 import {
+  clearWorkbenchForSessionTransition,
   setWorkbenchArtifact,
   setWorkbenchDrawing,
   type WorkbenchArtifact
@@ -33,13 +34,20 @@ interface HydratorOptions {
  */
 export function createWorkbenchHydrator(options: HydratorOptions) {
   let token = 0
+  let activeRuntimeSessionId: null | string = null
 
   return async function hydrate(runtimeSessionId: null | string): Promise<void> {
     const mine = ++token
+    const sessionChanged = runtimeSessionId !== activeRuntimeSessionId
+    activeRuntimeSessionId = runtimeSessionId
 
-    setWorkbenchArtifact(null)
-    // A pending draw belongs to the session that started it.
-    setWorkbenchDrawing(false)
+    if (sessionChanged) {
+      clearWorkbenchForSessionTransition()
+    } else {
+      setWorkbenchArtifact(null)
+      // A pending draw belongs to the session that started it.
+      setWorkbenchDrawing(false)
+    }
 
     const gateway = options.getGateway()
 

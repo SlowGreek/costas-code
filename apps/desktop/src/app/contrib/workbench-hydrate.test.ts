@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   $workbenchArtifact,
+  $workbenchCamera,
+  resetWorkbenchCameraFor,
   resetWorkbenchForTests,
+  setWorkbenchCamera,
   type WorkbenchArtifact
 } from '@/store/workbench'
 
@@ -100,5 +103,45 @@ describe('createWorkbenchHydrator', () => {
 
     // The stale reply must not paint session 1's map over session 2.
     expect($workbenchArtifact.get()).toBeNull()
+  })
+
+  it('resets camera ownership when two sessions both use map.main', async () => {
+    resetWorkbenchForTests()
+    let active = 'runtime-1'
+    const request = vi.fn(async () => ({ artifacts: [artifact] }))
+
+    const hydrate = createWorkbenchHydrator({
+      getGateway: () => ({ request }) as never,
+      getSessionId: () => active
+    })
+
+    await hydrate('runtime-1')
+    resetWorkbenchCameraFor('map.main')
+    setWorkbenchCamera({ x: 40, y: 20, zoom: 2 })
+
+    active = 'runtime-2'
+    await hydrate('runtime-2')
+    resetWorkbenchCameraFor('map.main')
+
+    expect($workbenchCamera.get()).toEqual({ x: 0, y: 0, zoom: 1 })
+  })
+
+  it('preserves camera on a same-session hydration retry', async () => {
+    resetWorkbenchForTests()
+    const request = vi.fn(async () => ({ artifacts: [artifact] }))
+
+    const hydrate = createWorkbenchHydrator({
+      getGateway: () => ({ request }) as never,
+      getSessionId: () => 'runtime-1'
+    })
+
+    await hydrate('runtime-1')
+    resetWorkbenchCameraFor('map.main')
+    setWorkbenchCamera({ x: 40, y: 20, zoom: 2 })
+
+    await hydrate('runtime-1')
+    resetWorkbenchCameraFor('map.main')
+
+    expect($workbenchCamera.get()).toEqual({ x: 40, y: 20, zoom: 2 })
   })
 })

@@ -115,7 +115,7 @@ describe('voice camera tools', () => {
 
     const output = await executeRealtimeVoiceTool(
       toolCall('frame_nodes', {
-        node_ids: ['planner', 'executor', 'planner', 'memory'],
+        node_ids: ['planner', 'executor', 'memory'],
         padding: 'tight',
         anchor: 'right',
         transition: 'dramatic'
@@ -149,6 +149,25 @@ describe('voice camera tools', () => {
         deps({ onCameraCommand: () => true })
       )
     ).resolves.toMatchObject({ error: expect.any(String) })
+  })
+
+  it('rejects non-string, empty, or duplicate cluster ids exactly', async () => {
+    const onCameraCommand = vi.fn(() => true)
+
+    for (const nodeIds of [
+      ['planner', 'executor', 7],
+      ['planner', ''],
+      ['planner', 'planner']
+    ]) {
+      await expect(
+        executeRealtimeVoiceTool(
+          toolCall('frame_nodes', { node_ids: nodeIds }),
+          deps({ onCameraCommand })
+        )
+      ).resolves.toMatchObject({ error: expect.any(String) })
+    }
+
+    expect(onCameraCommand).not.toHaveBeenCalled()
   })
 
   it('pans only by bounded named directions and amounts', async () => {
@@ -228,6 +247,49 @@ describe('voice camera tools', () => {
     })
     const completing = controller.responseDone('response-2')
 
+    await Promise.resolve()
+    expect(executed).toEqual(['zoom_to'])
+
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(executed).toEqual(['zoom_to', 'zoom_view'])
+  })
+
+  it('waits when response.done arrives before assistant playback starts', async () => {
+    const executed: string[] = []
+
+    const controller = createRealtimeTurnController({
+      execute: async call => {
+        executed.push(call.name)
+
+        return { status: 'moved' }
+      },
+      laneFor: voiceToolLane,
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Walk through the architecture cinematically.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone({
+      ...toolCall('zoom_to', { node_id: 'planner' }),
+      responseId: 'response-1'
+    })
+    await controller.responseDone('response-1')
+
+    controller.responseCreated('response-2')
+    controller.assistantTranscriptDone('response-2', 'The planner owns this decision.')
+    controller.functionCallDone({
+      ...toolCall('zoom_view', { direction: 'out' }),
+      callId: 'c2',
+      responseId: 'response-2'
+    })
+    const completing = controller.responseDone('response-2')
+
+    await Promise.resolve()
+    expect(executed).toEqual(['zoom_to'])
+
+    controller.assistantAudioStarted()
     await Promise.resolve()
     expect(executed).toEqual(['zoom_to'])
 

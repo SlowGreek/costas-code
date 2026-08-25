@@ -24,9 +24,7 @@ def _bundle(root: Path, name: str, marker: str, commit: str = EXPECTED_COMMIT) -
     return bundle
 
 
-def _run_swap(
-    install_root: Path, installed: Path, rebuilt: Path | None = None
-) -> subprocess.CompletedProcess[str]:
+def _run_swap(install_root: Path, installed: Path) -> subprocess.CompletedProcess[str]:
     args = [
         "/bin/bash",
         str(POSIX_HANDOFF),
@@ -40,9 +38,6 @@ def _run_swap(
         "--self-test-mac-swap",
     ]
 
-    if rebuilt is not None:
-        args[6:6] = ["--rebuilt-app", str(rebuilt)]
-
     return subprocess.run(args, capture_output=True, check=True, text=True, timeout=30)
 
 
@@ -52,7 +47,7 @@ def test_old_mac_handoff_discovers_a_rebuilt_catalyst_bundle(tmp_path: Path) -> 
     install_root = tmp_path / "hermes-agent"
     rebuilt_root = install_root / "apps" / "desktop" / "release" / "mac-arm64"
     rebuilt = _bundle(rebuilt_root, "Catalyst.app", "new")
-    installed = _bundle(tmp_path / "Applications", "Costas Code.app", "old")
+    installed = _bundle(tmp_path / "Applications", "Costas Code.app", "old", "1" * 40)
 
     _run_swap(install_root, installed)
 
@@ -61,18 +56,18 @@ def test_old_mac_handoff_discovers_a_rebuilt_catalyst_bundle(tmp_path: Path) -> 
 
 
 @pytest.mark.macos_only
-def test_new_mac_handoff_uses_its_explicit_rebuilt_bundle_hint(tmp_path: Path) -> None:
+def test_mac_swap_is_idempotent_when_installed_stamp_already_matches(tmp_path: Path) -> None:
     install_root = tmp_path / "hermes-agent"
-    rebuilt = _bundle(
-        install_root / "apps" / "desktop" / "release" / "mac-universal",
-        "Nova.app",
-        "new",
-    )
-    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "old")
+    rebuilt_root = install_root / "apps" / "desktop" / "release" / "mac-arm64"
+    _bundle(rebuilt_root, "Catalyst.app", "new")
+    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "current")
+    preserved = installed / "Contents" / "Resources" / "preserved.txt"
+    preserved.write_text("keep")
 
-    _run_swap(install_root, installed, rebuilt)
+    _run_swap(install_root, installed)
 
-    assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "new"
+    assert preserved.read_text() == "keep"
+    assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "current"
 
 
 @pytest.mark.macos_only
@@ -83,26 +78,11 @@ def test_old_mac_handoff_prefers_a_fresh_renamed_bundle_over_stale_same_name_out
     rebuilt_root = install_root / "apps" / "desktop" / "release" / "mac-arm64"
     stale = _bundle(rebuilt_root, "Costas Code.app", "stale")
     fresh = _bundle(rebuilt_root, "Catalyst.app", "new")
-    installed = _bundle(tmp_path / "Applications", "Costas Code.app", "old")
+    installed = _bundle(tmp_path / "Applications", "Costas Code.app", "old", "1" * 40)
     os.utime(stale, (1_000, 1_000))
     os.utime(fresh, (2_000, 2_000))
 
     _run_swap(install_root, installed)
-
-    assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "new"
-
-
-@pytest.mark.macos_only
-def test_fresh_renamed_bundle_beats_a_stale_explicit_hint(tmp_path: Path) -> None:
-    install_root = tmp_path / "hermes-agent"
-    rebuilt_root = install_root / "apps" / "desktop" / "release" / "mac-arm64"
-    stale_hint = _bundle(rebuilt_root, "Costas Code.app", "stale")
-    fresh = _bundle(rebuilt_root, "Catalyst.app", "new")
-    installed = _bundle(tmp_path / "Applications", "Costas Code.app", "old")
-    os.utime(stale_hint, (1_000, 1_000))
-    os.utime(fresh, (2_000, 2_000))
-
-    _run_swap(install_root, installed, stale_hint)
 
     assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "new"
 
@@ -113,7 +93,7 @@ def test_future_mtime_bundle_with_wrong_install_stamp_is_rejected(tmp_path: Path
     rebuilt_root = install_root / "apps" / "desktop" / "release" / "mac-arm64"
     genuine = _bundle(rebuilt_root, "Catalyst.app", "new")
     unrelated = _bundle(rebuilt_root, "Unrelated.app", "hostile", "b" * 40)
-    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "old")
+    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "old", "1" * 40)
     os.utime(genuine, (1_000, 1_000))
     os.utime(unrelated, (3_000, 3_000))
 
@@ -125,7 +105,7 @@ def test_future_mtime_bundle_with_wrong_install_stamp_is_rejected(tmp_path: Path
 @pytest.mark.macos_only
 def test_mac_handoff_reports_when_no_rebuilt_bundle_exists(tmp_path: Path) -> None:
     install_root = tmp_path / "hermes-agent"
-    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "old")
+    installed = _bundle(tmp_path / "Applications", "Catalyst.app", "old", "1" * 40)
 
     result = _run_swap(install_root, installed)
 

@@ -277,7 +277,6 @@ import {
 } from './profile-session-routing'
 import { createQuickEntryShortcut, quickEntryWindowBounds, sanitizeQuickEntrySettings } from './quick-entry'
 import { type ActiveWork, mergeActiveWork, normalizeActiveWork, quitPromptFor } from './quit-guard'
-import { resolveRebuiltMacBundle } from './rebuilt-bundle'
 import * as remoteLifecycle from './remote-lifecycle'
 import {
   RemoteLivenessTracker,
@@ -4127,37 +4126,6 @@ async function applyUpdatesPosixHandoff(opts: any) {
     args.push('--relaunch-target', targetApp)
   }
 
-  // Optional path hint for the shell. Dynamic post-build discovery remains
-  // mandatory there because this running (old) client may predate the product
-  // name the updated checkout builds.
-  const rebuiltApp = IS_MAC
-    ? resolveRebuiltMacBundle({
-        preferredName: `${APP_NAME}.app`,
-        probes: {
-          isDirectory: directoryExists,
-          modifiedAtMs: candidate => {
-            try {
-              return fs.statSync(candidate).mtimeMs
-            } catch {
-              return 0
-            }
-          },
-          readDir: dirPath => {
-            try {
-              return fs.readdirSync(dirPath)
-            } catch {
-              return []
-            }
-          }
-        },
-        runningBundleName: targetApp ? path.basename(targetApp) : null,
-        updateRoot
-      })
-    : null
-
-  if (rebuiltApp) {
-    args.push('--rebuilt-app', rebuiltApp)
-  }
 
   const relaunchArgs = collectRelaunchArgs(process.argv.slice(1))
 
@@ -4203,7 +4171,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
       percent: 100
     })
 
-    return { ok: true, backendUpdated: true, rebuiltApp: rebuiltApp || null }
+    return { ok: true, backendUpdated: true }
   }
 
   const dwellStartedAt = Date.now()

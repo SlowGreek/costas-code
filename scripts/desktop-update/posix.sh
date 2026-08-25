@@ -15,8 +15,6 @@
 #     --desktop-pid <pid>      the Electron main process to wait out
 #     [--relaunch-target <p>]  mac: running .app to swap+reopen;
 #                              linux: running binary (omit = no relaunch)
-#     [--rebuilt-app <p>]      optional mac build-output hint; renamed/branded
-#                              bundles are also discovered after the build
 #     [--relaunch-cwd <p>]     linux: working directory to restore on relaunch
 #     [--sandbox-fallback]     linux: the caller vouches for a sandbox opt-out
 #                              (ELECTRON_DISABLE_SANDBOX / --no-sandbox launch)
@@ -38,7 +36,7 @@
 set -u
 
 ORIGINAL_ARGS=("$@")
-INSTALL_ROOT="" BRANCH="main" DESKTOP_PID=0 RELAUNCH_TARGET="" REBUILT_APP="" EXPECTED_COMMIT=""
+INSTALL_ROOT="" BRANCH="main" DESKTOP_PID=0 RELAUNCH_TARGET="" EXPECTED_COMMIT=""
 RELAUNCH_CWD="" SANDBOX_FALLBACK=0 RELAUNCH_ARGS=()
 NO_UI=0 NO_MARKER_CLEANUP=0 SELF_TEST_UI=0 SELF_TEST_GATE=0 SELF_TEST_MARKER=0 SELF_TEST_MAC_SWAP=0
 FINALIZE_MAC_SWAP=0
@@ -49,7 +47,6 @@ while [ $# -gt 0 ]; do
     --branch) BRANCH="$2"; shift 2 ;;
     --desktop-pid) DESKTOP_PID="$2"; shift 2 ;;
     --relaunch-target) RELAUNCH_TARGET="$2"; shift 2 ;;
-    --rebuilt-app) REBUILT_APP="$2"; shift 2 ;;
     --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     --relaunch-cwd) RELAUNCH_CWD="$2"; shift 2 ;;
     --sandbox-fallback) SANDBOX_FALLBACK=1; shift ;;
@@ -333,8 +330,28 @@ linux_gate() {
   GATE=manual GATE_MSG="Update complete, but the rebuilt app can't relaunch itself (its sandbox helper needs root ownership). Reopen Hermes to finish."
 }
 
+mac_app_commit() {
+  local stamp="$1/Contents/Resources/install-stamp.json"
+  [ -f "$stamp" ] || return 1
+  /usr/bin/python3 - "$stamp" <<'PY'
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get("commit", "")
+    print(value if isinstance(value, str) else "")
+except Exception:
+    print("")
+PY
+}
+
+ensure_expected_commit() {
+  if [ -z "$EXPECTED_COMMIT" ]; then
+    EXPECTED_COMMIT="$(git -C "$INSTALL_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  fi
+  case "$EXPECTED_COMMIT" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+}
+
 validate_rebuilt_mac_app() {
-  local candidate="$1" release_real candidate_real parent_real stamp stamp_commit
+  local candidate="$1" release_real candidate_real parent_real stamp_commit
   [ -d "$candidate" ] || return 1
   release_real="$(cd "$INSTALL_ROOT/apps/desktop/release" 2>/dev/null && pwd -P)" || return 1
   candidate_real="$(cd "$candidate" 2>/dev/null && pwd -P)" || return 1
@@ -346,17 +363,7 @@ validate_rebuilt_mac_app() {
   esac
   case "${candidate_real##*/}" in *.app) ;; *) return 1 ;; esac
 
-  stamp="$candidate_real/Contents/Resources/install-stamp.json"
-  [ -f "$stamp" ] || return 1
-  stamp_commit="$(/usr/bin/python3 - "$stamp" <<'PY'
-import json, sys
-try:
-    value = json.load(open(sys.argv[1], encoding="utf-8")).get("commit", "")
-    print(value if isinstance(value, str) else "")
-except Exception:
-    print("")
-PY
-)"
+  stamp_commit="$(mac_app_commit "$candidate_real")" || return 1
   [ -n "$EXPECTED_COMMIT" ] && [ "$stamp_commit" = "$EXPECTED_COMMIT" ] || return 1
   printf '%s\n' "$candidate_real"
 }
@@ -366,19 +373,7 @@ find_rebuilt_mac_app() {
   local running_name="${RELAUNCH_TARGET##*/}"
   local dir candidate validated candidate_name candidate_rank newest="" newest_mtime=-1 newest_rank=0 mtime
 
-  if [ -z "$EXPECTED_COMMIT" ]; then
-    EXPECTED_COMMIT="$(git -C "$INSTALL_ROOT" rev-parse HEAD 2>/dev/null || true)"
-  fi
-  case "$EXPECTED_COMMIT" in ''|*[!0-9a-fA-F]*) return ;; esac
-
-  # The Electron caller may know a PRE-update output path. Treat it as a strong
-  # tie-breaker, not absolute truth: a rename can create a fresher bundle under
-  # a name the running client has never seen.
-  if validated="$(validate_rebuilt_mac_app "$REBUILT_APP")"; then
-    newest="$validated"
-    newest_mtime="$(stat -f '%m' "$validated" 2>/dev/null || echo 0)"
-    newest_rank=2
-  fi
+  ensure_expected_commit || return
 
   # Discover by freshness, not familiarity. During a rename release/ can hold
   # a stale same-name bundle beside the newly branded output; an OLD updater
@@ -392,7 +387,6 @@ find_rebuilt_mac_app() {
       candidate_name="${candidate##*/}"
       candidate_rank=0
       [ "$candidate_name" = "$running_name" ] && candidate_rank=1
-      [ "$candidate" = "$REBUILT_APP" ] && candidate_rank=2
       if [ "$mtime" -gt "$newest_mtime" ] \
           || { [ "$mtime" -eq "$newest_mtime" ] && [ "$candidate_rank" -gt "$newest_rank" ]; } \
           || { [ "$mtime" -eq "$newest_mtime" ] && [ "$candidate_rank" -eq "$newest_rank" ] \
@@ -408,7 +402,17 @@ find_rebuilt_mac_app() {
 }
 
 mac_swap() {
-  local rebuilt
+  local rebuilt installed_commit
+  ensure_expected_commit || {
+    DONE_NOTE="Update complete, but the rebuilt app commit could not be verified; the previous version was kept. Run the update again."
+    log "WARNING: expected desktop commit unavailable; keeping existing app"
+    return
+  }
+  installed_commit="$(mac_app_commit "$RELAUNCH_TARGET")" || true
+  if [ "$installed_commit" = "$EXPECTED_COMMIT" ]; then
+    log "installed app already matches $EXPECTED_COMMIT; skipping duplicate swap"
+    return
+  fi
   rebuilt="$(find_rebuilt_mac_app)"
 
   if [ "$FINAL_CODE" -eq 0 ] && [ -d "$RELAUNCH_TARGET" ] && [ -z "$rebuilt" ]; then
@@ -683,10 +687,6 @@ cd "$INSTALL_ROOT" || {
   log "$FINAL_MSG"; exit 3
 }
 export PYTHONUNBUFFERED=1
-# A new parent handoff owns its normal post-update swap. Pre-fix parents do not
-# export this flag, so the freshly pulled build-only child performs the one-time
-# finalize bridge before returning to that stale shell.
-export HERMES_DESKTOP_UPDATE_PARENT_FINALIZES=1
 # --keep-stash: never re-apply local source edits after the update (they stay
 # parked in git stash). Probe --help first: older installed backends don't
 # know the flag and argparse would abort with exit 2, which collides with the

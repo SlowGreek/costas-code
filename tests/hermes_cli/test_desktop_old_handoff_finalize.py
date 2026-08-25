@@ -72,29 +72,3 @@ def test_fresh_build_process_finalizes_an_old_desktop_handoff(tmp_path: Path) ->
     assert finalized is True
     assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "new"
     assert rebuilt.exists()
-
-
-@pytest.mark.macos_only
-def test_fresh_build_leaves_swap_to_a_new_parent_handoff(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    install_root = tmp_path / "hermes-agent"
-    _git_root(install_root)
-    installed = _bundle(tmp_path / "Applications" / "Catalyst.app", "old", "1" * 40)
-    monkeypatch.setenv("HERMES_DESKTOP_UPDATE_PARENT_FINALIZES", "1")
-
-    finalized = cli_main._finalize_old_macos_desktop_handoff(
-        install_root / "apps" / "desktop",
-        ancestor_cmdlines=[
-            [
-                "/bin/bash",
-                str(install_root / "scripts" / "desktop-update" / "posix.sh"),
-                "--daemonized",
-                "--relaunch-target",
-                str(installed),
-            ]
-        ],
-    )
-
-    assert finalized is True
-    assert (installed / "Contents" / "Resources" / "marker.txt").read_text() == "old"

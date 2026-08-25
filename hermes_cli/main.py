@@ -6718,7 +6718,7 @@ def _write_desktop_build_stamp(project_root: Path, *, source_mode: bool) -> None
         logger.debug("Failed to write desktop build stamp: %s", exc)
 
 
-def _desktop_ancestor_cmdlines(limit: int = 4) -> list[list[str]]:
+def _desktop_ancestor_cmdlines(limit: int = 8) -> list[list[str]]:
     """Return bounded parent argv for old-handoff recovery; empty on any probe failure."""
     try:
         import psutil
@@ -6745,12 +6745,10 @@ def _finalize_old_macos_desktop_handoff(
     The fresh ``hermes desktop --build-only`` subprocess is the first guaranteed
     new-code boundary. It recognizes that old ancestor and invokes the newly
     pulled script's finalize-only entry point before returning to the stale
-    parent. New handoffs set ``HERMES_DESKTOP_UPDATE_PARENT_FINALIZES`` and keep
-    their normal single-swap path.
+    parent. New handoffs may reach their normal swap afterward; that path is
+    idempotent once the installed stamp already matches.
     """
-    if sys.platform != "darwin" or os.environ.get(
-        "HERMES_DESKTOP_UPDATE_PARENT_FINALIZES"
-    ) == "1":
+    if sys.platform != "darwin":
         return True
 
     project_root = desktop_dir.parent.parent

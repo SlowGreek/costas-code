@@ -48,6 +48,18 @@ export function updateGateReason(deps: UpdateGateDeps): UpdateGateReason {
 }
 
 export type UpdateClearanceOutcome = 'clear' | 'finished' | 'timeout'
+export type UpdateClearanceDisposition = 'proceed' | 'restart-renderer'
+
+/**
+ * A process that remained alive while an update completed has renderer and
+ * main-process modules mapped from the old app bundle. Continuing after the
+ * bundle swap mixes old hashed imports with new files. Restart only after a
+ * real wait completed; an already-clear gate and a timed-out updater retain
+ * the existing fail-open startup behavior.
+ */
+export function updateClearanceDisposition(outcome: UpdateClearanceOutcome): UpdateClearanceDisposition {
+  return outcome === 'finished' ? 'restart-renderer' : 'proceed'
+}
 
 export interface WaitForUpdateClearanceOptions {
   timeoutMs: number

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 
 import { test } from 'vitest'
 
-import { updateGateReason, waitForUpdateClearance } from './update-gate'
+import { updateClearanceDisposition, updateGateReason, waitForUpdateClearance } from './update-gate'
 
 function deps(marker: boolean, inFlight: boolean) {
   return {
@@ -141,4 +141,10 @@ test('returns timeout when the gate never opens', async () => {
   })
 
   assert.equal(outcome, 'timeout')
+})
+
+test('only a renderer that lived across a completed update must restart', () => {
+  assert.equal(updateClearanceDisposition('clear'), 'proceed')
+  assert.equal(updateClearanceDisposition('timeout'), 'proceed')
+  assert.equal(updateClearanceDisposition('finished'), 'restart-renderer')
 })

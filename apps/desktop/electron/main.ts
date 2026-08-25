@@ -324,7 +324,7 @@ import {
   resolveCommitLogSelection,
   shouldCountCommits
 } from './update-count'
-import { waitForUpdateClearance } from './update-gate'
+import { updateClearanceDisposition, waitForUpdateClearance } from './update-gate'
 import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from './update-marker'
 import {
   buildUpdateBranchArgs,
@@ -2141,7 +2141,19 @@ async function waitForUpdateToFinish() {
   if (outcome === 'timeout') {
     rememberLog('[updates] update still in progress after wait timeout; starting backend anyway')
   } else {
-    rememberLog('[updates] update finished; proceeding with backend start')
+    rememberLog('[updates] update finished; restarting to load one renderer bundle generation')
+  }
+
+  if (updateClearanceDisposition(outcome) === 'restart-renderer') {
+    // This process opened while the detached updater still owned the bundle.
+    // Its modules came from the OLD app, but the files at their file:// URLs
+    // now belong to the NEW app. Starting the backend here leaves lazy imports
+    // requesting deleted old hashes ("Failed to fetch dynamically imported
+    // module"). Relaunch before any backend/session work so one process sees
+    // one immutable bundle generation. The updater's own `open` may race this;
+    // Electron's single-instance lock collapses both launches to one window.
+    app.relaunch()
+    await exitAfterBackendShutdown(0)
   }
 
   return true

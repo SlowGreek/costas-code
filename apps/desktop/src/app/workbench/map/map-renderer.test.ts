@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { act, cleanup, render, screen } from '@testing-library/react'
+import { createElement } from 'react'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
-import type { WorkbenchEdge } from '@/store/workbench'
-
 import {
+  animateWorkbenchCameraTo,
+  resetWorkbenchForTests,
+  type WorkbenchArtifact,
+  type WorkbenchEdge
+} from '@/store/workbench'
+
+import MapRenderer, {
   accentForKind,
   borderPoint,
   bowFactors,
@@ -12,6 +19,11 @@ import {
   nodeRingState,
   routeEdge
 } from './map-renderer'
+
+afterEach(() => {
+  cleanup()
+  resetWorkbenchForTests()
+})
 
 describe('nodeRingState', () => {
   it('keeps assistant focus independent of click selection', () => {
@@ -159,5 +171,54 @@ describe('bowFactors', () => {
 
     expect(bows.a).toBe(bows.b)
     expect(bows.a).not.toBe(0)
+  })
+})
+
+describe('cinematic camera rendering', () => {
+  const artifact: WorkbenchArtifact = {
+    artifact_id: 'artifact-camera',
+    kind: 'map',
+    payload: { edges: [], nodes: [{ id: 'planner', label: 'Planner' }] },
+    semantic_rev: 1,
+    view_rev: 1,
+    view_state: {}
+  }
+
+  it('renders intermediate and final camera frames through the actual SVG viewBox', () => {
+    const frames: Array<(time: number) => void> = []
+
+    render(
+      createElement(MapRenderer, {
+        artifact,
+        height: 420,
+        positions: { planner: { x: 360, y: 210 } },
+        width: 720
+      })
+    )
+
+    const canvas = screen.getByTestId('workbench-canvas')
+
+    expect(canvas.getAttribute('viewBox')).toBe('0 0 720 420')
+
+    act(() => {
+      animateWorkbenchCameraTo(
+        { x: 100, y: 40, zoom: 2 },
+        {
+          durationMs: 600,
+          now: () => 0,
+          requestFrame: frame => {
+            frames.push(frame)
+
+            return frames.length
+          }
+        }
+      )
+      frames.shift()?.(300)
+    })
+
+    expect(canvas.getAttribute('viewBox')).toBe('50 20 480 280')
+
+    act(() => frames.shift()?.(600))
+    expect(canvas.getAttribute('viewBox')).toBe('100 40 360 210')
   })
 })

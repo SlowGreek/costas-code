@@ -35,6 +35,41 @@ export interface RealtimeTranscript {
 
 export type RealtimeVoiceStatus = 'listening' | 'speaking'
 
+export type RealtimeCameraAnchor = 'bottom' | 'center' | 'left' | 'right' | 'top'
+export type RealtimeCameraAmount = 'large' | 'medium' | 'small'
+export type RealtimeCameraPanDirection = 'down' | 'left' | 'right' | 'up'
+export type RealtimeCameraTransition = 'cut' | 'dramatic' | 'quick' | 'smooth'
+export type RealtimeCameraZoomDirection = 'in' | 'out'
+
+export type RealtimeCameraCommand =
+  | {
+      anchor: RealtimeCameraAnchor
+      kind: 'frame_nodes'
+      nodeIds: string[]
+      padding: 'normal' | 'tight' | 'wide'
+      transition: RealtimeCameraTransition
+    }
+  | {
+      amount: RealtimeCameraAmount
+      direction: RealtimeCameraPanDirection
+      kind: 'pan_view'
+      transition: RealtimeCameraTransition
+    }
+  | { kind: 'reset_view'; transition: RealtimeCameraTransition }
+  | {
+      anchor: RealtimeCameraAnchor
+      kind: 'zoom_to'
+      nodeId: string
+      transition: RealtimeCameraTransition
+      zoom?: number
+    }
+  | {
+      amount: RealtimeCameraAmount
+      direction: RealtimeCameraZoomDirection
+      kind: 'zoom_view'
+      transition: RealtimeCameraTransition
+    }
+
 export interface RealtimeServerEventDeps {
   beforeToolCall?: () => Promise<void>
   createMissionId?: () => string
@@ -42,8 +77,8 @@ export interface RealtimeServerEventDeps {
   clearAssistantAudio?: () => void
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
-  /** Frame one node locally, or reset when nodeId is null. */
-  onCameraTarget?: (nodeId: null | string, zoom?: number) => boolean
+  /** Execute one bounded renderer-local camera command. */
+  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
@@ -306,7 +341,7 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
-  onCameraTarget?: (nodeId: null | string, zoom?: number) => boolean
+  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
@@ -355,7 +390,8 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds, so use focus, zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. zoom_to frames one node close up; omit its node_id to return to the whole canvas. ' +
+  'The instant tools land in milliseconds, so use focus, zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
   // the model has the selection in context and still asks "which one?".
@@ -570,6 +606,11 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         parameters: {
           type: 'object',
           properties: {
+            anchor: {
+              type: 'string',
+              enum: ['center', 'left', 'right', 'top', 'bottom'],
+              description: 'Compose the target at centre or on a viewport third.'
+            },
             node_id: {
               type: 'string',
               description: 'Existing node id from session_snapshot. Omit to reset the camera.'
@@ -579,6 +620,98 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
               minimum: 0.25,
               maximum: 4,
               description: 'Optional magnification. Around 2 is a readable close-up.'
+            },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic'],
+              description: 'Camera move style. Smooth is the default.'
+            }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'frame_nodes',
+        description:
+          'Move the camera to fit a small cluster of 2 to 8 existing nodes. Use it to explain one subsystem or relationship without showing the entire canvas. Presentation-only; does not redraw or edit the graph.',
+        parameters: {
+          type: 'object',
+          properties: {
+            anchor: {
+              type: 'string',
+              enum: ['center', 'left', 'right', 'top', 'bottom']
+            },
+            node_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              minItems: 2,
+              maxItems: 8,
+              description: 'Existing node ids from session_snapshot.'
+            },
+            padding: {
+              type: 'string',
+              enum: ['tight', 'normal', 'wide'],
+              description: 'How much surrounding context remains visible.'
+            },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
+            }
+          },
+          required: ['node_ids'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'pan_view',
+        description:
+          'Move the camera a bounded step left, right, up, or down while preserving zoom. Use for spatial reveals and nearby context, never for searching for an unknown node.',
+        parameters: {
+          type: 'object',
+          properties: {
+            direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+            amount: { type: 'string', enum: ['small', 'medium', 'large'] },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
+            }
+          },
+          required: ['direction'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'zoom_view',
+        description:
+          'Zoom the current composition in or out by a bounded relative amount without changing its centre. Use for a breathing close-up or reveal when no single node should own the frame.',
+        parameters: {
+          type: 'object',
+          properties: {
+            direction: { type: 'string', enum: ['in', 'out'] },
+            amount: { type: 'string', enum: ['small', 'medium', 'large'] },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
+            }
+          },
+          required: ['direction'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
+        name: 'reset_view',
+        description:
+          'Cinematically return the camera to the whole canvas. Use after a close-up or subsystem explanation when returning to the big picture.',
+        parameters: {
+          type: 'object',
+          properties: {
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
             }
           },
           additionalProperties: false
@@ -734,7 +867,7 @@ export async function startRealtimeVoiceConnection(
   const voiceToolDeps = {
     beforeToolCall: options.beforeToolCall,
     createMissionId: options.createMissionId,
-    onCameraTarget: options.onCameraTarget,
+    onCameraCommand: options.onCameraCommand,
     onResearchDispatched: options.onResearchDispatched,
     request: options.request,
     runtimeSessionId: options.runtimeSessionId
@@ -1092,7 +1225,14 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
     return 'read'
   }
 
-  if (call.name === 'focus' || call.name === 'zoom_to') {
+  if (
+    call.name === 'focus' ||
+    call.name === 'zoom_to' ||
+    call.name === 'frame_nodes' ||
+    call.name === 'pan_view' ||
+    call.name === 'zoom_view' ||
+    call.name === 'reset_view'
+  ) {
     return 'gesture'
   }
 
@@ -1140,7 +1280,7 @@ export async function executeRealtimeVoiceTool(
     RealtimeServerEventDeps,
     | 'beforeToolCall'
     | 'createMissionId'
-    | 'onCameraTarget'
+    | 'onCameraCommand'
     | 'onResearchDispatched'
     | 'request'
     | 'runtimeSessionId'
@@ -1148,28 +1288,92 @@ export async function executeRealtimeVoiceTool(
 ): Promise<unknown> {
   const { name } = call
 
-  if (name === 'zoom_to') {
-    let nodeId: null | string = null
-    let zoom: number | undefined
+  if (
+    name === 'zoom_to' ||
+    name === 'frame_nodes' ||
+    name === 'pan_view' ||
+    name === 'zoom_view' ||
+    name === 'reset_view'
+  ) {
+    let parsed: Record<string, unknown>
 
     try {
-      const parsed = JSON.parse(call.arguments || '{}') as {
-        node_id?: unknown
-        zoom?: unknown
-      }
-
-      nodeId = asTrimmedString(parsed.node_id) || null
-      zoom =
-        typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom)
-          ? Math.min(Math.max(parsed.zoom, 0.25), 4)
-          : undefined
+      parsed = JSON.parse(call.arguments || '{}') as Record<string, unknown>
     } catch {
-      return { error: 'zoom_to has malformed arguments' }
+      return { error: `${name} has malformed arguments` }
     }
 
-    return deps.onCameraTarget?.(nodeId, zoom)
-      ? { status: 'framed' }
-      : { error: nodeId ? `Node ${nodeId} is not on the canvas` : 'No canvas is mounted' }
+    let command: RealtimeCameraCommand
+
+    const transition = ['cut', 'dramatic', 'quick', 'smooth'].includes(
+      asTrimmedString(parsed.transition)
+    )
+      ? (parsed.transition as RealtimeCameraTransition)
+      : 'smooth'
+
+    const anchor = ['bottom', 'center', 'left', 'right', 'top'].includes(
+      asTrimmedString(parsed.anchor)
+    )
+      ? (parsed.anchor as RealtimeCameraAnchor)
+      : 'center'
+
+    const amount = ['large', 'medium', 'small'].includes(asTrimmedString(parsed.amount))
+      ? (parsed.amount as RealtimeCameraAmount)
+      : 'medium'
+
+    if (name === 'zoom_to') {
+      const nodeId = asTrimmedString(parsed.node_id)
+
+      if (!nodeId) {
+        command = { kind: 'reset_view', transition }
+      } else {
+        const zoom =
+          typeof parsed.zoom === 'number' && Number.isFinite(parsed.zoom)
+            ? Math.min(Math.max(parsed.zoom, 0.25), 4)
+            : undefined
+
+        command = { anchor, kind: 'zoom_to', nodeId, transition, zoom }
+      }
+    } else if (name === 'frame_nodes') {
+      const rawIds = Array.isArray(parsed.node_ids) ? parsed.node_ids : []
+      const nodeIds = [...new Set(rawIds.map(asTrimmedString).filter(Boolean))]
+
+      if (rawIds.length < 2 || rawIds.length > 8 || nodeIds.length < 2) {
+        return { error: 'frame_nodes requires 2 to 8 existing node ids' }
+      }
+
+      const padding =
+        parsed.padding === 'tight' || parsed.padding === 'wide' ? parsed.padding : 'normal'
+
+      command = { anchor, kind: 'frame_nodes', nodeIds, padding, transition }
+    } else if (name === 'pan_view') {
+      const direction = asTrimmedString(parsed.direction)
+
+      if (!['down', 'left', 'right', 'up'].includes(direction)) {
+        return { error: 'pan_view requires a bounded direction' }
+      }
+
+      command = {
+        amount,
+        direction: direction as RealtimeCameraPanDirection,
+        kind: 'pan_view',
+        transition
+      }
+    } else if (name === 'zoom_view') {
+      const direction = asTrimmedString(parsed.direction)
+
+      if (direction !== 'in' && direction !== 'out') {
+        return { error: 'zoom_view requires in or out' }
+      }
+
+      command = { amount, direction, kind: 'zoom_view', transition }
+    } else {
+      command = { kind: 'reset_view', transition }
+    }
+
+    return deps.onCameraCommand?.(command)
+      ? { status: command.kind === 'pan_view' ? 'moved' : 'framed' }
+      : { error: 'The requested camera target is not available on this canvas' }
   }
 
   if (name === 'session_snapshot') {

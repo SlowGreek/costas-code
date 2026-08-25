@@ -1,6 +1,6 @@
 import { atom } from 'nanostores'
 
-import type { WorkbenchCamera } from '@/lib/workbench-camera'
+import type { WorkbenchCamera, WorkbenchCameraEasing } from '@/lib/workbench-camera'
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
 
 export interface WorkbenchNode {
@@ -219,15 +219,92 @@ export const $workbenchCamera = atom<WorkbenchCamera>({ ...IDENTITY_CAMERA })
 
 /** Which artifact the current camera belongs to, so a redraw can keep it. */
 let cameraArtifactId: null | string = null
+let cameraMotionGeneration = 0
 
-export function setWorkbenchCamera(camera: WorkbenchCamera): void {
+interface WorkbenchCameraAnimationOptions {
+  durationMs?: number
+  easing?: WorkbenchCameraEasing
+  now?: () => number
+  reducedMotion?: boolean
+  requestFrame?: (frame: (time: number) => void) => number
+}
+
+const publishWorkbenchCamera = (camera: WorkbenchCamera): void => {
   const current = $workbenchCamera.get()
 
-  if (current.x === camera.x && current.y === camera.y && current.zoom === camera.zoom) {
+  if (current.x !== camera.x || current.y !== camera.y || current.zoom !== camera.zoom) {
+    $workbenchCamera.set(camera)
+  }
+}
+
+export function setWorkbenchCamera(camera: WorkbenchCamera): void {
+  cameraMotionGeneration += 1
+  publishWorkbenchCamera(camera)
+}
+
+/** Move the voice-owned lens without taking control away from direct user input. */
+export function animateWorkbenchCameraTo(
+  target: WorkbenchCamera,
+  options: WorkbenchCameraAnimationOptions = {}
+): void {
+  const generation = ++cameraMotionGeneration
+
+  const reducedMotion =
+    options.reducedMotion ??
+    (typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true)
+
+  if (reducedMotion) {
+    publishWorkbenchCamera(target)
+
     return
   }
 
-  $workbenchCamera.set(camera)
+  const from = $workbenchCamera.get()
+  const requestedDuration = options.durationMs ?? 650
+
+  if (requestedDuration <= 0) {
+    publishWorkbenchCamera(target)
+
+    return
+  }
+
+  const durationMs = Math.min(Math.max(requestedDuration, 150), 1_200)
+  const easing = options.easing ?? 'smooth'
+  const now = options.now ?? (() => performance.now())
+  const requestFrame = options.requestFrame ?? (frame => window.requestAnimationFrame(frame))
+  const startedAt = now()
+
+  const frame = (time: number) => {
+    if (generation !== cameraMotionGeneration) {
+      return
+    }
+
+    const progress = Math.min(Math.max((time - startedAt) / durationMs, 0), 1)
+
+    const eased =
+      easing === 'linear'
+        ? progress
+        : easing === 'ease_out'
+          ? 1 - (1 - progress) ** 3
+          : easing === 'dramatic'
+            ? progress < 0.5
+              ? 4 * progress ** 3
+              : 1 - (-2 * progress + 2) ** 3 / 2
+            : progress * progress * (3 - 2 * progress)
+
+    publishWorkbenchCamera({
+      x: from.x + (target.x - from.x) * eased,
+      y: from.y + (target.y - from.y) * eased,
+      zoom: from.zoom + (target.zoom - from.zoom) * eased
+    })
+
+    if (progress < 1) {
+      requestFrame(frame)
+    }
+  }
+
+  requestFrame(frame)
 }
 
 /** Reset only when the artifact identity changes, never for a same-artifact redraw. */
@@ -258,6 +335,7 @@ export function resetWorkbenchForTests(): void {
   $workbenchSelection.set(null)
   $workbenchLayout.set(null)
   cameraArtifactId = null
+  cameraMotionGeneration += 1
   $workbenchCamera.set({ ...IDENTITY_CAMERA })
 }
 

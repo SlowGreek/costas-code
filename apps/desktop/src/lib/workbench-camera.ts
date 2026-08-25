@@ -26,6 +26,28 @@ export interface WorkbenchWorld {
   width: number
 }
 
+export type WorkbenchCameraAnchor = 'bottom' | 'center' | 'left' | 'right' | 'top'
+export type WorkbenchCameraEasing = 'dramatic' | 'ease_out' | 'linear' | 'smooth'
+export type WorkbenchCameraTransition = 'cut' | 'dramatic' | 'quick' | 'smooth'
+
+export function cameraTransitionOptions(
+  transition: WorkbenchCameraTransition
+): { durationMs: number; easing: WorkbenchCameraEasing } {
+  switch (transition) {
+    case 'cut':
+      return { durationMs: 0, easing: 'linear' }
+
+    case 'quick':
+      return { durationMs: 280, easing: 'ease_out' }
+
+    case 'dramatic':
+      return { durationMs: 1_000, easing: 'dramatic' }
+
+    default:
+      return { durationMs: 650, easing: 'smooth' }
+  }
+}
+
 interface Point {
   x: number
   y: number
@@ -163,15 +185,62 @@ export function panCamera(
 export function cameraForNode(
   point: Point,
   world: WorkbenchWorld,
-  zoom: number
+  zoom: number,
+  anchor: WorkbenchCameraAnchor = 'center'
 ): WorkbenchCamera {
   const safeZoom = Number.isFinite(zoom) ? clamp(zoom, MIN_ZOOM, MAX_ZOOM) : 1
   const view = { height: world.height / safeZoom, width: world.width / safeZoom }
 
+  const ratio = {
+    x: anchor === 'left' ? 1 / 3 : anchor === 'right' ? 2 / 3 : 1 / 2,
+    y: anchor === 'top' ? 1 / 3 : anchor === 'bottom' ? 2 / 3 : 1 / 2
+  }
+
   return clampCamera(
-    { x: point.x - view.width / 2, y: point.y - view.height / 2, zoom: safeZoom },
+    {
+      x: point.x - view.width * ratio.x,
+      y: point.y - view.height * ratio.y,
+      zoom: safeZoom
+    },
     world
   )
+}
+
+/** Frame several semantic targets without exposing raw camera coordinates to the model. */
+export function cameraForPoints(
+  points: Point[],
+  world: WorkbenchWorld,
+  padding: number,
+  anchor: WorkbenchCameraAnchor = 'center'
+): WorkbenchCamera {
+  const finite = points.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+
+  if (!finite.length || world.width <= 0 || world.height <= 0) {
+    return { ...IDENTITY_CAMERA }
+  }
+
+  const safePadding = Number.isFinite(padding) ? clamp(padding, 0, 200) : 0
+  const xs = finite.map(point => point.x)
+  const ys = finite.map(point => point.y)
+  const minX = Math.min(...xs) - safePadding
+  const maxX = Math.max(...xs) + safePadding
+  const minY = Math.min(...ys) - safePadding
+  const maxY = Math.max(...ys) + safePadding
+  const centre = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+
+  const ratio = {
+    x: anchor === 'left' ? 1 / 3 : anchor === 'right' ? 2 / 3 : 1 / 2,
+    y: anchor === 'top' ? 1 / 3 : anchor === 'bottom' ? 2 / 3 : 1 / 2
+  }
+
+  const requiredView = {
+    height: Math.max((centre.y - minY) / ratio.y, (maxY - centre.y) / (1 - ratio.y), 1),
+    width: Math.max((centre.x - minX) / ratio.x, (maxX - centre.x) / (1 - ratio.x), 1)
+  }
+
+  const zoom = Math.min(world.width / requiredView.width, world.height / requiredView.height)
+
+  return cameraForNode(centre, world, zoom, anchor)
 }
 
 /** True when nothing is applied — the reset affordance stays hidden. */

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { createRealtimeTurnController } from './realtime-turn-controller'
 import {
   executeRealtimeVoiceTool,
   VOICE_TOOL_NAMES,
@@ -21,23 +22,29 @@ const deps = (
   ...overrides
 })
 
-describe('zoom_to voice tool', () => {
-  it('is offered to the model as a playback-aware gesture', () => {
+describe('voice camera tools', () => {
+  it('offers zoom_to as a playback-aware gesture', () => {
     expect(VOICE_TOOL_NAMES).toContain('zoom_to')
     expect(voiceToolLane(toolCall('zoom_to', { node_id: 'planner' }))).toBe('gesture')
   })
 
-  it('frames the node without touching the gateway', async () => {
+  it('frames one node without touching the gateway', async () => {
     const request = vi.fn()
-    const onCameraTarget = vi.fn(() => true)
+    const onCameraCommand = vi.fn(() => true)
 
     const output = await executeRealtimeVoiceTool(
       toolCall('zoom_to', { node_id: 'planner' }),
-      deps({ onCameraTarget, request })
+      deps({ onCameraCommand, request })
     )
 
     expect(request).not.toHaveBeenCalled()
-    expect(onCameraTarget).toHaveBeenCalledWith('planner', undefined)
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      anchor: 'center',
+      kind: 'zoom_to',
+      nodeId: 'planner',
+      transition: 'smooth',
+      zoom: undefined
+    })
     expect(output).toEqual({ status: 'framed' })
   })
 
@@ -46,35 +53,41 @@ describe('zoom_to voice tool', () => {
 
     await executeRealtimeVoiceTool(
       toolCall('zoom_to', { node_id: 'planner' }),
-      deps({ beforeToolCall, onCameraTarget: () => true })
+      deps({ beforeToolCall, onCameraCommand: () => true })
     )
 
     expect(beforeToolCall).not.toHaveBeenCalled()
   })
 
   it('accepts and bounds an optional zoom level', async () => {
-    const onCameraTarget = vi.fn(() => true)
+    const onCameraCommand = vi.fn(() => true)
 
     await executeRealtimeVoiceTool(
       toolCall('zoom_to', { node_id: 'planner', zoom: 99 }),
-      deps({ onCameraTarget })
+      deps({ onCameraCommand })
     )
 
-    expect(onCameraTarget).toHaveBeenCalledWith('planner', 4)
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      anchor: 'center',
+      kind: 'zoom_to',
+      nodeId: 'planner',
+      transition: 'smooth',
+      zoom: 4
+    })
   })
 
-  it('resets the view when asked with no node', async () => {
-    const onCameraTarget = vi.fn(() => true)
+  it('keeps zoom_to without a node as a reset-compatible command', async () => {
+    const onCameraCommand = vi.fn(() => true)
 
-    await executeRealtimeVoiceTool(toolCall('zoom_to', {}), deps({ onCameraTarget }))
+    await executeRealtimeVoiceTool(toolCall('zoom_to', {}), deps({ onCameraCommand }))
 
-    expect(onCameraTarget).toHaveBeenCalledWith(null, undefined)
+    expect(onCameraCommand).toHaveBeenCalledWith({ kind: 'reset_view', transition: 'smooth' })
   })
 
-  it('reports failure when the node is not on the canvas', async () => {
+  it('reports failure when a target is not on the canvas', async () => {
     const output = await executeRealtimeVoiceTool(
       toolCall('zoom_to', { node_id: 'ghost' }),
-      deps({ onCameraTarget: () => false })
+      deps({ onCameraCommand: () => false })
     )
 
     expect(output).toMatchObject({ error: expect.any(String) })
@@ -87,5 +100,140 @@ describe('zoom_to voice tool', () => {
     )
 
     expect(output).toMatchObject({ error: expect.any(String) })
+  })
+
+  it('offers the full bounded 2D camera grammar as gesture tools', () => {
+    for (const name of ['frame_nodes', 'pan_view', 'zoom_view', 'reset_view']) {
+      expect(VOICE_TOOL_NAMES).toContain(name)
+      expect(voiceToolLane(toolCall(name, {}))).toBe('gesture')
+    }
+  })
+
+  it('frames a bounded node cluster with composition and transition', async () => {
+    const request = vi.fn()
+    const onCameraCommand = vi.fn(() => true)
+
+    const output = await executeRealtimeVoiceTool(
+      toolCall('frame_nodes', {
+        node_ids: ['planner', 'executor', 'planner', 'memory'],
+        padding: 'tight',
+        anchor: 'right',
+        transition: 'dramatic'
+      }),
+      deps({ onCameraCommand, request })
+    )
+
+    expect(request).not.toHaveBeenCalled()
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      anchor: 'right',
+      kind: 'frame_nodes',
+      nodeIds: ['planner', 'executor', 'memory'],
+      padding: 'tight',
+      transition: 'dramatic'
+    })
+    expect(output).toEqual({ status: 'framed' })
+  })
+
+  it('rejects an unbounded or underspecified cluster', async () => {
+    const tooMany = Array.from({ length: 9 }, (_, index) => `node-${index}`)
+
+    await expect(
+      executeRealtimeVoiceTool(
+        toolCall('frame_nodes', { node_ids: tooMany }),
+        deps({ onCameraCommand: () => true })
+      )
+    ).resolves.toMatchObject({ error: expect.any(String) })
+    await expect(
+      executeRealtimeVoiceTool(
+        toolCall('frame_nodes', { node_ids: ['one'] }),
+        deps({ onCameraCommand: () => true })
+      )
+    ).resolves.toMatchObject({ error: expect.any(String) })
+  })
+
+  it('pans only by bounded named directions and amounts', async () => {
+    const onCameraCommand = vi.fn(() => true)
+
+    await executeRealtimeVoiceTool(
+      toolCall('pan_view', { direction: 'right', amount: 'medium' }),
+      deps({ onCameraCommand })
+    )
+
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      amount: 'medium',
+      direction: 'right',
+      kind: 'pan_view',
+      transition: 'smooth'
+    })
+  })
+
+  it('zooms the current composition relatively without naming a node', async () => {
+    const onCameraCommand = vi.fn(() => true)
+
+    await executeRealtimeVoiceTool(
+      toolCall('zoom_view', { direction: 'out', amount: 'small', transition: 'quick' }),
+      deps({ onCameraCommand })
+    )
+
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      amount: 'small',
+      direction: 'out',
+      kind: 'zoom_view',
+      transition: 'quick'
+    })
+  })
+
+  it('resets explicitly with a cinematic transition', async () => {
+    const onCameraCommand = vi.fn(() => true)
+
+    await executeRealtimeVoiceTool(
+      toolCall('reset_view', { transition: 'dramatic' }),
+      deps({ onCameraCommand })
+    )
+
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      kind: 'reset_view',
+      transition: 'dramatic'
+    })
+  })
+
+  it('dwells on the current frame until actual assistant playback ends', async () => {
+    const executed: string[] = []
+
+    const controller = createRealtimeTurnController({
+      execute: async call => {
+        executed.push(call.name)
+
+        return { status: 'moved' }
+      },
+      laneFor: voiceToolLane,
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Walk through the architecture cinematically.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone({
+      ...toolCall('zoom_to', { node_id: 'planner' }),
+      responseId: 'response-1'
+    })
+    await controller.responseDone('response-1')
+
+    controller.responseCreated('response-2')
+    controller.assistantTranscriptDone('response-2', 'The planner turns intent into a bounded plan.')
+    controller.assistantAudioStarted()
+    controller.functionCallDone({
+      ...toolCall('zoom_view', { direction: 'out' }),
+      callId: 'c2',
+      responseId: 'response-2'
+    })
+    const completing = controller.responseDone('response-2')
+
+    await Promise.resolve()
+    expect(executed).toEqual(['zoom_to'])
+
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(executed).toEqual(['zoom_to', 'zoom_view'])
   })
 })

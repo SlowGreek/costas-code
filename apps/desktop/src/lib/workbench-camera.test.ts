@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   cameraForNode,
+  cameraForPoints,
+  cameraTransitionOptions,
   cameraViewBox,
   clampCamera,
   IDENTITY_CAMERA,
@@ -91,11 +93,55 @@ describe('workbench camera', () => {
     expect(centre.y).toBeCloseTo(210, 5)
   })
 
+  it('composes a node on viewport thirds without changing its world position', () => {
+    const left = cameraForNode({ x: 360, y: 210 }, world, 2, 'left')
+    const right = cameraForNode({ x: 360, y: 210 }, world, 2, 'right')
+    const top = cameraForNode({ x: 360, y: 210 }, world, 2, 'top')
+
+    expect((360 - left.x) / (world.width / left.zoom)).toBeCloseTo(1 / 3, 5)
+    expect((360 - right.x) / (world.width / right.zoom)).toBeCloseTo(2 / 3, 5)
+    expect((210 - top.y) / (world.height / top.zoom)).toBeCloseTo(1 / 3, 5)
+  })
+
   it('framing a node still respects the pan clamp', () => {
     const framed = cameraForNode({ x: 100000, y: 100000 }, world, 2)
 
     expect(Number.isFinite(framed.x)).toBe(true)
     expect(framed.x).toBeLessThan(world.width)
+  })
+
+  it('frames a cluster of world points with bounded padding', () => {
+    const framed = cameraForPoints(
+      [
+        { x: 100, y: 100 },
+        { x: 500, y: 300 }
+      ],
+      world,
+      60
+    )
+
+    const view = { height: world.height / framed.zoom, width: world.width / framed.zoom }
+
+    expect(framed.x).toBeLessThanOrEqual(40)
+    expect(framed.y).toBeLessThanOrEqual(40)
+    expect(framed.x + view.width).toBeGreaterThanOrEqual(560)
+    expect(framed.y + view.height).toBeGreaterThanOrEqual(360)
+  })
+
+  it('returns identity when a cluster has no finite points', () => {
+    expect(cameraForPoints([], world, 60)).toEqual(IDENTITY_CAMERA)
+    expect(cameraForPoints([{ x: Number.NaN, y: 10 }], world, 60)).toEqual(IDENTITY_CAMERA)
+  })
+
+  it('maps cinematic transition presets to bounded renderer motion', () => {
+    expect(cameraTransitionOptions('cut')).toMatchObject({ durationMs: 0 })
+    expect(cameraTransitionOptions('quick').durationMs).toBeLessThan(
+      cameraTransitionOptions('smooth').durationMs
+    )
+    expect(cameraTransitionOptions('dramatic').durationMs).toBeGreaterThan(
+      cameraTransitionOptions('smooth').durationMs
+    )
+    expect(cameraTransitionOptions('dramatic').durationMs).toBeLessThanOrEqual(1_200)
   })
 
   it('recognises the identity camera so the UI can hide the reset affordance', () => {

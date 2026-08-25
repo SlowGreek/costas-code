@@ -61,6 +61,17 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/never schedule multiple focus or zoom_to calls together/i)
   })
 
+  it('teaches the full cinematic camera grammar without autoplay', () => {
+    for (const tool of ['zoom_to', 'frame_nodes', 'pan_view', 'zoom_view', 'reset_view']) {
+      expect(text, `${tool} missing from camera instructions`).toMatch(new RegExp(tool))
+    }
+
+    expect(text).toMatch(/composition anchor/i)
+    expect(text).toMatch(/cut, quick, smooth, or dramatic/i)
+    expect(text).toMatch(/actual spoken playback/i)
+    expect(text).toMatch(/one spatial beat/i)
+  })
+
   it('explains that visualize returns before the drawing exists', () => {
     // Without this the model waits for a result that never comes, or announces
     // a picture that has not arrived. Both were observed.

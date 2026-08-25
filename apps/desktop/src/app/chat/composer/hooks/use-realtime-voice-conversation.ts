@@ -12,7 +12,8 @@ import {
   type RealtimeVoiceConnection,
   startRealtimeVoiceConnection
 } from '@/lib/realtime-voice'
-import { cameraForNode, IDENTITY_CAMERA } from '@/lib/workbench-camera'
+import { cameraTransitionOptions } from '@/lib/workbench-camera'
+import { resolveWorkbenchCameraCommand } from '@/lib/workbench-camera-command'
 import {
   startWorkbenchContextSync,
   summarizeWorkbench
@@ -27,9 +28,10 @@ import {
 import { $gatewayState } from '@/store/session'
 import {
   $workbenchArtifact,
+  $workbenchCamera,
   $workbenchLayout,
   $workbenchSelection,
-  setWorkbenchCamera
+  animateWorkbenchCameraTo
 } from '@/store/workbench'
 import type { RpcEvent, SessionMessage } from '@/types/hermes'
 
@@ -214,23 +216,24 @@ export function useRealtimeVoiceConversation({
             failedTranscriptsRef.current.shift()
           }
         },
-        onCameraTarget: (nodeId, zoom) => {
-          if (nodeId === null) {
-            setWorkbenchCamera({ ...IDENTITY_CAMERA })
-
-            return true
-          }
-
+        onCameraCommand: command => {
           const layout = $workbenchLayout.get()
-          const point = layout?.positions[nodeId]
 
-          if (!layout || !point) {
+          if (!layout) {
             return false
           }
 
-          setWorkbenchCamera(
-            cameraForNode(point, { height: layout.height, width: layout.width }, zoom ?? 2)
+          const target = resolveWorkbenchCameraCommand(
+            command,
+            layout,
+            $workbenchCamera.get()
           )
+
+          if (!target) {
+            return false
+          }
+
+          animateWorkbenchCameraTo(target, cameraTransitionOptions(command.transition))
 
           return true
         },

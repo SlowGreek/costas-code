@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { IDENTITY_CAMERA } from '@/lib/workbench-camera'
 
 import {
   $workbenchCamera,
+  animateWorkbenchCameraTo,
   clearWorkbenchForSessionTransition,
   resetWorkbenchCameraFor,
   resetWorkbenchForTests,
@@ -78,5 +79,71 @@ describe('workbench camera store', () => {
     resetWorkbenchForTests()
 
     expect($workbenchCamera.get()).toEqual(IDENTITY_CAMERA)
+  })
+
+  it('animates a voice camera target over a bounded motion', () => {
+    const frames: Array<(time: number) => void> = []
+
+    animateWorkbenchCameraTo(
+      { x: 100, y: 40, zoom: 2 },
+      {
+        durationMs: 600,
+        now: () => 0,
+        requestFrame: frame => {
+          frames.push(frame)
+
+          return frames.length
+        }
+      }
+    )
+
+    expect($workbenchCamera.get()).toEqual(IDENTITY_CAMERA)
+
+    frames.shift()?.(300)
+    expect($workbenchCamera.get()).toEqual({ x: 50, y: 20, zoom: 1.5 })
+
+    frames.shift()?.(600)
+    expect($workbenchCamera.get()).toEqual({ x: 100, y: 40, zoom: 2 })
+  })
+
+  it('lets direct user input cancel an in-flight camera animation', () => {
+    const frames: Array<(time: number) => void> = []
+
+    animateWorkbenchCameraTo(
+      { x: 100, y: 40, zoom: 2 },
+      {
+        now: () => 0,
+        requestFrame: frame => {
+          frames.push(frame)
+
+          return frames.length
+        }
+      }
+    )
+    setWorkbenchCamera({ x: 7, y: 8, zoom: 1.25 })
+    frames.shift()?.(300)
+
+    expect($workbenchCamera.get()).toEqual({ x: 7, y: 8, zoom: 1.25 })
+  })
+
+  it('snaps voice camera targets for reduced motion', () => {
+    animateWorkbenchCameraTo(
+      { x: 100, y: 40, zoom: 2 },
+      { reducedMotion: true, requestFrame: () => 1 }
+    )
+
+    expect($workbenchCamera.get()).toEqual({ x: 100, y: 40, zoom: 2 })
+  })
+
+  it('uses a true cut without scheduling animation frames', () => {
+    const requestFrame = vi.fn(() => 1)
+
+    animateWorkbenchCameraTo(
+      { x: 100, y: 40, zoom: 2 },
+      { durationMs: 0, requestFrame }
+    )
+
+    expect(requestFrame).not.toHaveBeenCalled()
+    expect($workbenchCamera.get()).toEqual({ x: 100, y: 40, zoom: 2 })
   })
 })

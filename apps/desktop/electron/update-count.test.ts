@@ -209,7 +209,7 @@ test('up-to-date full clone reports 0', () => {
   )
 })
 
-test('non-numeric count falls back to 0 (defensive, unchanged behaviour)', () => {
+test('a failed full-clone count stays unknown instead of falsely reporting up-to-date', () => {
   assert.equal(
     resolveBehindCount({
       countStr: '',
@@ -217,7 +217,7 @@ test('non-numeric count falls back to 0 (defensive, unchanged behaviour)', () =>
       targetSha: 'bbb',
       isShallow: false
     }),
-    0
+    null
   )
 })
 
@@ -240,10 +240,38 @@ test('shallow commit logs select only the fetched remote tip', () => {
 })
 
 test('full-clone commit logs keep the complete behind range', () => {
-  assert.deepEqual(resolveCommitLogSelection({ branch: 'release', isShallow: false }), {
+  const installedSha = 'a'.repeat(40)
+
+  assert.deepEqual(resolveCommitLogSelection({ branch: 'release', currentSha: installedSha, isShallow: false }), {
     limit: 40,
-    revision: 'HEAD..origin/release'
+    revision: `${installedSha}..origin/release`
   })
+})
+
+test('installed app remains behind after its managed checkout catches up', () => {
+  const { cwd, git } = createTempGitRepo()
+
+  try {
+    git('commit', '--allow-empty', '-m', 'installed desktop')
+    const installedSha = git('rev-parse', 'HEAD')
+
+    git('commit', '--allow-empty', '-m', 'new source one')
+    git('commit', '--allow-empty', '-m', 'new source two')
+    git('update-ref', 'refs/remotes/origin/costas-code', 'HEAD')
+
+    assert.equal(git('rev-list', 'HEAD..origin/costas-code', '--count'), '0')
+
+    const { revision } = resolveCommitLogSelection({
+      branch: 'costas-code',
+      currentSha: installedSha,
+      isShallow: false
+    })
+
+    assert.equal(git('rev-list', revision, '--count'), '2')
+    assert.deepEqual(git('log', revision, '--format=%s').split('\n'), ['new source two', 'new source one'])
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true })
+  }
 })
 
 // The skip path produces an empty countStr; resolveBehindCount must NOT trust

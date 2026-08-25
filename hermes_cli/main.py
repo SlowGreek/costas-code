@@ -6718,6 +6718,108 @@ def _write_desktop_build_stamp(project_root: Path, *, source_mode: bool) -> None
         logger.debug("Failed to write desktop build stamp: %s", exc)
 
 
+def _desktop_ancestor_cmdlines(limit: int = 4) -> list[list[str]]:
+    """Return bounded parent argv for old-handoff recovery; empty on any probe failure."""
+    try:
+        import psutil
+
+        process = psutil.Process(os.getppid())
+        result: list[list[str]] = []
+        for _ in range(limit):
+            result.append(process.cmdline())
+            process = process.parent()
+            if process is None:
+                break
+        return result
+    except Exception:
+        return []
+
+
+def _finalize_old_macos_desktop_handoff(
+    desktop_dir: Path, *, ancestor_cmdlines: Optional[list[list[str]]] = None
+) -> bool:
+    """Let fresh build-only code finish a pre-fix macOS parent handoff.
+
+    The old shell is already parsed when ``hermes update`` pulls this fix, so
+    replacing ``posix.sh`` on disk cannot change its hardcoded swap function.
+    The fresh ``hermes desktop --build-only`` subprocess is the first guaranteed
+    new-code boundary. It recognizes that old ancestor and invokes the newly
+    pulled script's finalize-only entry point before returning to the stale
+    parent. New handoffs set ``HERMES_DESKTOP_UPDATE_PARENT_FINALIZES`` and keep
+    their normal single-swap path.
+    """
+    if sys.platform != "darwin" or os.environ.get(
+        "HERMES_DESKTOP_UPDATE_PARENT_FINALIZES"
+    ) == "1":
+        return True
+
+    project_root = desktop_dir.parent.parent
+    handoff_script = (project_root / "scripts" / "desktop-update" / "posix.sh").resolve()
+    target: Optional[Path] = None
+
+    for argv in ancestor_cmdlines or _desktop_ancestor_cmdlines():
+        if "--daemonized" not in argv:
+            continue
+        try:
+            script_matches = any(
+                Path(arg).resolve() == handoff_script
+                for arg in argv
+                if str(arg).endswith("posix.sh")
+            )
+            target_index = argv.index("--relaunch-target") + 1
+            candidate = Path(argv[target_index]).expanduser().resolve()
+        except (IndexError, OSError, ValueError):
+            continue
+        if script_matches and candidate.suffix == ".app" and candidate.is_dir():
+            target = candidate
+            break
+
+    if target is None:
+        return True
+
+    expected = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    ).stdout.strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", expected):
+        print("✗ Could not verify the rebuilt desktop commit; keeping the previous app.")
+        return False
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(handoff_script),
+            "--install-root",
+            str(project_root),
+            "--relaunch-target",
+            str(target),
+            "--expected-commit",
+            expected,
+            "--no-ui",
+            "--finalize-mac-swap",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        print("✗ Desktop app install did not complete; the previous app was kept.")
+        if detail:
+            print(f"  {detail[-1]}")
+        return False
+
+    print(f"  ✓ Installed rebuilt desktop app at {target}")
+    return True
+
+
 def _desktop_packaged_executable(desktop_dir: Path) -> Optional[Path]:
     """Return the current platform's unpacked Electron app executable."""
     release_dir = desktop_dir / "release"
@@ -8097,6 +8199,8 @@ def cmd_gui(args: argparse.Namespace):
             sys.exit(1)
         else:
             print(f"✓ Desktop packaged app ready: {packaged_executable} (not launching; --build-only)")
+            if not _finalize_old_macos_desktop_handoff(desktop_dir):
+                sys.exit(1)
         return
 
     if source_mode:

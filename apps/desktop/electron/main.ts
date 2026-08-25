@@ -2952,29 +2952,26 @@ async function checkUpdates() {
     isPackaged: IS_PACKAGED
   })
 
-  // Compare the target with the running client's build commit, not merely the
-  // backend checkout. The two can diverge after a backend-only repair/update.
-  const mergeBaseStr = await git(['merge-base', currentSha, `origin/${branch}`])
-
   const isShallow = shallowStr === 'true'
+  const installedRange = resolveCommitLogSelection({ branch, currentSha, isShallow: false }).revision
 
   // A shallow graph cannot provide a trustworthy exact count, even when it has
   // a visible merge-base. Skip the ancestry walk and use the SHA fallback.
-  const countStr = shouldCountCommits({ isShallow }) ? await git(['rev-list', `HEAD..origin/${branch}`, '--count']) : ''
+  const countStr = shouldCountCommits({ isShallow }) ? await git(['rev-list', installedRange, '--count']) : ''
 
   // A positive directional ancestry result remains trustworthy in a shallow
   // graph and prevents a local commit on top of origin from looking outdated.
-  const targetIsAncestorOfHead =
+  const targetIsAncestorOfCurrent =
     isShallow &&
     currentSha !== targetSha &&
-    (await runGit(['merge-base', '--is-ancestor', `origin/${branch}`, 'HEAD'], { cwd: updateRoot })).code === 0
+    (await runGit(['merge-base', '--is-ancestor', `origin/${branch}`, currentSha], { cwd: updateRoot })).code === 0
 
   let behind = resolveBehindCount({
     countStr,
     currentSha,
     targetSha,
     isShallow,
-    targetIsAncestorOfHead
+    targetIsAncestorOfHead: targetIsAncestorOfCurrent
   })
 
   // Recover the exact count a shallow clone can't compute: the GitHub compare
@@ -2989,7 +2986,7 @@ async function checkUpdates() {
   // clone): still list what origin offers — resolveCommitLogSelection keeps
   // the shallow log to the fetched tip so the range walk can't enumerate the
   // contaminated ancestry — so "See what's new" stays useful and honest.
-  const commits = behind !== 0 ? await readCommitLog(updateRoot, branch, isShallow) : []
+  const commits = behind !== 0 ? await readCommitLog(updateRoot, branch, currentSha, isShallow) : []
 
   return {
     supported: true,
@@ -3060,10 +3057,10 @@ async function fetchCompareBehindCount({ currentSha, originUrl, targetSha }) {
   }
 }
 
-async function readCommitLog(cwd, branch, isShallow) {
+async function readCommitLog(cwd, branch, currentSha, isShallow) {
   const SEP = '\x1f'
   const REC = '\x1e'
-  const { limit, revision } = resolveCommitLogSelection({ branch, isShallow })
+  const { limit, revision } = resolveCommitLogSelection({ branch, currentSha, isShallow })
 
   const { stdout } = await runGit(
     ['log', revision, `--pretty=format:%H${SEP}%s${SEP}%an${SEP}%at${REC}`, '-n', String(limit)],
@@ -4130,6 +4127,38 @@ async function applyUpdatesPosixHandoff(opts: any) {
     args.push('--relaunch-target', targetApp)
   }
 
+  // Optional path hint for the shell. Dynamic post-build discovery remains
+  // mandatory there because this running (old) client may predate the product
+  // name the updated checkout builds.
+  const rebuiltApp = IS_MAC
+    ? resolveRebuiltMacBundle({
+        preferredName: `${APP_NAME}.app`,
+        probes: {
+          isDirectory: directoryExists,
+          modifiedAtMs: candidate => {
+            try {
+              return fs.statSync(candidate).mtimeMs
+            } catch {
+              return 0
+            }
+          },
+          readDir: dirPath => {
+            try {
+              return fs.readdirSync(dirPath)
+            } catch {
+              return []
+            }
+          }
+        },
+        runningBundleName: targetApp ? path.basename(targetApp) : null,
+        updateRoot
+      })
+    : null
+
+  if (rebuiltApp) {
+    args.push('--rebuilt-app', rebuiltApp)
+  }
+
   const relaunchArgs = collectRelaunchArgs(process.argv.slice(1))
 
   if (!IS_MAC) {
@@ -4163,37 +4192,11 @@ async function applyUpdatesPosixHandoff(opts: any) {
     writeUpdateMarker(HERMES_HOME, child.pid, { startedAt: updateStartedAt })
   }
 
-  // Discover the rebuilt bundle by shape, not by a hardcoded name list. The
-  // updater doing the swap is the OLD build, so any baked-in list was written
-  // before the name it now has to match could exist — that is precisely how
-  // the Costas Code -> Catalyst rename silently no-oped the swap and left
-  // users on a stale GUI with an updated backend. See rebuilt-bundle.ts.
-  const rebuiltApp = resolveRebuiltMacBundle({
-    preferredName: `${APP_NAME}.app`,
-    probes: {
-      isDirectory: directoryExists,
-      modifiedAtMs: candidate => {
-        try {
-          return fs.statSync(candidate).mtimeMs
-        } catch {
-          return 0
-        }
-      },
-      readDir: dirPath => {
-        try {
-          return fs.readdirSync(dirPath)
-        } catch {
-          return []
-        }
-      }
-    },
-    runningBundleName: targetApp ? path.basename(targetApp) : null,
-    updateRoot
-  })
-
-  // No bundle to swap (dev run, Linux AppImage, or unresolved paths): the
-  // backend is updated; the next launch picks up the rebuilt GUI.
-  if (!rebuiltApp || !targetApp) {
+  // No installed target to replace (dev run / unresolved launch context): the
+  // backend is updated; the next explicit launch can pick up the rebuilt GUI.
+  // A missing PRE-BUILD bundle is not a reason to stay alive: the handoff may
+  // create its first packaged output only after this process exits.
+  if (!targetApp) {
     emitUpdateProgress({
       stage: 'done',
       message: 'Backend updated. Restart Catalyst to load the new version.',

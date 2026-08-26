@@ -6,120 +6,21 @@ import {
   createRealtimeTurnController,
   type RealtimeStopInput,
   type RealtimeStopOutcome,
-  type RealtimeToolExecution,
   type RealtimeToolLane,
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
 
-/**
- * Language that explicitly promises a TOUR: several subjects, in sequence.
- * A request matching one of these is not satisfied by explaining a single
- * node — exactly the shape session 20260826_112445_ca2284 ended on:
- * focus(planner), explain planner, tool-free response, turn over with two
- * subjects never visited. These may be challenged from the first subject.
- */
-const TOUR_GOAL =
-  /\b(walk (me )?through|step by step|one (piece|node|part) at a time|take me through|go through (it|them|each|every)|explain (the|this) (whole|entire|full))\b/i
-
-/**
- * Language that MIGHT be a tour but is often a one-shot demonstration —
- * "show me how you'd add a cache node" is finished by adding that one node.
- * These earn a challenge only once the model has itself begun a sequence, so
- * a single-subject answer is never nagged.
- */
-const AMBIGUOUS_GOAL = /\b(show me how|how does (this|it) work|how do these .* (work|fit))\b/i
-
-/** Camera/highlight actions that present exactly one subject. */
-const SUBJECT_ACTIONS = new Set(['add_node', 'focus', 'zoom_to'])
-
-/** Actions that deliberately return to the whole canvas, ending a tour. */
-const WHOLE_CANVAS_ACTIONS = new Set(['frame_nodes', 'reset_view'])
-
-const executionSubject = (execution: RealtimeToolExecution): string => {
-  try {
-    const args = JSON.parse(execution.arguments || '{}') as Record<string, unknown>
-    const id = args.node_id ?? args.id
-
-    return typeof id === 'string' ? id.trim() : ''
-  } catch {
-    return ''
-  }
-}
-
-/**
- * Decide whether a tool-free response really finished the user's request.
- *
- * The host never decides WHAT to present — only whether the model's own stated
- * goal is visibly unfinished, judged against the actions it actually executed
- * this turn. Ordinary conversation is never challenged.
- */
 export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
-  if (!input.canContinue) {
-    return { kind: 'allow' }
-  }
-
   const completedTools = input.turn.executions.filter(execution => execution.status === 'success')
 
-  // Silent tool rounds: the original FX case. Work happened with nothing said.
-  // Deliberately one-shot — it is a "you went quiet, say something" nudge, and
-  // repeating it could ping-pong between empty responses. Only the
-  // walkthrough-completion judge below earns repeat challenges, because a
-  // guided tour legitimately ends every beat in a tool-free response.
-  if (!input.candidateText.trim()) {
-    return completedTools.length < 2 || input.stopChallenges > 0
-      ? { kind: 'allow' }
-      : {
-          context:
-            'Summarize your current progress for the user. Explain what the completed tools established before deciding whether another action is needed.',
-          kind: 'continue_once'
-        }
-  }
-
-  const tour = TOUR_GOAL.test(input.turn.goal)
-
-  if (!tour && !AMBIGUOUS_GOAL.test(input.turn.goal)) {
-    return { kind: 'allow' }
-  }
-
-  const presentations = completedTools.filter(
-    execution => SUBJECT_ACTIONS.has(execution.name) || WHOLE_CANVAS_ACTIONS.has(execution.name)
-  )
-
-  // Ending ON the whole canvas is the model declaring the tour over. Judged
-  // positionally: a subsystem shot EARLY in a tour is a beat, not a finale.
-  const last = presentations.at(-1)
-
-  if (last && WHOLE_CANVAS_ACTIONS.has(last.name)) {
-    return { kind: 'allow' }
-  }
-
-  const presented = [
-    ...new Set(
-      presentations
-        .filter(execution => SUBJECT_ACTIONS.has(execution.name))
-        .map(executionSubject)
-        .filter(Boolean)
-    )
-  ]
-
-  // Nothing presented yet: the guided-walkthrough prompt owns that decision,
-  // and challenging here would nag during ordinary conversation.
-  //
-  // Ambiguous phrasing needs a visible sequence (2+ subjects) before it earns
-  // a challenge, so "show me how you'd add a cache node" — one add_node, one
-  // spoken answer — is left alone.
-  if (!presented.length || (!tour && presented.length < 2)) {
+  if (!input.canContinue || input.candidateText.trim() || completedTools.length < 2) {
     return { kind: 'allow' }
   }
 
   return {
     context:
-      `The user asked to be walked through this, and you have presented ${presented.length} ` +
-      `subject(s) so far: ${presented.join(', ')}. If any subject remains unexplained, move to ` +
-      'the next subject now: focus and zoom to it, then explain only that one. When every ' +
-      'subject has been covered, call reset_view to return to the whole canvas and close the ' +
-      'explanation.',
+      'Summarize your current progress for the user. Explain what the completed tools established before deciding whether another action is needed.',
     kind: 'continue_once'
   }
 }
@@ -537,7 +438,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
   // focus from generated words highlights the whole route before it is heard.
   'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
-  'For a small new diagram, build the explanation live: use add_node, focus, and zoom_to for exactly one node, then explain only that node while it remains framed. Because you choose stable node IDs, the next beat may call add_node, connect any now-valid relation, focus, and zoom_to in that order in the same response; those actions happen after the current explanation has played. Repeat one node at a time. If the diagram already exists, use session_snapshot and walk it the same way. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
+  'For a small new diagram, build the explanation live: use add_node, focus, and zoom_to for exactly one node, then explain only that node while it remains framed. After that explanation has played, call focus and zoom_to for the next node and repeat — you are not waiting for the user, and no one will prompt you between nodes. Keep going until every node has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and walk it the same way. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -998,11 +899,6 @@ export async function startRealtimeVoiceConnection(
     // Enough for a three-node live build with focus, camera, links, and a final
     // whole-canvas frame while still bounding runaway voice loops.
     maxActions: 16,
-    // A guided walkthrough ends EVERY beat in a tool-free response, so the
-    // completion judge must be allowed to challenge more than once. Six covers
-    // a six-subject tour; the action/round/time bounds still cap the turn, and
-    // an ordinary answer is never challenged at all.
-    maxStopChallenges: 6,
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,

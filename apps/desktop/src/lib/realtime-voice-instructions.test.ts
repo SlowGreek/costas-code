@@ -60,6 +60,16 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/never schedule multiple focus or zoom_to calls together/i)
   })
 
+  it('names the next action explicitly instead of saying "move on"', () => {
+    // Regression guard for the live loop stall. 9d98ddabaf said "call focus
+    // for the next node and repeat" and the model advanced on its own; a
+    // later edit softened it to "move to the next node", which reads as
+    // "wait for something" and the walkthrough died after one node. The
+    // instruction must name the TOOL, not the intention.
+    expect(text).toMatch(/call focus (and zoom_to )?for the next/i)
+    expect(text).not.toMatch(/after that explanation has played, move to the next node/i)
+  })
+
   it('treats ordinary show-me language as an implicit guided walkthrough', () => {
     expect(text).toMatch(/show me.*what would that look like.*how does this work.*step by step/is)
     expect(text).toMatch(/default.*guided walkthrough/i)
@@ -67,10 +77,12 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/user should not have to ask.*each visual action/i)
   })
 
-  it('gives each stable-id walkthrough beat one ordered action sequence', () => {
-    expect(text).toMatch(/add_node.*connect.*focus.*zoom_to.*in that order/is)
-    expect(text).toMatch(/same response/i)
-    expect(text).toMatch(/after the current explanation.*played/i)
+  it('tells the model to keep going without waiting to be prompted', () => {
+    // The stall shape: the model explains one node, then waits. Nothing was
+    // ever going to prompt it, so the walkthrough ended there.
+    expect(text).toMatch(/you are not waiting for the user/i)
+    expect(text).toMatch(/no one will prompt you between nodes/i)
+    expect(text).toMatch(/keep going until every node has been covered/i)
   })
 
   it('reserves speed_draw for an explicitly static or all-at-once request', () => {

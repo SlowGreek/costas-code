@@ -29,8 +29,6 @@ export interface RealtimeStopInput {
   candidateText: string
   canContinue: boolean
   responseId: string
-  /** How many times this turn has already been challenged. Bounds the judge. */
-  stopChallenges: number
   turn: RealtimeTurnSnapshot
 }
 
@@ -45,13 +43,6 @@ interface RealtimeTurnControllerOptions {
   execute: (call: RealtimeTurnToolCall) => Promise<unknown>
   laneFor?: (call: RealtimeTurnToolCall) => RealtimeToolLane
   maxActions?: number
-  /**
-   * How many times one semantic turn may be challenged for ending early.
-   * A guided walkthrough ends every beat in a tool-free response, so a
-   * single checkpoint (the original FX port) could only ever rescue the
-   * first one.
-   */
-  maxStopChallenges?: number
   maxToolRounds?: number
   maxTurnMs?: number
   now?: () => number
@@ -86,7 +77,7 @@ interface ActiveTurn {
   id: string
   responses: Map<string, TrackedResponse>
   startedAt: number
-  stopChallenges: number
+  stopCheckpointUsed: boolean
   toolRounds: number
 }
 
@@ -186,7 +177,6 @@ export interface RealtimeTurnController {
 
 export function createRealtimeTurnController(options: RealtimeTurnControllerOptions): RealtimeTurnController {
   const maxActions = Math.max(1, options.maxActions ?? 8)
-  const maxStopChallenges = Math.max(0, options.maxStopChallenges ?? 1)
   const maxToolRounds = Math.max(1, options.maxToolRounds ?? 4)
   const maxTurnMs = Math.max(1_000, options.maxTurnMs ?? 30_000)
   const now = options.now ?? Date.now
@@ -253,7 +243,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       id: `${turnIdPrefix}-${turnSequence}`,
       responses: new Map(),
       startedAt: now(),
-      stopChallenges: 0,
+      stopCheckpointUsed: false,
       toolRounds: 0
     }
     lastTurnId = current.id
@@ -416,10 +406,8 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           turn.actions < maxActions &&
           now() - turn.startedAt < maxTurnMs
 
-        if (turn.stopChallenges < maxStopChallenges && options.stop) {
-          const stopChallenges = turn.stopChallenges
-
-          turn.stopChallenges += 1
+        if (!turn.stopCheckpointUsed && options.stop) {
+          turn.stopCheckpointUsed = true
           let stopOutcome: RealtimeStopOutcome = { kind: 'allow' }
 
           try {
@@ -427,7 +415,6 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
               candidateText: response.assistantText,
               canContinue,
               responseId: response.id,
-              stopChallenges,
               turn: snapshot(turn, maxActions, maxToolRounds)
             })
           } catch {

@@ -152,6 +152,8 @@ export type RealtimeCameraCommand =
       amount: RealtimeCameraAmount
       direction: RealtimeCameraPanDirection
       kind: 'pan_view'
+      /** When set by present_step, do not pan until this subject exists in layout. */
+      requireNodeId?: string
       transition: RealtimeCameraTransition
     }
   | { kind: 'reset_view'; transition: RealtimeCameraTransition }
@@ -177,7 +179,10 @@ export interface RealtimeServerEventDeps {
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   /** Execute one bounded renderer-local camera command. */
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean | Promise<boolean>
+  onCameraCommand?: (
+    command: RealtimeCameraCommand,
+    signal?: AbortSignal
+  ) => boolean | Promise<boolean>
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
@@ -191,6 +196,7 @@ export interface RealtimeServerEventDeps {
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
   send: (event: Record<string, unknown>) => void
+  signal?: AbortSignal
   turnController?: RealtimeTurnController
 }
 
@@ -475,7 +481,10 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean | Promise<boolean>
+  onCameraCommand?: (
+    command: RealtimeCameraCommand,
+    signal?: AbortSignal
+  ) => boolean | Promise<boolean>
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
@@ -1062,7 +1071,7 @@ export async function startRealtimeVoiceConnection(
 
   const turnController = createRealtimeTurnController({
     baseInstructions: instructions,
-    execute: call => executeRealtimeVoiceTool(call, voiceToolDeps),
+    execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
     laneFor: voiceToolLane,
     // Enough for a three-node live build with focus, camera, links, and a final
     // whole-canvas frame while still bounding runaway voice loops.
@@ -1469,6 +1478,13 @@ const realtimeResponseStatus = (event: RealtimeEvent): string => {
   return asTrimmedString(response?.status) || 'completed'
 }
 
+const applyRealtimeCameraCommand = async (
+  handler: RealtimeServerEventDeps['onCameraCommand'],
+  command: RealtimeCameraCommand,
+  signal?: AbortSignal
+): Promise<boolean> =>
+  Boolean(signal ? await handler?.(command, signal) : await handler?.(command))
+
 /** Execute one voice-facade call without deciding when the provider continues. */
 export async function executeRealtimeVoiceTool(
   call: RealtimeTurnToolCall,
@@ -1480,6 +1496,7 @@ export async function executeRealtimeVoiceTool(
     | 'onResearchDispatched'
     | 'request'
     | 'runtimeSessionId'
+    | 'signal'
   >
 ): Promise<unknown> {
   const { name } = call
@@ -1603,7 +1620,7 @@ export async function executeRealtimeVoiceTool(
 
     const command: RealtimeCameraCommand =
       pan
-        ? { ...pan, kind: 'pan_view', transition }
+        ? { ...pan, kind: 'pan_view', requireNodeId: subjectId, transition }
         : framing === 'context'
         ? {
             anchor,
@@ -1614,7 +1631,7 @@ export async function executeRealtimeVoiceTool(
           }
         : { anchor, kind: 'zoom_to', nodeId: subjectId, transition, zoom: 2 }
 
-    return (await deps.onCameraCommand?.(command))
+    return (await applyRealtimeCameraCommand(deps.onCameraCommand, command, deps.signal))
       ? {
           camera: pan ? 'pan' : framing,
           ...(Object.keys(editResults).length ? { edits: editResults } : {}),
@@ -1624,8 +1641,12 @@ export async function executeRealtimeVoiceTool(
           ...(contextIds.length ? { context_ids: contextIds } : {})
         }
       : {
+          committed: {
+            ...editResults,
+            focus: focusResult
+          },
           error: 'The presentation subject is not available in the current canvas layout',
-          focus: focusResult,
+          status: 'partial',
           subject_id: subjectId
         }
   }
@@ -1722,7 +1743,7 @@ export async function executeRealtimeVoiceTool(
       command = { kind: 'reset_view', transition }
     }
 
-    return (await deps.onCameraCommand?.(command))
+    return (await applyRealtimeCameraCommand(deps.onCameraCommand, command, deps.signal))
       ? { status: command.kind === 'pan_view' ? 'moved' : 'framed' }
       : { error: 'The requested camera target is not available on this canvas' }
   }

@@ -81,4 +81,39 @@ describe('applyCameraCommandWhenReady', () => {
     expect(stop).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
+
+  it('cancels a queued camera before a later layout can mutate the canvas', async () => {
+    const abort = new AbortController()
+    let publish!: () => void
+    let active = true
+
+    const stop = vi.fn(() => {
+      active = false
+    })
+
+    const apply = vi.fn(() => false)
+
+    const listen = vi.fn((callback: () => void) => {
+      publish = () => {
+        if (active) {
+          callback()
+        }
+      }
+
+      return stop
+    })
+
+    const result = applyCameraCommandWhenReady(
+      { apply, listen, signal: abort.signal },
+      { kind: 'zoom_to' } as never
+    )
+
+    const callsBeforeAbort = apply.mock.calls.length
+
+    abort.abort()
+    await expect(result).resolves.toBe(false)
+    publish()
+    expect(apply).toHaveBeenCalledTimes(callsBeforeAbort)
+    expect(stop).toHaveBeenCalledOnce()
+  })
 })

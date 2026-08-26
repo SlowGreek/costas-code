@@ -205,7 +205,10 @@ describe('RealtimeTurnController', () => {
     await controller.responseDone('response-1')
 
     expect(execute).toHaveBeenCalledOnce()
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-new' }))
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: 'call-new' }),
+      expect.anything()
+    )
 
     const outputs = sent
       .filter(event => event.type === 'conversation.item.create')
@@ -453,6 +456,25 @@ describe('RealtimeTurnController', () => {
     })
   })
 
+  it('records a structured tool error as failure instead of completed success', async () => {
+    const controller = createRealtimeTurnController({
+      execute: async () => ({ error: 'camera unavailable', status: 'partial' }),
+      laneFor: () => 'gesture',
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Present the executor.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-present', 'present_step'))
+    await controller.responseDone('response-1')
+
+    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
+      callId: 'call-present',
+      output: { error: 'camera unavailable', status: 'partial' },
+      status: 'failure'
+    })
+  })
+
   it('cancels pending calls on barge-in and drops their late results', async () => {
     const work = deferred<unknown>()
     const sent: Record<string, unknown>[] = []
@@ -475,6 +497,30 @@ describe('RealtimeTurnController', () => {
     expect(JSON.parse((outputs[0].item as { output: string }).output)).toEqual({ cancelled: true })
     expect(sent.some(event => event.type === 'response.create')).toBe(false)
     expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('aborts an in-flight tool when the user interrupts the turn', async () => {
+    let capturedSignal: AbortSignal | undefined
+
+    const execute = vi.fn(
+      async (_call: unknown, signal: AbortSignal) =>
+        new Promise(resolve => {
+          capturedSignal = signal
+          signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true })
+        })
+    )
+
+    const controller = createRealtimeTurnController({ execute, send: vi.fn() })
+
+    controller.beginTurn('Move the camera.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-present', 'present_step'))
+    const completing = controller.responseDone('response-1')
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined())
+
+    controller.interrupt()
+    await completing
+    expect(capturedSignal?.aborted).toBe(true)
   })
 
   it('does not let stale response completion settle the next user turn', async () => {

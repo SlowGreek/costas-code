@@ -42,7 +42,7 @@ export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 's
 
 interface RealtimeTurnControllerOptions {
   baseInstructions?: () => string
-  execute: (call: RealtimeTurnToolCall) => Promise<unknown>
+  execute: (call: RealtimeTurnToolCall, signal: AbortSignal) => Promise<unknown>
   laneFor?: (call: RealtimeTurnToolCall) => RealtimeToolLane
   maxActions?: number
   /**
@@ -76,6 +76,7 @@ interface TrackedResponse {
 interface ActiveTurn {
   activeResponseId: null | string
   actions: number
+  abortController: AbortController
   callIds: Set<string>
   cancelled: boolean
   completedActions: string[]
@@ -120,6 +121,15 @@ const boundedJson = (value: unknown, maxChars: number): string => {
 
   return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`
 }
+
+const isStructuredToolError = (value: unknown): boolean =>
+  Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      typeof (value as { error?: unknown }).error === 'string' &&
+      (value as { error: string }).error.trim()
+  )
 
 const executionMemory = (turn: ActiveTurn): string => {
   if (!turn.executions.length) {
@@ -243,6 +253,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     current = {
       activeResponseId: null,
       actions: 0,
+      abortController: new AbortController(),
       callIds: new Set(),
       cancelled: false,
       completedActions: [],
@@ -298,6 +309,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     }
 
     turn.cancelled = true
+    turn.abortController.abort()
     blockedUntilBegin = true
 
     for (const response of turn.responses.values()) {
@@ -588,7 +600,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
             const timeout = Symbol('voice-tool-timeout')
 
             const result = await Promise.race([
-              options.execute(call),
+              options.execute(call, turn.abortController.signal),
               new Promise<typeof timeout>(resolve => {
                 timeoutId = setTimeout(() => resolve(timeout), remainingMs)
               })
@@ -601,7 +613,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
               output = result
             }
           } else {
-            output = await options.execute(call)
+            output = await options.execute(call, turn.abortController.signal)
           }
         } catch (error) {
           output = { error: error instanceof Error ? error.message : String(error) }
@@ -610,6 +622,10 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           if (timeoutId !== undefined) {
             clearTimeout(timeoutId)
           }
+        }
+
+        if (status === 'success' && isStructuredToolError(output)) {
+          status = 'failure'
         }
 
         if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart || call.outputSent) {

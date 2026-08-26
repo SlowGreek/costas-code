@@ -53,6 +53,10 @@ export function resolveWorkbenchCameraCommand(
   }
 
   if (command.kind === 'pan_view') {
+    if (command.requireNodeId && !layout.positions[command.requireNodeId]) {
+      return null
+    }
+
     const distance = PAN_PIXELS[command.amount]
 
     const delta =

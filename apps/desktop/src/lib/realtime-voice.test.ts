@@ -233,6 +233,28 @@ describe('fxStyleStopCheckpoint', () => {
     expect(context).toMatch(/without announcing|do not announce/i)
   })
 
+  it('never counts a partially failed presentation as a covered subject', () => {
+    expect(
+      fxStyleStopCheckpoint({
+        candidateText: 'The executor is next.',
+        canContinue: true,
+        responseId: 'response-3',
+        stopChallenges: 0,
+        turn: turn({
+          goal: 'Walk me through step by step.',
+          completedActions: ['present_step'],
+          executions: [
+            {
+              ...subject('present_step', '{"subject_id":"executor"}'),
+              output: { error: 'camera unavailable', status: 'partial' },
+              status: 'failure'
+            }
+          ]
+        })
+      })
+    ).toEqual({ kind: 'allow' })
+  })
+
   it('allows a walkthrough to end after the canvas has been reset to the whole view', () => {
     const outcome = fxStyleStopCheckpoint({
       candidateText: 'And that closes the loop.',
@@ -698,6 +720,35 @@ describe('routeRealtimeServerEvent', () => {
     expect(output).toMatchObject({ status: 'presented', subject_id: 'executor' })
   })
 
+  it('reports committed graph work honestly when camera application fails', async () => {
+    const request = vi.fn(async (method: string) => ({ method, ok: true }))
+
+    const output = await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({
+          subject_id: 'executor',
+          add: { label: 'Executor' },
+          connect_from: 'planner'
+        }),
+        callId: 'call-partial-present',
+        name: 'present_step',
+        responseId: 'response-1'
+      },
+      { onCameraCommand: vi.fn(() => false), request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(output).toMatchObject({
+      error: 'The presentation subject is not available in the current canvas layout',
+      committed: {
+        add: { method: 'workbench.edit', ok: true },
+        connect: { method: 'workbench.edit', ok: true },
+        focus: { method: 'workbench.focus', ok: true }
+      },
+      status: 'partial',
+      subject_id: 'executor'
+    })
+  })
+
   it('pans while keeping the presentation subject highlighted', async () => {
     const request = vi.fn(async () => ({ focused: true }))
     const onCameraCommand = vi.fn(() => true)
@@ -724,6 +775,7 @@ describe('routeRealtimeServerEvent', () => {
       amount: 'small',
       direction: 'right',
       kind: 'pan_view',
+      requireNodeId: 'executor',
       transition: 'smooth'
     })
   })
@@ -1569,7 +1621,8 @@ describe('startRealtimeVoiceConnection', () => {
     )
     await vi.waitFor(() =>
       expect(onCameraCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'zoom_to', nodeId: 'planner' })
+        expect.objectContaining({ kind: 'zoom_to', nodeId: 'planner' }),
+        expect.anything()
       )
     )
 
@@ -1604,7 +1657,8 @@ describe('startRealtimeVoiceConnection', () => {
       })
     )
     expect(onCameraCommand).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'zoom_to', nodeId: 'executor', transition: 'quick' })
+      expect.objectContaining({ kind: 'zoom_to', nodeId: 'executor', transition: 'quick' }),
+      expect.anything()
     )
   })
 

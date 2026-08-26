@@ -217,7 +217,7 @@ export function useRealtimeVoiceConversation({
             failedTranscriptsRef.current.shift()
           }
         },
-        onCameraCommand: command =>
+        onCameraCommand: (command, signal) =>
           applyCameraCommandWhenReady(
             {
               apply: next => {
@@ -241,7 +241,8 @@ export function useRealtimeVoiceConversation({
 
                 return true
               },
-              listen: callback => $workbenchLayout.listen(() => callback())
+              listen: callback => $workbenchLayout.listen(() => callback()),
+              signal
             },
             command
           ),

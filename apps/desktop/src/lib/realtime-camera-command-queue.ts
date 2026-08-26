@@ -3,6 +3,8 @@ interface CameraCommandQueueDeps<T> {
   apply: (command: T) => boolean
   /** Subscribe to authoritative layout publications. */
   listen: (callback: () => void) => () => void
+  /** Semantic-turn cancellation (barge-in, close, or replacement turn). */
+  signal?: AbortSignal
   /** Failure bound only; healthy commands resolve from layout events. */
   timeoutMs?: number
 }
@@ -16,6 +18,10 @@ export function applyCameraCommandWhenReady<T>(
   deps: CameraCommandQueueDeps<T>,
   command: T
 ): Promise<boolean> {
+  if (deps.signal?.aborted) {
+    return Promise.resolve(false)
+  }
+
   if (deps.apply(command)) {
     return Promise.resolve(true)
   }
@@ -24,6 +30,7 @@ export function applyCameraCommandWhenReady<T>(
     let done = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let stop: (() => void) | undefined
+    let onAbort: (() => void) | undefined
 
     const finish = (applied: boolean) => {
       if (done) {
@@ -37,6 +44,11 @@ export function applyCameraCommandWhenReady<T>(
       }
 
       stop?.()
+
+      if (onAbort) {
+        deps.signal?.removeEventListener('abort', onAbort)
+      }
+
       resolve(applied)
     }
 
@@ -46,10 +58,20 @@ export function applyCameraCommandWhenReady<T>(
       }
     })
 
+    onAbort = () => finish(false)
+    deps.signal?.addEventListener('abort', onAbort, { once: true })
+
+    if (deps.signal?.aborted) {
+      finish(false)
+
+      return
+    }
+
     // Some stores publish synchronously from listen(). In that case finish()
     // ran before the disposer was assigned, so dispose it now and stop.
     if (done) {
       stop()
+      deps.signal?.removeEventListener('abort', onAbort)
 
       return
     }

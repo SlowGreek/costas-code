@@ -74,6 +74,27 @@ describe('resolveWorkbenchCameraCommand', () => {
     expect(target?.zoom).toBe(2)
   })
 
+  it('waits to pan until a required presentation subject exists', () => {
+    expect(
+      resolve({
+        amount: 'small',
+        direction: 'right',
+        kind: 'pan_view',
+        requireNodeId: 'missing',
+        transition: 'smooth'
+      })
+    ).toBeNull()
+    expect(
+      resolve({
+        amount: 'small',
+        direction: 'right',
+        kind: 'pan_view',
+        requireNodeId: 'executor',
+        transition: 'smooth'
+      })
+    ).not.toBeNull()
+  })
+
   it('zooms around the current composition centre', () => {
     const target = resolve(
       { amount: 'small', direction: 'out', kind: 'zoom_view', transition: 'quick' },

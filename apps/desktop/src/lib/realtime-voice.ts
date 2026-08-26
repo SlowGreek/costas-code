@@ -1598,6 +1598,31 @@ export async function routeRealtimeServerEvent(
   const event = rawEvent as RealtimeEvent
   const type = asTrimmedString(event.type)
 
+  // TEMPORARY live diagnostic (remove once the walkthrough loop is proven).
+  // Four prompt-level hypotheses have now failed against the real provider,
+  // so record what it actually sends per response instead of guessing again.
+  if (typeof globalThis !== 'undefined') {
+    const scope = globalThis as { __hermesVoiceTrace?: unknown[] }
+
+    if (
+      type === 'response.created' ||
+      type === 'response.done' ||
+      type === 'response.function_call_arguments.done' ||
+      type === 'response.output_audio_transcript.done' ||
+      type === 'output_audio_buffer.started' ||
+      type === 'output_audio_buffer.stopped'
+    ) {
+      scope.__hermesVoiceTrace = scope.__hermesVoiceTrace ?? []
+      ;(scope.__hermesVoiceTrace as unknown[]).push({
+        at: Date.now(),
+        type,
+        responseId: realtimeResponseId(event),
+        name: asTrimmedString(event.name) || undefined,
+        status: type === 'response.done' ? realtimeResponseStatus(event) : undefined
+      })
+    }
+  }
+
   if (type === 'response.created') {
     deps.turnController?.responseCreated(realtimeResponseId(event))
     deps.onProviderResponseStarted?.()

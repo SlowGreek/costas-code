@@ -6,6 +6,7 @@ import {
   executeRealtimeVoiceTool,
   fxStyleStopCheckpoint,
   MAX_WORKBENCH_CONTEXT_CHARS,
+  type RealtimeCameraCommand,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
   startRealtimeVoiceConnection,
@@ -226,8 +227,8 @@ describe('fxStyleStopCheckpoint', () => {
     // It must forbid re-covering what is done, not merely list it.
     expect(context).toMatch(/already covered|do not repeat|without repeating/i)
     expect(context).toMatch(/speech-recognition/)
-    // And it must demand the visual action land WITH the explanation.
-    expect(context).toMatch(/focus/i)
+    // And it must demand the atomic visual beat land WITH the explanation.
+    expect(context).toMatch(/present_step/i)
     // Stage-direction narration is what produced "let's add that layer next".
     expect(context).toMatch(/without announcing|do not announce/i)
   })
@@ -384,6 +385,7 @@ describe('voiceToolLane', () => {
     expect(voiceToolLane({ name: 'research_search' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'research_read' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'focus' } as never)).toBe('gesture')
+    expect(voiceToolLane({ name: 'present_step' } as never)).toBe('gesture')
     expect(voiceToolLane({ name: 'add_node' } as never)).toBe('presentation')
     expect(voiceToolLane({ name: 'rename' } as never)).toBe('edit')
     expect(voiceToolLane({ name: 'visualize' } as never)).toBe('slow')
@@ -578,6 +580,169 @@ describe('routeRealtimeServerEvent', () => {
     await Promise.resolve()
     expect(current).toHaveBeenCalledOnce()
     vi.useRealTimers()
+  })
+
+  it('atomically focuses and closely frames one presentation subject', async () => {
+    const order: string[] = []
+
+    const request = vi.fn(async (method: string) => {
+      order.push(method)
+
+      return { focused: true }
+    })
+
+    const onCameraCommand = vi.fn(() => {
+      order.push('camera')
+
+      return true
+    })
+
+    const output = await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({
+          subject_id: 'planner',
+          framing: 'close',
+          anchor: 'left',
+          transition: 'smooth'
+        }),
+        callId: 'call-present',
+        name: 'present_step',
+        responseId: 'response-1'
+      },
+      { onCameraCommand, request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(order).toEqual(['workbench.focus', 'camera'])
+    expect(request).toHaveBeenCalledWith('workbench.focus', {
+      node_id: 'planner',
+      session_id: 'runtime-session'
+    })
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      anchor: 'left',
+      kind: 'zoom_to',
+      nodeId: 'planner',
+      transition: 'smooth',
+      zoom: 2
+    })
+    expect(output).toMatchObject({ status: 'presented', subject_id: 'planner' })
+  })
+
+  it('frames a subject with its related context in one presentation beat', async () => {
+    const request = vi.fn(async () => ({ focused: true }))
+    const onCameraCommand = vi.fn(() => true)
+
+    await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({
+          subject_id: 'executor',
+          context_ids: ['planner', 'reviser'],
+          framing: 'context',
+          transition: 'quick'
+        }),
+        callId: 'call-present-context',
+        name: 'present_step',
+        responseId: 'response-1'
+      },
+      { onCameraCommand, request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      anchor: 'center',
+      kind: 'frame_nodes',
+      nodeIds: ['executor', 'planner', 'reviser'],
+      padding: 'normal',
+      transition: 'quick'
+    })
+  })
+
+  it('creates, connects, focuses, and frames one graph subject in order', async () => {
+    const order: string[] = []
+
+    const request = vi.fn(async (method: string) => {
+      order.push(method)
+
+      return { ok: true }
+    })
+
+    const onCameraCommand = vi.fn(() => {
+      order.push('camera')
+
+      return true
+    })
+
+    const output = await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({
+          subject_id: 'executor',
+          add: { label: 'Executor', kind: 'agent' },
+          connect_from: 'planner',
+          edge_label: 'plan',
+          framing: 'close'
+        }),
+        callId: 'call-build-present',
+        name: 'present_step',
+        responseId: 'response-1'
+      },
+      { onCameraCommand, request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(order).toEqual(['workbench.edit', 'workbench.edit', 'workbench.focus', 'camera'])
+    expect(request).toHaveBeenNthCalledWith(1, 'workbench.edit', {
+      session_id: 'runtime-session',
+      edit: { id: 'executor', kind: 'agent', label: 'Executor', op: 'add_node' }
+    })
+    expect(request).toHaveBeenNthCalledWith(2, 'workbench.edit', {
+      session_id: 'runtime-session',
+      edit: { from_id: 'planner', label: 'plan', op: 'connect', to_id: 'executor' }
+    })
+    expect(output).toMatchObject({ status: 'presented', subject_id: 'executor' })
+  })
+
+  it('pans while keeping the presentation subject highlighted', async () => {
+    const request = vi.fn(async () => ({ focused: true }))
+    const onCameraCommand = vi.fn(() => true)
+
+    await executeRealtimeVoiceTool(
+      {
+        arguments: JSON.stringify({
+          subject_id: 'executor',
+          pan: { direction: 'right', amount: 'small' },
+          transition: 'smooth'
+        }),
+        callId: 'call-present-pan',
+        name: 'present_step',
+        responseId: 'response-1'
+      },
+      { onCameraCommand, request, runtimeSessionId: 'runtime-session' }
+    )
+
+    expect(request).toHaveBeenCalledWith('workbench.focus', {
+      node_id: 'executor',
+      session_id: 'runtime-session'
+    })
+    expect(onCameraCommand).toHaveBeenCalledWith({
+      amount: 'small',
+      direction: 'right',
+      kind: 'pan_view',
+      transition: 'smooth'
+    })
+  })
+
+  it('rejects a presentation beat with no stable subject id', async () => {
+    const request = vi.fn()
+
+    await expect(
+      executeRealtimeVoiceTool(
+        {
+          arguments: JSON.stringify({ framing: 'close' }),
+          callId: 'call-present-invalid',
+          name: 'present_step',
+          responseId: 'response-1'
+        },
+        { onCameraCommand: vi.fn(), request, runtimeSessionId: 'runtime-session' }
+      )
+    ).resolves.toEqual({ error: 'present_step requires a subject_id' })
+    expect(request).not.toHaveBeenCalled()
   })
 
   it('bridges session_snapshot function calls to the Hermes gateway', async () => {
@@ -906,7 +1071,8 @@ describe('startRealtimeVoiceConnection', () => {
     tokenOverrides: Record<string, unknown> = {},
     onTranscript?: (entry: RealtimeTranscript) => void,
     requestOverride?: (method: string, params: Record<string, unknown>) => Promise<unknown>,
-    onConnectionClosed?: () => void
+    onConnectionClosed?: () => void,
+    onCameraCommand?: (command: RealtimeCameraCommand) => boolean | Promise<boolean>
   ) => {
     const sent: string[] = []
     const listeners = new Map<string, (event: { data?: string }) => void>()
@@ -940,6 +1106,7 @@ describe('startRealtimeVoiceConnection', () => {
         text: async () => 'answer-sdp'
       })) as never,
       mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
+      onCameraCommand,
       onConnectionClosed,
       peerConnectionFactory: () => peer as never,
       onTranscript,
@@ -1376,6 +1543,71 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
   })
 
+  it('keeps focus and camera together when a spoken beat carries present_step', async () => {
+    const request = vi.fn(async () => ({ focused: true }))
+    const onCameraCommand = vi.fn(() => true)
+    const harness = await connectHarness({}, undefined, request, undefined, onCameraCommand)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-planner',
+      name: 'present_step',
+      arguments: '{"subject_id":"planner","framing":"close"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'planner',
+        session_id: 'runtime-session'
+      })
+    )
+    await vi.waitFor(() =>
+      expect(onCameraCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'zoom_to', nodeId: 'planner' })
+      )
+    )
+
+    request.mockClear()
+    onCameraCommand.mockClear()
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-planner',
+      transcript: 'The Planner decides what happens next.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-executor',
+      name: 'present_step',
+      arguments: '{"subject_id":"executor","framing":"close","transition":"quick"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+
+    await Promise.resolve()
+    expect(request).not.toHaveBeenCalled()
+    expect(onCameraCommand).not.toHaveBeenCalled()
+
+    harness.emit({ type: 'output_audio_buffer.stopped' })
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'executor',
+        session_id: 'runtime-session'
+      })
+    )
+    expect(onCameraCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'zoom_to', nodeId: 'executor', transition: 'quick' })
+    )
+  })
+
   it('keeps a walkthrough alive across a spoken beat that carries the next focus', async () => {
     // The 8/20 shape, pinned. The model bundles "explain A + focus B" into one
     // response, so response.calls is non-empty and the turn does NOT settle.
@@ -1804,6 +2036,7 @@ describe('startRealtimeVoiceConnection', () => {
       'research_read',
       // Surgical tools: one thing, instantly, with no diagrammer round trip.
       'add_node',
+      'present_step',
       'focus',
       'zoom_to',
       'frame_nodes',
@@ -1827,8 +2060,10 @@ describe('startRealtimeVoiceConnection', () => {
     expect(toolDescriptions.get('session_snapshot')).toMatch(/nodes.*edges.*revisions.*view state/i)
     expect(toolDescriptions.get('speed_draw')).toMatch(/ONLY.*explicitly.*quick draft.*all at once.*rearrange/is)
     expect(toolDescriptions.get('speed_draw')).toMatch(/step by step.*live narrated/is)
-    expect(toolDescriptions.get('add_node')).toMatch(/default.*step by step.*focus.*zoom/is)
-    expect(toolDescriptions.get('focus')).toMatch(/automatically.*guided explanations/i)
+    expect(toolDescriptions.get('add_node')).toMatch(/one-off edit.*present_step/is)
+    expect(toolDescriptions.get('present_step')).toMatch(/single coherent visual action/i)
+    expect(toolDescriptions.get('present_step')).toMatch(/ring the subject.*camera/is)
+    expect(toolDescriptions.get('focus')).toMatch(/one-off highlight.*present_step/is)
     expect(toolDescriptions.get('connect')).toMatch(/add_node.*then.*connect/i)
     expect(toolDescriptions.get('connect')).toMatch(/speed_draw.*broad/i)
 

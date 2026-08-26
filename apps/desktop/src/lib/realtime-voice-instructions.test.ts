@@ -54,9 +54,9 @@ describe('realtime instructions', () => {
   })
 
   it('paces walkthrough camera moves with one explanation at a time', () => {
-    expect(text).toMatch(/add or focus exactly one node/i)
-    expect(text).toMatch(/explain only that node/i)
-    expect(text).toMatch(/never queue more than one node ahead/i)
+    expect(text).toMatch(/present_step.*create ONE subject.*connect it/is)
+    expect(text).toMatch(/explain only that subject/i)
+    expect(text).toMatch(/never queue more than one beat ahead/i)
   })
 
   it('names the next action explicitly instead of saying "move on"', () => {
@@ -65,25 +65,25 @@ describe('realtime instructions', () => {
     // later edit softened it to "move to the next node", which reads as
     // "wait for something" and the walkthrough died after one node. The
     // instruction must name the TOOL, not the intention.
-    expect(text).toMatch(/call focus (and zoom_to )?for the next/i)
+    expect(text).toMatch(/call present_step for the next/i)
     expect(text).not.toMatch(/after that explanation has played, move to the next node/i)
   })
 
   it('treats ordinary show-me language as an implicit guided walkthrough', () => {
     expect(text).toMatch(/show me.*what would that look like.*how does this work.*step by step/is)
     expect(text).toMatch(/default.*guided walkthrough/i)
-    expect(text).toMatch(/add or focus exactly one node.*explain only that node/is)
+    expect(text).toMatch(/present_step.*create ONE subject.*connect it/is)
     expect(text).toMatch(/user should not have to ask.*each visual action/i)
   })
 
-  it('asks the model to carry the next focus inside the explanation response', () => {
+  it('asks the model to carry the next presentation beat inside the explanation response', () => {
     // THE loop contract. A Realtime response cannot be reopened, so a spoken
     // beat with no tool call ends the semantic turn -- the model must reach
     // for the next node in the SAME response that explains the current one.
     // Session 20260820_100843_ef4edc advanced on its own with this shape;
     // splitting it into "explain, then move on" stranded the walkthrough.
     expect(text).toMatch(/in that same explanation response/i)
-    expect(text).toMatch(/call focus and zoom_to for the NEXT node/i)
+    expect(text).toMatch(/call present_step for the NEXT subject/i)
     expect(text).toMatch(/waits for your current sentence to finish playing/i)
     expect(text).toMatch(/keeps itself going/i)
   })
@@ -94,7 +94,7 @@ describe('realtime instructions', () => {
     // behind the narration, so she apologised for the lag and explained nodes
     // that were not on screen yet. A step-by-step BUILD must use add_node.
     expect(text).toMatch(/building .* (with the user|together)|co-buil/i)
-    expect(text).toMatch(/add_node.*one at a time|one node at a time/i)
+    expect(text).toMatch(/present_step.*optional add\/connect.*one subject at a time/i)
     expect(text).toMatch(/not speed_draw|never speed_draw|rather than speed_draw/i)
   })
 
@@ -127,7 +127,7 @@ describe('realtime instructions', () => {
   })
 
   it('uses one consistent focus rule and preserves incremental add-then-connect', () => {
-    expect(text).toMatch(/focus automatically.*guided/i)
+    expect(text).toMatch(/present_step.*guided explanations/i)
     expect(text).toMatch(/add_node.*then connect/i)
   })
 

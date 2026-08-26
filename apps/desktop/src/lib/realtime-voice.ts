@@ -31,7 +31,7 @@ const TOUR_GOAL =
 const AMBIGUOUS_GOAL = /\b(show me how|how does (this|it) work|how do these .* (work|fit))\b/i
 
 /** Camera/highlight actions that present exactly one subject. */
-const SUBJECT_ACTIONS = new Set(['add_node', 'focus', 'zoom_to'])
+const SUBJECT_ACTIONS = new Set(['add_node', 'focus', 'present_step', 'zoom_to'])
 
 /** Actions that deliberately return to the whole canvas, ending a tour. */
 const WHOLE_CANVAS_ACTIONS = new Set(['frame_nodes', 'reset_view'])
@@ -39,7 +39,7 @@ const WHOLE_CANVAS_ACTIONS = new Set(['frame_nodes', 'reset_view'])
 const executionSubject = (execution: RealtimeToolExecution): string => {
   try {
     const args = JSON.parse(execution.arguments || '{}') as Record<string, unknown>
-    const id = args.node_id ?? args.id
+    const id = args.subject_id ?? args.node_id ?? args.id
 
     return typeof id === 'string' ? id.trim() : ''
   } catch {
@@ -115,8 +115,8 @@ export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOut
 
   return {
     context:
-      `Already covered, do not repeat: ${presented.join(', ')}. Move to the next subject now: ` +
-      'call focus (and zoom_to) for it in THIS response and explain it in the same breath, ' +
+      `Already covered, do not repeat: ${presented.join(', ')}. Move to ` +
+      'the next subject now: call present_step for it in THIS response and explain it in the same breath, ' +
       'without announcing what you are about to do — no "let\'s look at", no "next we\'ll add". ' +
       'The visual and the explanation must land together. When every subject has been covered, ' +
       'call reset_view to return to the whole canvas and close the explanation.',
@@ -177,7 +177,7 @@ export interface RealtimeServerEventDeps {
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   /** Execute one bounded renderer-local camera command. */
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
+  onCameraCommand?: (command: RealtimeCameraCommand) => boolean | Promise<boolean>
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
@@ -475,7 +475,7 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
+  onCameraCommand?: (command: RealtimeCameraCommand) => boolean | Promise<boolean>
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
@@ -524,7 +524,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds. Focus automatically during guided explanations so the user can track the current node; use zoom_to with it, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'The instant tools land in milliseconds. Use present_step during guided explanations so highlighting and camera framing land together; use focus or zoom_to alone only for a direct one-off visual request. Use rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
   'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -537,11 +537,11 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
   // focus from generated words highlights the whole route before it is heard.
   'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
-  'For a small new diagram, build the explanation live: add or focus exactly one node, then explain only that node while it remains framed. In that same explanation response, call focus and zoom_to for the NEXT node — the canvas waits for your current sentence to finish playing before it moves, so the two stay in step and the walkthrough keeps itself going. Repeat until every node has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and walk it the same way. Do not name future nodes during the current node’s explanation, and never queue more than one node ahead. ' +
+  'For a small new diagram, build the explanation live with present_step: it may create ONE subject, connect it from ONE existing subject, highlight it, and frame it as a single beat. Explain only that subject while its frame remains active. In that same explanation response, call present_step for the NEXT subject — the canvas waits for your current sentence to finish playing before it moves, so the two stay in step and the walkthrough keeps itself going. Repeat until every subject has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and present_step through it the same way. Do not name future subjects during the current subject’s explanation, and never queue more than one beat ahead. ' +
   // Co-building must stay on the instant tools. speed_draw is asynchronous:
   // in one session the canvas landed ~20s behind the narration, so she
   // apologised for the lag and explained nodes that were not on screen yet.
-  'When you are building something with the user step by step, add_node one node at a time and connect it — not speed_draw. The instant tools land in milliseconds, so the canvas keeps pace with your voice; the whole-canvas drawer takes seconds and will leave you talking about boxes the user cannot see yet. ' +
+  'When you are building something with the user step by step, use present_step with its optional add/connect fields one subject at a time — not speed_draw. The atomic beat keeps the graph edit, highlight, and camera together; the whole-canvas drawer takes seconds and will leave you talking about boxes the user cannot see yet. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -605,7 +605,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'speed_draw',
         description:
-          'Generate or restructure the whole canvas without narrating every node. Use ONLY when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. “Show me”, “what would that look like?”, “how does this work?”, and “step by step” instead call for live narrated construction with add_node, focus, and zoom_to.',
+          'Generate or restructure the whole canvas without narrating every node. Use ONLY when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. “Show me”, “what would that look like?”, “how does this work?”, and “step by step” instead call for live narrated construction with present_step and its optional add/connect fields.',
         parameters: {
           type: 'object',
           properties: {
@@ -694,7 +694,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'add_node',
         description:
-          'Add ONE new node directly to the current map. This is the default for small explanatory diagrams requested with “show me”, “what would that look like?”, “how does this work?”, or “step by step”. Add, focus, zoom to, and explain one node before adding the next.',
+          'Add ONE new node directly to the current map for a one-off edit. During a guided build, prefer present_step with its add field so creation, highlight, and camera framing cannot drift apart.',
         parameters: {
           type: 'object',
           properties: {
@@ -708,9 +708,74 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
       },
       {
         type: 'function',
+        name: 'present_step',
+        description:
+          'Present ONE graph/map teaching beat as a single coherent visual action: ring the subject and move the camera around it. Use after add_node/connect when building, or directly for an existing node. Use close for one subject; use context with related node ids to frame a relationship. Then explain only subject_id while this frame remains active.',
+        parameters: {
+          type: 'object',
+          properties: {
+            subject_id: {
+              type: 'string',
+              description: 'The existing node this beat explains and highlights.'
+            },
+            add: {
+              type: 'object',
+              description: 'Optionally create subject_id before presenting it. One node only.',
+              properties: {
+                label: { type: 'string', description: 'Visible label for the new subject.' },
+                kind: { type: 'string', description: 'Optional semantic kind.' }
+              },
+              required: ['label'],
+              additionalProperties: false
+            },
+            connect_from: {
+              type: 'string',
+              description: 'Optionally connect one existing node to subject_id before presenting it.'
+            },
+            edge_label: {
+              type: 'string',
+              description: 'Optional label for connect_from → subject_id.'
+            },
+            pan: {
+              type: 'object',
+              description: 'Optionally reveal adjacent space while keeping subject_id highlighted.',
+              properties: {
+                direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+                amount: { type: 'string', enum: ['small', 'medium', 'large'] }
+              },
+              required: ['direction'],
+              additionalProperties: false
+            },
+            context_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: 7,
+              uniqueItems: true,
+              description: 'Optional related existing nodes to retain in a subsystem frame.'
+            },
+            framing: {
+              type: 'string',
+              enum: ['close', 'context'],
+              description: 'Close frames only the subject; context frames subject plus context_ids.'
+            },
+            anchor: {
+              type: 'string',
+              enum: ['center', 'left', 'right', 'top', 'bottom']
+            },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
+            }
+          },
+          required: ['subject_id'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
         name: 'focus',
         description:
-          'Instantly ring ONE existing node. Use it automatically with zoom_to during guided explanations so the canvas keeps pace with the voice, and to resolve ambiguous references. Keep an already-clear referent framed instead of re-focusing it on every mention. Changes nothing about the ideas themselves.',
+          'Instantly ring ONE existing node for a direct one-off highlight or ambiguous reference. For guided explanations use present_step, which couples this highlight with the correct camera frame. Changes nothing about the ideas themselves.',
         parameters: {
           type: 'object',
           properties: {
@@ -1356,6 +1421,7 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
   }
 
   if (
+    call.name === 'present_step' ||
     call.name === 'focus' ||
     call.name === 'zoom_to' ||
     call.name === 'frame_nodes' ||
@@ -1417,6 +1483,152 @@ export async function executeRealtimeVoiceTool(
   >
 ): Promise<unknown> {
   const { name } = call
+
+  if (name === 'present_step') {
+    let parsed: Record<string, unknown>
+
+    try {
+      const value = JSON.parse(call.arguments || '{}') as unknown
+
+      parsed = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+    } catch {
+      return { error: 'present_step has malformed arguments' }
+    }
+
+    const subjectId = asTrimmedString(parsed.subject_id).slice(0, 200)
+
+    if (!subjectId) {
+      return { error: 'present_step requires a subject_id' }
+    }
+
+    const transition = ['cut', 'dramatic', 'quick', 'smooth'].includes(
+      asTrimmedString(parsed.transition)
+    )
+      ? (parsed.transition as RealtimeCameraTransition)
+      : 'smooth'
+
+    const anchor = ['bottom', 'center', 'left', 'right', 'top'].includes(
+      asTrimmedString(parsed.anchor)
+    )
+      ? (parsed.anchor as RealtimeCameraAnchor)
+      : 'center'
+
+    const rawContextIds = Array.isArray(parsed.context_ids) ? parsed.context_ids : []
+
+    const contextIds = [
+      ...new Set(
+        rawContextIds
+          .filter(contextId => typeof contextId === 'string')
+          .map(contextId => (contextId as string).trim().slice(0, 200))
+          .filter(contextId => contextId && contextId !== subjectId)
+      )
+    ].slice(0, 7)
+
+    if (rawContextIds.length !== contextIds.length) {
+      return { error: 'present_step context_ids must be unique non-empty ids distinct from subject_id' }
+    }
+
+    const framing = parsed.framing === 'context' ? 'context' : 'close'
+
+    if (framing === 'context' && contextIds.length === 0) {
+      return { error: 'present_step context framing requires at least one context_id' }
+    }
+
+    const editResults: Record<string, unknown> = {}
+
+    if (parsed.add !== undefined) {
+      if (!parsed.add || typeof parsed.add !== 'object' || Array.isArray(parsed.add)) {
+        return { error: 'present_step add must be an object with a label' }
+      }
+
+      const add = parsed.add as Record<string, unknown>
+      const label = asTrimmedString(add.label).slice(0, 200)
+      const kind = asTrimmedString(add.kind).slice(0, 200)
+
+      if (!label) {
+        return { error: 'present_step add requires a label' }
+      }
+
+      editResults.add = await deps.request('workbench.edit', {
+        session_id: deps.runtimeSessionId,
+        edit: { id: subjectId, label, op: 'add_node', ...(kind ? { kind } : {}) }
+      })
+    }
+
+    const connectFrom = asTrimmedString(parsed.connect_from).slice(0, 200)
+
+    if (connectFrom) {
+      if (connectFrom === subjectId) {
+        return { error: 'present_step cannot connect a subject to itself' }
+      }
+
+      const label = asTrimmedString(parsed.edge_label).slice(0, 200)
+
+      editResults.connect = await deps.request('workbench.edit', {
+        session_id: deps.runtimeSessionId,
+        edit: {
+          from_id: connectFrom,
+          op: 'connect',
+          to_id: subjectId,
+          ...(label ? { label } : {})
+        }
+      })
+    }
+
+    let pan: { amount: RealtimeCameraAmount; direction: RealtimeCameraPanDirection } | null = null
+
+    if (parsed.pan !== undefined) {
+      if (!parsed.pan || typeof parsed.pan !== 'object' || Array.isArray(parsed.pan)) {
+        return { error: 'present_step pan must be an object with a bounded direction' }
+      }
+
+      const value = parsed.pan as Record<string, unknown>
+      const direction = asTrimmedString(value.direction)
+
+      if (!['down', 'left', 'right', 'up'].includes(direction)) {
+        return { error: 'present_step pan requires a bounded direction' }
+      }
+
+      const amount = ['large', 'medium', 'small'].includes(asTrimmedString(value.amount))
+        ? (value.amount as RealtimeCameraAmount)
+        : 'medium'
+
+      pan = { amount, direction: direction as RealtimeCameraPanDirection }
+    }
+
+    const focusResult = await deps.request('workbench.focus', {
+      session_id: deps.runtimeSessionId,
+      node_id: subjectId
+    })
+
+    const command: RealtimeCameraCommand =
+      pan
+        ? { ...pan, kind: 'pan_view', transition }
+        : framing === 'context'
+        ? {
+            anchor,
+            kind: 'frame_nodes',
+            nodeIds: [subjectId, ...contextIds],
+            padding: 'normal',
+            transition
+          }
+        : { anchor, kind: 'zoom_to', nodeId: subjectId, transition, zoom: 2 }
+
+    return (await deps.onCameraCommand?.(command))
+      ? {
+          camera: pan ? 'pan' : framing,
+          ...(Object.keys(editResults).length ? { edits: editResults } : {}),
+          focus: focusResult,
+          status: 'presented',
+          subject_id: subjectId,
+          ...(contextIds.length ? { context_ids: contextIds } : {})
+        }
+      : {
+          error: 'The presentation subject is not available in the current canvas layout',
+          focus: focusResult,
+          subject_id: subjectId
+        }
+  }
 
   if (
     name === 'zoom_to' ||
@@ -1510,7 +1722,7 @@ export async function executeRealtimeVoiceTool(
       command = { kind: 'reset_view', transition }
     }
 
-    return deps.onCameraCommand?.(command)
+    return (await deps.onCameraCommand?.(command))
       ? { status: command.kind === 'pan_view' ? 'moved' : 'framed' }
       : { error: 'The requested camera target is not available on this canvas' }
   }

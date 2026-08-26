@@ -13,13 +13,22 @@ import {
 } from './realtime-turn-controller'
 
 /**
- * Language that promises a multi-subject presentation. A request matching one
- * of these is not satisfied by explaining a single node — exactly the shape
- * session 20260826_112445_ca2284 ended on: focus(planner), explain planner,
- * tool-free response, turn over with two subjects never visited.
+ * Language that explicitly promises a TOUR: several subjects, in sequence.
+ * A request matching one of these is not satisfied by explaining a single
+ * node — exactly the shape session 20260826_112445_ca2284 ended on:
+ * focus(planner), explain planner, tool-free response, turn over with two
+ * subjects never visited. These may be challenged from the first subject.
  */
-const GUIDED_GOAL =
-  /\b(walk (me )?through|step by step|one (piece|node|part) at a time|show me how|how does (this|it) work|explain (the|this) (whole|entire|full)|take me through)\b/i
+const TOUR_GOAL =
+  /\b(walk (me )?through|step by step|one (piece|node|part) at a time|take me through|go through (it|them|each|every)|explain (the|this) (whole|entire|full))\b/i
+
+/**
+ * Language that MIGHT be a tour but is often a one-shot demonstration —
+ * "show me how you'd add a cache node" is finished by adding that one node.
+ * These earn a challenge only once the model has itself begun a sequence, so
+ * a single-subject answer is never nagged.
+ */
+const AMBIGUOUS_GOAL = /\b(show me how|how does (this|it) work|how do these .* (work|fit))\b/i
 
 /** Camera/highlight actions that present exactly one subject. */
 const SUBJECT_ACTIONS = new Set(['add_node', 'focus', 'zoom_to'])
@@ -67,18 +76,27 @@ export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOut
         }
   }
 
-  if (!GUIDED_GOAL.test(input.turn.goal)) {
+  const tour = TOUR_GOAL.test(input.turn.goal)
+
+  if (!tour && !AMBIGUOUS_GOAL.test(input.turn.goal)) {
     return { kind: 'allow' }
   }
 
-  // A deliberate return to the whole canvas is the model saying "tour over".
-  if (completedTools.some(execution => WHOLE_CANVAS_ACTIONS.has(execution.name))) {
+  const presentations = completedTools.filter(
+    execution => SUBJECT_ACTIONS.has(execution.name) || WHOLE_CANVAS_ACTIONS.has(execution.name)
+  )
+
+  // Ending ON the whole canvas is the model declaring the tour over. Judged
+  // positionally: a subsystem shot EARLY in a tour is a beat, not a finale.
+  const last = presentations.at(-1)
+
+  if (last && WHOLE_CANVAS_ACTIONS.has(last.name)) {
     return { kind: 'allow' }
   }
 
   const presented = [
     ...new Set(
-      completedTools
+      presentations
         .filter(execution => SUBJECT_ACTIONS.has(execution.name))
         .map(executionSubject)
         .filter(Boolean)
@@ -87,7 +105,11 @@ export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOut
 
   // Nothing presented yet: the guided-walkthrough prompt owns that decision,
   // and challenging here would nag during ordinary conversation.
-  if (!presented.length) {
+  //
+  // Ambiguous phrasing needs a visible sequence (2+ subjects) before it earns
+  // a challenge, so "show me how you'd add a cache node" — one add_node, one
+  // spoken answer — is left alone.
+  if (!presented.length || (!tour && presented.length < 2)) {
     return { kind: 'allow' }
   }
 

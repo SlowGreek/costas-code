@@ -236,6 +236,100 @@ describe('fxStyleStopCheckpoint', () => {
     ).toEqual({ kind: 'allow' })
   })
 
+  it('never challenges a greeting or small talk, whatever else is on the canvas', () => {
+    // The user's worry, pinned: saying "Hi" must never trigger the completion
+    // judge. Two independent gates hold here — the goal is not tour language,
+    // and nothing was presented — and beginTurn() resets both per utterance,
+    // so a previous walkthrough cannot leak its goal into this turn.
+    for (const goal of ['Hi', 'Hello', 'you.', 'Are you there?', 'Okay', 'thanks', 'Nice.']) {
+      expect(
+        fxStyleStopCheckpoint({
+          candidateText: 'Hey! What can I help with?',
+          canContinue: true,
+          responseId: 'response-1',
+          stopChallenges: 0,
+          turn: turn({ goal })
+        }),
+        `greeting "${goal}" was challenged`
+      ).toEqual({ kind: 'allow' })
+    }
+  })
+
+  it('does not challenge a one-shot request that merely sounds guided', () => {
+    // "Show me how you'd add a cache node" is satisfied by adding that one
+    // node. Only language that promises a TOUR may be challenged on a single
+    // presented subject.
+    expect(
+      fxStyleStopCheckpoint({
+        candidateText: 'Added it on the right, feeding the planner.',
+        canContinue: true,
+        responseId: 'response-2',
+        stopChallenges: 0,
+        turn: turn({
+          goal: "Show me how you'd add a cache node.",
+          completedActions: ['add_node'],
+          executions: [subject('add_node', '{"id":"cache","label":"Cache"}')]
+        })
+      })
+    ).toEqual({ kind: 'allow' })
+  })
+
+  it('still challenges ambiguous phrasing once a tour is visibly under way', () => {
+    const outcome = fxStyleStopCheckpoint({
+      candidateText: 'That is the executor.',
+      canContinue: true,
+      responseId: 'response-4',
+      stopChallenges: 1,
+      turn: turn({
+        goal: 'Show me how this works.',
+        completedActions: ['focus', 'focus'],
+        executions: [
+          subject('focus', '{"node_id":"planner"}'),
+          subject('focus', '{"node_id":"executor"}')
+        ]
+      })
+    })
+
+    expect(outcome.kind).toBe('continue_once')
+  })
+
+  it('re-arms after a mid-tour frame_nodes so the tour still finishes', () => {
+    // A subsystem shot early in a tour is not the model declaring it over.
+    // Only the MOST RECENT presentation action ending on the whole canvas is.
+    const outcome = fxStyleStopCheckpoint({
+      candidateText: 'And this one revises the plan.',
+      canContinue: true,
+      responseId: 'response-6',
+      stopChallenges: 2,
+      turn: turn({
+        goal: 'Walk me through step by step.',
+        completedActions: ['frame_nodes', 'focus'],
+        executions: [
+          subject('frame_nodes', '{"node_ids":["planner","executor"]}'),
+          subject('focus', '{"node_id":"reviser"}')
+        ]
+      })
+    })
+
+    expect(outcome.kind).toBe('continue_once')
+  })
+
+  it('tolerates malformed tool arguments without counting a subject', () => {
+    expect(
+      fxStyleStopCheckpoint({
+        candidateText: 'Here is the shape of it.',
+        canContinue: true,
+        responseId: 'response-2',
+        stopChallenges: 0,
+        turn: turn({
+          goal: 'Walk me through step by step.',
+          completedActions: ['focus', 'focus'],
+          executions: [subject('focus', 'not-json'), subject('focus', 'null')]
+        })
+      })
+    ).toEqual({ kind: 'allow' })
+  })
+
   it('never challenges once the turn can no longer continue', () => {
     expect(
       fxStyleStopCheckpoint({

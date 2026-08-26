@@ -102,57 +102,90 @@ export interface PendingTranscriptionTracker {
    * a normal turn settles on the real event with no added latency.
    */
   awaitSettled: (timeoutMs?: number) => Promise<void>
-  markPending: () => void
-  settle: () => void
+  markPending: (itemId?: string) => void
+  settle: (itemId?: string) => void
 }
 
 /** Fallback bound for a transcription event that never arrives. */
 export const PENDING_TRANSCRIPTION_TIMEOUT_MS = 4_000
 
 export function createPendingTranscriptionTracker(): PendingTranscriptionTracker {
-  let pending = 0
-  let waiters: Array<() => void> = []
+  let anonymousSequence = 0
+  const pending = new Set<string>()
+  let waiters: Array<{ finish: () => void; itemIds: Set<string> }> = []
 
-  const release = () => {
-    const settled = waiters
-    waiters = []
-    settled.forEach(resolve => resolve())
+  const releaseSettledWaiters = () => {
+    for (const waiter of [...waiters]) {
+      if ([...waiter.itemIds].every(itemId => !pending.has(itemId))) {
+        waiter.finish()
+      }
+    }
   }
 
   return {
     awaitSettled: (timeoutMs = PENDING_TRANSCRIPTION_TIMEOUT_MS) => {
-      if (pending <= 0) {
+      const itemIds = new Set(pending)
+
+      if (itemIds.size === 0) {
         return Promise.resolve()
       }
 
       return new Promise<void>(resolve => {
         let done = false
+        let timer: number | undefined
 
-        const finish = () => {
-          if (done) {
-            return
+        const waiter = {
+          itemIds,
+          finish: () => {
+            if (done) {
+              return
+            }
+
+            done = true
+
+            if (timer !== undefined) {
+              window.clearTimeout(timer)
+            }
+
+            waiters = waiters.filter(candidate => candidate !== waiter)
+            resolve()
           }
-
-          done = true
-          window.clearTimeout(timer)
-          resolve()
         }
+
+        waiters.push(waiter)
 
         // The timer only bounds a lost/slow transcription event; it never
         // paces a healthy turn.
-        const timer = window.setTimeout(finish, timeoutMs)
-        waiters.push(finish)
+        timer = window.setTimeout(() => {
+          // Retire only the utterances this waiter began with. A newer
+          // utterance may commit while this timer is running, and a late
+          // terminal event for an older item must never settle that new work.
+          itemIds.forEach(itemId => pending.delete(itemId))
+          waiter.finish()
+          releaseSettledWaiters()
+        }, timeoutMs)
       })
     },
-    markPending: () => {
-      pending += 1
-    },
-    settle: () => {
-      pending = Math.max(0, pending - 1)
+    markPending: itemId => {
+      const normalized = itemId?.trim()
+      const key = normalized || `anonymous-${++anonymousSequence}`
 
-      if (pending === 0) {
-        release()
+      pending.add(key)
+    },
+    settle: itemId => {
+      const normalized = itemId?.trim()
+
+      if (normalized) {
+        pending.delete(normalized)
+      } else {
+        const oldest = pending.values().next().value
+
+        if (oldest) {
+          pending.delete(oldest)
+        }
       }
+
+      releaseSettledWaiters()
     }
   }
 }
@@ -326,6 +359,8 @@ export interface RealtimeVoiceConnection {
   close: () => void
   /** Seed prior conversation turns so voice continues rather than restarts. */
   seedHistory: (turns: RealtimeTranscript[]) => void
+  /** Refresh continuation truth without rewriting the cached session prompt. */
+  refreshWorkbenchContext: (summary: string) => void
   /** Continue a ready mission without injecting a synthetic user message. */
   resumeMission: (event: RealtimeMissionResumeAction['event']) => boolean
   setMuted: (muted: boolean) => void
@@ -390,7 +425,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds, so use focus, zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'The instant tools land in milliseconds. Use focus when visual anchoring would help the user track a specific node; use zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
   'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -398,23 +433,23 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'The workbench summary places every node in plain language ("upper left", "centre", "far right", and neighbours like "left of: Planner"), and `pointing_at` is the node the user just clicked — they are literally pointing at it. ' +
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
-  'Speak locations the way a person would — "the box on the far right" — and use focus for a single node when the referent would otherwise be ambiguous. ' +
+  'Speak locations the way a person would — "the box on the far right" — and keep an already-clear referent framed instead of re-focusing it on every mention. ' +
   // A walkthrough is intentionally one bounded semantic micro-round per node.
   // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
   // focus from generated words highlights the whole route before it is heard.
-  'During a walkthrough, handle exactly one node per tool round. Focus and zoom_to exactly one node, then in the continuation explain only that node while it remains framed. After that explanation has played, move to the next node and repeat. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
+  'During a walkthrough, handle exactly one node at a time. Focus and zoom_to exactly one node, then explain only that node while it remains framed. After that explanation has played, move to the next node and repeat. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
-  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call visualize with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
+  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call speed_draw with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
 
 const VOICE_OWNED_REDRAW_INSTRUCTIONS =
-  'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. Add and explain one presentation step before moving to the next. When the user asks “what would that look like?”, always perform a real canvas action. Use speed_draw—or the backward-compatible visualize alias—when the user asks for a fast whole-canvas draft, broad layout, or wholesale rethink without narration for every node. The mute diagrammer edits in place with validated operations whenever possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means a speed draw started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
+  'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. When the user asks “what would that look like?”, always perform a real canvas action. Use speed_draw for a fast whole-canvas draft, broad layout, or wholesale rethink without narrating every node. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
-  'You operate inside a real agent loop. One human turn may span several model responses and tool rounds; each response is one inference step, not necessarily the whole user turn. When you call a tool, the harness executes it, returns the tool result, and creates another inference in this same semantic turn. A tool-free response ends the loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. Return a tool-free response only when the original user request is satisfied or you genuinely need their input. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then visualize; snapshot, edit, then inspect again when confirmation matters. Keep the same conversational thought across every inference without greeting, restarting, or recapping.'
+  'You can continue the same user request after each tool result. A response without a tool ends the current work loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. End without another tool only when the original user request is satisfied or you genuinely need their input. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then speed_draw; snapshot, edit, then inspect again when confirmation matters. Keep the same conversational thought throughout without greeting, restarting, or recapping.'
 
 const VOICE_RESEARCH_INSTRUCTIONS =
-  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned artifact_id. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. On a later user turn, call research_status; when ready, use research_search to locate relevant evidence and research_read to inspect only the needed sections before drawing or answering.'
+  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
 
 const WEB_SEARCH_INSTRUCTIONS =
   'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
@@ -454,7 +489,8 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
       {
         type: 'function',
         name: 'session_snapshot',
-        description: 'Read the current Hermes workbench artifacts and their revisions.',
+        description:
+          'Read persisted canvas truth: artifact kinds, nodes, edges, semantic revisions, and view state. Spatial layout and the current pointing target come from the authoritative workbench summary in your context.',
         parameters: {
           type: 'object',
           properties: {},
@@ -463,27 +499,9 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
       },
       {
         type: 'function',
-        name: 'visualize',
-        description:
-          'Backward-compatible whole-diagram drawing through the mute diagrammer. Prefer direct add_node/connect/rename/remove for deliberate live drawing. Use this or speed_draw for a fast whole-canvas draft. ' +
-          'After the first drawing, use it when the requested structure genuinely changed: a new area of the problem, several new ideas at once, or a canvas that no longer matches what you are discussing. ' +
-          'It takes a few seconds, but the diagrammer edits in place with validated ops whenever possible; grouped removals/additions and layout-only changes do not require replacing the artifact. For one label, one link, or one box, use rename / connect / disconnect / remove instead, which are instant.',
-        parameters: {
-          type: 'object',
-          properties: {
-            prompt: {
-              type: 'string',
-              description: 'Optional direction for what the diagrammer should emphasize or correct.'
-            }
-          },
-          additionalProperties: false
-        }
-      },
-      {
-        type: 'function',
         name: 'speed_draw',
         description:
-          'Generate or restructure the whole canvas quickly through the mute diagrammer without narrating every node. Use for fast drafts, broad layouts, or wholesale redraws. For live narrated construction, use add_node and connect incrementally instead.',
+          'Generate or restructure the whole canvas without narrating every node. Use for fast drafts, broad layouts, or wholesale redraws. For live narrated construction, use add_node and connect incrementally instead.',
         parameters: {
           type: 'object',
           properties: {
@@ -588,7 +606,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'focus',
         description:
-          'Instantly ring ONE existing node on the canvas so the user can see which box you mean. Use it whenever you talk about a specific part ("the planner here", "this one on the left") — the user sees the highlight while you speak. Changes nothing about the ideas themselves and needs no full redraw.',
+          'Instantly ring ONE existing node when visual anchoring would help the user track the explanation or resolve an ambiguous reference. Keep an already-clear referent framed instead of re-focusing it on every mention. Changes nothing about the ideas themselves.',
         parameters: {
           type: 'object',
           properties: {
@@ -747,7 +765,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'connect',
         description:
-          'Instantly add ONE link between two nodes that already exist. Use it for "those two are related", "the planner feeds the executor". If either end does not exist yet, call visualize with the new structure so the mute diagrammer can add it.',
+          'Instantly add ONE link between two existing nodes. Use it for "those two are related" or "the planner feeds the executor". If one simple endpoint is missing, call add_node, inspect its result, then connect it. Use speed_draw only when the request requires a broader structural change.',
         parameters: {
           type: 'object',
           properties: {
@@ -1035,6 +1053,9 @@ export async function startRealtimeVoiceConnection(
       })
     },
     close,
+    refreshWorkbenchContext: summary => {
+      workbenchContext = boundWorkbenchContext(summary)
+    },
     seedHistory: turns => {
       if (!channelOpen || closed) {
         return
@@ -1654,14 +1675,14 @@ export async function routeRealtimeServerEvent(
     // transcription becomes in flight. `speech_stopped` is deliberately NOT
     // used too: both fire for the same utterance, so marking on each would
     // leave a permanently unbalanced counter.
-    deps.pendingTranscription?.markPending()
+    deps.pendingTranscription?.markPending(asTrimmedString(event.item_id))
     deps.turnController?.beginTurn()
 
     return
   }
 
   if (type === 'conversation.item.input_audio_transcription.failed') {
-    deps.pendingTranscription?.settle()
+    deps.pendingTranscription?.settle(asTrimmedString(event.item_id))
 
     return
   }
@@ -1681,7 +1702,7 @@ export async function routeRealtimeServerEvent(
       })
     }
 
-    deps.pendingTranscription?.settle()
+    deps.pendingTranscription?.settle(asTrimmedString(event.item_id))
 
     return
   }

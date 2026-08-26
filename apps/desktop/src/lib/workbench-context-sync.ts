@@ -38,6 +38,7 @@ export interface WorkbenchContextSyncOptions {
   appendEvent?: (event: string) => void
   /** Pin/hide state, read lazily so Track B can own the atoms. */
   overlay?: () => WorkbenchContextOverlay
+  /** Refresh the local snapshot used by response-scoped continuations. */
   push: (summary: string) => void
   /** Injected for tests. */
   scheduler?: {
@@ -195,6 +196,10 @@ export function startWorkbenchContextSync(options: WorkbenchContextSyncOptions):
     }
 
     lastSent = summary
+    // Keep response-scoped continuation instructions aligned with the latest
+    // world state without rewriting the session prompt. The short semantic
+    // event below still tells the model what changed.
+    options.push(summary)
 
     let fact: string
 

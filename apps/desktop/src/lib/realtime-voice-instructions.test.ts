@@ -18,7 +18,7 @@ describe('realtime instructions', () => {
   })
 
   it('makes visualization a deliberate voice decision', () => {
-    expect(text).toMatch(/visualize/)
+    expect(text).toMatch(/speed_draw/)
     expect(text).toMatch(/user asks|clearly help/i)
     expect(text).toMatch(/edits? in place/i)
     expect(text).not.toMatch(/draw first/i)
@@ -30,10 +30,10 @@ describe('realtime instructions', () => {
   })
 
   it('teaches the model to act sequentially across one human turn', () => {
-    expect(text).toMatch(/several (?:model )?responses and tool rounds/i)
+    expect(text).toMatch(/continue.*after each tool result/i)
     expect(text).toMatch(/inspect its result/i)
     expect(text).toMatch(/do not schedule dependent actions together/i)
-    expect(text).toMatch(/search.*visualize/i)
+    expect(text).toMatch(/search.*speed_draw/i)
   })
 
   it('delegates research reluctantly without creating a second conversation authority', () => {
@@ -43,13 +43,12 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/do not busy-poll/i)
     expect(text).toMatch(/research_search.*research_read/i)
     expect(text).toMatch(/you remain.*conversation|sole conversational authority/i)
+    expect(text).toMatch(/readiness continuation|safe boundary/i)
   })
 
   it('explains the voice agent loop and its completion signal', () => {
-    expect(text).toMatch(/each response is one inference step/i)
-    expect(text).toMatch(/not necessarily the whole user turn/i)
-    expect(text).toMatch(/tool result.*another inference/i)
-    expect(text).toMatch(/tool-free response ends the loop/i)
+    expect(text).toMatch(/continue.*after each tool result/i)
+    expect(text).toMatch(/response without a tool ends/i)
     expect(text).toMatch(/while work remains.*call the next tool/i)
     expect(text).toMatch(/original user request is satisfied/i)
   })
@@ -82,6 +81,15 @@ describe('realtime instructions', () => {
     for (const tool of ['focus', 'zoom_to', 'rename', 'connect', 'disconnect', 'remove', 'go_back']) {
       expect(text, `${tool} missing from instructions`).toMatch(new RegExp(tool))
     }
+  })
+
+  it('uses one consistent focus rule and preserves incremental add-then-connect', () => {
+    expect(text).toMatch(/focus when visual anchoring.*help/i)
+    expect(text).toMatch(/add_node.*then connect/i)
+  })
+
+  it('keeps implementation vocabulary out of model-facing instructions', () => {
+    expect(text).not.toMatch(/mute diagrammer|backward-compatible|inference step|tool rounds?/i)
   })
 
   it('asks for silent tool calls, which is what removes the audible seam', () => {
@@ -122,7 +130,7 @@ describe('realtime instructions', () => {
     // Reported: "I asked to have it redrawn linearly, she said she did it, but
     // it didn't change." She had no notion that SHAPE was changeable, so a
     // request about arrangement produced a redraw of identical content.
-    expect(text).toMatch(/call visualize with the requested arrangement/i)
+    expect(text).toMatch(/call speed_draw with the requested arrangement/i)
   })
 
   it('does not use generated transcript timing as the walkthrough clock', () => {

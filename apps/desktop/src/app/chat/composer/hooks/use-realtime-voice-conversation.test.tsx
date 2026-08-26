@@ -6,12 +6,13 @@ import { startRealtimeVoiceConnection } from '@/lib/realtime-voice'
 import { $gateway } from '@/store/gateway'
 import { $realtimeMissions } from '@/store/realtime-mission'
 import { setGatewayState } from '@/store/session'
-import { setWorkbenchArtifact } from '@/store/workbench'
+import { setWorkbenchArtifact, setWorkbenchLayout, setWorkbenchSelection } from '@/store/workbench'
 
 import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
 
 const close = vi.fn()
 const appendContext = vi.fn()
+const refreshWorkbenchContext = vi.fn()
 const setMuted = vi.fn()
 const updateWorkbenchContext = vi.fn()
 const awaitPendingTranscription = vi.fn(async () => {})
@@ -24,6 +25,7 @@ vi.mock('@/lib/realtime-voice', () => ({
     appendContext,
     awaitPendingTranscription,
     close,
+    refreshWorkbenchContext,
     resumeMission,
     seedHistory,
     setMuted,
@@ -41,6 +43,8 @@ describe('useRealtimeVoiceConversation', () => {
     vi.clearAllMocks()
     awaitPendingTranscription.mockImplementation(async () => {})
     setWorkbenchArtifact(null)
+    setWorkbenchLayout(null)
+    setWorkbenchSelection(null)
     $realtimeMissions.set({})
     $gateway.set({ request: vi.fn(async () => ({})) } as never)
     setGatewayState('open')
@@ -163,6 +167,47 @@ describe('useRealtimeVoiceConversation', () => {
     await waitFor(() => expect(hook.result.current.status).toBe('listening'))
     expect(updateWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('timeline'))
     expect(updateWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('Phase 1'))
+  })
+
+  it('refreshes continuation truth on selection without rewriting session instructions', async () => {
+    setWorkbenchArtifact({
+      artifact_id: 'map.main',
+      kind: 'map',
+      semantic_rev: 1,
+      view_rev: 1,
+      payload: {
+        edges: [],
+        nodes: [
+          { id: 'planner', label: 'Planner' },
+          { id: 'executor', label: 'Executor' }
+        ]
+      },
+      view_state: {}
+    } as never)
+    setWorkbenchLayout({
+      height: 600,
+      positions: { executor: { x: 500, y: 300 }, planner: { x: 100, y: 100 } },
+      width: 900
+    })
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({ enabled: false, runtimeSessionId: 'runtime-session' })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+    refreshWorkbenchContext.mockClear()
+    updateWorkbenchContext.mockClear()
+    appendContext.mockClear()
+
+    act(() => {
+      setWorkbenchSelection('executor')
+    })
+
+    expect(refreshWorkbenchContext).toHaveBeenCalledWith(expect.stringContaining('"pointing_at":"executor"'))
+    expect(appendContext).toHaveBeenCalledWith(expect.stringContaining('pointing at Executor'))
+    expect(updateWorkbenchContext).not.toHaveBeenCalled()
   })
 
   it('exposes a manual stop-turn interrupt to the composer controls', async () => {

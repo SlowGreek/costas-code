@@ -490,7 +490,43 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         }
 
         if (presentation && response.assistantText.trim()) {
-          await audioEndedPromise
+          const playbackRemainingMs = maxTurnMs - (now() - turn.startedAt)
+
+          if (playbackRemainingMs <= 0) {
+            results.set(call.callId, {
+              executed: false,
+              output: { error: 'Voice playback boundary timed out' },
+              status: 'failure'
+            })
+            finishAudio()
+
+            return
+          }
+
+          const playbackTimeout = Symbol('voice-playback-timeout')
+          let playbackTimeoutId: ReturnType<typeof setTimeout> | undefined
+
+          const playbackOutcome = await Promise.race([
+            audioEndedPromise,
+            new Promise<typeof playbackTimeout>(resolve => {
+              playbackTimeoutId = setTimeout(() => resolve(playbackTimeout), playbackRemainingMs)
+            })
+          ])
+
+          if (playbackTimeoutId !== undefined) {
+            clearTimeout(playbackTimeoutId)
+          }
+
+          if (playbackOutcome === playbackTimeout) {
+            results.set(call.callId, {
+              executed: false,
+              output: { error: 'Voice playback boundary timed out' },
+              status: 'failure'
+            })
+            finishAudio()
+
+            return
+          }
 
           if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {
             return

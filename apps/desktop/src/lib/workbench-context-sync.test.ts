@@ -88,7 +88,7 @@ describe('summarizeWorkbench', () => {
 })
 
 describe('startWorkbenchContextSync', () => {
-  it('appends transitions after startup instead of rewriting the system prompt', () => {
+  it('refreshes continuation truth while appending transitions instead of rewriting the prompt', () => {
     // Codex pattern: one snapshot at startup, semantic events after. Rewriting
     // the full instructions on every canvas change invalidates prompt caching
     // and tells the model only WHAT IS, never WHAT CHANGED.
@@ -114,7 +114,8 @@ describe('startWorkbenchContextSync', () => {
     })
     scheduler.run()
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push.mock.calls[0][0]).toContain('Memory')
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('Memory')
     expect(appendEvent.mock.calls[0][0]).not.toContain('Current canvas state')
@@ -134,7 +135,7 @@ describe('startWorkbenchContextSync', () => {
     appendEvent.mockClear()
     setWorkbenchSelection('planner')
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('pointing at Planner')
     expect(appendEvent.mock.calls[0][0]).toContain('id planner')
@@ -175,7 +176,7 @@ describe('startWorkbenchContextSync', () => {
     appendEvent.mockClear()
     setWorkbenchSelection('planner')
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('pointing at Planner')
     expect(appendEvent.mock.calls[0][0]).toContain('id planner')
@@ -203,7 +204,7 @@ describe('startWorkbenchContextSync', () => {
 
     expect(appendEvent).not.toHaveBeenCalled()
     scheduler.run()
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
     expect(appendEvent).toHaveBeenCalledTimes(1)
     stop()
   })
@@ -222,7 +223,7 @@ describe('startWorkbenchContextSync', () => {
     setWorkbenchArtifact(artifact(2))
     scheduler.run()
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('"revision":2')
     stop()
@@ -244,7 +245,7 @@ describe('startWorkbenchContextSync', () => {
     setWorkbenchLayout({ ...layout })
     scheduler.run()
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledTimes(1)
     expect(appendEvent).toHaveBeenCalledTimes(1)
     expect(appendEvent.mock.calls[0][0]).toContain('"pinned":true')
     stop()

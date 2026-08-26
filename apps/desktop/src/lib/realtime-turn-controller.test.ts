@@ -512,6 +512,37 @@ describe('RealtimeTurnController', () => {
     vi.useRealTimers()
   })
 
+  it('bounds a missing playback-ended event by the semantic-turn deadline', async () => {
+    vi.useFakeTimers()
+    const sent: Record<string, unknown>[] = []
+    const execute = vi.fn(async () => ({ focused: true }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: () => 'gesture',
+      maxTurnMs: 1_000,
+      send: event => sent.push(event)
+    })
+
+    controller.beginTurn('Explain one node, then move to the next.')
+    controller.responseCreated('response-1')
+    controller.assistantAudioStarted()
+    controller.assistantTranscriptDone('response-1', 'The first node controls planning.')
+    controller.functionCallDone(call('response-1', 'call-next-focus', 'focus'))
+    const completing = controller.responseDone('response-1')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await completing
+
+    expect(execute).not.toHaveBeenCalled()
+    const output = sent.find(event => event.type === 'conversation.item.create')
+    expect(JSON.parse((output?.item as { output: string }).output)).toEqual({
+      error: 'Voice playback boundary timed out'
+    })
+    expect(sent.at(-1)).toMatchObject({ response: { tool_choice: 'none' }, type: 'response.create' })
+    vi.useRealTimers()
+  })
+
   it('does not start another action after the turn deadline has elapsed', async () => {
     let now = 0
 

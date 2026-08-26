@@ -428,7 +428,7 @@ export function useRealtimeVoiceConversation({
           }
         },
         push: summary => {
-          connectionRef.current?.updateWorkbenchContext(summary)
+          connectionRef.current?.refreshWorkbenchContext(summary)
         }
       }),
     []

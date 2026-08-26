@@ -93,6 +93,49 @@ describe('createPendingTranscriptionTracker', () => {
     vi.useRealTimers()
   })
 
+  it('retires lost transcription state after the fallback timeout', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const first = vi.fn()
+    const later = vi.fn()
+
+    tracker.markPending()
+    void tracker.awaitSettled().then(first)
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(first).toHaveBeenCalledOnce()
+
+    void tracker.awaitSettled().then(later)
+    await Promise.resolve()
+    expect(later).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('does not let a late retired transcription settle a newer utterance', async () => {
+    vi.useFakeTimers()
+    const tracker = createPendingTranscriptionTracker()
+    const retired = vi.fn()
+    const current = vi.fn()
+
+    tracker.markPending('utterance-a')
+    void tracker.awaitSettled().then(retired)
+    await vi.advanceTimersByTimeAsync(3_990)
+
+    tracker.markPending('utterance-b')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(retired).toHaveBeenCalledOnce()
+
+    tracker.markPending('utterance-c')
+    void tracker.awaitSettled().then(current)
+    tracker.settle('utterance-b')
+    await Promise.resolve()
+    expect(current).not.toHaveBeenCalled()
+
+    tracker.settle('utterance-c')
+    await Promise.resolve()
+    expect(current).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
   it('waits for every in-flight utterance before releasing', async () => {
     vi.useFakeTimers()
     const tracker = createPendingTranscriptionTracker()
@@ -219,7 +262,7 @@ describe('routeRealtimeServerEvent', () => {
       send: vi.fn()
     }
 
-    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed' }, deps)
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed', item_id: 'item-1' }, deps)
     const settled = vi.fn()
     void pendingTranscription.awaitSettled().then(settled)
     await Promise.resolve()
@@ -247,7 +290,7 @@ describe('routeRealtimeServerEvent', () => {
       send: vi.fn()
     }
 
-    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed' }, deps)
+    await routeRealtimeServerEvent({ type: 'input_audio_buffer.committed', item_id: 'item-1' }, deps)
     const settled = vi.fn()
     void pendingTranscription.awaitSettled().then(settled)
     await Promise.resolve()
@@ -259,6 +302,62 @@ describe('routeRealtimeServerEvent', () => {
     )
     await Promise.resolve()
     expect(settled).toHaveBeenCalled()
+  })
+
+  it('routes transcription identities without letting late events settle newer speech', async () => {
+    vi.useFakeTimers()
+    const pendingTranscription = createPendingTranscriptionTracker()
+
+    const deps = {
+      pendingTranscription,
+      request: vi.fn(),
+      runtimeSessionId: 'runtime-session',
+      send: vi.fn()
+    }
+
+    const retired = vi.fn()
+    const current = vi.fn()
+
+    await routeRealtimeServerEvent(
+      { type: 'input_audio_buffer.committed', item_id: 'utterance-a' },
+      deps
+    )
+    void pendingTranscription.awaitSettled().then(retired)
+    await vi.advanceTimersByTimeAsync(3_990)
+    await routeRealtimeServerEvent(
+      { type: 'input_audio_buffer.committed', item_id: 'utterance-b' },
+      deps
+    )
+    await vi.advanceTimersByTimeAsync(10)
+    expect(retired).toHaveBeenCalledOnce()
+
+    await routeRealtimeServerEvent(
+      { type: 'input_audio_buffer.committed', item_id: 'utterance-c' },
+      deps
+    )
+    void pendingTranscription.awaitSettled().then(current)
+    await routeRealtimeServerEvent(
+      {
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'utterance-b',
+        transcript: 'Late prior speech.'
+      },
+      deps
+    )
+    await Promise.resolve()
+    expect(current).not.toHaveBeenCalled()
+
+    await routeRealtimeServerEvent(
+      {
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'utterance-c',
+        transcript: 'Current speech.'
+      },
+      deps
+    )
+    await Promise.resolve()
+    expect(current).toHaveBeenCalledOnce()
+    vi.useRealTimers()
   })
 
   it('bridges session_snapshot function calls to the Hermes gateway', async () => {
@@ -726,10 +825,45 @@ describe('startRealtimeVoiceConnection', () => {
     expect(onConnectionClosed).toHaveBeenCalledOnce()
   })
 
+  it('uses refreshed canvas truth in tool continuations without rewriting the session', async () => {
+    const harness = await connectHarness({}, undefined, async () => ({ artifacts: [] }))
+    harness.open()
+    harness.connection.updateWorkbenchContext('Canvas snapshot: pointing_at=planner')
+    harness.sent.length = 0
+
+    harness.connection.refreshWorkbenchContext('Canvas snapshot: pointing_at=executor')
+    expect(harness.sent).toHaveLength(0)
+
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-snapshot',
+      name: 'session_snapshot',
+      arguments: '{}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(
+        harness.sent
+          .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
+          .find(event => event.type === 'response.create')?.response?.instructions
+      ).toContain('pointing_at=executor')
+    )
+
+    const continuation = harness.sent
+      .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
+      .find(event => event.type === 'response.create')?.response?.instructions
+
+    expect(continuation).not.toContain('pointing_at=planner')
+  })
+
   it('keeps voice as the redraw owner even for a legacy watcher token', async () => {
     // Older backends/configs can still advertise watcher ownership. The client
     // must fail toward the deliberate voice-owned path rather than silently
-    // removing visualize and letting a transcript observer decide when to draw.
+    // removing speed_draw and letting a transcript observer decide when to draw.
     const harness = await connectHarness({
       workbench_watcher: { active: true, owns_redraws: true, pipeline: 'direct' }
     })
@@ -742,19 +876,18 @@ describe('startRealtimeVoiceConnection', () => {
 
     const names = update.session.tools.map(tool => tool.name)
 
-    expect(names).toContain('visualize')
+    expect(names).not.toContain('visualize')
     expect(names).toContain('speed_draw')
     expect(names).toContain('add_node')
     expect(names).toContain('focus')
     expect(names).toContain('go_back')
-    expect(update.session.tools.find(tool => tool.name === 'visualize')?.description).toMatch(
-      /edits? in place/i
-    )
+    expect(update.session.tools.find(tool => tool.name === 'speed_draw')?.description).toMatch(/whole canvas/i)
+    expect(update.session.instructions).toMatch(/edits in place/i)
     expect(update.session.instructions).toMatch(/you decide when the drawing should change/i)
     expect(update.session.instructions).not.toMatch(/background canvas worker owns every full redraw/i)
   })
 
-  it('keeps visualize when the watcher is shadow-only', async () => {
+  it('keeps speed_draw without exposing the legacy alias when the watcher is shadow-only', async () => {
     const harness = await connectHarness({
       workbench_watcher: { active: false, owns_redraws: false, pipeline: 'direct' }
     })
@@ -762,7 +895,8 @@ describe('startRealtimeVoiceConnection', () => {
     harness.open()
     const update = JSON.parse(harness.sent[0]) as { session: { tools: { name: string }[] } }
 
-    expect(update.session.tools.map(tool => tool.name)).toContain('visualize')
+    expect(update.session.tools.map(tool => tool.name)).toContain('speed_draw')
+    expect(update.session.tools.map(tool => tool.name)).not.toContain('visualize')
   })
 
   it('exposes live web search only when the backend advertises it', async () => {
@@ -1237,7 +1371,6 @@ describe('startRealtimeVoiceConnection', () => {
     })
     expect(sessionUpdate.session.tools.map((tool: { name: string }) => tool.name)).toEqual([
       'session_snapshot',
-      'visualize',
       'speed_draw',
       'delegate_research',
       'research_status',
@@ -1257,6 +1390,18 @@ describe('startRealtimeVoiceConnection', () => {
       'disconnect',
       'remove'
     ])
+
+    const toolDescriptions = new Map(
+      sessionUpdate.session.tools.map((tool: { description: string; name: string }) => [
+        tool.name,
+        tool.description
+      ])
+    )
+
+    expect(toolDescriptions.get('session_snapshot')).toMatch(/nodes.*edges.*revisions.*view state/i)
+    expect(toolDescriptions.get('focus')).toMatch(/visual anchoring.*help/i)
+    expect(toolDescriptions.get('connect')).toMatch(/add_node.*then.*connect/i)
+    expect(toolDescriptions.get('connect')).toMatch(/speed_draw.*broad/i)
 
     connection.updateWorkbenchContext('Nodes: GPT Realtime, Workbench canvas. Edge: voice sees canvas.')
     expect(JSON.parse(sent.at(-1) ?? '{}')).toMatchObject({

@@ -54,10 +54,9 @@ describe('realtime instructions', () => {
   })
 
   it('paces walkthrough camera moves with one explanation at a time', () => {
-    expect(text).toMatch(/use add_node, focus, and zoom_to for exactly one node/i)
+    expect(text).toMatch(/add or focus exactly one node/i)
     expect(text).toMatch(/explain only that node/i)
-    expect(text).toMatch(/after (?:that|the current) explanation.*played/i)
-    expect(text).toMatch(/never schedule multiple focus or zoom_to calls together/i)
+    expect(text).toMatch(/never queue more than one node ahead/i)
   })
 
   it('names the next action explicitly instead of saying "move on"', () => {
@@ -73,16 +72,20 @@ describe('realtime instructions', () => {
   it('treats ordinary show-me language as an implicit guided walkthrough', () => {
     expect(text).toMatch(/show me.*what would that look like.*how does this work.*step by step/is)
     expect(text).toMatch(/default.*guided walkthrough/i)
-    expect(text).toMatch(/add_node.*focus.*zoom_to.*explain only that node/is)
+    expect(text).toMatch(/add or focus exactly one node.*explain only that node/is)
     expect(text).toMatch(/user should not have to ask.*each visual action/i)
   })
 
-  it('tells the model to keep going without waiting to be prompted', () => {
-    // The stall shape: the model explains one node, then waits. Nothing was
-    // ever going to prompt it, so the walkthrough ended there.
-    expect(text).toMatch(/you are not waiting for the user/i)
-    expect(text).toMatch(/no one will prompt you between nodes/i)
-    expect(text).toMatch(/keep going until every node has been covered/i)
+  it('asks the model to carry the next focus inside the explanation response', () => {
+    // THE loop contract. A Realtime response cannot be reopened, so a spoken
+    // beat with no tool call ends the semantic turn -- the model must reach
+    // for the next node in the SAME response that explains the current one.
+    // Session 20260820_100843_ef4edc advanced on its own with this shape;
+    // splitting it into "explain, then move on" stranded the walkthrough.
+    expect(text).toMatch(/in that same explanation response/i)
+    expect(text).toMatch(/call focus and zoom_to for the NEXT node/i)
+    expect(text).toMatch(/waits for your current sentence to finish playing/i)
+    expect(text).toMatch(/keeps itself going/i)
   })
 
   it('reserves speed_draw for an explicitly static or all-at-once request', () => {

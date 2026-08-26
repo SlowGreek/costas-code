@@ -359,6 +359,45 @@ describe('RealtimeTurnController', () => {
     expect(controller.activeTurn()).toBeNull()
   })
 
+  it('lets a spoken beat carry the next presentation instead of skipping it', async () => {
+    // Narration debt exists so two focuses cannot fire back-to-back with no
+    // explanation between them. But when the SAME response both explains the
+    // current node and reaches for the next one, the debt is already paid --
+    // skipping that call is what strands a walkthrough after one node.
+    const executed: string[] = []
+
+    const controller = createRealtimeTurnController({
+      execute: async call => {
+        executed.push(call.name)
+
+        return { ok: true }
+      },
+      laneFor: () => 'gesture',
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Walk me through it.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-planner', 'focus'))
+    await controller.responseDone('response-1')
+    expect(executed).toEqual(['focus'])
+
+    // Beat two: explanation AND the next focus in one response.
+    controller.responseCreated('response-2')
+    controller.assistantTranscriptDone('response-2', 'The Planner decides what happens next.')
+    controller.functionCallDone(call('response-2', 'call-executor', 'focus'))
+    const completing = controller.responseDone('response-2')
+
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(executed).toEqual(['focus', 'focus'])
+    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
+      callId: 'call-executor',
+      status: 'success'
+    })
+  })
+
   it('forces a final no-tool response when the round budget is exhausted', async () => {
     const sent: Record<string, unknown>[] = []
 

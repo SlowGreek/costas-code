@@ -1156,6 +1156,81 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
   })
 
+  it('keeps a walkthrough alive across a spoken beat that carries the next focus', async () => {
+    // The 8/20 shape, pinned. The model bundles "explain A + focus B" into one
+    // response, so response.calls is non-empty and the turn does NOT settle.
+    // A spoken beat that also carries the next action must keep the loop alive.
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-1',
+      transcript: 'Walk me through it from the beginning.'
+    })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-planner',
+      name: 'focus',
+      arguments: '{"node_id":"planner"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'planner',
+        session_id: 'runtime-session'
+      })
+    )
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    // Beat two: speech AND the next focus in the same response, with audio
+    // playing. The barrier holds focus(executor) until playback ends.
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({ type: 'output_audio_buffer.started' })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-planner',
+      transcript: 'We start with the Planner. It decides what to do next.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-executor',
+      name: 'focus',
+      arguments: '{"node_id":"executor"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+
+    await Promise.resolve()
+    expect(request).not.toHaveBeenCalledWith('workbench.focus', {
+      node_id: 'executor',
+      session_id: 'runtime-session'
+    })
+
+    harness.emit({ type: 'output_audio_buffer.stopped' })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'executor',
+        session_id: 'runtime-session'
+      })
+    )
+    // The turn is still alive: a second continuation was created, so the model
+    // gets another inference to explain Executor and reach for Reviser.
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
+    )
+  })
+
   it('walks focus A then explanation A then focus B at the audio boundary', async () => {
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
     const harness = await connectHarness({}, undefined, request)

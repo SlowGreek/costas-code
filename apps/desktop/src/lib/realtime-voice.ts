@@ -115,11 +115,11 @@ export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOut
 
   return {
     context:
-      `The user asked to be walked through this, and you have presented ${presented.length} ` +
-      `subject(s) so far: ${presented.join(', ')}. If any subject remains unexplained, move to ` +
-      'the next subject now: focus and zoom to it, then explain only that one. When every ' +
-      'subject has been covered, call reset_view to return to the whole canvas and close the ' +
-      'explanation.',
+      `Already covered, do not repeat: ${presented.join(', ')}. Move to the next subject now: ` +
+      'call focus (and zoom_to) for it in THIS response and explain it in the same breath, ' +
+      'without announcing what you are about to do — no "let\'s look at", no "next we\'ll add". ' +
+      'The visual and the explanation must land together. When every subject has been covered, ' +
+      'call reset_view to return to the whole canvas and close the explanation.',
     kind: 'continue_once'
   }
 }
@@ -538,6 +538,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // focus from generated words highlights the whole route before it is heard.
   'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
   'For a small new diagram, build the explanation live: add or focus exactly one node, then explain only that node while it remains framed. In that same explanation response, call focus and zoom_to for the NEXT node — the canvas waits for your current sentence to finish playing before it moves, so the two stay in step and the walkthrough keeps itself going. Repeat until every node has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and walk it the same way. Do not name future nodes during the current node’s explanation, and never queue more than one node ahead. ' +
+  // Co-building must stay on the instant tools. speed_draw is asynchronous:
+  // in one session the canvas landed ~20s behind the narration, so she
+  // apologised for the lag and explained nodes that were not on screen yet.
+  'When you are building something with the user step by step, add_node one node at a time and connect it — not speed_draw. The instant tools land in milliseconds, so the canvas keeps pace with your voice; the whole-canvas drawer takes seconds and will leave you talking about boxes the user cannot see yet. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'

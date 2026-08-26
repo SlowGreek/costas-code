@@ -88,6 +88,16 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/keeps itself going/i)
   })
 
+  it('keeps a co-built walkthrough on the instant tools, never speed_draw', () => {
+    // Session 20260826_133821_919b47: "let's build a voice agent step by step"
+    // went through speed_draw, which is async and slow. The canvas landed ~20s
+    // behind the narration, so she apologised for the lag and explained nodes
+    // that were not on screen yet. A step-by-step BUILD must use add_node.
+    expect(text).toMatch(/building .* (with the user|together)|co-buil/i)
+    expect(text).toMatch(/add_node.*one at a time|one node at a time/i)
+    expect(text).toMatch(/not speed_draw|never speed_draw|rather than speed_draw/i)
+  })
+
   it('reserves speed_draw for an explicitly static or all-at-once request', () => {
     expect(text).toMatch(/speed_draw only when.*quick draft.*all at once.*rearrange/is)
     expect(text).not.toMatch(/SHAPE[^.]*step by step/i)

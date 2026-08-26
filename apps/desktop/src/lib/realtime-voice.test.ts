@@ -199,8 +199,37 @@ describe('fxStyleStopCheckpoint', () => {
     })
 
     expect(outcome.kind).toBe('continue_once')
-    expect(outcome.kind === 'continue_once' && outcome.context).toMatch(/presented 1/i)
     expect(outcome.kind === 'continue_once' && outcome.context).toMatch(/next subject/i)
+  })
+
+  it('points the continuation at the NEXT subject instead of the finished one', () => {
+    // Session 20260826_133821_919b47: the continuation listed what had already
+    // been presented ("you have presented 1 subject(s): speech-recognition"),
+    // and the model read that list as its topic -- re-explaining Speech
+    // Recognition at 13:40:02 instead of advancing. The challenge must name
+    // what is DONE only as exclusion, and put the instruction on what is next.
+    const outcome = fxStyleStopCheckpoint({
+      candidateText: 'Speech Recognition is the ear of the agent.',
+      canContinue: true,
+      responseId: 'response-3',
+      stopChallenges: 0,
+      turn: turn({
+        goal: 'Walk me through the entire thing.',
+        completedActions: ['focus'],
+        executions: [subject('focus', '{"node_id":"speech-recognition"}')]
+      })
+    })
+
+    const context = outcome.kind === 'continue_once' ? outcome.context : ''
+
+    expect(outcome.kind).toBe('continue_once')
+    // It must forbid re-covering what is done, not merely list it.
+    expect(context).toMatch(/already covered|do not repeat|without repeating/i)
+    expect(context).toMatch(/speech-recognition/)
+    // And it must demand the visual action land WITH the explanation.
+    expect(context).toMatch(/focus/i)
+    // Stage-direction narration is what produced "let's add that layer next".
+    expect(context).toMatch(/without announcing|do not announce/i)
   })
 
   it('allows a walkthrough to end after the canvas has been reset to the whole view', () => {
@@ -1535,7 +1564,7 @@ describe('startRealtimeVoiceConnection', () => {
       .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
       .find(event => event.type === 'response.create')?.response?.instructions
 
-    expect(challenge).toMatch(/presented 1 subject/i)
+    expect(challenge).toMatch(/already covered, do not repeat/i)
     expect(challenge).toMatch(/planner/i)
     expect(challenge).toMatch(/move to the next subject/i)
   })

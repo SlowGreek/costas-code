@@ -951,6 +951,37 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
   })
 
+  it('keeps enough bounded actions for a three-node cinematic walkthrough', async () => {
+    const harness = await connectHarness({}, undefined, async () => ({ artifacts: [] }))
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+
+    for (let index = 0; index < 13; index += 1) {
+      harness.emit({
+        type: 'response.function_call_arguments.done',
+        response_id: 'response-1',
+        call_id: `call-${index}`,
+        name: 'session_snapshot',
+        arguments: '{}'
+      })
+    }
+
+    harness.emit({ type: 'response.done', response: { id: 'response-1' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'conversation.item.create')).toHaveLength(13)
+    )
+
+    const outputs = harness.sent
+      .map(raw => JSON.parse(raw) as { item?: { output?: string }; type: string })
+      .filter(event => event.type === 'conversation.item.create')
+      .map(event => JSON.parse(event.item?.output ?? '{}'))
+
+    expect(outputs).not.toContainEqual({ error: 'Voice action budget exhausted' })
+  })
+
   it('does not resurrect an interrupted turn when a slow tool finishes late', async () => {
     let finishSearch!: (value: unknown) => void
 
@@ -1399,7 +1430,10 @@ describe('startRealtimeVoiceConnection', () => {
     )
 
     expect(toolDescriptions.get('session_snapshot')).toMatch(/nodes.*edges.*revisions.*view state/i)
-    expect(toolDescriptions.get('focus')).toMatch(/visual anchoring.*help/i)
+    expect(toolDescriptions.get('speed_draw')).toMatch(/ONLY.*explicitly.*quick draft.*all at once.*rearrange/is)
+    expect(toolDescriptions.get('speed_draw')).toMatch(/step by step.*live narrated/is)
+    expect(toolDescriptions.get('add_node')).toMatch(/default.*step by step.*focus.*zoom/is)
+    expect(toolDescriptions.get('focus')).toMatch(/automatically.*guided explanations/i)
     expect(toolDescriptions.get('connect')).toMatch(/add_node.*then.*connect/i)
     expect(toolDescriptions.get('connect')).toMatch(/speed_draw.*broad/i)
 

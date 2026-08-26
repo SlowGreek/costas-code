@@ -425,7 +425,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds. Use focus when visual anchoring would help the user track a specific node; use zoom_to, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'The instant tools land in milliseconds. Focus automatically during guided explanations so the user can track the current node; use zoom_to with it, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
   'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -437,16 +437,17 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // A walkthrough is intentionally one bounded semantic micro-round per node.
   // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
   // focus from generated words highlights the whole route before it is heard.
-  'During a walkthrough, handle exactly one node at a time. Focus and zoom_to exactly one node, then explain only that node while it remains framed. After that explanation has played, move to the next node and repeat. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
+  'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
+  'For a small new diagram, build the explanation live: use add_node, focus, and zoom_to for exactly one node, then explain only that node while it remains framed. Because you choose stable node IDs, the next beat may call add_node, connect any now-valid relation, focus, and zoom_to in that order in the same response; those actions happen after the current explanation has played. Repeat one node at a time. If the diagram already exists, use session_snapshot and walk it the same way. Never schedule multiple focus or zoom_to calls together, and do not name future nodes during the current node’s explanation. Return to the whole canvas when the explanation returns to system structure. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
-  'When the user asks about the SHAPE of the diagram rather than its content — "show me this linearly", "as a flow", "step by step", "top down" — call speed_draw with the requested arrangement as its direction. That is a real canvas change, not something to claim in speech without changing the artifact.'
+  'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'
 
 const VOICE_OWNED_REDRAW_INSTRUCTIONS =
-  'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. When the user asks “what would that look like?”, always perform a real canvas action. Use speed_draw for a fast whole-canvas draft, broad layout, or wholesale rethink without narrating every node. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
+  'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. Use speed_draw only when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
-  'You can continue the same user request after each tool result. A response without a tool ends the current work loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. End without another tool only when the original user request is satisfied or you genuinely need their input. When one action depends on another, call the first tool, inspect its result, and continue from there. Do not schedule dependent actions together: search, inspect, then speed_draw; snapshot, edit, then inspect again when confirmation matters. Keep the same conversational thought throughout without greeting, restarting, or recapping.'
+  'You can continue the same user request after each tool result. A response without a tool ends the current work loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. End without another tool only when the original user request is satisfied or you genuinely need their input. When later arguments depend on a result you do not know yet, call the first tool, inspect its result, and continue from there. Do not schedule unknown dependencies together: search, inspect, then speed_draw; snapshot, edit, then inspect again when confirmation matters. The stable-ID walkthrough sequence above is already ordered and may share one response. Keep the same conversational thought throughout without greeting, restarting, or recapping.'
 
 const VOICE_RESEARCH_INSTRUCTIONS =
   'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
@@ -501,7 +502,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'speed_draw',
         description:
-          'Generate or restructure the whole canvas without narrating every node. Use for fast drafts, broad layouts, or wholesale redraws. For live narrated construction, use add_node and connect incrementally instead.',
+          'Generate or restructure the whole canvas without narrating every node. Use ONLY when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. “Show me”, “what would that look like?”, “how does this work?”, and “step by step” instead call for live narrated construction with add_node, focus, and zoom_to.',
         parameters: {
           type: 'object',
           properties: {
@@ -590,7 +591,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'add_node',
         description:
-          'Add ONE new node directly to the current map. Use this to build ideas incrementally while talking. Add and explain one node before adding the next in a stepwise walkthrough. Use visualize/speed_draw only when the user wants a fast whole-canvas draft.',
+          'Add ONE new node directly to the current map. This is the default for small explanatory diagrams requested with “show me”, “what would that look like?”, “how does this work?”, or “step by step”. Add, focus, zoom to, and explain one node before adding the next.',
         parameters: {
           type: 'object',
           properties: {
@@ -606,7 +607,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'focus',
         description:
-          'Instantly ring ONE existing node when visual anchoring would help the user track the explanation or resolve an ambiguous reference. Keep an already-clear referent framed instead of re-focusing it on every mention. Changes nothing about the ideas themselves.',
+          'Instantly ring ONE existing node. Use it automatically with zoom_to during guided explanations so the canvas keeps pace with the voice, and to resolve ambiguous references. Keep an already-clear referent framed instead of re-focusing it on every mention. Changes nothing about the ideas themselves.',
         parameters: {
           type: 'object',
           properties: {
@@ -895,9 +896,9 @@ export async function startRealtimeVoiceConnection(
     baseInstructions: instructions,
     execute: call => executeRealtimeVoiceTool(call, voiceToolDeps),
     laneFor: voiceToolLane,
-    // Enough for one snapshot plus a seven-node guided walkthrough while still
-    // bounding runaway voice loops. Spoken walkthroughs routinely exceed 30s.
-    maxActions: 8,
+    // Enough for a three-node live build with focus, camera, links, and a final
+    // whole-canvas frame while still bounding runaway voice loops.
+    maxActions: 16,
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,

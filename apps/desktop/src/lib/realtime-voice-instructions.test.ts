@@ -19,7 +19,7 @@ describe('realtime instructions', () => {
 
   it('makes visualization a deliberate voice decision', () => {
     expect(text).toMatch(/speed_draw/)
-    expect(text).toMatch(/user asks|clearly help/i)
+    expect(text).toMatch(/user explicitly asks/i)
     expect(text).toMatch(/edits? in place/i)
     expect(text).not.toMatch(/draw first/i)
   })
@@ -32,7 +32,7 @@ describe('realtime instructions', () => {
   it('teaches the model to act sequentially across one human turn', () => {
     expect(text).toMatch(/continue.*after each tool result/i)
     expect(text).toMatch(/inspect its result/i)
-    expect(text).toMatch(/do not schedule dependent actions together/i)
+    expect(text).toMatch(/do not schedule unknown dependencies together/i)
     expect(text).toMatch(/search.*speed_draw/i)
   })
 
@@ -54,10 +54,28 @@ describe('realtime instructions', () => {
   })
 
   it('paces walkthrough camera moves with one explanation at a time', () => {
-    expect(text).toMatch(/focus and zoom_to exactly one node/i)
+    expect(text).toMatch(/use add_node, focus, and zoom_to for exactly one node/i)
     expect(text).toMatch(/explain only that node/i)
-    expect(text).toMatch(/after that explanation has played/i)
+    expect(text).toMatch(/after (?:that|the current) explanation.*played/i)
     expect(text).toMatch(/never schedule multiple focus or zoom_to calls together/i)
+  })
+
+  it('treats ordinary show-me language as an implicit guided walkthrough', () => {
+    expect(text).toMatch(/show me.*what would that look like.*how does this work.*step by step/is)
+    expect(text).toMatch(/default.*guided walkthrough/i)
+    expect(text).toMatch(/add_node.*focus.*zoom_to.*explain only that node/is)
+    expect(text).toMatch(/user should not have to ask.*each visual action/i)
+  })
+
+  it('gives each stable-id walkthrough beat one ordered action sequence', () => {
+    expect(text).toMatch(/add_node.*connect.*focus.*zoom_to.*in that order/is)
+    expect(text).toMatch(/same response/i)
+    expect(text).toMatch(/after the current explanation.*played/i)
+  })
+
+  it('reserves speed_draw for an explicitly static or all-at-once request', () => {
+    expect(text).toMatch(/speed_draw only when.*quick draft.*all at once.*rearrange/is)
+    expect(text).not.toMatch(/SHAPE[^.]*step by step/i)
   })
 
   it('teaches the full cinematic camera grammar without autoplay', () => {
@@ -84,7 +102,7 @@ describe('realtime instructions', () => {
   })
 
   it('uses one consistent focus rule and preserves incremental add-then-connect', () => {
-    expect(text).toMatch(/focus when visual anchoring.*help/i)
+    expect(text).toMatch(/focus automatically.*guided/i)
     expect(text).toMatch(/add_node.*then connect/i)
   })
 

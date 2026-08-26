@@ -112,7 +112,20 @@ def _(rid, params: dict) -> dict:
         try:
             artifact = db.get_session_artifact(stored_session_id, artifact_id)
             if artifact is None:
-                return _err(rid, 4623, f"no artifact {artifact_id} in this session")
+                if edit.get("op") != "add_node":
+                    return _err(rid, 4623, f"no artifact {artifact_id} in this session")
+
+                payload = apply_surgical_edit({"nodes": [], "edges": []}, edit)
+                created = db.create_session_artifact(
+                    stored_session_id,
+                    artifact_id,
+                    kind="map",
+                    payload=payload,
+                    view_state={"positions": {}, "pinned": []},
+                    updated_by="voice-edit",
+                )
+                _emit("artifact.updated", sid, {"artifact": created})
+                return _ok(rid, {"artifact": created})
             if str(artifact.get("kind") or "map") != "map":
                 return _err(rid, 4624, "surgical edits apply to map artifacts only")
 

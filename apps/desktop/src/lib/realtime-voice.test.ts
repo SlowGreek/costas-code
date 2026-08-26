@@ -4,6 +4,7 @@ import {
   boundWorkbenchContext,
   createPendingTranscriptionTracker,
   executeRealtimeVoiceTool,
+  fxStyleStopCheckpoint,
   MAX_WORKBENCH_CONTEXT_CHARS,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
@@ -153,6 +154,102 @@ describe('createPendingTranscriptionTracker', () => {
     await Promise.resolve()
     expect(settled).toHaveBeenCalled()
     vi.useRealTimers()
+  })
+})
+
+describe('fxStyleStopCheckpoint', () => {
+  const turn = (overrides: Record<string, unknown> = {}) =>
+    ({
+      completedActions: [],
+      executions: [],
+      goal: '',
+      id: 'voice-turn-1',
+      remainingActions: 12,
+      remainingToolRounds: 6,
+      toolRounds: 1,
+      ...overrides
+    }) as never
+
+  const subject = (name: string, args: string) => ({
+    arguments: args,
+    callId: `call-${name}`,
+    name,
+    output: {},
+    responseId: 'response-1',
+    status: 'success' as const
+  })
+
+  it('continues a guided walkthrough that has only presented one subject', () => {
+    // The exact live failure: focus(planner) landed, planner was explained,
+    // and the model returned a tool-free response with executor and reviser
+    // still unvisited.
+    const outcome = fxStyleStopCheckpoint({
+      candidateText: 'First, this Planner is where the intent forms.',
+      canContinue: true,
+      responseId: 'response-2',
+      stopChallenges: 0,
+      turn: turn({
+        goal: 'Walk me through step by step.',
+        completedActions: ['focus'],
+        executions: [
+          subject('session_snapshot', '{}'),
+          subject('focus', '{"node_id":"planner"}')
+        ]
+      })
+    })
+
+    expect(outcome.kind).toBe('continue_once')
+    expect(outcome.kind === 'continue_once' && outcome.context).toMatch(/presented 1/i)
+    expect(outcome.kind === 'continue_once' && outcome.context).toMatch(/next subject/i)
+  })
+
+  it('allows a walkthrough to end after the canvas has been reset to the whole view', () => {
+    const outcome = fxStyleStopCheckpoint({
+      candidateText: 'And that closes the loop.',
+      canContinue: true,
+      responseId: 'response-9',
+      stopChallenges: 1,
+      turn: turn({
+        goal: 'Walk me through step by step.',
+        completedActions: ['focus', 'focus', 'focus', 'reset_view'],
+        executions: [
+          subject('focus', '{"node_id":"planner"}'),
+          subject('focus', '{"node_id":"executor"}'),
+          subject('focus', '{"node_id":"reviser"}'),
+          subject('reset_view', '{}')
+        ]
+      })
+    })
+
+    expect(outcome).toEqual({ kind: 'allow' })
+  })
+
+  it('does not challenge an ordinary conversational answer', () => {
+    expect(
+      fxStyleStopCheckpoint({
+        candidateText: 'I am here, listening.',
+        canContinue: true,
+        responseId: 'response-1',
+        stopChallenges: 0,
+        turn: turn({ goal: 'Are you there?' })
+      })
+    ).toEqual({ kind: 'allow' })
+  })
+
+  it('never challenges once the turn can no longer continue', () => {
+    expect(
+      fxStyleStopCheckpoint({
+        candidateText: 'Planner comes first.',
+        canContinue: false,
+        responseId: 'response-2',
+        stopChallenges: 0,
+        turn: turn({
+          goal: 'Walk me through step by step.',
+          completedActions: ['focus'],
+          executions: [subject('focus', '{"node_id":"planner"}')]
+        })
+      })
+    ).toEqual({ kind: 'allow' })
   })
 })
 
@@ -1212,6 +1309,106 @@ describe('startRealtimeVoiceConnection', () => {
       })
     )
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
+  })
+
+  it('challenges a walkthrough that stops after explaining only the first node', async () => {
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-1',
+      transcript: 'Walk me through step by step.'
+    })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-planner',
+      name: 'focus',
+      arguments: '{"node_id":"planner"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith('workbench.focus', {
+        node_id: 'planner',
+        session_id: 'runtime-session'
+      })
+    )
+    // Wait for the round's own continuation: that is the proof the tool round
+    // finished and recorded its execution, which is the evidence the judge
+    // weighs. Emitting the next response before this races that bookkeeping.
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    // The regression: the model explains Planner and stops, leaving Executor
+    // and Reviser unvisited. The completion judge must send it onward.
+    harness.sent.length = 0
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-planner',
+      transcript: 'First, this Planner is where the intent forms.'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    const challenge = harness.sent
+      .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
+      .find(event => event.type === 'response.create')?.response?.instructions
+
+    expect(challenge).toMatch(/presented 1 subject/i)
+    expect(challenge).toMatch(/planner/i)
+    expect(challenge).toMatch(/move to the next subject/i)
+  })
+
+  it('lets a walkthrough end once the model returns to the whole canvas', async () => {
+    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-1',
+      transcript: 'Walk me through step by step.'
+    })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-reset',
+      name: 'reset_view',
+      arguments: '{}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    harness.sent.length = 0
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-2',
+      item_id: 'assistant-close',
+      transcript: 'And that closes the loop.'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(harness.sentTypes()).not.toContain('response.create')
   })
 
   it('draws node A then explains A before drawing node B', async () => {

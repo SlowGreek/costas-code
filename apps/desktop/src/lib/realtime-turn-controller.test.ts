@@ -359,6 +359,71 @@ describe('RealtimeTurnController', () => {
     expect(controller.activeTurn()).toBeNull()
   })
 
+  it('challenges an unfinished goal more than once within its bounded budget', async () => {
+    // The live regression: focus(planner) -> explain planner -> tool-free
+    // response. One challenge is not enough for a three-node walkthrough,
+    // because each beat ends in exactly this shape.
+    const send = vi.fn()
+    const seen: number[] = []
+
+    const stop = vi.fn(async (input: { stopChallenges: number }) => {
+      seen.push(input.stopChallenges)
+
+      return { context: 'Two subjects remain unexplained.', kind: 'continue_once' } as const
+    })
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      maxStopChallenges: 3,
+      send,
+      stop
+    })
+
+    controller.beginTurn('Walk me through every node step by step.')
+
+    for (const index of [1, 2, 3]) {
+      const responseId = `response-${index}`
+
+      controller.responseCreated(responseId)
+      controller.assistantTranscriptDone(responseId, `Beat ${index}.`)
+      await expect(controller.responseDone(responseId)).resolves.toEqual({
+        continued: true,
+        settled: false
+      })
+    }
+
+    expect(seen).toEqual([0, 1, 2])
+    expect(stop).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops challenging once the bounded budget is spent', async () => {
+    const stop = vi.fn(async () => ({ context: 'Still unfinished.', kind: 'continue_once' }) as const)
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      maxStopChallenges: 2,
+      send: vi.fn(),
+      stop
+    })
+
+    controller.beginTurn('Walk me through every node step by step.')
+
+    for (const index of [1, 2]) {
+      controller.responseCreated(`response-${index}`)
+      controller.assistantTranscriptDone(`response-${index}`, `Beat ${index}.`)
+      await controller.responseDone(`response-${index}`)
+    }
+
+    controller.responseCreated('response-3')
+    controller.assistantTranscriptDone('response-3', 'Beat 3.')
+    await expect(controller.responseDone('response-3')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
+    expect(stop).toHaveBeenCalledTimes(2)
+    expect(controller.activeTurn()).toBeNull()
+  })
+
   it('forces a final no-tool response when the round budget is exhausted', async () => {
     const sent: Record<string, unknown>[] = []
 

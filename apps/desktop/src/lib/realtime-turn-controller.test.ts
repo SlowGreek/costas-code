@@ -359,43 +359,69 @@ describe('RealtimeTurnController', () => {
     expect(controller.activeTurn()).toBeNull()
   })
 
-  it('lets a spoken beat carry the next presentation instead of skipping it', async () => {
-    // Narration debt exists so two focuses cannot fire back-to-back with no
-    // explanation between them. But when the SAME response both explains the
-    // current node and reaches for the next one, the debt is already paid --
-    // skipping that call is what strands a walkthrough after one node.
-    const executed: string[] = []
+  it('challenges an unfinished goal more than once within its bounded budget', async () => {
+    // The live regression: focus(planner) -> explain planner -> tool-free
+    // response. One challenge is not enough for a three-node walkthrough,
+    // because each beat ends in exactly this shape.
+    const send = vi.fn()
+    const seen: number[] = []
+
+    const stop = vi.fn(async (input: { stopChallenges: number }) => {
+      seen.push(input.stopChallenges)
+
+      return { context: 'Two subjects remain unexplained.', kind: 'continue_once' } as const
+    })
 
     const controller = createRealtimeTurnController({
-      execute: async call => {
-        executed.push(call.name)
-
-        return { ok: true }
-      },
-      laneFor: () => 'gesture',
-      send: vi.fn()
+      execute: vi.fn(),
+      maxStopChallenges: 3,
+      send,
+      stop
     })
 
-    controller.beginTurn('Walk me through it.')
-    controller.responseCreated('response-1')
-    controller.functionCallDone(call('response-1', 'call-planner', 'focus'))
-    await controller.responseDone('response-1')
-    expect(executed).toEqual(['focus'])
+    controller.beginTurn('Walk me through every node step by step.')
 
-    // Beat two: explanation AND the next focus in one response.
-    controller.responseCreated('response-2')
-    controller.assistantTranscriptDone('response-2', 'The Planner decides what happens next.')
-    controller.functionCallDone(call('response-2', 'call-executor', 'focus'))
-    const completing = controller.responseDone('response-2')
+    for (const index of [1, 2, 3]) {
+      const responseId = `response-${index}`
 
-    controller.assistantAudioEnded()
-    await completing
+      controller.responseCreated(responseId)
+      controller.assistantTranscriptDone(responseId, `Beat ${index}.`)
+      await expect(controller.responseDone(responseId)).resolves.toEqual({
+        continued: true,
+        settled: false
+      })
+    }
 
-    expect(executed).toEqual(['focus', 'focus'])
-    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
-      callId: 'call-executor',
-      status: 'success'
+    expect(seen).toEqual([0, 1, 2])
+    expect(stop).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops challenging once the bounded budget is spent', async () => {
+    const stop = vi.fn(async () => ({ context: 'Still unfinished.', kind: 'continue_once' }) as const)
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      maxStopChallenges: 2,
+      send: vi.fn(),
+      stop
     })
+
+    controller.beginTurn('Walk me through every node step by step.')
+
+    for (const index of [1, 2]) {
+      controller.responseCreated(`response-${index}`)
+      controller.assistantTranscriptDone(`response-${index}`, `Beat ${index}.`)
+      await controller.responseDone(`response-${index}`)
+    }
+
+    controller.responseCreated('response-3')
+    controller.assistantTranscriptDone('response-3', 'Beat 3.')
+    await expect(controller.responseDone('response-3')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
+    expect(stop).toHaveBeenCalledTimes(2)
+    expect(controller.activeTurn()).toBeNull()
   })
 
   it('forces a final no-tool response when the round budget is exhausted', async () => {

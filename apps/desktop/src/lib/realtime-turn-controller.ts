@@ -34,13 +34,6 @@ export interface RealtimeStopInput {
   turn: RealtimeTurnSnapshot
 }
 
-export interface RealtimeTerminalProposalInput {
-  candidateText: string
-  proposal: RealtimeToolExecution
-  responseId: string
-  turn: RealtimeTurnSnapshot
-}
-
 export type RealtimeStopOutcome =
   | { kind: 'allow' }
   | { context: string; kind: 'continue_once'; toolChoice?: 'required' }
@@ -65,9 +58,6 @@ interface RealtimeTurnControllerOptions {
   send: (event: Record<string, unknown>) => void
   stop?: (input: RealtimeStopInput) => Promise<RealtimeStopOutcome> | RealtimeStopOutcome
   turnIdPrefix?: string
-  verifyTerminal?: (
-    input: RealtimeTerminalProposalInput
-  ) => Promise<RealtimeStopOutcome> | RealtimeStopOutcome
 }
 
 interface TrackedCall extends RealtimeTurnToolCall {
@@ -683,51 +673,6 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         return { continued: false, settled: false }
       }
 
-      let terminalRejection: Extract<RealtimeStopOutcome, { kind: 'continue_once' }> | null = null
-
-      const terminalCall = response.calls.find(call => {
-        const result = results.get(call.callId)
-
-        return (
-          (options.laneFor?.(call) ?? 'serial') === 'terminal' &&
-          result?.executed === true &&
-          result.status === 'success'
-        )
-      })
-
-      if (terminalCall && options.verifyTerminal) {
-        const result = results.get(terminalCall.callId)!
-        let verification: RealtimeStopOutcome = { kind: 'allow' }
-
-        try {
-          verification = await options.verifyTerminal({
-            candidateText: response.assistantText,
-            proposal: {
-              arguments: terminalCall.arguments,
-              callId: terminalCall.callId,
-              name: terminalCall.name,
-              output: result.output,
-              responseId: terminalCall.responseId,
-              status: result.status
-            },
-            responseId: response.id,
-            turn: snapshot(turn, maxActions, maxToolRounds)
-          })
-        } catch {
-          verification = { kind: 'allow' }
-        }
-
-        if (verification.kind === 'continue_once') {
-          terminalRejection = verification
-          result.output = {
-            accepted: false,
-            error: 'Completion proposal rejected',
-            reason: verification.context
-          }
-          result.status = 'failure'
-        }
-      }
-
       for (const call of response.calls) {
         const result = results.get(call.callId)
 
@@ -790,14 +735,9 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
             maxActions,
             maxToolRounds,
             finalResponse,
-            options.baseInstructions?.(),
-            terminalRejection?.context
+            options.baseInstructions?.()
           ),
-          ...(finalResponse
-            ? { tool_choice: 'none' }
-            : terminalRejection?.toolChoice
-              ? { tool_choice: terminalRejection.toolChoice }
-              : {})
+          ...(finalResponse ? { tool_choice: 'none' } : {})
         }
       })
 

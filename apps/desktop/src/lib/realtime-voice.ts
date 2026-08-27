@@ -6,124 +6,23 @@ import {
   createRealtimeTurnController,
   type RealtimeStopInput,
   type RealtimeStopOutcome,
-  type RealtimeTerminalProposalInput,
   type RealtimeToolLane,
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
 
-type CompletionVerdict = 'blocked' | 'complete' | 'continue' | 'deferred'
-
-const COMPLETION_JUDGE_INSTRUCTIONS =
-  'You verify whether a realtime agent may stop. Judge the original user goal against the candidate spoken response and ACTUAL tool executions. Promises, introductions, and plans are not completion. Failed or skipped tools do not satisfy the goal. Return verdict complete only when the whole goal is satisfied; blocked only when new user input is required; deferred only when already-dispatched background or external work will resume later; otherwise continue. Never choose the next action and never write a user-facing response. Return only JSON: {"verdict":"complete|continue|blocked|deferred","reason":"one short sentence"}.'
-
-const completionEvidence = (input: RealtimeStopInput | RealtimeTerminalProposalInput): string =>
-  JSON.stringify({
-    candidate_response: input.candidateText.slice(0, 4_000),
-    executions: input.turn.executions.slice(-8).map(execution => ({
-      arguments: execution.arguments.slice(0, 500),
-      name: execution.name,
-      output: (() => {
-        try {
-          return JSON.stringify(execution.output).slice(0, 800)
-        } catch {
-          return String(execution.output).slice(0, 800)
-        }
-      })(),
-      status: execution.status
-    })),
-    goal: input.turn.goal.slice(0, 4_000),
-    proposal: 'proposal' in input ? input.proposal.output : undefined
-  })
-
-const parseCompletionVerdict = (text: string): null | { reason: string; verdict: CompletionVerdict } => {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-
-  if (start < 0 || end <= start) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
-    const verdict = typeof parsed.verdict === 'string' ? parsed.verdict.trim() : ''
-    const reason = typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 500) : ''
-
-    return ['blocked', 'complete', 'continue', 'deferred'].includes(verdict)
-      ? { reason, verdict: verdict as CompletionVerdict }
-      : null
-  } catch {
-    return null
-  }
-}
-
-const completionContinuation = (reason: string): RealtimeStopOutcome => ({
-  context:
-    `Completion verification found the original goal unfinished${reason ? `: ${reason}` : '.'} ` +
-    'Do not speak before acting. Call the next useful tool now, or use finish_turn only with a status supported by the actual state.',
-  kind: 'continue_once',
-  toolChoice: 'required'
-})
-
-export const createSemanticCompletionJudge = (
-  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
-  timeoutMs = 5_000
-) => async (
-  input: RealtimeStopInput | RealtimeTerminalProposalInput
-): Promise<RealtimeStopOutcome> => {
-  if ('canContinue' in input && !input.canContinue) {
+export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
+  if (!input.canContinue) {
     return { kind: 'allow' }
   }
 
-  let timeoutId: ReturnType<typeof setTimeout> | undefined
-
-  try {
-    const timeout = Symbol('completion-judge-timeout')
-
-    const result = await Promise.race([
-      request('llm.oneshot', {
-        input: completionEvidence(input),
-        instructions: COMPLETION_JUDGE_INSTRUCTIONS,
-        max_tokens: 180,
-        task: 'goal_judge',
-        temperature: 0
-      }),
-      new Promise<typeof timeout>(resolve => {
-        timeoutId = setTimeout(() => resolve(timeout), Math.max(250, timeoutMs))
-      })
-    ])
-
-    if (result === timeout || !result || typeof result !== 'object') {
-      return { kind: 'allow' }
-    }
-
-    const text = (result as { text?: unknown }).text
-    const judgment = parseCompletionVerdict(typeof text === 'string' ? text : '')
-
-    if (!judgment) {
-      return { kind: 'allow' }
-    }
-
-    if (!('proposal' in input)) {
-      return judgment.verdict === 'continue'
-        ? completionContinuation(judgment.reason)
-        : { kind: 'allow' }
-    }
-
-    const proposedStatus =
-      input.proposal.output && typeof input.proposal.output === 'object'
-        ? (input.proposal.output as { status?: unknown }).status
-        : undefined
-
-    return judgment.verdict === proposedStatus
-      ? { kind: 'allow' }
-      : completionContinuation(judgment.reason)
-  } catch {
-    return { kind: 'allow' }
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId)
-    }
+  return {
+    context:
+      'This response ended without an explicit finish_turn declaration. Do not speak during this checkpoint. ' +
+      'Reconsider the original user goal and actual tool results. If the whole goal is satisfied, call finish_turn. ' +
+      'Otherwise call the next useful tool now. You are not waiting for the user or another cue.',
+    kind: 'continue_once',
+    toolChoice: 'required'
   }
 }
 
@@ -537,6 +436,7 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
   'The instant tools land in milliseconds. Use present_step during guided explanations so highlighting and camera framing land together; use focus or zoom_to alone only for a direct one-off visual request. Use rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'For a guided visual walkthrough, call present_step for the next item in every nonfinal beat; you are not waiting for the user or another cue between steps. ' +
   'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -1088,8 +988,6 @@ export async function startRealtimeVoiceConnection(
     runtimeSessionId: options.runtimeSessionId
   }
 
-  const completionJudge = createSemanticCompletionJudge(options.request)
-
   const turnController = createRealtimeTurnController({
     baseInstructions: instructions,
     execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
@@ -1103,9 +1001,8 @@ export async function startRealtimeVoiceConnection(
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,
-    stop: completionJudge,
-    turnIdPrefix: `voice-${semanticConnectionId}-turn`,
-    verifyTerminal: completionJudge
+    stop: semanticTurnStopCheckpoint,
+    turnIdPrefix: `voice-${semanticConnectionId}-turn`
   })
 
   /**

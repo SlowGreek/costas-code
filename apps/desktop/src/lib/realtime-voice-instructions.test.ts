@@ -85,6 +85,11 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/actual spoken playback.*one spatial beat/i)
   })
 
+  it('names the walkthrough tool and says no cue will arrive between beats', () => {
+    expect(text).toMatch(/guided visual walkthrough[^.]*call present_step[^.]*nonfinal beat/i)
+    expect(text).toMatch(/not waiting for the user or another cue/i)
+  })
+
   it('reserves speed_draw for explicitly broad or all-at-once work', () => {
     expect(text).toMatch(/speed_draw only for an explicitly quick, all-at-once, rearranged, or wholesale/i)
     expect(text).not.toMatch(/SHAPE[^.]*step by step/i)

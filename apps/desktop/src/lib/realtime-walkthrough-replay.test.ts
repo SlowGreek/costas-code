@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { startRealtimeVoiceConnection } from './realtime-voice'
 
 /**
- * The literal live failure, replayed: session 20260826_112445_ca2284.
+ * The literal live failure, replayed: session 20260827_115245_2bc279.
  *
  * "Let's walk through it from the beginning." -> focus(planner) -> a spoken
  * response that explains Planner and carries NO tool call. Every mocked test
@@ -36,23 +36,18 @@ describe('live walkthrough replay', () => {
 
     const track = { enabled: true, stop: vi.fn() }
 
+    const request = vi.fn(async (method: string) =>
+      method === 'voice.realtime.token'
+        ? { client_secret: 'ek', model: 'gpt-realtime-2.1', voice: 'marin' }
+        : { artifact: { semantic_rev: 2, view_rev: 1 } }
+    )
+
     await startRealtimeVoiceConnection({
       audioFactory: () => ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
       fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => 'answer-sdp' })) as never,
       mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } as never,
       peerConnectionFactory: () => peer as never,
-      request: vi.fn(async (method: string) =>
-        method === 'voice.realtime.token'
-          ? { client_secret: 'ek', model: 'gpt-realtime-2.1', voice: 'marin' }
-          : method === 'llm.oneshot'
-            ? {
-                text: JSON.stringify({
-                  verdict: 'continue',
-                  reason: 'The requested walkthrough is incomplete.'
-                })
-              }
-            : { artifact: { semantic_rev: 2, view_rev: 1 } }
-      ),
+      request,
       runtimeSessionId: 'runtime-session'
     })
 
@@ -60,6 +55,7 @@ describe('live walkthrough replay', () => {
       emit: (event: Record<string, unknown>) =>
         listeners.get('message')?.({ data: JSON.stringify(event) }),
       open: () => listeners.get('open')?.({}),
+      request,
       sent,
       types: () => sent.map(payload => JSON.parse(payload).type as string)
     }
@@ -124,5 +120,6 @@ describe('live walkthrough replay', () => {
       .find(event => event.type === 'response.create')
 
     expect(continuation.response.tool_choice).toBe('required')
+    expect(h.request).not.toHaveBeenCalledWith('llm.oneshot', expect.anything())
   })
 })

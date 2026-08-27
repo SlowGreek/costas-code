@@ -194,10 +194,10 @@ export interface RealtimeTurnController {
 }
 
 export function createRealtimeTurnController(options: RealtimeTurnControllerOptions): RealtimeTurnController {
-  const maxActions = Math.max(1, options.maxActions ?? 8)
+  const maxActions = Math.max(1, options.maxActions ?? 999)
   const maxStopChallenges = Math.max(0, options.maxStopChallenges ?? 1)
-  const maxToolRounds = Math.max(1, options.maxToolRounds ?? 4)
-  const maxTurnMs = Math.max(1_000, options.maxTurnMs ?? 30_000)
+  const maxToolRounds = Math.max(1, options.maxToolRounds ?? 999)
+  const maxTurnMs = Math.max(1_000, options.maxTurnMs ?? 24 * 60 * 60 * 1_000)
   const now = options.now ?? Date.now
   const turnIdPrefix = options.turnIdPrefix?.trim() || 'voice-turn'
 

@@ -562,6 +562,34 @@ describe('RealtimeTurnController', () => {
     })
   })
 
+  it('allows 999 default tool rounds before forcing a final response', async () => {
+    const sent: Record<string, unknown>[] = []
+    let elapsedMs = 0
+
+    const controller = createRealtimeTurnController({
+      execute: async ({ name }) => ({ ok: name }),
+      now: () => elapsedMs,
+      send: event => sent.push(event)
+    })
+
+    controller.beginTurn('Walk through every phase one by one.')
+
+    for (let index = 1; index <= 999; index += 1) {
+      elapsedMs = index * 1_000
+      controller.responseCreated(`response-${index}`)
+      controller.functionCallDone(call(`response-${index}`, `call-${index}`, 'present_step'))
+      await controller.responseDone(`response-${index}`)
+
+      const continuation = sent.at(-1)
+
+      if (index < 999) {
+        expect(continuation).not.toHaveProperty('response.tool_choice')
+      } else {
+        expect(continuation).toMatchObject({ response: { tool_choice: 'none' } })
+      }
+    }
+  })
+
   it('records a structured tool error as failure instead of completed success', async () => {
     const controller = createRealtimeTurnController({
       execute: async () => ({ error: 'camera unavailable', status: 'partial' }),

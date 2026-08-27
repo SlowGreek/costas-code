@@ -53,6 +53,70 @@ describe('RealtimeTurnController', () => {
     expect(outcome).toEqual({ continued: true, settled: false })
   })
 
+  it('settles after a successful terminal declaration without another inference', async () => {
+    const sent: Record<string, unknown>[] = []
+    const execute = vi.fn(async ({ name }: { name: string }) => ({ status: name === 'finish_turn' ? 'complete' : 'ok' }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'finish_turn' ? 'terminal' : 'serial'),
+      maxStopChallenges: 2,
+      send: event => sent.push(event),
+      stop: input => ({
+        context: `The response ended without a completion declaration for: ${input.turn.goal}`,
+        kind: 'continue_once'
+      })
+    })
+
+    controller.beginTurn('Explain whether the cache is healthy.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'The cache is healthy.')
+
+    expect(await controller.responseDone('response-1')).toEqual({ continued: true, settled: false })
+    expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone(call('response-2', 'call-finish', 'finish_turn'))
+
+    expect(await controller.responseDone('response-2')).toEqual({ continued: false, settled: true })
+    expect(sent.filter(event => event.type === 'conversation.item.create')).toHaveLength(1)
+    expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
+    expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('rejects a terminal declaration bundled with an unobserved action', async () => {
+    const sent: Record<string, unknown>[] = []
+
+    const execute = vi.fn(async ({ name }: { name: string }) =>
+      name === 'finish_turn' ? { status: 'complete' } : { focused: 'planner' }
+    )
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'finish_turn' ? 'terminal' : 'edit'),
+      send: event => sent.push(event)
+    })
+
+    controller.beginTurn('Focus the planner and verify the result.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-focus', 'focus'))
+    controller.functionCallDone(call('response-1', 'call-finish', 'finish_turn'))
+
+    expect(await controller.responseDone('response-1')).toEqual({ continued: true, settled: false })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ name: 'focus' }), expect.any(AbortSignal))
+
+    const outputs = sent
+      .filter(event => event.type === 'conversation.item.create')
+      .map(event => JSON.parse((event.item as { output: string }).output))
+
+    expect(outputs).toEqual([
+      { focused: 'planner' },
+      { error: 'finish_turn must be the only tool call in its response' }
+    ])
+    expect(controller.activeTurn()).not.toBeNull()
+  })
+
   it('retains ordered tool arguments and results as execution memory', async () => {
     const send = vi.fn()
 
@@ -279,6 +343,41 @@ describe('RealtimeTurnController', () => {
     })
   })
 
+  it('keeps a checkpoint-selected visual action behind prior response playback', async () => {
+    const execute = vi.fn(async () => ({ focused: 'vad' }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'focus' ? 'gesture' : 'serial'),
+      maxStopChallenges: 2,
+      send: vi.fn(),
+      stop: () => ({ context: 'Choose the next action or finish_turn.', kind: 'continue_once' })
+    })
+
+    controller.beginTurn('Walk through the system.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'Mic audio is the entry point.')
+    await controller.responseDone('response-1')
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone({
+      arguments: '{"node_id":"vad"}',
+      callId: 'call-vad',
+      name: 'focus',
+      responseId: 'response-2'
+    })
+    const completing = controller.responseDone('response-2')
+
+    await Promise.resolve()
+    expect(execute).not.toHaveBeenCalled()
+
+    controller.assistantAudioStarted()
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it('executes a duplicate call id only once', async () => {
     const execute = vi.fn(async () => ({ ok: true }))
     const send = vi.fn()
@@ -325,7 +424,7 @@ describe('RealtimeTurnController', () => {
     expect(controller.turnIdForResponse('response-1')).toBe(turnId)
   })
 
-  it('lets an FX-style Stop checkpoint continue one tool-free candidate once', async () => {
+  it('lets the semantic Stop checkpoint continue a tool-free candidate', async () => {
     const send = vi.fn()
 
     const stop = vi.fn(async input => {
@@ -363,9 +462,9 @@ describe('RealtimeTurnController', () => {
   })
 
   it('challenges an unfinished goal more than once within its bounded budget', async () => {
-    // The live regression: focus(planner) -> explain planner -> tool-free
-    // response. One challenge is not enough for a three-node walkthrough,
-    // because each beat ends in exactly this shape.
+    // Any undertrained Realtime response may speak and omit both the next
+    // action and finish_turn. The recovery budget must handle that shape more
+    // than once without becoming unbounded.
     const send = vi.fn()
     const seen: number[] = []
 

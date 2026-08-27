@@ -6,120 +6,29 @@ import {
   createRealtimeTurnController,
   type RealtimeStopInput,
   type RealtimeStopOutcome,
-  type RealtimeToolExecution,
   type RealtimeToolLane,
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
 
 /**
- * Language that explicitly promises a TOUR: several subjects, in sequence.
- * A request matching one of these is not satisfied by explaining a single
- * node — exactly the shape session 20260826_112445_ca2284 ended on:
- * focus(planner), explain planner, tool-free response, turn over with two
- * subjects never visited. These may be challenged from the first subject.
+ * A tool-free response is a proposed stop, not proof that the user's goal is
+ * complete. Give Realtime one silent inference in which it must either choose
+ * the next useful action or explicitly declare the semantic turn complete or
+ * blocked. The host never interprets the goal or chooses the action.
  */
-const TOUR_GOAL =
-  /\b(walk (me )?through|step by step|one (piece|node|part) at a time|take me through|go through (it|them|each|every)|explain (the|this) (whole|entire|full))\b/i
-
-/**
- * Language that MIGHT be a tour but is often a one-shot demonstration —
- * "show me how you'd add a cache node" is finished by adding that one node.
- * These earn a challenge only once the model has itself begun a sequence, so
- * a single-subject answer is never nagged.
- */
-const AMBIGUOUS_GOAL = /\b(show me how|how does (this|it) work|how do these .* (work|fit))\b/i
-
-/** Camera/highlight actions that present exactly one subject. */
-const SUBJECT_ACTIONS = new Set(['add_node', 'focus', 'present_step', 'zoom_to'])
-
-/** Actions that deliberately return to the whole canvas, ending a tour. */
-const WHOLE_CANVAS_ACTIONS = new Set(['frame_nodes', 'reset_view'])
-
-const executionSubject = (execution: RealtimeToolExecution): string => {
-  try {
-    const args = JSON.parse(execution.arguments || '{}') as Record<string, unknown>
-    const id = args.subject_id ?? args.node_id ?? args.id
-
-    return typeof id === 'string' ? id.trim() : ''
-  } catch {
-    return ''
-  }
-}
-
-/**
- * Decide whether a tool-free response really finished the user's request.
- *
- * The host never decides WHAT to present — only whether the model's own stated
- * goal is visibly unfinished, judged against the actions it actually executed
- * this turn. Ordinary conversation is never challenged.
- */
-export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
+export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
   if (!input.canContinue) {
-    return { kind: 'allow' }
-  }
-
-  const completedTools = input.turn.executions.filter(execution => execution.status === 'success')
-
-  // Silent tool rounds: the original FX case. Work happened with nothing said.
-  // Deliberately one-shot — it is a "you went quiet, say something" nudge, and
-  // repeating it could ping-pong between empty responses. Only the
-  // walkthrough-completion judge below earns repeat challenges, because a
-  // guided tour legitimately ends every beat in a tool-free response.
-  if (!input.candidateText.trim()) {
-    return completedTools.length < 2 || input.stopChallenges > 0
-      ? { kind: 'allow' }
-      : {
-          context:
-            'Summarize your current progress for the user. Explain what the completed tools established before deciding whether another action is needed.',
-          kind: 'continue_once'
-        }
-  }
-
-  const tour = TOUR_GOAL.test(input.turn.goal)
-
-  if (!tour && !AMBIGUOUS_GOAL.test(input.turn.goal)) {
-    return { kind: 'allow' }
-  }
-
-  const presentations = completedTools.filter(
-    execution => SUBJECT_ACTIONS.has(execution.name) || WHOLE_CANVAS_ACTIONS.has(execution.name)
-  )
-
-  // Ending ON the whole canvas is the model declaring the tour over. Judged
-  // positionally: a subsystem shot EARLY in a tour is a beat, not a finale.
-  const last = presentations.at(-1)
-
-  if (last && WHOLE_CANVAS_ACTIONS.has(last.name)) {
-    return { kind: 'allow' }
-  }
-
-  const presented = [
-    ...new Set(
-      presentations
-        .filter(execution => SUBJECT_ACTIONS.has(execution.name))
-        .map(executionSubject)
-        .filter(Boolean)
-    )
-  ]
-
-  // Nothing presented yet: the guided-walkthrough prompt owns that decision,
-  // and challenging here would nag during ordinary conversation.
-  //
-  // Ambiguous phrasing needs a visible sequence (2+ subjects) before it earns
-  // a challenge, so "show me how you'd add a cache node" — one add_node, one
-  // spoken answer — is left alone.
-  if (!presented.length || (!tour && presented.length < 2)) {
     return { kind: 'allow' }
   }
 
   return {
     context:
-      `Already covered, do not repeat: ${presented.join(', ')}. Move to ` +
-      'the next subject now: call present_step for it in THIS response and explain it in the same breath, ' +
-      'without announcing what you are about to do — no "let\'s look at", no "next we\'ll add". ' +
-      'The visual and the explanation must land together. When every subject has been covered, ' +
-      'call reset_view to return to the whole canvas and close the explanation.',
+      'This response ended without an explicit finish_turn declaration. Do not speak during this checkpoint. ' +
+      'Reconsider the original user goal and the actual execution results. If the goal is satisfied, call ' +
+      'finish_turn with status complete. If progress requires new user input, call finish_turn with status blocked. ' +
+      'If already-dispatched background or external work will resume the goal later, call finish_turn with status deferred. ' +
+      'Otherwise call the next useful action now. Do not recap or announce the action.',
     kind: 'continue_once'
   }
 }
@@ -542,15 +451,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
   'Speak locations the way a person would — "the box on the far right" — and keep an already-clear referent framed instead of re-focusing it on every mention. ' +
-  // A walkthrough is intentionally one bounded semantic micro-round per node.
-  // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
-  // focus from generated words highlights the whole route before it is heard.
-  'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
-  'For a small new diagram, build the explanation live with present_step: it may create ONE subject, connect it from ONE existing subject, highlight it, and frame it as a single beat. Explain only that subject while its frame remains active. In that same explanation response, call present_step for the NEXT subject — the canvas waits for your current sentence to finish playing before it moves, so the two stay in step and the walkthrough keeps itself going. Repeat until every subject has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and present_step through it the same way. Do not name future subjects during the current subject’s explanation, and never queue more than one beat ahead. ' +
-  // Co-building must stay on the instant tools. speed_draw is asynchronous:
-  // in one session the canvas landed ~20s behind the narration, so she
-  // apologised for the lag and explained nodes that were not on screen yet.
-  'When you are building something with the user step by step, use present_step with its optional add/connect fields one subject at a time — not speed_draw. The atomic beat keeps the graph edit, highlight, and camera together; the whole-canvas drawer takes seconds and will leave you talking about boxes the user cannot see yet. ' +
+  // Visual tools are capabilities inside the general loop, not a second
+  // graph-specific orchestrator. Realtime chooses the route from the goal and
+  // current state; the host only keeps visible actions synchronized to audio.
+  'When a visual action advances the user’s goal, choose the smallest semantic tool that expresses it. present_step can couple one bounded graph edit with focus and framing when those effects belong to one thought; the individual edit and camera tools remain available when they do not. Keep the current visual result visible while you explain it, and choose what comes next through the same general agent loop. Use speed_draw only for an explicitly quick, all-at-once, rearranged, or wholesale canvas change because it completes asynchronously. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -559,10 +463,13 @@ const VOICE_OWNED_REDRAW_INSTRUCTIONS =
   'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. Use speed_draw only when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
-  'You can continue the same user request after each tool result. A response without a tool ends the current work loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. End without another tool only when the original user request is satisfied or you genuinely need their input. When later arguments depend on a result you do not know yet, call the first tool, inspect its result, and continue from there. Do not schedule unknown dependencies together: search, inspect, then speed_draw; snapshot, edit, then inspect again when confirmation matters. The stable-ID walkthrough sequence above is already ordered and may share one response. Keep the same conversational thought throughout without greeting, restarting, or recapping.'
+  'You operate inside one continuous agent loop for each user request. Each response is one step, not necessarily the whole answer. Act, observe the real result, explain progress when useful, and choose what to do next. Speech is not completion: while work remains, call the next useful tool before the response ends. When the entire user goal is satisfied, call finish_turn with status complete in the same response. When progress genuinely requires new user input, explain what is needed and call finish_turn with status blocked. When already-dispatched background or external work will resume the goal later, explain that it is continuing and call finish_turn with status deferred. A tool-free response is only a candidate stop; the harness may give you a silent checkpoint to call finish_turn or choose the next action. Continue after each tool result without greeting, restarting, or recapping. Run dependent actions sequentially so you can inspect each real result before choosing the next; independent reads may share one response.'
+
+/** Test seam: the agent-loop contract must remain independent of every tool domain. */
+export const VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS = VOICE_ACTION_LOOP_INSTRUCTIONS
 
 const VOICE_RESEARCH_INSTRUCTIONS =
-  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
+  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and call finish_turn with status deferred, naming that continuation in the reason. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
 
 const WEB_SEARCH_INSTRUCTIONS =
   'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
@@ -599,6 +506,24 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
     instructions,
     audio: REALTIME_AUDIO_CONFIG,
     tools: [
+      {
+        type: 'function',
+        name: 'finish_turn',
+        description:
+          'Explicitly end the current semantic turn. Call complete only when the whole request is satisfied; blocked only when progress requires new user input; deferred only when already-dispatched background or external work will resume the goal. Do not use this merely because you have spoken.',
+        parameters: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['complete', 'blocked', 'deferred'] },
+            reason: {
+              type: 'string',
+              description: 'Short internal reason. Required when blocked or deferred; do not speak it as a separate recap.'
+            }
+          },
+          required: ['status'],
+          additionalProperties: false
+        }
+      },
       {
         type: 'function',
         name: 'session_snapshot',
@@ -1073,18 +998,16 @@ export async function startRealtimeVoiceConnection(
     baseInstructions: instructions,
     execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
     laneFor: voiceToolLane,
-    // Enough for a three-node live build with focus, camera, links, and a final
-    // whole-canvas frame while still bounding runaway voice loops.
+    // Bound a useful multi-step voice task without encoding any task-specific
+    // route. Actions, tool rounds, checkpoint retries, and wall time all cap it.
     maxActions: 16,
-    // A guided walkthrough ends EVERY beat in a tool-free response, so the
-    // completion judge must be allowed to challenge more than once. Six covers
-    // a six-subject tour; the action/round/time bounds still cap the turn, and
-    // an ordinary answer is never challenged at all.
+    // Realtime gets several opportunities to recover from a premature stop,
+    // but every recovery must choose a real next action or finish_turn.
     maxStopChallenges: 6,
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,
-    stop: fxStyleStopCheckpoint,
+    stop: semanticTurnStopCheckpoint,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
   })
 
@@ -1419,6 +1342,10 @@ export const SURGICAL_TOOL_NAMES = [
 ] as const
 
 export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): RealtimeToolLane {
+  if (call.name === 'finish_turn') {
+    return 'terminal'
+  }
+
   if (
     call.name === 'session_snapshot' ||
     call.name === 'web_search' ||
@@ -1500,6 +1427,33 @@ export async function executeRealtimeVoiceTool(
   >
 ): Promise<unknown> {
   const { name } = call
+
+  if (name === 'finish_turn') {
+    let parsed: Record<string, unknown>
+
+    try {
+      const value = JSON.parse(call.arguments || '{}') as unknown
+
+      parsed = value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {}
+    } catch {
+      return { error: 'finish_turn has malformed arguments' }
+    }
+
+    const status = asTrimmedString(parsed.status)
+    const reason = asTrimmedString(parsed.reason).slice(0, 500)
+
+    if (status !== 'complete' && status !== 'blocked' && status !== 'deferred') {
+      return { error: 'finish_turn requires status complete, blocked, or deferred' }
+    }
+
+    if ((status === 'blocked' || status === 'deferred') && !reason) {
+      return { error: `finish_turn ${status} requires a reason` }
+    }
+
+    return { ...(reason ? { reason } : {}), status }
+  }
 
   if (name === 'present_step') {
     let parsed: Record<string, unknown>

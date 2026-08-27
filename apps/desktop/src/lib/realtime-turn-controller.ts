@@ -38,7 +38,7 @@ export type RealtimeStopOutcome =
   | { kind: 'allow' }
   | { context: string; kind: 'continue_once' }
 
-export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 'serial' | 'slow'
+export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 'serial' | 'slow' | 'terminal'
 
 interface RealtimeTurnControllerOptions {
   baseInstructions?: () => string
@@ -46,10 +46,9 @@ interface RealtimeTurnControllerOptions {
   laneFor?: (call: RealtimeTurnToolCall) => RealtimeToolLane
   maxActions?: number
   /**
-   * How many times one semantic turn may be challenged for ending early.
-   * A guided walkthrough ends every beat in a tool-free response, so a
-   * single checkpoint (the original FX port) could only ever rescue the
-   * first one.
+   * How many times one semantic turn may be challenged for ending without an
+   * explicit completion declaration. The same bound applies across every tool
+   * domain and remains inside the action/round/time budgets.
    */
   maxStopChallenges?: number
   maxToolRounds?: number
@@ -501,6 +500,16 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         const lane = options.laneFor?.(call) ?? 'serial'
         const presentation = lane === 'gesture' || lane === 'presentation'
 
+        if (lane === 'terminal' && response.calls.length !== 1) {
+          results.set(call.callId, {
+            executed: false,
+            output: { error: 'finish_turn must be the only tool call in its response' },
+            status: 'failure'
+          })
+
+          return
+        }
+
         if (presentation && turn.gestureNarrationPending) {
           results.set(call.callId, {
             executed: false,
@@ -514,7 +523,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
-        if (presentation && response.assistantText.trim()) {
+        if (presentation && (audioPlaying || resolveAudioEnded !== null || response.assistantText.trim())) {
           const playbackRemainingMs = maxTurnMs - (now() - turn.startedAt)
 
           if (playbackRemainingMs <= 0) {
@@ -695,6 +704,23 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
       if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {
         return { continued: false, settled: false }
+      }
+
+      const terminalAccepted = response.calls.some(call => {
+        const result = results.get(call.callId)
+
+        return (
+          (options.laneFor?.(call) ?? 'serial') === 'terminal' &&
+          result?.executed === true &&
+          result.status === 'success'
+        )
+      })
+
+      if (terminalAccepted) {
+        current = null
+        options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
+
+        return { continued: false, settled: true }
       }
 
       const finalResponse =

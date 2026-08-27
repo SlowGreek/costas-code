@@ -4,11 +4,11 @@ import {
   boundWorkbenchContext,
   createPendingTranscriptionTracker,
   executeRealtimeVoiceTool,
-  fxStyleStopCheckpoint,
   MAX_WORKBENCH_CONTEXT_CHARS,
   type RealtimeCameraCommand,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
+  semanticTurnStopCheckpoint,
   startRealtimeVoiceConnection,
   voiceToolLane
 } from './realtime-voice'
@@ -158,7 +158,7 @@ describe('createPendingTranscriptionTracker', () => {
   })
 })
 
-describe('fxStyleStopCheckpoint', () => {
+describe('semanticTurnStopCheckpoint', () => {
   const turn = (overrides: Record<string, unknown> = {}) =>
     ({
       completedActions: [],
@@ -180,211 +180,63 @@ describe('fxStyleStopCheckpoint', () => {
     status: 'success' as const
   })
 
-  it('continues a guided walkthrough that has only presented one subject', () => {
-    // The exact live failure: focus(planner) landed, planner was explained,
-    // and the model returned a tool-free response with executor and reviser
-    // still unvisited.
-    const outcome = fxStyleStopCheckpoint({
-      candidateText: 'First, this Planner is where the intent forms.',
+  it('checks any unfinished semantic turn without task-specific routing', () => {
+    const outcome = semanticTurnStopCheckpoint({
+      candidateText: 'I found the repository and identified the failing package.',
       canContinue: true,
       responseId: 'response-2',
       stopChallenges: 0,
       turn: turn({
-        goal: 'Walk me through step by step.',
-        completedActions: ['focus'],
-        executions: [
-          subject('session_snapshot', '{}'),
-          subject('focus', '{"node_id":"planner"}')
-        ]
-      })
-    })
-
-    expect(outcome.kind).toBe('continue_once')
-    expect(outcome.kind === 'continue_once' && outcome.context).toMatch(/next subject/i)
-  })
-
-  it('points the continuation at the NEXT subject instead of the finished one', () => {
-    // Session 20260826_133821_919b47: the continuation listed what had already
-    // been presented ("you have presented 1 subject(s): speech-recognition"),
-    // and the model read that list as its topic -- re-explaining Speech
-    // Recognition at 13:40:02 instead of advancing. The challenge must name
-    // what is DONE only as exclusion, and put the instruction on what is next.
-    const outcome = fxStyleStopCheckpoint({
-      candidateText: 'Speech Recognition is the ear of the agent.',
-      canContinue: true,
-      responseId: 'response-3',
-      stopChallenges: 0,
-      turn: turn({
-        goal: 'Walk me through the entire thing.',
-        completedActions: ['focus'],
-        executions: [subject('focus', '{"node_id":"speech-recognition"}')]
+        goal: 'Inspect the repository, fix the failing package, and verify the build.',
+        completedActions: ['session_snapshot'],
+        executions: [subject('session_snapshot', '{}')]
       })
     })
 
     const context = outcome.kind === 'continue_once' ? outcome.context : ''
 
     expect(outcome.kind).toBe('continue_once')
-    // It must forbid re-covering what is done, not merely list it.
-    expect(context).toMatch(/already covered|do not repeat|without repeating/i)
-    expect(context).toMatch(/speech-recognition/)
-    // And it must demand the atomic visual beat land WITH the explanation.
-    expect(context).toMatch(/present_step/i)
-    // Stage-direction narration is what produced "let's add that layer next".
-    expect(context).toMatch(/without announcing|do not announce/i)
+    expect(context).toMatch(/finish_turn/i)
+    expect(context).toMatch(/next useful action/i)
+    expect(context).not.toMatch(/node|graph|canvas|subject|present_step|focus/i)
   })
 
-  it('never counts a partially failed presentation as a covered subject', () => {
-    expect(
-      fxStyleStopCheckpoint({
-        candidateText: 'The executor is next.',
-        canContinue: true,
-        responseId: 'response-3',
-        stopChallenges: 0,
-        turn: turn({
-          goal: 'Walk me through step by step.',
-          completedActions: ['present_step'],
-          executions: [
-            {
-              ...subject('present_step', '{"subject_id":"executor"}'),
-              output: { error: 'camera unavailable', status: 'partial' },
-              status: 'failure'
-            }
-          ]
-        })
-      })
-    ).toEqual({ kind: 'allow' })
-  })
+  it('uses the same silent checkpoint for conversation, coding, and visual work', () => {
+    const cases = [
+      { goal: 'Hi', candidateText: 'Hey! Good to hear from you.', executions: [] },
+      {
+        goal: 'Fix the package and verify it.',
+        candidateText: 'I found the failing package.',
+        executions: [subject('session_snapshot', '{}')]
+      },
+      {
+        goal: 'Walk through the graph.',
+        candidateText: 'The planner establishes the intent.',
+        executions: [subject('focus', '{"node_id":"planner"}')]
+      }
+    ]
 
-  it('allows a walkthrough to end after the canvas has been reset to the whole view', () => {
-    const outcome = fxStyleStopCheckpoint({
-      candidateText: 'And that closes the loop.',
-      canContinue: true,
-      responseId: 'response-9',
-      stopChallenges: 1,
-      turn: turn({
-        goal: 'Walk me through step by step.',
-        completedActions: ['focus', 'focus', 'focus', 'reset_view'],
-        executions: [
-          subject('focus', '{"node_id":"planner"}'),
-          subject('focus', '{"node_id":"executor"}'),
-          subject('focus', '{"node_id":"reviser"}'),
-          subject('reset_view', '{}')
-        ]
-      })
-    })
-
-    expect(outcome).toEqual({ kind: 'allow' })
-  })
-
-  it('does not challenge an ordinary conversational answer', () => {
-    expect(
-      fxStyleStopCheckpoint({
-        candidateText: 'I am here, listening.',
-        canContinue: true,
-        responseId: 'response-1',
-        stopChallenges: 0,
-        turn: turn({ goal: 'Are you there?' })
-      })
-    ).toEqual({ kind: 'allow' })
-  })
-
-  it('never challenges a greeting or small talk, whatever else is on the canvas', () => {
-    // The user's worry, pinned: saying "Hi" must never trigger the completion
-    // judge. Two independent gates hold here — the goal is not tour language,
-    // and nothing was presented — and beginTurn() resets both per utterance,
-    // so a previous walkthrough cannot leak its goal into this turn.
-    for (const goal of ['Hi', 'Hello', 'you.', 'Are you there?', 'Okay', 'thanks', 'Nice.']) {
-      expect(
-        fxStyleStopCheckpoint({
-          candidateText: 'Hey! What can I help with?',
-          canContinue: true,
-          responseId: 'response-1',
-          stopChallenges: 0,
-          turn: turn({ goal })
-        }),
-        `greeting "${goal}" was challenged`
-      ).toEqual({ kind: 'allow' })
-    }
-  })
-
-  it('does not challenge a one-shot request that merely sounds guided', () => {
-    // "Show me how you'd add a cache node" is satisfied by adding that one
-    // node. Only language that promises a TOUR may be challenged on a single
-    // presented subject.
-    expect(
-      fxStyleStopCheckpoint({
-        candidateText: 'Added it on the right, feeding the planner.',
+    const outcomes = cases.map(item =>
+      semanticTurnStopCheckpoint({
+        candidateText: item.candidateText,
         canContinue: true,
         responseId: 'response-2',
         stopChallenges: 0,
-        turn: turn({
-          goal: "Show me how you'd add a cache node.",
-          completedActions: ['add_node'],
-          executions: [subject('add_node', '{"id":"cache","label":"Cache"}')]
-        })
+        turn: turn({ goal: item.goal, executions: item.executions })
       })
-    ).toEqual({ kind: 'allow' })
-  })
+    )
 
-  it('still challenges ambiguous phrasing once a tour is visibly under way', () => {
-    const outcome = fxStyleStopCheckpoint({
-      candidateText: 'That is the executor.',
-      canContinue: true,
-      responseId: 'response-4',
-      stopChallenges: 1,
-      turn: turn({
-        goal: 'Show me how this works.',
-        completedActions: ['focus', 'focus'],
-        executions: [
-          subject('focus', '{"node_id":"planner"}'),
-          subject('focus', '{"node_id":"executor"}')
-        ]
-      })
+    expect(outcomes).toHaveLength(3)
+    expect(new Set(outcomes.map(outcome => JSON.stringify(outcome))).size).toBe(1)
+    expect(outcomes[0]).toMatchObject({
+      kind: 'continue_once',
+      context: expect.stringMatching(/do not speak.*finish_turn.*next useful action/is)
     })
-
-    expect(outcome.kind).toBe('continue_once')
-  })
-
-  it('re-arms after a mid-tour frame_nodes so the tour still finishes', () => {
-    // A subsystem shot early in a tour is not the model declaring it over.
-    // Only the MOST RECENT presentation action ending on the whole canvas is.
-    const outcome = fxStyleStopCheckpoint({
-      candidateText: 'And this one revises the plan.',
-      canContinue: true,
-      responseId: 'response-6',
-      stopChallenges: 2,
-      turn: turn({
-        goal: 'Walk me through step by step.',
-        completedActions: ['frame_nodes', 'focus'],
-        executions: [
-          subject('frame_nodes', '{"node_ids":["planner","executor"]}'),
-          subject('focus', '{"node_id":"reviser"}')
-        ]
-      })
-    })
-
-    expect(outcome.kind).toBe('continue_once')
-  })
-
-  it('tolerates malformed tool arguments without counting a subject', () => {
-    expect(
-      fxStyleStopCheckpoint({
-        candidateText: 'Here is the shape of it.',
-        canContinue: true,
-        responseId: 'response-2',
-        stopChallenges: 0,
-        turn: turn({
-          goal: 'Walk me through step by step.',
-          completedActions: ['focus', 'focus'],
-          executions: [subject('focus', 'not-json'), subject('focus', 'null')]
-        })
-      })
-    ).toEqual({ kind: 'allow' })
   })
 
   it('never challenges once the turn can no longer continue', () => {
     expect(
-      fxStyleStopCheckpoint({
+      semanticTurnStopCheckpoint({
         candidateText: 'Planner comes first.',
         canContinue: false,
         responseId: 'response-2',
@@ -399,8 +251,62 @@ describe('fxStyleStopCheckpoint', () => {
   })
 })
 
+describe('finish_turn', () => {
+  it('accepts an explicit complete declaration without touching the gateway', async () => {
+    const request = vi.fn()
+
+    await expect(
+      executeRealtimeVoiceTool(
+        {
+          arguments: JSON.stringify({ status: 'complete', reason: 'The requested comparison is finished.' }),
+          callId: 'call-finish',
+          name: 'finish_turn',
+          responseId: 'response-2'
+        },
+        { request, runtimeSessionId: 'runtime-session' }
+      )
+    ).resolves.toEqual({ reason: 'The requested comparison is finished.', status: 'complete' })
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('accepts deferred work only when a background continuation is named', async () => {
+    await expect(
+      executeRealtimeVoiceTool(
+        {
+          arguments: JSON.stringify({
+            status: 'deferred',
+            reason: 'The delegated evidence collection will resume this goal when ready.'
+          }),
+          callId: 'call-deferred',
+          name: 'finish_turn',
+          responseId: 'response-2'
+        },
+        { request: vi.fn(), runtimeSessionId: 'runtime-session' }
+      )
+    ).resolves.toEqual({
+      reason: 'The delegated evidence collection will resume this goal when ready.',
+      status: 'deferred'
+    })
+  })
+
+  it('requires a reason when declaring the turn blocked', async () => {
+    await expect(
+      executeRealtimeVoiceTool(
+        {
+          arguments: JSON.stringify({ status: 'blocked' }),
+          callId: 'call-finish',
+          name: 'finish_turn',
+          responseId: 'response-2'
+        },
+        { request: vi.fn(), runtimeSessionId: 'runtime-session' }
+      )
+    ).resolves.toEqual({ error: 'finish_turn blocked requires a reason' })
+  })
+})
+
 describe('voiceToolLane', () => {
-  it('classifies reads, gestures, edits, and slow detached work', () => {
+  it('classifies reads, gestures, edits, terminal declarations, and slow detached work', () => {
+    expect(voiceToolLane({ name: 'finish_turn' } as never)).toBe('terminal')
     expect(voiceToolLane({ name: 'session_snapshot' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'web_search' } as never)).toBe('read')
     expect(voiceToolLane({ name: 'research_status' } as never)).toBe('read')
@@ -1494,7 +1400,7 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes()).not.toContain('response.create')
   })
 
-  it('uses the FX Stop checkpoint once after two silent tool rounds', async () => {
+  it('uses the general Stop checkpoint after a tool-free response', async () => {
     const harness = await connectHarness()
 
     harness.open()
@@ -1532,9 +1438,17 @@ describe('startRealtimeVoiceConnection', () => {
       .filter(event => event.type === 'response.create')
       .at(-1)
 
-    expect(recovery.response.instructions).toMatch(/summarize.*current progress/i)
+    expect(recovery.response.instructions).toMatch(/without an explicit finish_turn declaration/i)
+    expect(recovery.response.instructions).toMatch(/next useful action/i)
 
     harness.emit({ type: 'response.created', response: { id: 'response-4' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-4',
+      call_id: 'call-finish',
+      name: 'finish_turn',
+      arguments: '{"status":"complete"}'
+    })
     harness.emit({
       type: 'response.done',
       response: { id: 'response-4', status: 'completed' }
@@ -1544,7 +1458,7 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(3)
   })
 
-  it('finishes ordinary conversation without invoking Stop recovery', async () => {
+  it('checks ordinary conversation silently before accepting completion', async () => {
     const harness = await connectHarness()
 
     harness.open()
@@ -1558,12 +1472,31 @@ describe('startRealtimeVoiceConnection', () => {
       transcript: 'Hey, how are you?'
     })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    const checkpoint = harness.sent
+      .map(payload => JSON.parse(payload) as { response?: { instructions?: string }; type: string })
+      .find(event => event.type === 'response.create')?.response?.instructions
+
+    expect(checkpoint).toMatch(/do not speak during this checkpoint/i)
+
+    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-finish',
+      name: 'finish_turn',
+      arguments: '{"status":"complete"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
     await Promise.resolve()
 
-    expect(harness.sentTypes()).not.toContain('response.create')
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
   })
 
-  it('finishes a one-shot tool answer without invoking Stop recovery', async () => {
+  it('checks a one-shot tool answer before accepting completion', async () => {
     const harness = await connectHarness()
 
     harness.open()
@@ -1590,9 +1523,22 @@ describe('startRealtimeVoiceConnection', () => {
       transcript: 'The canvas contains one map.'
     })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
+    )
+
+    harness.emit({ type: 'response.created', response: { id: 'response-3' } })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-3',
+      call_id: 'call-finish',
+      name: 'finish_turn',
+      arguments: '{"status":"complete"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-3', status: 'completed' } })
     await Promise.resolve()
 
-    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
   })
 
   it('keeps focus and camera together when a spoken beat carries present_step', async () => {
@@ -1850,12 +1796,16 @@ describe('startRealtimeVoiceConnection', () => {
       .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
       .find(event => event.type === 'response.create')?.response?.instructions
 
-    expect(challenge).toMatch(/already covered, do not repeat/i)
-    expect(challenge).toMatch(/planner/i)
-    expect(challenge).toMatch(/move to the next subject/i)
+    expect(challenge).toMatch(/without an explicit finish_turn declaration/i)
+    expect(challenge).toMatch(/original user goal/i)
+    expect(challenge).toMatch(/next useful action/i)
+
+    const stopContext = challenge?.match(/Stop checkpoint context:\n([\s\S]*?)\n\nCompleted actions:/)?.[1] ?? ''
+
+    expect(stopContext).not.toMatch(/planner|node|subject|present_step|focus/i)
   })
 
-  it('lets a walkthrough end once the model returns to the whole canvas', async () => {
+  it('ends a completed walkthrough through the same explicit terminal declaration', async () => {
     const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
     const harness = await connectHarness({}, undefined, request)
 
@@ -1887,6 +1837,13 @@ describe('startRealtimeVoiceConnection', () => {
       response_id: 'response-2',
       item_id: 'assistant-close',
       transcript: 'And that closes the loop.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-2',
+      call_id: 'call-finish',
+      name: 'finish_turn',
+      arguments: '{"status":"complete","reason":"The full walkthrough is complete."}'
     })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
     await Promise.resolve()
@@ -2082,6 +2039,7 @@ describe('startRealtimeVoiceConnection', () => {
       session: { tool_choice: 'auto' }
     })
     expect(sessionUpdate.session.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      'finish_turn',
       'session_snapshot',
       'speed_draw',
       'delegate_research',

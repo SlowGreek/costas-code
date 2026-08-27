@@ -23,6 +23,9 @@ const orderOf = (p: OAuthProvider) => PROVIDER_DISPLAY[p.id]?.order ?? 99
 export const sortProviders = (providers: OAuthProvider[]) =>
   [...providers].sort((a, b) => orderOf(a) - orderOf(b) || a.name.localeCompare(b.name))
 
+export const catalystProviders = (providers: OAuthProvider[]) =>
+  providers.filter(provider => provider.id === 'copilot' || provider.id === 'github-copilot')
+
 export function FeaturedProviderRow({
   onSelect,
   provider

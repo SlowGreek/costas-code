@@ -6343,6 +6343,23 @@ def resolve_provider_client(
     # Normalise aliases
     provider = _normalize_aux_provider(provider)
 
+    # Provider policy is enforced at the auxiliary router too: title generation,
+    # compression, vision, approval, and plugin-side LLM calls do not pass
+    # through the primary runtime resolver. ``auto`` becomes the first allowed
+    # provider so the built-in discovery chain cannot escape the allowlist.
+    from hermes_cli.config import load_config
+    from hermes_cli.provider_policy import (
+        configured_allowed_providers,
+        require_provider_allowed,
+    )
+
+    _policy_config = load_config()
+    _allowed_providers = configured_allowed_providers(_policy_config)
+    if provider == "auto" and _allowed_providers:
+        provider = _allowed_providers[0]
+        original_provider = provider
+    require_provider_allowed(provider, _policy_config)
+
     # MoA virtual provider chokepoint: "moa" is not a real HTTP provider —
     # its acting model is the preset's aggregator slot. The two resolver
     # layers above (_resolve_auto, _resolve_task_provider_model) already
@@ -7355,6 +7372,20 @@ def resolve_vision_provider_client(
         "vision", provider, model, base_url, api_key
     )
     requested = _normalize_vision_provider(requested)
+
+    # Vision owns a separate strict-backend fallback ladder and can bypass
+    # resolve_provider_client(). Apply the same policy before that ladder runs.
+    from hermes_cli.config import load_config
+    from hermes_cli.provider_policy import (
+        configured_allowed_providers,
+        require_provider_allowed,
+    )
+
+    _policy_config = load_config()
+    _allowed_providers = configured_allowed_providers(_policy_config)
+    if requested == "auto" and _allowed_providers:
+        requested = _allowed_providers[0]
+    require_provider_allowed(requested, _policy_config)
 
     def _finalize(resolved_provider: str, sync_client: Any, default_model: Optional[str]):
         if sync_client is None:

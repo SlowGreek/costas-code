@@ -117,3 +117,27 @@ def test_cli_picker_hides_excluded_provider_by_alias(config_home):
     )
 
 
+def test_cli_picker_allowlist_offers_only_github_copilot(config_home):
+    _write_config(
+        config_home,
+        **{
+            "model": {"provider": "github-copilot", "default": "gpt-5.6-sol"},
+            "model_catalog": {"allowed_providers": ["github-copilot"]},
+            "providers": {
+                "local-proxy": {
+                    "name": "Local Proxy",
+                    "base_url": "http://127.0.0.1:9000/v1",
+                    "model": "local-model",
+                }
+            },
+        },
+    )
+
+    labels = _capture_provider_labels(config_home)
+
+    assert any("GitHub Copilot" in label for label in labels)
+    assert not any("Custom endpoint" in label for label in labels)
+    assert not any("Local Proxy" in label for label in labels)
+    assert not any("OpenRouter" in label for label in labels)
+
+

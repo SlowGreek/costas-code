@@ -42,6 +42,7 @@ from hermes_cli.auth import (
 )
 from hermes_cli.config import (
     get_compatible_custom_providers,
+    is_provider_enabled,
     load_config,
     normalize_extra_headers,
 )
@@ -1789,6 +1790,21 @@ def resolve_runtime_provider(
     """
     requested_provider = resolve_requested_provider(requested)
 
+    # A configured provider allowlist is an execution boundary, not merely a
+    # picker filter.  Resolve ``auto`` deterministically to the first allowed
+    # route so ambient credentials can never escape the policy, then reject
+    # explicit/fallback/channel overrides before touching their credentials.
+    from hermes_cli.provider_policy import (
+        configured_allowed_providers,
+        require_provider_allowed,
+    )
+
+    _full_cfg = load_config()
+    _allowed_providers = configured_allowed_providers(_full_cfg)
+    if requested_provider == "auto" and _allowed_providers:
+        requested_provider = _allowed_providers[0]
+    require_provider_allowed(requested_provider, _full_cfg)
+
     # Honour ``providers.<name>.enabled: false`` for BOTH user-defined
     # custom providers and the built-in ones (openai / anthropic /
     # openrouter / gemini / ...). The earlier ``_get_named_custom_provider``
@@ -1799,8 +1815,6 @@ def resolve_runtime_provider(
     #
     # Fail fast with a typed error so the fallback chain can advance to
     # the next provider instead of using a disabled one.
-    from hermes_cli.config import is_provider_enabled, load_config
-    _full_cfg = load_config()
     _provs_cfg = _full_cfg.get("providers") if isinstance(_full_cfg, dict) else None
     if isinstance(_provs_cfg, dict):
         _block = _provs_cfg.get(requested_provider)

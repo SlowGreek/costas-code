@@ -7655,6 +7655,9 @@ def _apply_model_assignment_sync(
         if not provider or not model:
             raise HTTPException(status_code=400, detail="provider and model required for main")
         provider, model = _normalize_main_model_assignment(provider, model)
+        from hermes_cli.provider_policy import require_provider_allowed
+
+        require_provider_allowed(provider, cfg)
         providers_cfg = cfg.get("providers")
         provider_entry = providers_cfg.get(provider) if isinstance(providers_cfg, dict) else None
         if not base_url and isinstance(provider_entry, dict) and provider_entry.get("base_url"):
@@ -7794,6 +7797,10 @@ def _apply_model_assignment_sync(
 
     if not provider:
         raise HTTPException(status_code=400, detail="provider required for auxiliary")
+    if provider.strip().lower() not in {"auto", "main"}:
+        from hermes_cli.provider_policy import require_provider_allowed
+
+        require_provider_allowed(provider, cfg)
 
     targets = [task] if task else list(_AUX_TASK_SLOTS)
     for slot in targets:
@@ -8167,8 +8174,11 @@ async def get_env_vars(profile: Optional[str] = None):
 def _get_env_vars_sync(profile: Optional[str] = None):
     with _profile_scope(profile):
         env_on_disk = load_env()
+        catalog_meta = _catalog_provider_env_metadata()
+        from hermes_cli.provider_policy import configured_allowed_providers
+
+        provider_allowlist_active = bool(configured_allowed_providers(load_config()))
     channel_keys = _channel_managed_env_keys()
-    catalog_meta = _catalog_provider_env_metadata()
 
     def _row(var_name: str, info: dict, *, custom: bool = False) -> dict:
         value = env_on_disk.get(var_name)
@@ -8203,6 +8213,12 @@ def _get_env_vars_sync(profile: Optional[str] = None):
 
     result = {}
     for var_name, info in OPTIONAL_ENV_VARS.items():
+        if (
+            provider_allowlist_active
+            and info.get("category") == "provider"
+            and var_name not in catalog_meta
+        ):
+            continue
         result[var_name] = _row(var_name, info)
     # Synthesize rows for catalog provider env vars that have no hand entry in
     # OPTIONAL_ENV_VARS — these are the providers that were CLI-configurable but
@@ -15204,6 +15220,9 @@ def _write_profile_model(profile_dir: Path, provider: str, model: str) -> None:
     try:
         provider, model = _normalize_main_model_assignment(provider, model)
         cfg = load_config()
+        from hermes_cli.provider_policy import require_provider_allowed
+
+        require_provider_allowed(provider, cfg)
         cfg["model"] = _apply_main_model_assignment(cfg.get("model", {}), provider, model)
         save_config(cfg)
     finally:

@@ -52,7 +52,8 @@ class ConfigContext:
     current_base_url: str
     user_providers: dict
     custom_providers: list
-    excluded_providers: list = None
+    excluded_providers: list | None = None
+    allowed_providers: list | None = None
 
     def with_overrides(
         self,
@@ -97,7 +98,11 @@ def load_picker_context() -> ConfigContext:
         current_provider = ""
         current_base_url = ""
     raw = cfg.get("providers")
-    excluded = cfg.get("model_catalog", {}).get("excluded_providers") or []
+    model_catalog = cfg.get("model_catalog")
+    if not isinstance(model_catalog, dict):
+        model_catalog = {}
+    excluded = model_catalog.get("excluded_providers") or []
+    allowed = model_catalog.get("allowed_providers") or []
     return ConfigContext(
         current_provider=current_provider,
         current_model=current_model,
@@ -105,6 +110,7 @@ def load_picker_context() -> ConfigContext:
         user_providers=raw if isinstance(raw, dict) else {},
         custom_providers=get_compatible_custom_providers(cfg),
         excluded_providers=excluded if isinstance(excluded, list) else [],
+        allowed_providers=allowed if isinstance(allowed, list) else [],
     )
 
 
@@ -262,6 +268,14 @@ def build_models_payload(
 
     if include_unconfigured:
         rows = list(rows) + [r for r in _append_unconfigured_rows(rows, ctx) if str(r.get("slug", "")).lower() != "moa"]
+
+    if ctx.allowed_providers:
+        from hermes_cli.provider_policy import filter_allowed_provider_rows
+
+        rows = filter_allowed_provider_rows(
+            rows,
+            {"model_catalog": {"allowed_providers": ctx.allowed_providers}},
+        )
     if picker_hints:
         _apply_picker_hints(rows)
     if canonical_order:

@@ -30,18 +30,16 @@ import type { ModelOptionProvider, OAuthProvider } from '@/types/hermes'
 
 import { DocsLink, FlowPanel, Status } from './flow'
 import {
+  catalystProviders,
   FeaturedProviderRow,
-  FireworksProviderRow,
-  OpenRouterProviderRow,
   ProviderRow,
   sortProviders
 } from './providers'
 
 export {
+  catalystProviders,
   FeaturedProviderRow,
-  FireworksProviderRow,
   KeyProviderRow,
-  OpenRouterProviderRow,
   ProviderRow,
   providerTitle,
   sortProviders
@@ -64,45 +62,13 @@ export interface ApiKeyOption {
   short?: string
 }
 
-// Curated order mirrors CANONICAL_PROVIDERS: Fireworks sits #2 overall (after
-// Nous Portal OAuth), ahead of OpenRouter and the rest of the key catalog.
+// Catalyst accepts a GitHub Copilot token as its only manual credential path.
 const API_KEY_OPTIONS: ApiKeyOption[] = [
   {
-    id: 'fireworks',
-    name: 'Fireworks AI',
-    envKey: 'FIREWORKS_API_KEY',
-    docsUrl: 'https://app.fireworks.ai/settings/users/api-keys'
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    envKey: 'OPENROUTER_API_KEY',
-    docsUrl: 'https://openrouter.ai/keys'
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    envKey: 'OPENAI_API_KEY',
-    docsUrl: 'https://platform.openai.com/api-keys'
-  },
-  {
-    id: 'gemini',
-    name: 'Google Gemini',
-    envKey: 'GEMINI_API_KEY',
-    docsUrl: 'https://aistudio.google.com/app/apikey'
-  },
-  {
-    id: 'xai',
-    name: 'xAI Grok',
-    envKey: 'XAI_API_KEY',
-    docsUrl: 'https://console.x.ai/'
-  },
-  {
-    id: 'local',
-    name: 'Local / custom endpoint',
-    envKey: 'OPENAI_BASE_URL',
-    docsUrl: 'https://github.com/NousResearch/hermes-agent#bring-your-own-endpoint',
-    placeholder: 'http://127.0.0.1:8000/v1'
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    envKey: 'COPILOT_GITHUB_TOKEN',
+    docsUrl: 'https://github.com/settings/copilot'
   }
 ]
 
@@ -144,9 +110,13 @@ function useApiKeyCatalog(): ApiKeyOption[] {
     const seenEnv = new Set<string>(API_KEY_OPTIONS.map(o => o.envKey))
 
     for (const row of rows) {
-      // Only api_key providers can be activated with a pasted key. Skip OAuth /
-      // external / managed flows and anything missing an env var to write to.
-      if (row.auth_type && row.auth_type !== 'api_key') {
+      // The backend enforces the same allowlist. Keep this renderer boundary
+      // strict as well so stale/older gateways cannot reintroduce providers.
+      if (row.slug !== 'copilot' && row.slug !== 'github-copilot') {
+        continue
+      }
+
+      if (row.auth_type && row.auth_type !== 'api_key' && row.auth_type !== 'copilot') {
         continue
       }
 
@@ -437,7 +407,11 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
     setOnboardingMode('apikey')
   }
 
-  const ordered = useMemo(() => (providers ? sortProviders(providers) : []), [providers])
+  const ordered = useMemo(
+    () => (providers ? sortProviders(catalystProviders(providers)) : []),
+    [providers]
+  )
+
   const hasOauth = ordered.length > 0
   const apiKeyOptions = useApiKeyCatalog()
 
@@ -471,11 +445,10 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
   const select = (p: OAuthProvider) => void startProviderOAuth(p, ctx)
   const featured = ordered.find(p => p.id === FEATURED_ID) ?? null
   const rest = featured ? ordered.filter(p => p.id !== FEATURED_ID) : ordered
-  // Collapse the secondary providers behind a disclosure whenever Nous Portal
-  // is present to anchor the choice — otherwise show the full list. The
-  // Fireworks/OpenRouter key rows always live behind the disclosure, so the
-  // toggle is warranted even when there are no other OAuth providers.
-  const collapsible = Boolean(featured)
+  // Collapse secondary account flows only when the featured provider anchors
+  // the list. Catalyst never injects API-key providers outside the backend
+  // catalog: GitHub Copilot is the sole configured inference provider.
+  const collapsible = Boolean(featured) && rest.length > 0
   const showRest = !collapsible || showAll
 
   return (
@@ -484,13 +457,9 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
         {featured ? <FeaturedProviderRow onSelect={select} provider={featured} /> : null}
         {showRest ? (
           <>
-            {/* Fireworks leads the expanded list, matching CANONICAL_PROVIDERS
-                (Nous → Fireworks), but stays hidden until the user opens it. */}
-            <FireworksProviderRow onClick={() => openKeyForm('FIREWORKS_API_KEY')} />
             {rest.map(p => (
               <ProviderRow key={p.id} onSelect={select} provider={p} />
             ))}
-            <OpenRouterProviderRow onClick={() => openKeyForm('OPENROUTER_API_KEY')} />
           </>
         ) : null}
       </div>

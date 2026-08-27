@@ -120,8 +120,19 @@ def provider_catalog() -> list[ProviderDescriptor]:
     except Exception:
         HERMES_OVERLAYS = {}
 
+    try:
+        from hermes_cli.config import load_config
+        from hermes_cli.provider_policy import provider_is_allowed
+
+        policy_config = load_config()
+    except Exception:
+        policy_config = {}
+        provider_is_allowed = lambda _provider, _config: True
+
     out: list[ProviderDescriptor] = []
     for order, entry in enumerate(CANONICAL_PROVIDERS):
+        if not provider_is_allowed(entry.slug, policy_config):
+            continue
         slug = entry.slug
         cfg = PROVIDER_REGISTRY.get(slug)
         prof = profiles.get(slug)

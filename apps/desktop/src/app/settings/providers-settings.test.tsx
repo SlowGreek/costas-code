@@ -32,7 +32,7 @@ function provider(id: string, loggedIn: boolean, patch: Partial<OAuthProvider> =
     docs_url: '',
     flow: 'device_code',
     id,
-    name: id === 'nous' ? 'Nous Portal' : 'MiniMax',
+    name: id === 'nous' ? 'Nous Portal' : id === 'copilot' ? 'GitHub Copilot' : 'MiniMax',
     status: {
       logged_in: loggedIn
     },
@@ -62,9 +62,9 @@ function keyVar(patch: Partial<EnvVarInfo> = {}): EnvVarInfo {
 beforeEach(() => {
   onboarding.set({ manual: false })
   getEnvVars.mockResolvedValue({})
-  disconnectOAuthProvider.mockResolvedValue({ ok: true, provider: 'nous' })
+  disconnectOAuthProvider.mockResolvedValue({ ok: true, provider: 'copilot' })
   listOAuthProviders.mockResolvedValue({
-    providers: [provider('nous', true), provider('minimax-oauth', false)]
+    providers: [provider('copilot', true), provider('minimax-oauth', false)]
   })
 })
 
@@ -93,10 +93,23 @@ async function renderProvidersSettings() {
 }
 
 describe('ProvidersSettings', () => {
+  it('does not inject non-Copilot providers into Catalyst settings', async () => {
+    listOAuthProviders.mockResolvedValue({
+      providers: [provider('copilot', false), provider('minimax-oauth', false)]
+    })
+
+    await renderProvidersSettings()
+
+    expect(await screen.findByText('GitHub Copilot')).toBeTruthy()
+    expect(screen.queryByText('MiniMax')).toBeNull()
+    expect(screen.queryByText('Fireworks AI')).toBeNull()
+    expect(screen.queryByText('OpenRouter')).toBeNull()
+  })
+
   it('disconnects a connected provider account and refreshes the accounts list', async () => {
     await renderProvidersSettings()
 
-    const remove = await screen.findByRole('button', { name: 'Remove Nous Portal' })
+    const remove = await screen.findByRole('button', { name: 'Remove GitHub Copilot' })
     await act(async () => {
       fireEvent.click(remove)
     })
@@ -109,7 +122,7 @@ describe('ProvidersSettings', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
     })
 
-    await waitFor(() => expect(disconnectOAuthProvider).toHaveBeenCalledWith('nous'))
+    await waitFor(() => expect(disconnectOAuthProvider).toHaveBeenCalledWith('copilot'))
     expect(listOAuthProviders).toHaveBeenCalledTimes(2)
   })
 
@@ -117,7 +130,7 @@ describe('ProvidersSettings', () => {
     await renderProvidersSettings()
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: 'Remove Nous Portal' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove GitHub Copilot' }))
     })
 
     await act(async () => {
@@ -131,38 +144,14 @@ describe('ProvidersSettings', () => {
     await renderProvidersSettings()
 
     await act(async () => {
-      fireEvent.click(await screen.findByText('Nous Portal'))
+      fireEvent.click(await screen.findByText('GitHub Copilot'))
     })
 
-    expect(startManualProviderOAuth).toHaveBeenCalledWith('nous')
+    expect(startManualProviderOAuth).toHaveBeenCalledWith('copilot')
     expect(disconnectOAuthProvider).not.toHaveBeenCalled()
   })
 
-  it('does not offer removal for externally managed providers', async () => {
-    listOAuthProviders.mockResolvedValue({
-      providers: [
-        provider('qwen-oauth', true, {
-          cli_command: 'hermes auth add qwen-oauth',
-          disconnect_hint: "Use `hermes auth add qwen-oauth` or that provider's CLI to remove it.",
-          disconnectable: false,
-          flow: 'external',
-          name: 'Qwen (via Qwen CLI)'
-        })
-      ]
-    })
-
-    await renderProvidersSettings()
-
-    expect(await screen.findByText('Qwen Code')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Remove Qwen Code' })).toBeNull()
-    expect(screen.getByText(/managed by its own CLI/)).toBeTruthy()
-  })
-
-  it('renders a Keys card for a backend-tagged provider with no PROVIDER_GROUPS prefix', async () => {
-    // A provider the backend catalog tags (provider/provider_label) but that has
-    // no desktop PROVIDER_GROUPS prefix row must still render its own card —
-    // this is the GUI/CLI drift fix: membership comes from the backend, not
-    // from the hand-maintained prefix list.
+  it('does not render backend-tagged non-Copilot provider keys', async () => {
     getEnvVars.mockResolvedValue({
       WIDGETAI_API_KEY: keyVar({
         provider: 'widgetai',
@@ -177,61 +166,39 @@ describe('ProvidersSettings', () => {
       render(<ProvidersSettings onClose={vi.fn()} onViewChange={vi.fn()} view="keys" />)
     })
 
-    expect(await screen.findByText('WidgetAI')).toBeTruthy()
+    await waitFor(() => expect(getEnvVars).toHaveBeenCalled())
+    expect(screen.queryByText('WidgetAI')).toBeNull()
   })
 
-  it('orders API-key providers by priority then name, and filters them via search', async () => {
-    // These three providers have no curated PROVIDER_GROUPS priority, so they
-    // share the default priority and fall back to alphabetical among themselves
-    // (Acme, Middle, Zebra) — exercising the name tiebreak of the priority sort.
+  it('keeps only the Copilot token card and filters it via search', async () => {
     getEnvVars.mockResolvedValue({
-      ZEBRA_API_KEY: keyVar({ provider: 'zebra', provider_label: 'Zebra' }),
-      ACME_API_KEY: keyVar({ provider: 'acme', provider_label: 'Acme' }),
-      MIDDLE_API_KEY: keyVar({ provider: 'middle', provider_label: 'Middle' })
+      COPILOT_GITHUB_TOKEN: keyVar({ provider: 'copilot', provider_label: 'GitHub Copilot' }),
+      ZEBRA_API_KEY: keyVar({ provider: 'zebra', provider_label: 'Zebra' })
     })
     listOAuthProviders.mockResolvedValue({ providers: [] })
 
     const { ProvidersSettings } = await import('./providers-settings')
     render(<ProvidersSettings onClose={vi.fn()} onViewChange={vi.fn()} view="keys" />)
 
-    // Equal priority → alphabetical tiebreak: Acme, Middle, Zebra.
-    await screen.findByText('Acme')
-    const labels = screen.getAllByText(/Acme|Middle|Zebra/).map(el => el.textContent)
-    expect(labels).toEqual(['Acme', 'Middle', 'Zebra'])
-
-    // Typing narrows the list to matching providers only.
-    const search = screen.getByPlaceholderText('Search providers…')
-    await act(async () => {
-      fireEvent.change(search, { target: { value: 'mid' } })
-    })
-
-    await waitFor(() => expect(screen.queryByText('Acme')).toBeNull())
-    expect(screen.getByText('Middle')).toBeTruthy()
+    expect(await screen.findByText('GitHub Copilot')).toBeTruthy()
     expect(screen.queryByText('Zebra')).toBeNull()
 
-    // A non-matching query shows the empty-state copy.
+    const search = screen.getByPlaceholderText('Search providers…')
     await act(async () => {
       fireEvent.change(search, { target: { value: 'nonesuch-xyz' } })
     })
     expect(await screen.findByText('No providers match your search.')).toBeTruthy()
   })
 
-  it('offers a Local / custom endpoint entry in the API-keys tab that opens the custom-endpoint flow', async () => {
-    // Regression: the composer pill and the providers "have an API key"
-    // affordance both dead-end on the env-var-driven key catalog, which never
-    // lists a custom endpoint — so without this row there is no reachable
-    // Desktop GUI path to add one. See issue #62817.
+  it('does not offer a Local / custom endpoint in the Catalyst API-keys tab', async () => {
     getEnvVars.mockResolvedValue({})
     listOAuthProviders.mockResolvedValue({ providers: [] })
 
     const { ProvidersSettings } = await import('./providers-settings')
     render(<ProvidersSettings onClose={vi.fn()} onViewChange={vi.fn()} view="keys" />)
 
-    const row = await screen.findByText('Local / custom endpoint')
-    expect(screen.getByText(/OpenAI-compatible endpoint/)).toBeTruthy()
-
-    fireEvent.click(row)
-
-    await waitFor(() => expect(startManualLocalEndpoint).toHaveBeenCalledWith(null))
+    await waitFor(() => expect(getEnvVars).toHaveBeenCalled())
+    expect(screen.queryByText('Local / custom endpoint')).toBeNull()
+    expect(startManualLocalEndpoint).not.toHaveBeenCalled()
   })
 })

@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { runInTerminal } from '@/app/right-sidebar/store'
 import {
+  catalystProviders,
   FEATURED_ID,
   FeaturedProviderRow,
-  FireworksProviderRow,
-  OpenRouterProviderRow,
   ProviderRow,
   providerTitle,
   sortProviders
@@ -22,11 +21,10 @@ import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
 import { confirm } from '@/store/confirm'
 import { notify, notifyError } from '@/store/notifications'
-import { $desktopOnboarding, startManualLocalEndpoint, startManualProviderOAuth } from '@/store/onboarding'
+import { $desktopOnboarding, startManualProviderOAuth } from '@/store/onboarding'
 import type { EnvVarInfo, OAuthProvider } from '@/types/hermes'
 
 import { isKeyVar, ProviderKeyRows } from './credential-key-ui'
-import { CustomEndpointsSettings } from './custom-endpoints-settings'
 import { SettingsCategoryHeading, useEnvCredentials } from './env-credentials'
 import { providerGroup, providerMeta, providerPriority } from './helpers'
 import { SettingsContent, SettingsSkeleton } from './primitives'
@@ -45,8 +43,8 @@ function GroupLabel({ children }: { children: ReactNode }) {
   )
 }
 
-// Sub-views surfaced as a sidebar subnav: account sign-in vs raw API keys.
-export const PROVIDER_VIEWS = ['accounts', 'keys', 'custom-endpoints'] as const
+// Catalyst exposes only GitHub Copilot account and token setup.
+export const PROVIDER_VIEWS = ['accounts', 'keys'] as const
 
 export type ProviderView = (typeof PROVIDER_VIEWS)[number]
 
@@ -67,6 +65,12 @@ function buildProviderKeyGroups(vars: Record<string, EnvVarInfo>): ProviderKeyGr
 
   for (const [key, info] of Object.entries(vars)) {
     if (info.category !== 'provider') {
+      continue
+    }
+
+    const providerId = info.provider?.trim().toLowerCase()
+
+    if (key !== 'COPILOT_GITHUB_TOKEN' && providerId !== 'copilot' && providerId !== 'github-copilot') {
       continue
     }
 
@@ -140,7 +144,11 @@ function OAuthPicker({
   const { t } = useI18n()
   const p = t.settings.providers
   const [showAll, setShowAll] = useState(false)
-  const ordered = useMemo(() => sortProviders(providers), [providers])
+
+  const ordered = useMemo(
+    () => sortProviders(catalystProviders(providers)),
+    [providers]
+  )
 
   if (ordered.length === 0) {
     return null
@@ -155,7 +163,7 @@ function OAuthPicker({
   // Both lists preserve `sortProviders` order (curated priority, then name).
   const connected = rest.filter(p => p.status?.logged_in)
   const others = rest.filter(p => !p.status?.logged_in)
-  const collapsible = others.length > 0
+  const collapsible = Boolean(featured) && others.length > 0
   const showOthers = !collapsible || showAll
 
   return (
@@ -176,8 +184,6 @@ function OAuthPicker({
         {p.intro}
       </p>
       {featured && <FeaturedProviderRow onSelect={select} provider={featured} />}
-      {/* Slot #2 — always visible, matching onboarding / CANONICAL_PROVIDERS. */}
-      <FireworksProviderRow onClick={onWantApiKey} />
       {connected.length > 0 && (
         <>
           <GroupLabel>{p.connected}</GroupLabel>
@@ -199,7 +205,6 @@ function OAuthPicker({
           {others.map(p => (
             <ProviderRow key={p.id} onSelect={select} provider={p} />
           ))}
-          <OpenRouterProviderRow onClick={onWantApiKey} />
         </>
       )}
       {collapsible && (
@@ -302,40 +307,8 @@ function NoProviderKeys() {
   )
 }
 
-// Surfaces the "Local / custom endpoint" entry point directly in the API-keys
-// tab so users can add any OpenAI-compatible endpoint (Zyphra, vLLM, Ollama…)
-// from the GUI. The composer pill and the providers "have an API key" affordance
-// both dead-end on the env-var-driven key catalog, which never lists a custom
-// endpoint — so without this row there is no reachable Desktop path to it.
-// The whole row is the button so the click target and a11y focus match the
-// visible area (the chevron + gutter are inside the button, not beside it).
-// Pass reason: null — the onboarding overlay renders an unmapped reason string
-// verbatim as a banner (see ReasonNotice in onboarding/index.tsx), and we don't
-// want a raw identifier like "providers-keys-tab" showing as literal text.
-function LocalEndpointRow({ onOpen }: { onOpen: (reason: null | string) => void }) {
-  const { t } = useI18n()
-  const copy = t.settings.providers.localEndpoint
-
-  return (
-    <RowButton
-      className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-[6px] px-3 py-2.5 text-left transition-colors hover:bg-(--ui-control-hover-background)"
-      onClick={() => onOpen(null)}
-    >
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-[length:var(--conversation-text-font-size)] font-semibold">{copy.title}</span>
-        <span className="truncate text-[length:var(--conversation-caption-font-size)] leading-5 text-muted-foreground">
-          {copy.description}
-        </span>
-      </div>
-      <ChevronRight className="size-4 text-muted-foreground transition group-hover:text-foreground" />
-    </RowButton>
-  )
-}
-
 export function ProvidersSettings({
   onClose,
-  onConfigSaved,
-  onMainModelChanged,
   onViewChange,
   view
 }: ProvidersSettingsProps) {
@@ -448,9 +421,8 @@ export function ProvidersSettings({
   }
 
   const hasOauth = oauthProviders.length > 0
-  // The sidebar subnav owns the Accounts/API-keys split now; with no OAuth
-  // providers there's nothing for the "Accounts" view to show, so fall to keys.
-  const showApiKeys = view === 'keys' || (!hasOauth && view !== 'custom-endpoints')
+  // With no account flow available, fall back to the Copilot token view.
+  const showApiKeys = view === 'keys' || !hasOauth
 
   const keyGroups = buildProviderKeyGroups(vars)
 
@@ -467,7 +439,6 @@ export function ProvidersSettings({
 
     return (
       <SettingsContent>
-        <LocalEndpointRow onOpen={startManualLocalEndpoint} />
         {keyGroups.length > 0 ? (
           <div className="grid gap-3">
             <SearchField
@@ -501,10 +472,6 @@ export function ProvidersSettings({
         )}
       </SettingsContent>
     )
-  }
-
-  if (view === 'custom-endpoints') {
-    return <CustomEndpointsSettings onConfigSaved={onConfigSaved} onMainModelChanged={onMainModelChanged} />
   }
 
   return (

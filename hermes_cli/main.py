@@ -3872,6 +3872,12 @@ def select_provider_and_model(args=None):
         ]
     else:
         _visible_slugs = [p.slug for p in CANONICAL_PROVIDERS]
+
+    from hermes_cli.provider_policy import provider_is_allowed
+
+    _visible_slugs = [
+        slug for slug in _visible_slugs if provider_is_allowed(slug, config)
+    ]
     grouped_rows = group_providers(_visible_slugs)
 
     # The group/slug that should be pre-selected: the active provider's group
@@ -3904,6 +3910,8 @@ def select_provider_and_model(args=None):
             ordered.append((key, label, members))
 
     for key, provider_info in _custom_provider_map.items():
+        if not provider_is_allowed(key, config):
+            continue
         name = provider_info["name"]
         base_url = provider_info["base_url"]
         short_url = base_url.replace("https://", "").replace("http://", "").rstrip("/")
@@ -3916,12 +3924,13 @@ def select_provider_and_model(args=None):
         else:
             ordered.append((key, label, []))
 
-    ordered.append(("custom", "Custom endpoint (enter URL manually)", []))
-    _has_saved_custom_list = isinstance(config.get("custom_providers"), list) and bool(
-        config.get("custom_providers")
-    )
-    if _has_saved_custom_list:
-        ordered.append(("remove-custom", "Remove a saved custom provider", []))
+    if provider_is_allowed("custom", config):
+        ordered.append(("custom", "Custom endpoint (enter URL manually)", []))
+        _has_saved_custom_list = isinstance(config.get("custom_providers"), list) and bool(
+            config.get("custom_providers")
+        )
+        if _has_saved_custom_list:
+            ordered.append(("remove-custom", "Remove a saved custom provider", []))
     ordered.append(("aux-config", "Configure auxiliary models...", []))
     ordered.append(("cancel", "Leave unchanged", []))
 
@@ -12016,10 +12025,14 @@ def cmd_console(args):
 
 
 def _build_provider_choices() -> list[str]:
-    """Build the --provider choices list from CANONICAL_PROVIDERS + 'auto'."""
+    """Build the --provider choices list from the configured provider policy."""
     try:
+        from hermes_cli.config import load_config
         from hermes_cli.models import CANONICAL_PROVIDERS as _cp
-        return ["auto"] + [p.slug for p in _cp]
+        from hermes_cli.provider_policy import provider_is_allowed
+
+        config = load_config()
+        return ["auto"] + [p.slug for p in _cp if provider_is_allowed(p.slug, config)]
     except Exception:
         # Fallback: static list guarantees the CLI always works
         return [

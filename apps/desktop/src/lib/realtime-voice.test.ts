@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   boundWorkbenchContext,
   createPendingTranscriptionTracker,
+  createSemanticCompletionJudge,
   executeRealtimeVoiceTool,
   MAX_WORKBENCH_CONTEXT_CHARS,
   type RealtimeCameraCommand,
   type RealtimeTranscript,
   routeRealtimeServerEvent,
-  semanticTurnStopCheckpoint,
   startRealtimeVoiceConnection,
   voiceToolLane
 } from './realtime-voice'
@@ -158,96 +158,73 @@ describe('createPendingTranscriptionTracker', () => {
   })
 })
 
-describe('semanticTurnStopCheckpoint', () => {
-  const turn = (overrides: Record<string, unknown> = {}) =>
-    ({
-      completedActions: [],
-      executions: [],
-      goal: '',
-      id: 'voice-turn-1',
-      remainingActions: 12,
-      remainingToolRounds: 6,
-      toolRounds: 1,
-      ...overrides
-    }) as never
+describe('createSemanticCompletionJudge', () => {
+  const turn = {
+    completedActions: [],
+    executions: [],
+    goal: 'Hello.',
+    id: 'voice-turn-1',
+    remainingActions: 16,
+    remainingToolRounds: 8,
+    toolRounds: 0
+  }
 
-  const subject = (name: string, args: string) => ({
-    arguments: args,
-    callId: `call-${name}`,
-    name,
-    output: {},
-    responseId: 'response-1',
-    status: 'success' as const
-  })
+  it('accepts an ordinary greeting without creating a checkpoint loop', async () => {
+    const request = vi.fn(async () => ({
+      text: JSON.stringify({ verdict: 'complete', reason: 'The greeting was answered.' })
+    }))
 
-  it('checks any unfinished semantic turn without task-specific routing', () => {
-    const outcome = semanticTurnStopCheckpoint({
-      candidateText: 'I found the repository and identified the failing package.',
-      canContinue: true,
-      responseId: 'response-2',
-      stopChallenges: 0,
-      turn: turn({
-        goal: 'Inspect the repository, fix the failing package, and verify the build.',
-        completedActions: ['session_snapshot'],
-        executions: [subject('session_snapshot', '{}')]
-      })
-    })
+    const judge = createSemanticCompletionJudge(request)
 
-    const context = outcome.kind === 'continue_once' ? outcome.context : ''
-
-    expect(outcome.kind).toBe('continue_once')
-    expect(context).toMatch(/finish_turn/i)
-    expect(context).toMatch(/next useful action/i)
-    expect(context).not.toMatch(/node|graph|canvas|subject|present_step|focus/i)
-  })
-
-  it('uses the same silent checkpoint for conversation, coding, and visual work', () => {
-    const cases = [
-      { goal: 'Hi', candidateText: 'Hey! Good to hear from you.', executions: [] },
-      {
-        goal: 'Fix the package and verify it.',
-        candidateText: 'I found the failing package.',
-        executions: [subject('session_snapshot', '{}')]
-      },
-      {
-        goal: 'Walk through the graph.',
-        candidateText: 'The planner establishes the intent.',
-        executions: [subject('focus', '{"node_id":"planner"}')]
-      }
-    ]
-
-    const outcomes = cases.map(item =>
-      semanticTurnStopCheckpoint({
-        candidateText: item.candidateText,
+    await expect(
+      judge({
+        candidateText: 'Hi! How can I help?',
         canContinue: true,
-        responseId: 'response-2',
+        responseId: 'response-1',
         stopChallenges: 0,
-        turn: turn({ goal: item.goal, executions: item.executions })
+        turn
       })
+    ).resolves.toEqual({ kind: 'allow' })
+    expect(request).toHaveBeenCalledWith(
+      'llm.oneshot',
+      expect.objectContaining({ task: 'goal_judge', temperature: 0 })
     )
-
-    expect(outcomes).toHaveLength(3)
-    expect(new Set(outcomes.map(outcome => JSON.stringify(outcome))).size).toBe(1)
-    expect(outcomes[0]).toMatchObject({
-      kind: 'continue_once',
-      context: expect.stringMatching(/do not speak.*finish_turn.*next useful action/is)
-    })
   })
-
-  it('never challenges once the turn can no longer continue', () => {
-    expect(
-      semanticTurnStopCheckpoint({
-        candidateText: 'Planner comes first.',
-        canContinue: false,
-        responseId: 'response-2',
-        stopChallenges: 0,
-        turn: turn({
-          goal: 'Walk me through step by step.',
-          completedActions: ['focus'],
-          executions: [subject('focus', '{"node_id":"planner"}')]
-        })
+  it('rejects a premature terminal proposal without choosing the next action', async () => {
+    const request = vi.fn(async () => ({
+      text: JSON.stringify({
+        verdict: 'continue',
+        reason: 'The response only promises a walkthrough; no explanation was performed.'
       })
-    ).toEqual({ kind: 'allow' })
+    }))
+
+    const judge = createSemanticCompletionJudge(request)
+
+    const outcome = await judge({
+      candidateText: 'Sure, let’s walk the flow from the user’s voice through the system.',
+      proposal: {
+        arguments: '{"status":"complete"}',
+        callId: 'call-finish',
+        name: 'finish_turn',
+        output: { status: 'complete' },
+        responseId: 'response-1',
+        status: 'success'
+      },
+      responseId: 'response-1',
+      turn: {
+        ...turn,
+        goal: 'Walk me through the data flow step by step.'
+      }
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'continue_once',
+      toolChoice: 'required',
+      context: expect.stringMatching(/no explanation was performed/i)
+    })
+    expect(outcome.kind === 'continue_once' && outcome.context).not.toMatch(
+      /present_step|focus|node|canvas/i
+    )
   })
 })
 
@@ -1401,7 +1378,18 @@ describe('startRealtimeVoiceConnection', () => {
   })
 
   it('uses the general Stop checkpoint after a tool-free response', async () => {
-    const harness = await connectHarness()
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method !== 'llm.oneshot') {
+        return {}
+      }
+
+      const evidence = JSON.parse(String(params.input)) as { proposal?: { status?: string } }
+      const verdict = evidence.proposal?.status ?? 'continue'
+
+      return { text: JSON.stringify({ verdict, reason: 'Test completion verdict.' }) }
+    })
+
+    const harness = await connectHarness({}, undefined, request)
 
     harness.open()
     harness.sent.length = 0
@@ -1438,8 +1426,9 @@ describe('startRealtimeVoiceConnection', () => {
       .filter(event => event.type === 'response.create')
       .at(-1)
 
-    expect(recovery.response.instructions).toMatch(/without an explicit finish_turn declaration/i)
-    expect(recovery.response.instructions).toMatch(/next useful action/i)
+    expect(recovery.response.instructions).toMatch(/completion verification found the original goal unfinished/i)
+    expect(recovery.response.instructions).toMatch(/next useful tool/i)
+    expect(recovery.response.tool_choice).toBe('required')
 
     harness.emit({ type: 'response.created', response: { id: 'response-4' } })
     harness.emit({
@@ -1458,46 +1447,55 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(3)
   })
 
-  it('checks ordinary conversation silently before accepting completion', async () => {
-    const harness = await connectHarness()
+  it('accepts a completed greeting without creating the repeated-speech checkpoint loop', async () => {
+    const request = vi.fn(async (method: string, _params: Record<string, unknown>) =>
+      method === 'llm.oneshot'
+        ? { text: JSON.stringify({ verdict: 'complete', reason: 'The greeting was answered.' }) }
+        : {}
+    )
+
+    const harness = await connectHarness({}, undefined, request)
 
     harness.open()
     harness.sent.length = 0
     harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-1',
+      transcript: 'Hello.'
+    })
     harness.emit({ type: 'response.created', response: { id: 'response-1' } })
     harness.emit({
       type: 'response.output_audio_transcript.done',
       response_id: 'response-1',
       item_id: 'assistant-1',
-      transcript: 'Hey, how are you?'
+      transcript: 'Hi! I’m here.'
     })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
-    await vi.waitFor(() =>
-      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
-    )
 
-    const checkpoint = harness.sent
-      .map(payload => JSON.parse(payload) as { response?: { instructions?: string }; type: string })
-      .find(event => event.type === 'response.create')?.response?.instructions
-
-    expect(checkpoint).toMatch(/do not speak during this checkpoint/i)
-
-    harness.emit({ type: 'response.created', response: { id: 'response-2' } })
-    harness.emit({
-      type: 'response.function_call_arguments.done',
-      response_id: 'response-2',
-      call_id: 'call-finish',
-      name: 'finish_turn',
-      arguments: '{"status":"complete"}'
-    })
-    harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('llm.oneshot', expect.any(Object)))
     await Promise.resolve()
 
-    expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    expect(harness.sentTypes()).not.toContain('response.create')
+    expect(request.mock.calls.at(-1)?.[1]).toMatchObject({
+      input: expect.stringContaining('Hello.'),
+      task: 'goal_judge'
+    })
   })
 
   it('checks a one-shot tool answer before accepting completion', async () => {
-    const harness = await connectHarness()
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method !== 'llm.oneshot') {
+        return {}
+      }
+
+      const evidence = JSON.parse(String(params.input)) as { proposal?: { status?: string } }
+      const verdict = evidence.proposal?.status ?? 'continue'
+
+      return { text: JSON.stringify({ verdict, reason: 'Test completion verdict.' }) }
+    })
+
+    const harness = await connectHarness({}, undefined, request)
 
     harness.open()
     harness.sent.length = 0
@@ -1539,6 +1537,65 @@ describe('startRealtimeVoiceConnection', () => {
     await Promise.resolve()
 
     expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
+  })
+
+  it('rejects the live premature explanation finish through the real transport path', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'llm.oneshot') {
+        return {
+          text: JSON.stringify({
+            verdict: 'continue',
+            reason: 'The response only introduces the walkthrough; it does not perform it.'
+          })
+        }
+      }
+
+      return {}
+    })
+
+    const harness = await connectHarness({}, undefined, request)
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+    harness.emit({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'user-1',
+      transcript: 'Walk me through the data flow step by step.'
+    })
+    harness.emit({ type: 'response.created', response: { id: 'response-1' } })
+    harness.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'response-1',
+      item_id: 'assistant-1',
+      transcript: 'Sure, let’s walk the flow from the user’s voice through the system.'
+    })
+    harness.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'response-1',
+      call_id: 'call-finish',
+      name: 'finish_turn',
+      arguments: '{"status":"complete"}'
+    })
+    harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith('llm.oneshot', expect.any(Object)))
+    await vi.waitFor(() =>
+      expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(1)
+    )
+
+    const sent = harness.sent.map(raw => JSON.parse(raw))
+    const output = sent.find(event => event.type === 'conversation.item.create')
+    const continuation = sent.find(event => event.type === 'response.create')
+
+    expect(JSON.parse(output.item.output)).toMatchObject({
+      accepted: false,
+      error: 'Completion proposal rejected'
+    })
+    expect(continuation.response).toMatchObject({
+      instructions: expect.stringMatching(/does not perform it/i),
+      tool_choice: 'required'
+    })
   })
 
   it('keeps focus and camera together when a spoken beat carries present_step', async () => {
@@ -1742,7 +1799,17 @@ describe('startRealtimeVoiceConnection', () => {
   })
 
   it('challenges a walkthrough that stops after explaining only the first node', async () => {
-    const request = vi.fn(async () => ({ artifact: { semantic_rev: 2, view_rev: 1 } }))
+    const request = vi.fn(async (method: string) =>
+      method === 'llm.oneshot'
+        ? {
+            text: JSON.stringify({
+              verdict: 'continue',
+              reason: 'The original step-by-step explanation is incomplete.'
+            })
+          }
+        : { artifact: { semantic_rev: 2, view_rev: 1 } }
+    )
+
     const harness = await connectHarness({}, undefined, request)
 
     harness.open()
@@ -1793,14 +1860,16 @@ describe('startRealtimeVoiceConnection', () => {
     )
 
     const challenge = harness.sent
-      .map(raw => JSON.parse(raw) as { response?: { instructions?: string }; type: string })
-      .find(event => event.type === 'response.create')?.response?.instructions
+      .map(raw => JSON.parse(raw) as { response?: { instructions?: string; tool_choice?: string }; type: string })
+      .find(event => event.type === 'response.create')?.response
 
-    expect(challenge).toMatch(/without an explicit finish_turn declaration/i)
-    expect(challenge).toMatch(/original user goal/i)
-    expect(challenge).toMatch(/next useful action/i)
+    expect(challenge?.instructions).toMatch(/completion verification found the original goal unfinished/i)
+    expect(challenge?.instructions).toMatch(/next useful tool/i)
+    expect(challenge?.tool_choice).toBe('required')
 
-    const stopContext = challenge?.match(/Stop checkpoint context:\n([\s\S]*?)\n\nCompleted actions:/)?.[1] ?? ''
+    const stopContext = challenge?.instructions?.match(
+      /Stop checkpoint context:\n([\s\S]*?)\n\nCompleted actions:/
+    )?.[1] ?? ''
 
     expect(stopContext).not.toMatch(/planner|node|subject|present_step|focus/i)
   })

@@ -6,30 +6,124 @@ import {
   createRealtimeTurnController,
   type RealtimeStopInput,
   type RealtimeStopOutcome,
+  type RealtimeTerminalProposalInput,
   type RealtimeToolLane,
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
 
-/**
- * A tool-free response is a proposed stop, not proof that the user's goal is
- * complete. Give Realtime one silent inference in which it must either choose
- * the next useful action or explicitly declare the semantic turn complete or
- * blocked. The host never interprets the goal or chooses the action.
- */
-export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
-  if (!input.canContinue) {
+type CompletionVerdict = 'blocked' | 'complete' | 'continue' | 'deferred'
+
+const COMPLETION_JUDGE_INSTRUCTIONS =
+  'You verify whether a realtime agent may stop. Judge the original user goal against the candidate spoken response and ACTUAL tool executions. Promises, introductions, and plans are not completion. Failed or skipped tools do not satisfy the goal. Return verdict complete only when the whole goal is satisfied; blocked only when new user input is required; deferred only when already-dispatched background or external work will resume later; otherwise continue. Never choose the next action and never write a user-facing response. Return only JSON: {"verdict":"complete|continue|blocked|deferred","reason":"one short sentence"}.'
+
+const completionEvidence = (input: RealtimeStopInput | RealtimeTerminalProposalInput): string =>
+  JSON.stringify({
+    candidate_response: input.candidateText.slice(0, 4_000),
+    executions: input.turn.executions.slice(-8).map(execution => ({
+      arguments: execution.arguments.slice(0, 500),
+      name: execution.name,
+      output: (() => {
+        try {
+          return JSON.stringify(execution.output).slice(0, 800)
+        } catch {
+          return String(execution.output).slice(0, 800)
+        }
+      })(),
+      status: execution.status
+    })),
+    goal: input.turn.goal.slice(0, 4_000),
+    proposal: 'proposal' in input ? input.proposal.output : undefined
+  })
+
+const parseCompletionVerdict = (text: string): null | { reason: string; verdict: CompletionVerdict } => {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+
+  if (start < 0 || end <= start) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
+    const verdict = typeof parsed.verdict === 'string' ? parsed.verdict.trim() : ''
+    const reason = typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 500) : ''
+
+    return ['blocked', 'complete', 'continue', 'deferred'].includes(verdict)
+      ? { reason, verdict: verdict as CompletionVerdict }
+      : null
+  } catch {
+    return null
+  }
+}
+
+const completionContinuation = (reason: string): RealtimeStopOutcome => ({
+  context:
+    `Completion verification found the original goal unfinished${reason ? `: ${reason}` : '.'} ` +
+    'Do not speak before acting. Call the next useful tool now, or use finish_turn only with a status supported by the actual state.',
+  kind: 'continue_once',
+  toolChoice: 'required'
+})
+
+export const createSemanticCompletionJudge = (
+  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  timeoutMs = 5_000
+) => async (
+  input: RealtimeStopInput | RealtimeTerminalProposalInput
+): Promise<RealtimeStopOutcome> => {
+  if ('canContinue' in input && !input.canContinue) {
     return { kind: 'allow' }
   }
 
-  return {
-    context:
-      'This response ended without an explicit finish_turn declaration. Do not speak during this checkpoint. ' +
-      'Reconsider the original user goal and the actual execution results. If the goal is satisfied, call ' +
-      'finish_turn with status complete. If progress requires new user input, call finish_turn with status blocked. ' +
-      'If already-dispatched background or external work will resume the goal later, call finish_turn with status deferred. ' +
-      'Otherwise call the next useful action now. Do not recap or announce the action.',
-    kind: 'continue_once'
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    const timeout = Symbol('completion-judge-timeout')
+
+    const result = await Promise.race([
+      request('llm.oneshot', {
+        input: completionEvidence(input),
+        instructions: COMPLETION_JUDGE_INSTRUCTIONS,
+        max_tokens: 180,
+        task: 'goal_judge',
+        temperature: 0
+      }),
+      new Promise<typeof timeout>(resolve => {
+        timeoutId = setTimeout(() => resolve(timeout), Math.max(250, timeoutMs))
+      })
+    ])
+
+    if (result === timeout || !result || typeof result !== 'object') {
+      return { kind: 'allow' }
+    }
+
+    const text = (result as { text?: unknown }).text
+    const judgment = parseCompletionVerdict(typeof text === 'string' ? text : '')
+
+    if (!judgment) {
+      return { kind: 'allow' }
+    }
+
+    if (!('proposal' in input)) {
+      return judgment.verdict === 'continue'
+        ? completionContinuation(judgment.reason)
+        : { kind: 'allow' }
+    }
+
+    const proposedStatus =
+      input.proposal.output && typeof input.proposal.output === 'object'
+        ? (input.proposal.output as { status?: unknown }).status
+        : undefined
+
+    return judgment.verdict === proposedStatus
+      ? { kind: 'allow' }
+      : completionContinuation(judgment.reason)
+  } catch {
+    return { kind: 'allow' }
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
   }
 }
 
@@ -994,6 +1088,8 @@ export async function startRealtimeVoiceConnection(
     runtimeSessionId: options.runtimeSessionId
   }
 
+  const completionJudge = createSemanticCompletionJudge(options.request)
+
   const turnController = createRealtimeTurnController({
     baseInstructions: instructions,
     execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
@@ -1007,8 +1103,9 @@ export async function startRealtimeVoiceConnection(
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,
-    stop: semanticTurnStopCheckpoint,
-    turnIdPrefix: `voice-${semanticConnectionId}-turn`
+    stop: completionJudge,
+    turnIdPrefix: `voice-${semanticConnectionId}-turn`,
+    verifyTerminal: completionJudge
   })
 
   /**

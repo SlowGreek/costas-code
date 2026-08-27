@@ -44,7 +44,14 @@ describe('live walkthrough replay', () => {
       request: vi.fn(async (method: string) =>
         method === 'voice.realtime.token'
           ? { client_secret: 'ek', model: 'gpt-realtime-2.1', voice: 'marin' }
-          : { artifact: { semantic_rev: 2, view_rev: 1 } }
+          : method === 'llm.oneshot'
+            ? {
+                text: JSON.stringify({
+                  verdict: 'continue',
+                  reason: 'The requested walkthrough is incomplete.'
+                })
+              }
+            : { artifact: { semantic_rev: 2, view_rev: 1 } }
       ),
       runtimeSessionId: 'runtime-session'
     })
@@ -111,5 +118,11 @@ describe('live walkthrough replay', () => {
     await vi.waitFor(() =>
       expect(h.types().filter(t => t === 'response.create')).toHaveLength(1)
     )
+
+    const continuation = h.sent
+      .map(raw => JSON.parse(raw))
+      .find(event => event.type === 'response.create')
+
+    expect(continuation.response.tool_choice).toBe('required')
   })
 })

@@ -3124,9 +3124,33 @@ def _(rid, params: dict) -> dict:
 
 @method("session.branch")
 def _(rid, params: dict) -> dict:
-    session, err = _sess(params, rid)
-    if err:
-        return err
+    stored_session_id = str(params.get("stored_session_id") or "").strip()
+    omit_messages = is_truthy_value(params.get("omit_messages", False))
+    if stored_session_id:
+        # Sidebar branches may target a cold stored session. Build the narrow
+        # parent record this handler needs instead of resuming/materializing its
+        # complete model history in the gateway (or the Desktop renderer).
+        with _profile_db(params) as lookup_db:
+            if lookup_db is None:
+                return _db_unavailable_error(rid, code=5008)
+            found = lookup_db.get_session(stored_session_id)
+        if not found:
+            return _err(rid, 4007, "session not found")
+        profile = str(params.get("profile") or "").strip() or None
+        profile_home = _profile_home(profile)
+        session = {
+            "session_key": found["id"],
+            "history": [],
+            "history_lock": threading.Lock(),
+            "cwd": found.get("cwd"),
+            "source": found.get("source"),
+            "profile_home": str(profile_home) if profile_home else None,
+        }
+    else:
+        session, err = _sess(params, rid)
+        if err:
+            return err
+    branch_cwd = session.get("cwd") if stored_session_id else _session_cwd(session)
     # Branch must write into the parent's profile-scoped state.db (app-global
     # remote mode). Using the launch handle would orphan branch rows + history.
     with _session_db(session) as db:
@@ -3231,7 +3255,7 @@ def _(rid, params: dict) -> dict:
                 # thing that surfaces TUI branches. See issue #20856.
                 model_config={"_branched_from": old_key},
                 parent_session_id=old_key,
-                cwd=_session_cwd(session),
+                cwd=branch_cwd,
                 # The branch stays on its parent's profile. Explicit stamp (not
                 # just the parent-backfill) so it holds even when the parent row
                 # predates the profile_name column.
@@ -3336,7 +3360,7 @@ def _(rid, params: dict) -> dict:
                 agent,
                 list(history),
                 cols=session.get("cols", 80),
-                cwd=_session_cwd(session),
+                cwd=branch_cwd,
                 session_db=branch_db,
                 source=source,
                 profile_home=parent_home,
@@ -3372,7 +3396,7 @@ def _(rid, params: dict) -> dict:
             "title": title,
             "parent": old_key,
             "message_count": len(history),
-            "messages": _history_to_messages(history),
+            "messages": [] if omit_messages else _history_to_messages(history),
             "info": _session_info(agent, branched_session),
         },
     )

@@ -1483,9 +1483,90 @@ describe('branchStoredSession desktop source tagging', () => {
     vi.restoreAllMocks()
   })
 
+  it('branches a stored session without loading its complete transcript into Desktop', async () => {
+    setSessions([storedSession({ id: 'stored-parent', message_count: 50_000 })])
+    vi.mocked(getAllSessionMessages).mockRejectedValue(
+      new Error('Session transcript exceeds the Desktop safe-load limit')
+    )
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
+      messages: [{ content: 'recent branch tail', role: 'assistant', timestamp: 2 }],
+      session_id: 'branch-stored'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'session.resume') {
+        return {
+          info: {},
+          messages: [],
+          resumed: params?.session_id,
+          session_id: 'parent-runtime',
+          session_key: 'stored-parent'
+        } as never
+      }
+
+      if (method === 'session.branch') {
+        return {
+          info: {},
+          message_count: 50_000,
+          messages: [],
+          session_id: 'branch-runtime',
+          stored_session_id: 'branch-stored',
+          title: 'Branch'
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let branchStoredSession: ((storedSessionId: string) => Promise<boolean>) | null = null
+    render(<BranchHarness onReady={branch => (branchStoredSession = branch)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(branchStoredSession).not.toBeNull())
+
+    await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
+
+    expect(getAllSessionMessages).not.toHaveBeenCalled()
+    expect(getLatestSessionMessages).toHaveBeenCalledWith('branch-stored', undefined)
+    expect(requestGateway).toHaveBeenCalledWith('session.branch', {
+      omit_messages: true,
+      stored_session_id: 'stored-parent'
+    })
+  })
+
+  it('falls back to transcript seeding with a backend that predates stored-session branching', async () => {
+    setSessions([storedSession({ id: 'stored-parent', message_count: 1 })])
+    vi.mocked(getAllSessionMessages).mockResolvedValue({
+      messages: [{ content: 'branch me', role: 'user', timestamp: 1 }],
+      session_id: 'stored-parent'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'session.branch') {
+        throw Object.assign(new Error('session not found'), { code: 4001 })
+      }
+
+      if (method === 'session.create') {
+        expect(params).toMatchObject({
+          messages: [{ content: 'branch me', role: 'user' }],
+          parent_session_id: 'stored-parent'
+        })
+
+        return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
+      }
+
+      return {} as never
+    })
+
+    let branchStoredSession: ((storedSessionId: string) => Promise<boolean>) | null = null
+    render(<BranchHarness onReady={branch => (branchStoredSession = branch)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(branchStoredSession).not.toBeNull())
+
+    await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
+    expect(getAllSessionMessages).toHaveBeenCalledWith('stored-parent', undefined)
+  })
+
   it('opens the branch as the primary session in the main workspace (#93444)', async () => {
     const requestGateway = vi.fn(async (method: string) => {
-      if (method === 'session.create') {
+      if (method === 'session.branch') {
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
 
@@ -1535,7 +1616,7 @@ describe('branchStoredSession desktop source tagging', () => {
 
   it('keeps the current view when branching a different session from the sidebar (does not reintroduce #69750)', async () => {
     const requestGateway = vi.fn(async (method: string) => {
-      if (method === 'session.create') {
+      if (method === 'session.branch') {
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
 
@@ -1583,12 +1664,12 @@ describe('branchStoredSession desktop source tagging', () => {
     expect($sessionTiles.get().some(tile => tile.storedSessionId === 'branch-stored')).toBe(true)
   })
 
-  it('tags desktop branch sessions as desktop sessions', async () => {
-    let createParams: Record<string, unknown> | undefined
+  it('targets the stored parent when branching from the sidebar', async () => {
+    let branchParams: Record<string, unknown> | undefined
 
     const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-      if (method === 'session.create') {
-        createParams = params
+      if (method === 'session.branch') {
+        branchParams = params
 
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
@@ -1608,9 +1689,9 @@ describe('branchStoredSession desktop source tagging', () => {
 
     await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
 
-    expect(createParams).toMatchObject({
-      parent_session_id: 'stored-parent',
-      source: 'desktop'
+    expect(branchParams).toMatchObject({
+      omit_messages: true,
+      stored_session_id: 'stored-parent'
     })
   })
 
@@ -1659,9 +1740,10 @@ describe('branchStoredSession desktop source tagging', () => {
 
     expect(requestGateway).toHaveBeenCalledWith('session.branch', {
       session_id: 'live-parent',
+      omit_messages: true,
       count: 2
     })
-    expect(branchParams).toEqual({ session_id: 'live-parent', count: 2 })
+    expect(branchParams).toEqual({ session_id: 'live-parent', omit_messages: true, count: 2 })
   })
 
   it('hydrates the complete persisted display transcript before branching a compacted live chat', async () => {
@@ -1715,7 +1797,7 @@ describe('branchStoredSession desktop source tagging', () => {
     await expect(branchCurrentSession!()).resolves.toBe(true)
 
     expect(getAllSessionMessages).toHaveBeenCalledWith('stored-parent', undefined)
-    expect(branchParams).toEqual({ session_id: 'live-parent' })
+    expect(branchParams).toEqual({ session_id: 'live-parent', omit_messages: true })
   })
 
   it('aborts if the active runtime changes while the branch transcript is hydrating', async () => {
@@ -1765,11 +1847,11 @@ describe('branchStoredSession desktop source tagging', () => {
       session_id: 'stored-parent'
     } as never)
 
-    let createParams: Record<string, unknown> | undefined
+    let branchParams: Record<string, unknown> | undefined
 
     const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-      if (method === 'session.create') {
-        createParams = params
+      if (method === 'session.branch') {
+        branchParams = params
 
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
@@ -1786,11 +1868,10 @@ describe('branchStoredSession desktop source tagging', () => {
     await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
 
     expect(ensureGatewayProfile).toHaveBeenCalledWith('work')
-    expect(getAllSessionMessages).toHaveBeenCalledWith('stored-parent', 'work')
-    // The create itself must carry the owning profile: in app-global remote
+    // The branch itself must carry the owning profile: in app-global remote
     // mode the soft gateway swap alone is not enough — an omitted profile
     // lands the branch on the launch (default) profile's state.db.
-    expect(createParams).toMatchObject({ parent_session_id: 'stored-parent', profile: 'work' })
+    expect(branchParams).toMatchObject({ stored_session_id: 'stored-parent', profile: 'work' })
 
     vi.mocked(getSession).mockReset()
   })
@@ -1802,11 +1883,11 @@ describe('branchStoredSession desktop source tagging', () => {
       session_id: 'stored-parent'
     } as never)
 
-    let createParams: Record<string, unknown> | undefined
+    let branchParams: Record<string, unknown> | undefined
 
     const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-      if (method === 'session.create') {
-        createParams = params
+      if (method === 'session.branch') {
+        branchParams = params
 
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
@@ -1821,7 +1902,7 @@ describe('branchStoredSession desktop source tagging', () => {
     await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
 
     expect(ensureGatewayProfile).toHaveBeenCalledWith('work')
-    expect(createParams).toMatchObject({ profile: 'work' })
+    expect(branchParams).toMatchObject({ profile: 'work' })
   })
 
   it('omits profile for a profile-less parent so single-profile users are unchanged', async () => {
@@ -1831,11 +1912,11 @@ describe('branchStoredSession desktop source tagging', () => {
       session_id: 'stored-parent'
     } as never)
 
-    let createParams: Record<string, unknown> | undefined
+    let branchParams: Record<string, unknown> | undefined
 
     const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-      if (method === 'session.create') {
-        createParams = params
+      if (method === 'session.branch') {
+        branchParams = params
 
         return { session_id: 'branch-runtime', stored_session_id: 'branch-stored' } as never
       }
@@ -1849,8 +1930,8 @@ describe('branchStoredSession desktop source tagging', () => {
 
     await expect(branchStoredSession!('stored-parent')).resolves.toBe(true)
 
-    expect(createParams).toBeDefined()
-    expect(createParams).not.toHaveProperty('profile')
+    expect(branchParams).toBeDefined()
+    expect(branchParams).not.toHaveProperty('profile')
   })
 })
 

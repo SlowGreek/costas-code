@@ -1209,6 +1209,81 @@ def test_session_branch_persists_branched_from_marker(server, monkeypatch):
     assert kwargs["model_config"] == {"_branched_from": parent_key}
 
 
+def test_session_branch_from_stored_session_skips_parent_resume_and_response_history(server, monkeypatch):
+    """A Desktop sidebar branch copies persisted history in the backend.
+
+    The parent need not be live, and the full transcript must not cross the
+    WebSocket merely to create the child.
+    """
+    parent_key = "20260101_000000_parent"
+    display_history = [
+        {"role": "user", "content": "hello", "timestamp": 1.0},
+        {"role": "assistant", "content": "hi", "timestamp": 2.0},
+    ]
+    append_calls = []
+    create_calls = []
+    init_calls = []
+
+    class _DB:
+        def get_session(self, key):
+            if key == parent_key:
+                return {"id": parent_key, "cwd": None, "source": "desktop"}
+            return None
+
+        def get_resume_conversations(self, key):
+            assert key == parent_key
+            return [], display_history
+
+        def get_session_title(self, _key):
+            return "parent-title"
+
+        def get_next_title_in_lineage(self, base):
+            return f"{base} 2"
+
+        def create_session(self, new_key, **kwargs):
+            create_calls.append((new_key, kwargs))
+            return new_key
+
+        def append_messages_batch(self, session_key, messages, **_kwargs):
+            append_calls.extend((session_key, message) for message in messages)
+
+        def set_session_title(self, _key, _title):
+            return None
+
+    db = _DB()
+    monkeypatch.setattr(server, "_get_db", lambda: db)
+    monkeypatch.setattr(server, "_resolve_model", lambda: "test/model")
+    monkeypatch.setattr(server, "_new_session_key", lambda: "20260101_000001_child0")
+    monkeypatch.setattr(
+        server,
+        "_make_agent",
+        lambda _sid, key, session_id=None, session_db=None, **_kwargs: types.SimpleNamespace(
+            model="test/model", session_id=session_id or key
+        ),
+    )
+    monkeypatch.setattr(server, "_init_session", lambda *_a, **kwargs: init_calls.append(kwargs))
+    monkeypatch.setattr(server, "_set_session_context", lambda *_a, **_k: [])
+    monkeypatch.setattr(server, "_clear_session_context", lambda *_a, **_k: None)
+
+    resp = server.handle_request(
+        {
+            "id": "stored-branch",
+            "method": "session.branch",
+            "params": {"stored_session_id": parent_key, "omit_messages": True},
+        }
+    )
+
+    assert "error" not in resp, resp
+    assert [message[1]["content"] for message in append_calls] == ["hello", "hi"]
+    assert create_calls[0][1]["cwd"] is None
+    assert create_calls[0][1]["source"] == "desktop"
+    assert create_calls[0][1]["parent_session_id"] == parent_key
+    assert create_calls[0][1]["model_config"] == {"_branched_from": parent_key}
+    assert init_calls[0]["cwd"] is None
+    assert resp["result"]["message_count"] == 2
+    assert resp["result"]["messages"] == []
+
+
 def test_session_branch_with_count_truncates_history(server, monkeypatch):
     """Branch-from-a-specific-message support (issue: Branch in new chat
     loses the question): the desktop client passes ``count`` to keep only

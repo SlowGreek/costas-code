@@ -1617,7 +1617,9 @@ export function useSessionActions({
       parentStoredId: null | string,
       cwd?: string,
       profile?: null | string,
-      branchCount?: number
+      branchCount?: number,
+      sourceStoredSessionId?: string,
+      propagateFailure: boolean = false
     ): Promise<boolean> => {
       creatingSessionRef.current = true
 
@@ -1632,25 +1634,40 @@ export function useSessionActions({
         await ensureGatewayProfile(profile)
 
         // No title: the backend auto-names the branch from its parent's lineage.
-        const branched = sourceSessionId
-          ? await requestGateway<SessionCreateResponse>('session.branch', {
-              session_id: sourceSessionId,
-              ...(branchCount !== undefined ? { count: branchCount } : {})
-            })
-          : await requestGateway<SessionCreateResponse>('session.create', {
-              cols: 96,
-              source: 'desktop',
-              ...(cwd && { cwd }),
-              ...(profile ? { profile } : {}),
-              messages: branchMessages.map(({ content, role }) => ({ content, role })),
-              ...(parentStoredId && { parent_session_id: parentStoredId })
-            })
+        const branched =
+          sourceSessionId || sourceStoredSessionId
+            ? await requestGateway<SessionCreateResponse>('session.branch', {
+                ...(sourceSessionId ? { session_id: sourceSessionId } : { stored_session_id: sourceStoredSessionId }),
+                omit_messages: true,
+                ...(profile ? { profile } : {}),
+                ...(branchCount !== undefined ? { count: branchCount } : {})
+              })
+            : await requestGateway<SessionCreateResponse>('session.create', {
+                cols: 96,
+                source: 'desktop',
+                ...(cwd && { cwd }),
+                ...(profile ? { profile } : {}),
+                messages: branchMessages.map(({ content, role }) => ({ content, role })),
+                ...(parentStoredId && { parent_session_id: parentStoredId })
+              })
 
-        const responseBranchMessages =
-          sourceSessionId && branched.messages?.length ? toBranchMessages(toChatMessages(branched.messages)) : []
+        const routedSessionId = branched.stored_session_id ?? branched.session_id
+
+        let responseBranchMessages =
+          (sourceSessionId || sourceStoredSessionId) && branched.messages?.length
+            ? toBranchMessages(toChatMessages(branched.messages))
+            : []
+
+        if (sourceStoredSessionId && !responseBranchMessages.length) {
+          try {
+            const persistedTail = await getLatestSessionMessages(routedSessionId, profile)
+            responseBranchMessages = toBranchMessages(toChatMessages(persistedTail.messages))
+          } catch {
+            // Non-fatal: the branch exists and resume/backfill can hydrate it.
+          }
+        }
 
         const effectiveBranchMessages = responseBranchMessages.length ? responseBranchMessages : branchMessages
-        const routedSessionId = branched.stored_session_id ?? branched.session_id
         const preview = effectiveBranchMessages.map(({ content }) => content).find(Boolean) ?? null
         // Draft until submit: nest under the parent at the parent's recency so it
         // doesn't bubble to the top until a real message lands (backend persists
@@ -1708,6 +1725,10 @@ export function useSessionActions({
 
         return true
       } catch (err) {
+        if (propagateFailure) {
+          throw err
+        }
+
         notifyError(err, copy.branchFailed)
 
         return false
@@ -1831,16 +1852,40 @@ export function useSessionActions({
 
       try {
         await ensureGatewayProfile(profile)
-        const { messages } = await getAllSessionMessages(storedSessionId, profile)
-        const branchMessages = toBranchMessages(toChatMessages(messages))
+        const parentStoredId = stored?.id ?? storedSessionId
 
-        if (!branchMessages.length) {
-          notify({ kind: 'warning', title: copy.nothingToBranch, message: copy.branchNoText })
+        try {
+          return await forkBranch(
+            [],
+            null,
+            parentStoredId,
+            stored?.cwd?.trim(),
+            profile,
+            undefined,
+            parentStoredId,
+            true
+          )
+        } catch (err) {
+          const code = typeof err === 'object' && err !== null && 'code' in err ? Number(err.code) : null
 
-          return false
+          if (code !== 4001 && !isMissingRpcMethod(err)) {
+            throw err
+          }
+
+          // Compatibility with gateways that know session.branch only for a
+          // live runtime id. Retain the old bounded Desktop path for ordinary
+          // sessions; oversized sessions require the updated backend.
+          const { messages } = await getAllSessionMessages(storedSessionId, profile)
+          const branchMessages = toBranchMessages(toChatMessages(messages))
+
+          if (!branchMessages.length) {
+            notify({ kind: 'warning', title: copy.nothingToBranch, message: copy.branchNoText })
+
+            return false
+          }
+
+          return await forkBranch(branchMessages, null, parentStoredId, stored?.cwd?.trim(), profile)
         }
-
-        return await forkBranch(branchMessages, null, stored?.id ?? storedSessionId, stored?.cwd?.trim(), profile)
       } catch (err) {
         notifyError(err, copy.branchFailed)
 

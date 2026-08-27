@@ -29,20 +29,28 @@ export interface RealtimeStopInput {
   candidateText: string
   canContinue: boolean
   responseId: string
+  /** How many times this turn has already been challenged. Bounds the judge. */
+  stopChallenges: number
   turn: RealtimeTurnSnapshot
 }
 
 export type RealtimeStopOutcome =
   | { kind: 'allow' }
-  | { context: string; kind: 'continue_once' }
+  | { context: string; kind: 'continue_once'; toolChoice?: 'required' }
 
-export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 'serial' | 'slow'
+export type RealtimeToolLane = 'edit' | 'gesture' | 'presentation' | 'read' | 'serial' | 'slow' | 'terminal'
 
 interface RealtimeTurnControllerOptions {
   baseInstructions?: () => string
-  execute: (call: RealtimeTurnToolCall) => Promise<unknown>
+  execute: (call: RealtimeTurnToolCall, signal: AbortSignal) => Promise<unknown>
   laneFor?: (call: RealtimeTurnToolCall) => RealtimeToolLane
   maxActions?: number
+  /**
+   * How many times one semantic turn may be challenged for ending without an
+   * explicit completion declaration. The same bound applies across every tool
+   * domain and remains inside the action/round/time budgets.
+   */
+  maxStopChallenges?: number
   maxToolRounds?: number
   maxTurnMs?: number
   now?: () => number
@@ -67,6 +75,7 @@ interface TrackedResponse {
 interface ActiveTurn {
   activeResponseId: null | string
   actions: number
+  abortController: AbortController
   callIds: Set<string>
   cancelled: boolean
   completedActions: string[]
@@ -77,7 +86,7 @@ interface ActiveTurn {
   id: string
   responses: Map<string, TrackedResponse>
   startedAt: number
-  stopCheckpointUsed: boolean
+  stopChallenges: number
   toolRounds: number
 }
 
@@ -111,6 +120,15 @@ const boundedJson = (value: unknown, maxChars: number): string => {
 
   return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`
 }
+
+const isStructuredToolError = (value: unknown): boolean =>
+  Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      typeof (value as { error?: unknown }).error === 'string' &&
+      (value as { error: string }).error.trim()
+  )
 
 const executionMemory = (turn: ActiveTurn): string => {
   if (!turn.executions.length) {
@@ -177,6 +195,7 @@ export interface RealtimeTurnController {
 
 export function createRealtimeTurnController(options: RealtimeTurnControllerOptions): RealtimeTurnController {
   const maxActions = Math.max(1, options.maxActions ?? 8)
+  const maxStopChallenges = Math.max(0, options.maxStopChallenges ?? 1)
   const maxToolRounds = Math.max(1, options.maxToolRounds ?? 4)
   const maxTurnMs = Math.max(1_000, options.maxTurnMs ?? 30_000)
   const now = options.now ?? Date.now
@@ -233,6 +252,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     current = {
       activeResponseId: null,
       actions: 0,
+      abortController: new AbortController(),
       callIds: new Set(),
       cancelled: false,
       completedActions: [],
@@ -243,7 +263,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       id: `${turnIdPrefix}-${turnSequence}`,
       responses: new Map(),
       startedAt: now(),
-      stopCheckpointUsed: false,
+      stopChallenges: 0,
       toolRounds: 0
     }
     lastTurnId = current.id
@@ -288,6 +308,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     }
 
     turn.cancelled = true
+    turn.abortController.abort()
     blockedUntilBegin = true
 
     for (const response of turn.responses.values()) {
@@ -406,8 +427,10 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           turn.actions < maxActions &&
           now() - turn.startedAt < maxTurnMs
 
-        if (!turn.stopCheckpointUsed && options.stop) {
-          turn.stopCheckpointUsed = true
+        if (turn.stopChallenges < maxStopChallenges && options.stop) {
+          const stopChallenges = turn.stopChallenges
+
+          turn.stopChallenges += 1
           let stopOutcome: RealtimeStopOutcome = { kind: 'allow' }
 
           try {
@@ -415,6 +438,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
               candidateText: response.assistantText,
               canContinue,
               responseId: response.id,
+              stopChallenges,
               turn: snapshot(turn, maxActions, maxToolRounds)
             })
           } catch {
@@ -438,7 +462,8 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
                   false,
                   options.baseInstructions?.(),
                   context
-                )
+                ),
+                ...(stopOutcome.toolChoice ? { tool_choice: stopOutcome.toolChoice } : {})
               }
             })
 
@@ -476,6 +501,16 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         const lane = options.laneFor?.(call) ?? 'serial'
         const presentation = lane === 'gesture' || lane === 'presentation'
 
+        if (lane === 'terminal' && response.calls.length !== 1) {
+          results.set(call.callId, {
+            executed: false,
+            output: { error: 'finish_turn must be the only tool call in its response' },
+            status: 'failure'
+          })
+
+          return
+        }
+
         if (presentation && turn.gestureNarrationPending) {
           results.set(call.callId, {
             executed: false,
@@ -489,7 +524,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           return
         }
 
-        if (presentation && response.assistantText.trim()) {
+        if (presentation && (audioPlaying || resolveAudioEnded !== null || response.assistantText.trim())) {
           const playbackRemainingMs = maxTurnMs - (now() - turn.startedAt)
 
           if (playbackRemainingMs <= 0) {
@@ -575,7 +610,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
             const timeout = Symbol('voice-tool-timeout')
 
             const result = await Promise.race([
-              options.execute(call),
+              options.execute(call, turn.abortController.signal),
               new Promise<typeof timeout>(resolve => {
                 timeoutId = setTimeout(() => resolve(timeout), remainingMs)
               })
@@ -588,7 +623,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
               output = result
             }
           } else {
-            output = await options.execute(call)
+            output = await options.execute(call, turn.abortController.signal)
           }
         } catch (error) {
           output = { error: error instanceof Error ? error.message : String(error) }
@@ -597,6 +632,10 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           if (timeoutId !== undefined) {
             clearTimeout(timeoutId)
           }
+        }
+
+        if (status === 'success' && isStructuredToolError(output)) {
+          status = 'failure'
         }
 
         if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart || call.outputSent) {
@@ -666,6 +705,23 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
       if (closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart) {
         return { continued: false, settled: false }
+      }
+
+      const terminalAccepted = response.calls.some(call => {
+        const result = results.get(call.callId)
+
+        return (
+          (options.laneFor?.(call) ?? 'serial') === 'terminal' &&
+          result?.executed === true &&
+          result.status === 'success'
+        )
+      })
+
+      if (terminalAccepted) {
+        current = null
+        options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
+
+        return { continued: false, settled: true }
       }
 
       const finalResponse =

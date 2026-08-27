@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { REALTIME_INSTRUCTIONS_FOR_TESTS } from './realtime-voice'
+import {
+  REALTIME_INSTRUCTIONS_FOR_TESTS,
+  VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS
+} from './realtime-voice'
 
 /**
  * Behaviour contracts for the voice instructions, not wording snapshots.
@@ -26,14 +29,14 @@ describe('realtime instructions', () => {
 
   it('requires an actual tool action for explicit visual requests', () => {
     expect(text).toMatch(/spoken description alone does not satisfy/i)
-    expect(text).toMatch(/what would that look like/i)
+    expect(text).toMatch(/visual action advances the user’s goal/i)
   })
 
   it('teaches the model to act sequentially across one human turn', () => {
-    expect(text).toMatch(/continue.*after each tool result/i)
-    expect(text).toMatch(/inspect its result/i)
-    expect(text).toMatch(/do not schedule unknown dependencies together/i)
-    expect(text).toMatch(/search.*speed_draw/i)
+    expect(text).toMatch(/continue after each tool result/i)
+    expect(text).toMatch(/inspect each real result/i)
+    expect(text).toMatch(/dependent actions sequentially/i)
+    expect(text).toMatch(/independent reads may share one response/i)
   })
 
   it('delegates research reluctantly without creating a second conversation authority', () => {
@@ -46,50 +49,49 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/readiness continuation|safe boundary/i)
   })
 
-  it('explains the voice agent loop and its completion signal', () => {
-    expect(text).toMatch(/continue.*after each tool result/i)
-    expect(text).toMatch(/response without a tool ends/i)
-    expect(text).toMatch(/while work remains.*call the next tool/i)
-    expect(text).toMatch(/original user request is satisfied/i)
+  it('gives running background work a valid deferred terminal boundary', () => {
+    expect(text).toMatch(/if research_status says running/i)
+    expect(text).toMatch(/finish_turn with status deferred/i)
+    expect(text).not.toMatch(/research_status says running[^.]*end normally/i)
   })
 
-  it('paces walkthrough camera moves with one explanation at a time', () => {
-    expect(text).toMatch(/add or focus exactly one node/i)
-    expect(text).toMatch(/explain only that node/i)
-    expect(text).toMatch(/never queue more than one node ahead/i)
+  it('teaches a general iterative agent loop with explicit completion', () => {
+    expect(text).toMatch(/each response.*one step/i)
+    expect(text).toMatch(/speech.*not.*completion|speaking.*not.*completion/i)
+    expect(text).toMatch(/while work remains.*next useful tool/i)
+    expect(text).toMatch(/finish_turn.*complete/i)
+    expect(text).toMatch(/finish_turn.*blocked/i)
+    expect(text).toMatch(/finish_turn.*deferred/i)
+    expect(text).toMatch(/tool-free response.*candidate stop/i)
   })
 
-  it('names the next action explicitly instead of saying "move on"', () => {
-    // Regression guard for the live loop stall. 9d98ddabaf said "call focus
-    // for the next node and repeat" and the model advanced on its own; a
-    // later edit softened it to "move to the next node", which reads as
-    // "wait for something" and the walkthrough died after one node. The
-    // instruction must name the TOOL, not the intention.
-    expect(text).toMatch(/call focus (and zoom_to )?for the next/i)
-    expect(text).not.toMatch(/after that explanation has played, move to the next node/i)
+  it('keeps the core agent loop independent of any particular tool domain', () => {
+    expect(VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS).not.toMatch(
+      /graph|canvas|node|subject|present_step|focus|camera|research|speed_draw/i
+    )
   })
 
-  it('treats ordinary show-me language as an implicit guided walkthrough', () => {
-    expect(text).toMatch(/show me.*what would that look like.*how does this work.*step by step/is)
-    expect(text).toMatch(/default.*guided walkthrough/i)
-    expect(text).toMatch(/add or focus exactly one node.*explain only that node/is)
-    expect(text).toMatch(/user should not have to ask.*each visual action/i)
+  it('does not prescribe a graph-specific state machine around the general loop', () => {
+    expect(text).not.toMatch(/for a small new diagram/i)
+    expect(text).not.toMatch(/call present_step for the NEXT subject/i)
+    expect(text).not.toMatch(/repeat until every subject/i)
+    expect(text).not.toMatch(/default to a guided walkthrough/i)
   })
 
-  it('asks the model to carry the next focus inside the explanation response', () => {
-    // THE loop contract. A Realtime response cannot be reopened, so a spoken
-    // beat with no tool call ends the semantic turn -- the model must reach
-    // for the next node in the SAME response that explains the current one.
-    // Session 20260820_100843_ef4edc advanced on its own with this shape;
-    // splitting it into "explain, then move on" stranded the walkthrough.
-    expect(text).toMatch(/in that same explanation response/i)
-    expect(text).toMatch(/call focus and zoom_to for the NEXT node/i)
-    expect(text).toMatch(/waits for your current sentence to finish playing/i)
-    expect(text).toMatch(/keeps itself going/i)
+  it('keeps visual capabilities synchronized without prescribing the route', () => {
+    expect(text).toMatch(/present_step.*couple one bounded graph edit with focus and framing/is)
+    expect(text).toMatch(/keep the current visual result visible while you explain/i)
+    expect(text).toMatch(/choose what comes next through the same general agent loop/i)
+    expect(text).toMatch(/actual spoken playback.*one spatial beat/i)
   })
 
-  it('reserves speed_draw for an explicitly static or all-at-once request', () => {
-    expect(text).toMatch(/speed_draw only when.*quick draft.*all at once.*rearrange/is)
+  it('names the walkthrough tool and says no cue will arrive between beats', () => {
+    expect(text).toMatch(/guided visual walkthrough[^.]*call present_step[^.]*nonfinal beat/i)
+    expect(text).toMatch(/not waiting for the user or another cue/i)
+  })
+
+  it('reserves speed_draw for explicitly broad or all-at-once work', () => {
+    expect(text).toMatch(/speed_draw only for an explicitly quick, all-at-once, rearranged, or wholesale/i)
     expect(text).not.toMatch(/SHAPE[^.]*step by step/i)
   })
 
@@ -117,7 +119,7 @@ describe('realtime instructions', () => {
   })
 
   it('uses one consistent focus rule and preserves incremental add-then-connect', () => {
-    expect(text).toMatch(/focus automatically.*guided/i)
+    expect(text).toMatch(/present_step.*guided explanations/i)
     expect(text).toMatch(/add_node.*then connect/i)
   })
 

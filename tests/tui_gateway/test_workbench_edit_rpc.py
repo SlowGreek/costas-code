@@ -85,6 +85,52 @@ def test_add_node_bumps_semantic_rev_and_emits(wired):
     assert ("artifact.updated", runtime_id, {"artifact": artifact}) in emitted
 
 
+def test_first_add_node_bootstraps_an_empty_map_for_immediate_focus(tmp_path, monkeypatch):
+    """The first present_step must not need a prior whole-canvas visualization."""
+    db = SessionDB(db_path=tmp_path / "state.db")
+    runtime_id = "runtime-empty-map"
+    db.create_session("stored-empty-map", "desktop", model="test")
+    server._sessions[runtime_id] = {"session_key": "stored-empty-map", "profile_home": None}
+    monkeypatch.setattr(server, "_db", db)
+    emitted = []
+    monkeypatch.setattr(
+        server, "_emit", lambda event, sid, payload=None: emitted.append((event, sid, payload))
+    )
+
+    try:
+        added = server._methods["workbench.edit"](
+            "r-first-add",
+            {
+                "session_id": runtime_id,
+                "edit": {
+                    "op": "add_node",
+                    "id": "audio-input",
+                    "label": "Audio Input",
+                    "kind": "surface",
+                },
+            },
+        )
+
+        assert "error" not in added
+        artifact = added["result"]["artifact"]
+        assert artifact["semantic_rev"] == 1
+        assert artifact["payload"] == {
+            "nodes": [{"id": "audio-input", "label": "Audio Input", "kind": "surface"}],
+            "edges": [],
+        }
+
+        focused = server._methods["workbench.focus"](
+            "r-first-focus",
+            {"session_id": runtime_id, "node_id": "audio-input"},
+        )
+        assert "error" not in focused
+        assert focused["result"]["artifact"]["view_state"]["focus"] == "audio-input"
+        assert [event for event, _, _ in emitted] == ["artifact.updated", "artifact.updated"]
+    finally:
+        server._sessions.pop(runtime_id, None)
+        db.close()
+
+
 def test_remove_drops_dangling_edges(wired):
     _, runtime_id, _ = wired
     envelope = server._methods["workbench.edit"](

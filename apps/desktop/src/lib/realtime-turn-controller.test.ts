@@ -53,6 +53,70 @@ describe('RealtimeTurnController', () => {
     expect(outcome).toEqual({ continued: true, settled: false })
   })
 
+  it('settles after a successful terminal declaration without another inference', async () => {
+    const sent: Record<string, unknown>[] = []
+    const execute = vi.fn(async ({ name }: { name: string }) => ({ status: name === 'finish_turn' ? 'complete' : 'ok' }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'finish_turn' ? 'terminal' : 'serial'),
+      maxStopChallenges: 2,
+      send: event => sent.push(event),
+      stop: input => ({
+        context: `The response ended without a completion declaration for: ${input.turn.goal}`,
+        kind: 'continue_once'
+      })
+    })
+
+    controller.beginTurn('Explain whether the cache is healthy.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'The cache is healthy.')
+
+    expect(await controller.responseDone('response-1')).toEqual({ continued: true, settled: false })
+    expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone(call('response-2', 'call-finish', 'finish_turn'))
+
+    expect(await controller.responseDone('response-2')).toEqual({ continued: false, settled: true })
+    expect(sent.filter(event => event.type === 'conversation.item.create')).toHaveLength(1)
+    expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
+    expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('rejects a terminal declaration bundled with an unobserved action', async () => {
+    const sent: Record<string, unknown>[] = []
+
+    const execute = vi.fn(async ({ name }: { name: string }) =>
+      name === 'finish_turn' ? { status: 'complete' } : { focused: 'planner' }
+    )
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'finish_turn' ? 'terminal' : 'edit'),
+      send: event => sent.push(event)
+    })
+
+    controller.beginTurn('Focus the planner and verify the result.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-focus', 'focus'))
+    controller.functionCallDone(call('response-1', 'call-finish', 'finish_turn'))
+
+    expect(await controller.responseDone('response-1')).toEqual({ continued: true, settled: false })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ name: 'focus' }), expect.any(AbortSignal))
+
+    const outputs = sent
+      .filter(event => event.type === 'conversation.item.create')
+      .map(event => JSON.parse((event.item as { output: string }).output))
+
+    expect(outputs).toEqual([
+      { focused: 'planner' },
+      { error: 'finish_turn must be the only tool call in its response' }
+    ])
+    expect(controller.activeTurn()).not.toBeNull()
+  })
+
   it('retains ordered tool arguments and results as execution memory', async () => {
     const send = vi.fn()
 
@@ -205,7 +269,10 @@ describe('RealtimeTurnController', () => {
     await controller.responseDone('response-1')
 
     expect(execute).toHaveBeenCalledOnce()
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ callId: 'call-new' }))
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: 'call-new' }),
+      expect.anything()
+    )
 
     const outputs = sent
       .filter(event => event.type === 'conversation.item.create')
@@ -276,6 +343,41 @@ describe('RealtimeTurnController', () => {
     })
   })
 
+  it('keeps a checkpoint-selected visual action behind prior response playback', async () => {
+    const execute = vi.fn(async () => ({ focused: 'vad' }))
+
+    const controller = createRealtimeTurnController({
+      execute,
+      laneFor: ({ name }) => (name === 'focus' ? 'gesture' : 'serial'),
+      maxStopChallenges: 2,
+      send: vi.fn(),
+      stop: () => ({ context: 'Choose the next action or finish_turn.', kind: 'continue_once' })
+    })
+
+    controller.beginTurn('Walk through the system.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'Mic audio is the entry point.')
+    await controller.responseDone('response-1')
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone({
+      arguments: '{"node_id":"vad"}',
+      callId: 'call-vad',
+      name: 'focus',
+      responseId: 'response-2'
+    })
+    const completing = controller.responseDone('response-2')
+
+    await Promise.resolve()
+    expect(execute).not.toHaveBeenCalled()
+
+    controller.assistantAudioStarted()
+    controller.assistantAudioEnded()
+    await completing
+
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it('executes a duplicate call id only once', async () => {
     const execute = vi.fn(async () => ({ ok: true }))
     const send = vi.fn()
@@ -322,7 +424,7 @@ describe('RealtimeTurnController', () => {
     expect(controller.turnIdForResponse('response-1')).toBe(turnId)
   })
 
-  it('lets an FX-style Stop checkpoint continue one tool-free candidate once', async () => {
+  it('lets the semantic Stop checkpoint continue a tool-free candidate', async () => {
     const send = vi.fn()
 
     const stop = vi.fn(async input => {
@@ -330,7 +432,11 @@ describe('RealtimeTurnController', () => {
       expect(input.turn.goal).toBe('Explain every step.')
       expect(input.canContinue).toBe(true)
 
-      return { context: 'The original request is incomplete. Continue.', kind: 'continue_once' } as const
+      return {
+        context: 'The original request is incomplete. Continue.',
+        kind: 'continue_once',
+        toolChoice: 'required'
+      } as const
     })
 
     const controller = createRealtimeTurnController({ execute: vi.fn(), send, stop })
@@ -345,7 +451,10 @@ describe('RealtimeTurnController', () => {
     })
     expect(controller.activeTurn()?.id).toBe(turnId)
     expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
-      response: { instructions: expect.stringMatching(/original request is incomplete/i) },
+      response: {
+        instructions: expect.stringMatching(/original request is incomplete/i),
+        tool_choice: 'required'
+      },
       type: 'response.create'
     })
 
@@ -359,43 +468,69 @@ describe('RealtimeTurnController', () => {
     expect(controller.activeTurn()).toBeNull()
   })
 
-  it('lets a spoken beat carry the next presentation instead of skipping it', async () => {
-    // Narration debt exists so two focuses cannot fire back-to-back with no
-    // explanation between them. But when the SAME response both explains the
-    // current node and reaches for the next one, the debt is already paid --
-    // skipping that call is what strands a walkthrough after one node.
-    const executed: string[] = []
+  it('challenges an unfinished goal more than once within its bounded budget', async () => {
+    // Any undertrained Realtime response may speak and omit both the next
+    // action and finish_turn. The recovery budget must handle that shape more
+    // than once without becoming unbounded.
+    const send = vi.fn()
+    const seen: number[] = []
+
+    const stop = vi.fn(async (input: { stopChallenges: number }) => {
+      seen.push(input.stopChallenges)
+
+      return { context: 'Two subjects remain unexplained.', kind: 'continue_once' } as const
+    })
 
     const controller = createRealtimeTurnController({
-      execute: async call => {
-        executed.push(call.name)
-
-        return { ok: true }
-      },
-      laneFor: () => 'gesture',
-      send: vi.fn()
+      execute: vi.fn(),
+      maxStopChallenges: 3,
+      send,
+      stop
     })
 
-    controller.beginTurn('Walk me through it.')
-    controller.responseCreated('response-1')
-    controller.functionCallDone(call('response-1', 'call-planner', 'focus'))
-    await controller.responseDone('response-1')
-    expect(executed).toEqual(['focus'])
+    controller.beginTurn('Walk me through every node step by step.')
 
-    // Beat two: explanation AND the next focus in one response.
-    controller.responseCreated('response-2')
-    controller.assistantTranscriptDone('response-2', 'The Planner decides what happens next.')
-    controller.functionCallDone(call('response-2', 'call-executor', 'focus'))
-    const completing = controller.responseDone('response-2')
+    for (const index of [1, 2, 3]) {
+      const responseId = `response-${index}`
 
-    controller.assistantAudioEnded()
-    await completing
+      controller.responseCreated(responseId)
+      controller.assistantTranscriptDone(responseId, `Beat ${index}.`)
+      await expect(controller.responseDone(responseId)).resolves.toEqual({
+        continued: true,
+        settled: false
+      })
+    }
 
-    expect(executed).toEqual(['focus', 'focus'])
-    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
-      callId: 'call-executor',
-      status: 'success'
+    expect(seen).toEqual([0, 1, 2])
+    expect(stop).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops challenging once the bounded budget is spent', async () => {
+    const stop = vi.fn(async () => ({ context: 'Still unfinished.', kind: 'continue_once' }) as const)
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      maxStopChallenges: 2,
+      send: vi.fn(),
+      stop
     })
+
+    controller.beginTurn('Walk me through every node step by step.')
+
+    for (const index of [1, 2]) {
+      controller.responseCreated(`response-${index}`)
+      controller.assistantTranscriptDone(`response-${index}`, `Beat ${index}.`)
+      await controller.responseDone(`response-${index}`)
+    }
+
+    controller.responseCreated('response-3')
+    controller.assistantTranscriptDone('response-3', 'Beat 3.')
+    await expect(controller.responseDone('response-3')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
+    expect(stop).toHaveBeenCalledTimes(2)
+    expect(controller.activeTurn()).toBeNull()
   })
 
   it('forces a final no-tool response when the round budget is exhausted', async () => {
@@ -427,6 +562,25 @@ describe('RealtimeTurnController', () => {
     })
   })
 
+  it('records a structured tool error as failure instead of completed success', async () => {
+    const controller = createRealtimeTurnController({
+      execute: async () => ({ error: 'camera unavailable', status: 'partial' }),
+      laneFor: () => 'gesture',
+      send: vi.fn()
+    })
+
+    controller.beginTurn('Present the executor.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-present', 'present_step'))
+    await controller.responseDone('response-1')
+
+    expect(controller.activeTurn()?.executions.at(-1)).toMatchObject({
+      callId: 'call-present',
+      output: { error: 'camera unavailable', status: 'partial' },
+      status: 'failure'
+    })
+  })
+
   it('cancels pending calls on barge-in and drops their late results', async () => {
     const work = deferred<unknown>()
     const sent: Record<string, unknown>[] = []
@@ -449,6 +603,30 @@ describe('RealtimeTurnController', () => {
     expect(JSON.parse((outputs[0].item as { output: string }).output)).toEqual({ cancelled: true })
     expect(sent.some(event => event.type === 'response.create')).toBe(false)
     expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('aborts an in-flight tool when the user interrupts the turn', async () => {
+    let capturedSignal: AbortSignal | undefined
+
+    const execute = vi.fn(
+      async (_call: unknown, signal: AbortSignal) =>
+        new Promise(resolve => {
+          capturedSignal = signal
+          signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true })
+        })
+    )
+
+    const controller = createRealtimeTurnController({ execute, send: vi.fn() })
+
+    controller.beginTurn('Move the camera.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-present', 'present_step'))
+    const completing = controller.responseDone('response-1')
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined())
+
+    controller.interrupt()
+    await completing
+    expect(capturedSignal?.aborted).toBe(true)
   })
 
   it('does not let stale response completion settle the next user turn', async () => {

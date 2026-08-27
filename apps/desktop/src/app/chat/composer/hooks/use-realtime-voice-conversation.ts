@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { onGatewayEvent } from '@/contrib/events'
 import { useI18n } from '@/i18n'
+import { applyCameraCommandWhenReady } from '@/lib/realtime-camera-command-queue'
 import {
   createRealtimeMissionRuntime,
   type RealtimeResearchStatusSnapshot,
@@ -216,27 +217,35 @@ export function useRealtimeVoiceConversation({
             failedTranscriptsRef.current.shift()
           }
         },
-        onCameraCommand: command => {
-          const layout = $workbenchLayout.get()
+        onCameraCommand: (command, signal) =>
+          applyCameraCommandWhenReady(
+            {
+              apply: next => {
+                const layout = $workbenchLayout.get()
 
-          if (!layout) {
-            return false
-          }
+                if (!layout) {
+                  return false
+                }
 
-          const target = resolveWorkbenchCameraCommand(
-            command,
-            layout,
-            $workbenchCamera.get()
-          )
+                const target = resolveWorkbenchCameraCommand(
+                  next,
+                  layout,
+                  $workbenchCamera.get()
+                )
 
-          if (!target) {
-            return false
-          }
+                if (!target) {
+                  return false
+                }
 
-          animateWorkbenchCameraTo(target, cameraTransitionOptions(command.transition))
+                animateWorkbenchCameraTo(target, cameraTransitionOptions(next.transition))
 
-          return true
-        },
+                return true
+              },
+              listen: callback => $workbenchLayout.listen(() => callback()),
+              signal
+            },
+            command
+          ),
         onAssistantAudioEnded: missionRuntime.assistantAudioEnded,
         onAssistantAudioStarted: missionRuntime.assistantAudioStarted,
         onConnectionClosed: missionRuntime.connectionClosed,

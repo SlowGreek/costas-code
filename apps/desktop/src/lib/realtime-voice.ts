@@ -11,17 +11,18 @@ import {
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
 
-export const fxStyleStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
-  const completedTools = input.turn.executions.filter(execution => execution.status === 'success')
-
-  if (!input.canContinue || input.candidateText.trim() || completedTools.length < 2) {
+export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
+  if (!input.canContinue) {
     return { kind: 'allow' }
   }
 
   return {
     context:
-      'Summarize your current progress for the user. Explain what the completed tools established before deciding whether another action is needed.',
-    kind: 'continue_once'
+      'This response ended without an explicit finish_turn declaration. Do not speak during this checkpoint. ' +
+      'Reconsider the original user goal and actual tool results. If the whole goal is satisfied, call finish_turn. ' +
+      'Otherwise call the next useful tool now. You are not waiting for the user or another cue.',
+    kind: 'continue_once',
+    toolChoice: 'required'
   }
 }
 
@@ -53,6 +54,8 @@ export type RealtimeCameraCommand =
       amount: RealtimeCameraAmount
       direction: RealtimeCameraPanDirection
       kind: 'pan_view'
+      /** When set by present_step, do not pan until this subject exists in layout. */
+      requireNodeId?: string
       transition: RealtimeCameraTransition
     }
   | { kind: 'reset_view'; transition: RealtimeCameraTransition }
@@ -78,7 +81,10 @@ export interface RealtimeServerEventDeps {
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   /** Execute one bounded renderer-local camera command. */
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
+  onCameraCommand?: (
+    command: RealtimeCameraCommand,
+    signal?: AbortSignal
+  ) => boolean | Promise<boolean>
   onAssistantResponseDone?: () => void
   onAssistantTranscriptDelta?: (delta: string) => void
   onProviderResponseEnded?: (status: string, continued: boolean) => void
@@ -92,6 +98,7 @@ export interface RealtimeServerEventDeps {
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
   send: (event: Record<string, unknown>) => void
+  signal?: AbortSignal
   turnController?: RealtimeTurnController
 }
 
@@ -376,7 +383,10 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
-  onCameraCommand?: (command: RealtimeCameraCommand) => boolean
+  onCameraCommand?: (
+    command: RealtimeCameraCommand,
+    signal?: AbortSignal
+  ) => boolean | Promise<boolean>
   onAssistantAudioEnded?: () => void
   onAssistantAudioStarted?: () => void
   onAssistantResponseDone?: () => void
@@ -425,7 +435,8 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   // implementation in her mouth, and it reads as apologising for the software.
   'Keep the machinery to yourself. Redraws, render timing, what is in flight, what you are or are not allowed to call — none of that belongs in the conversation. If the user says they cannot see something yet, say so plainly in one short line and carry on with the idea. ' +
   // Latency is the reason to prefer the fast tools, so give the reason.
-  'The instant tools land in milliseconds. Focus automatically during guided explanations so the user can track the current node; use zoom_to with it, rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'The instant tools land in milliseconds. Use present_step during guided explanations so highlighting and camera framing land together; use focus or zoom_to alone only for a direct one-off visual request. Use rename, connect, disconnect and remove for single changes, and go_back when the user wants an earlier version. ' +
+  'For a guided visual walkthrough, call present_step for the next item in every nonfinal beat; you are not waiting for the user or another cue between steps. ' +
   'Use the full camera grammar deliberately: zoom_to frames one node; frame_nodes composes a 2–8 node subsystem; pan_view reveals nearby space; zoom_view breathes the current composition in or out; reset_view returns to the whole canvas. Set a composition anchor when the subject should sit on a viewport third rather than dead centre. Choose a transition as cut, quick, smooth, or dramatic to match the thought. Actual spoken playback is the dwell clock: make one spatial beat, explain it while it remains framed, then move only after that audio has ended. Never pre-script a multi-step camera tour that can outrun the narration. ' +
   'session_snapshot tells you what is actually on the canvas; check it before describing what the user is looking at. ' +
   // Deixis. This is the line that makes the shared referent real: without it
@@ -434,11 +445,10 @@ const DEFAULT_REALTIME_INSTRUCTIONS =
   '"This one", "that", "it", "this box" all mean `pointing_at`: resolve it silently and act. ' +
   'With nothing selected, use the spatial descriptions to work out what "the one on the left" means, and ask only when it is genuinely ambiguous. ' +
   'Speak locations the way a person would — "the box on the far right" — and keep an already-clear referent framed instead of re-focusing it on every mention. ' +
-  // A walkthrough is intentionally one bounded semantic micro-round per node.
-  // Transcript deltas run ahead of audible WebRTC playback, so trying to infer
-  // focus from generated words highlights the whole route before it is heard.
-  'Ordinary teaching language is enough to activate presentation: “show me”, “what would that look like?”, “how does this work?”, and “step by step” default to a guided walkthrough. The user should not have to ask for each visual action. ' +
-  'For a small new diagram, build the explanation live: add or focus exactly one node, then explain only that node while it remains framed. In that same explanation response, call focus and zoom_to for the NEXT node — the canvas waits for your current sentence to finish playing before it moves, so the two stay in step and the walkthrough keeps itself going. Repeat until every node has been covered, then call reset_view to return to the whole canvas. If the diagram already exists, use session_snapshot and walk it the same way. Do not name future nodes during the current node’s explanation, and never queue more than one node ahead. ' +
+  // Visual tools are capabilities inside the general loop, not a second
+  // graph-specific orchestrator. Realtime chooses the route from the goal and
+  // current state; the host only keeps visible actions synchronized to audio.
+  'When a visual action advances the user’s goal, choose the smallest semantic tool that expresses it. present_step can couple one bounded graph edit with focus and framing when those effects belong to one thought; the individual edit and camera tools remain available when they do not. Keep the current visual result visible while you explain it, and choose what comes next through the same general agent loop. Use speed_draw only for an explicitly quick, all-at-once, rearranged, or wholesale canvas change because it completes asynchronously. ' +
   // Layout intent. Without this she has no way to answer a question about
   // arrangement and falls back to redrawing the same graph.
   'When the user explicitly asks to rearrange an existing diagram — “make this linear”, “left to right”, “top down”, or “radial” — call speed_draw with the requested arrangement. That is a real canvas change, not something to claim in speech without changing the artifact.'
@@ -447,10 +457,13 @@ const VOICE_OWNED_REDRAW_INSTRUCTIONS =
   'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. Use speed_draw only when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
-  'You can continue the same user request after each tool result. A response without a tool ends the current work loop. Therefore, while work remains, call the next tool before that response ends; spoken output may explain the current step without implying the whole request is complete. End without another tool only when the original user request is satisfied or you genuinely need their input. When later arguments depend on a result you do not know yet, call the first tool, inspect its result, and continue from there. Do not schedule unknown dependencies together: search, inspect, then speed_draw; snapshot, edit, then inspect again when confirmation matters. The stable-ID walkthrough sequence above is already ordered and may share one response. Keep the same conversational thought throughout without greeting, restarting, or recapping.'
+  'You operate inside one continuous agent loop for each user request. Each response is one step, not necessarily the whole answer. Act, observe the real result, explain progress when useful, and choose what to do next. Speech is not completion: while work remains, call the next useful tool before the response ends. When the entire user goal is satisfied, call finish_turn with status complete in the same response. When progress genuinely requires new user input, explain what is needed and call finish_turn with status blocked. When already-dispatched background or external work will resume the goal later, explain that it is continuing and call finish_turn with status deferred. A tool-free response is only a candidate stop; the harness may give you a silent checkpoint to call finish_turn or choose the next action. Continue after each tool result without greeting, restarting, or recapping. Run dependent actions sequentially so you can inspect each real result before choosing the next; independent reads may share one response.'
+
+/** Test seam: the agent-loop contract must remain independent of every tool domain. */
+export const VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS = VOICE_ACTION_LOOP_INSTRUCTIONS
 
 const VOICE_RESEARCH_INSTRUCTIONS =
-  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and end normally. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
+  'Use delegate_research reluctantly, only for substantial multi-source or deep research that cannot be answered with a quick web_search. Prefer web_search for current facts and small lookups. A research worker produces evidence only; you remain the sole conversational authority and decide what it means, what to draw, and what to say. After dispatch, keep the returned research handle. Do not busy-poll: if research_status says running, explain that the evidence is being gathered and call finish_turn with status deferred, naming that continuation in the reason. When a readiness continuation arrives at a safe boundary, call research_status, use research_search to locate relevant evidence, and research_read to inspect only the needed sections before drawing or answering. If no continuation arrives, do the same on a later user turn.'
 
 const WEB_SEARCH_INSTRUCTIONS =
   'You can search the live web for current information and unfamiliar facts. Use web_search silently instead of guessing, then ground the spoken answer in the returned sources.'
@@ -489,6 +502,24 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
     tools: [
       {
         type: 'function',
+        name: 'finish_turn',
+        description:
+          'Explicitly end the current semantic turn. Call complete only when the whole request is satisfied; blocked only when progress requires new user input; deferred only when already-dispatched background or external work will resume the goal. Do not use this merely because you have spoken.',
+        parameters: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['complete', 'blocked', 'deferred'] },
+            reason: {
+              type: 'string',
+              description: 'Short internal reason. Required when blocked or deferred; do not speak it as a separate recap.'
+            }
+          },
+          required: ['status'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
         name: 'session_snapshot',
         description:
           'Read persisted canvas truth: artifact kinds, nodes, edges, semantic revisions, and view state. Spatial layout and the current pointing target come from the authoritative workbench summary in your context.',
@@ -502,7 +533,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'speed_draw',
         description:
-          'Generate or restructure the whole canvas without narrating every node. Use ONLY when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. “Show me”, “what would that look like?”, “how does this work?”, and “step by step” instead call for live narrated construction with add_node, focus, and zoom_to.',
+          'Generate or restructure the whole canvas without narrating every node. Use ONLY when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. “Show me”, “what would that look like?”, “how does this work?”, and “step by step” instead call for live narrated construction with present_step and its optional add/connect fields.',
         parameters: {
           type: 'object',
           properties: {
@@ -591,7 +622,7 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
         type: 'function',
         name: 'add_node',
         description:
-          'Add ONE new node directly to the current map. This is the default for small explanatory diagrams requested with “show me”, “what would that look like?”, “how does this work?”, or “step by step”. Add, focus, zoom to, and explain one node before adding the next.',
+          'Add ONE new node directly to the current map for a one-off edit. During a guided build, prefer present_step with its add field so creation, highlight, and camera framing cannot drift apart.',
         parameters: {
           type: 'object',
           properties: {
@@ -605,9 +636,74 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
       },
       {
         type: 'function',
+        name: 'present_step',
+        description:
+          'Present ONE graph/map teaching beat as a single coherent visual action: ring the subject and move the camera around it. Use after add_node/connect when building, or directly for an existing node. Use close for one subject; use context with related node ids to frame a relationship. Then explain only subject_id while this frame remains active.',
+        parameters: {
+          type: 'object',
+          properties: {
+            subject_id: {
+              type: 'string',
+              description: 'The existing node this beat explains and highlights.'
+            },
+            add: {
+              type: 'object',
+              description: 'Optionally create subject_id before presenting it. One node only.',
+              properties: {
+                label: { type: 'string', description: 'Visible label for the new subject.' },
+                kind: { type: 'string', description: 'Optional semantic kind.' }
+              },
+              required: ['label'],
+              additionalProperties: false
+            },
+            connect_from: {
+              type: 'string',
+              description: 'Optionally connect one existing node to subject_id before presenting it.'
+            },
+            edge_label: {
+              type: 'string',
+              description: 'Optional label for connect_from → subject_id.'
+            },
+            pan: {
+              type: 'object',
+              description: 'Optionally reveal adjacent space while keeping subject_id highlighted.',
+              properties: {
+                direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+                amount: { type: 'string', enum: ['small', 'medium', 'large'] }
+              },
+              required: ['direction'],
+              additionalProperties: false
+            },
+            context_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: 7,
+              uniqueItems: true,
+              description: 'Optional related existing nodes to retain in a subsystem frame.'
+            },
+            framing: {
+              type: 'string',
+              enum: ['close', 'context'],
+              description: 'Close frames only the subject; context frames subject plus context_ids.'
+            },
+            anchor: {
+              type: 'string',
+              enum: ['center', 'left', 'right', 'top', 'bottom']
+            },
+            transition: {
+              type: 'string',
+              enum: ['cut', 'quick', 'smooth', 'dramatic']
+            }
+          },
+          required: ['subject_id'],
+          additionalProperties: false
+        }
+      },
+      {
+        type: 'function',
         name: 'focus',
         description:
-          'Instantly ring ONE existing node. Use it automatically with zoom_to during guided explanations so the canvas keeps pace with the voice, and to resolve ambiguous references. Keep an already-clear referent framed instead of re-focusing it on every mention. Changes nothing about the ideas themselves.',
+          'Instantly ring ONE existing node for a direct one-off highlight or ambiguous reference. For guided explanations use present_step, which couples this highlight with the correct camera frame. Changes nothing about the ideas themselves.',
         parameters: {
           type: 'object',
           properties: {
@@ -894,15 +990,18 @@ export async function startRealtimeVoiceConnection(
 
   const turnController = createRealtimeTurnController({
     baseInstructions: instructions,
-    execute: call => executeRealtimeVoiceTool(call, voiceToolDeps),
+    execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
     laneFor: voiceToolLane,
-    // Enough for a three-node live build with focus, camera, links, and a final
-    // whole-canvas frame while still bounding runaway voice loops.
+    // Bound a useful multi-step voice task without encoding any task-specific
+    // route. Actions, tool rounds, checkpoint retries, and wall time all cap it.
     maxActions: 16,
+    // Realtime gets several opportunities to recover from a premature stop,
+    // but every recovery must choose a real next action or finish_turn.
+    maxStopChallenges: 6,
     maxToolRounds: 8,
     maxTurnMs: 120_000,
     send,
-    stop: fxStyleStopCheckpoint,
+    stop: semanticTurnStopCheckpoint,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
   })
 
@@ -1237,6 +1336,10 @@ export const SURGICAL_TOOL_NAMES = [
 ] as const
 
 export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): RealtimeToolLane {
+  if (call.name === 'finish_turn') {
+    return 'terminal'
+  }
+
   if (
     call.name === 'session_snapshot' ||
     call.name === 'web_search' ||
@@ -1248,6 +1351,7 @@ export function voiceToolLane(call: Pick<RealtimeTurnToolCall, 'name'>): Realtim
   }
 
   if (
+    call.name === 'present_step' ||
     call.name === 'focus' ||
     call.name === 'zoom_to' ||
     call.name === 'frame_nodes' ||
@@ -1295,6 +1399,13 @@ const realtimeResponseStatus = (event: RealtimeEvent): string => {
   return asTrimmedString(response?.status) || 'completed'
 }
 
+const applyRealtimeCameraCommand = async (
+  handler: RealtimeServerEventDeps['onCameraCommand'],
+  command: RealtimeCameraCommand,
+  signal?: AbortSignal
+): Promise<boolean> =>
+  Boolean(signal ? await handler?.(command, signal) : await handler?.(command))
+
 /** Execute one voice-facade call without deciding when the provider continues. */
 export async function executeRealtimeVoiceTool(
   call: RealtimeTurnToolCall,
@@ -1306,9 +1417,187 @@ export async function executeRealtimeVoiceTool(
     | 'onResearchDispatched'
     | 'request'
     | 'runtimeSessionId'
+    | 'signal'
   >
 ): Promise<unknown> {
   const { name } = call
+
+  if (name === 'finish_turn') {
+    let parsed: Record<string, unknown>
+
+    try {
+      const value = JSON.parse(call.arguments || '{}') as unknown
+
+      parsed = value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {}
+    } catch {
+      return { error: 'finish_turn has malformed arguments' }
+    }
+
+    const status = asTrimmedString(parsed.status)
+    const reason = asTrimmedString(parsed.reason).slice(0, 500)
+
+    if (status !== 'complete' && status !== 'blocked' && status !== 'deferred') {
+      return { error: 'finish_turn requires status complete, blocked, or deferred' }
+    }
+
+    if ((status === 'blocked' || status === 'deferred') && !reason) {
+      return { error: `finish_turn ${status} requires a reason` }
+    }
+
+    return { ...(reason ? { reason } : {}), status }
+  }
+
+  if (name === 'present_step') {
+    let parsed: Record<string, unknown>
+
+    try {
+      const value = JSON.parse(call.arguments || '{}') as unknown
+
+      parsed = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+    } catch {
+      return { error: 'present_step has malformed arguments' }
+    }
+
+    const subjectId = asTrimmedString(parsed.subject_id).slice(0, 200)
+
+    if (!subjectId) {
+      return { error: 'present_step requires a subject_id' }
+    }
+
+    const transition = ['cut', 'dramatic', 'quick', 'smooth'].includes(
+      asTrimmedString(parsed.transition)
+    )
+      ? (parsed.transition as RealtimeCameraTransition)
+      : 'smooth'
+
+    const anchor = ['bottom', 'center', 'left', 'right', 'top'].includes(
+      asTrimmedString(parsed.anchor)
+    )
+      ? (parsed.anchor as RealtimeCameraAnchor)
+      : 'center'
+
+    const rawContextIds = Array.isArray(parsed.context_ids) ? parsed.context_ids : []
+
+    const contextIds = [
+      ...new Set(
+        rawContextIds
+          .filter(contextId => typeof contextId === 'string')
+          .map(contextId => (contextId as string).trim().slice(0, 200))
+          .filter(contextId => contextId && contextId !== subjectId)
+      )
+    ].slice(0, 7)
+
+    if (rawContextIds.length !== contextIds.length) {
+      return { error: 'present_step context_ids must be unique non-empty ids distinct from subject_id' }
+    }
+
+    const framing = parsed.framing === 'context' ? 'context' : 'close'
+
+    if (framing === 'context' && contextIds.length === 0) {
+      return { error: 'present_step context framing requires at least one context_id' }
+    }
+
+    const editResults: Record<string, unknown> = {}
+
+    if (parsed.add !== undefined) {
+      if (!parsed.add || typeof parsed.add !== 'object' || Array.isArray(parsed.add)) {
+        return { error: 'present_step add must be an object with a label' }
+      }
+
+      const add = parsed.add as Record<string, unknown>
+      const label = asTrimmedString(add.label).slice(0, 200)
+      const kind = asTrimmedString(add.kind).slice(0, 200)
+
+      if (!label) {
+        return { error: 'present_step add requires a label' }
+      }
+
+      editResults.add = await deps.request('workbench.edit', {
+        session_id: deps.runtimeSessionId,
+        edit: { id: subjectId, label, op: 'add_node', ...(kind ? { kind } : {}) }
+      })
+    }
+
+    const connectFrom = asTrimmedString(parsed.connect_from).slice(0, 200)
+
+    if (connectFrom) {
+      if (connectFrom === subjectId) {
+        return { error: 'present_step cannot connect a subject to itself' }
+      }
+
+      const label = asTrimmedString(parsed.edge_label).slice(0, 200)
+
+      editResults.connect = await deps.request('workbench.edit', {
+        session_id: deps.runtimeSessionId,
+        edit: {
+          from_id: connectFrom,
+          op: 'connect',
+          to_id: subjectId,
+          ...(label ? { label } : {})
+        }
+      })
+    }
+
+    let pan: { amount: RealtimeCameraAmount; direction: RealtimeCameraPanDirection } | null = null
+
+    if (parsed.pan !== undefined) {
+      if (!parsed.pan || typeof parsed.pan !== 'object' || Array.isArray(parsed.pan)) {
+        return { error: 'present_step pan must be an object with a bounded direction' }
+      }
+
+      const value = parsed.pan as Record<string, unknown>
+      const direction = asTrimmedString(value.direction)
+
+      if (!['down', 'left', 'right', 'up'].includes(direction)) {
+        return { error: 'present_step pan requires a bounded direction' }
+      }
+
+      const amount = ['large', 'medium', 'small'].includes(asTrimmedString(value.amount))
+        ? (value.amount as RealtimeCameraAmount)
+        : 'medium'
+
+      pan = { amount, direction: direction as RealtimeCameraPanDirection }
+    }
+
+    const focusResult = await deps.request('workbench.focus', {
+      session_id: deps.runtimeSessionId,
+      node_id: subjectId
+    })
+
+    const command: RealtimeCameraCommand =
+      pan
+        ? { ...pan, kind: 'pan_view', requireNodeId: subjectId, transition }
+        : framing === 'context'
+        ? {
+            anchor,
+            kind: 'frame_nodes',
+            nodeIds: [subjectId, ...contextIds],
+            padding: 'normal',
+            transition
+          }
+        : { anchor, kind: 'zoom_to', nodeId: subjectId, transition, zoom: 2 }
+
+    return (await applyRealtimeCameraCommand(deps.onCameraCommand, command, deps.signal))
+      ? {
+          camera: pan ? 'pan' : framing,
+          ...(Object.keys(editResults).length ? { edits: editResults } : {}),
+          focus: focusResult,
+          status: 'presented',
+          subject_id: subjectId,
+          ...(contextIds.length ? { context_ids: contextIds } : {})
+        }
+      : {
+          committed: {
+            ...editResults,
+            focus: focusResult
+          },
+          error: 'The presentation subject is not available in the current canvas layout',
+          status: 'partial',
+          subject_id: subjectId
+        }
+  }
 
   if (
     name === 'zoom_to' ||
@@ -1402,7 +1691,7 @@ export async function executeRealtimeVoiceTool(
       command = { kind: 'reset_view', transition }
     }
 
-    return deps.onCameraCommand?.(command)
+    return (await applyRealtimeCameraCommand(deps.onCameraCommand, command, deps.signal))
       ? { status: command.kind === 'pan_view' ? 'moved' : 'framed' }
       : { error: 'The requested camera target is not available on this canvas' }
   }

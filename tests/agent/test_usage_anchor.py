@@ -22,6 +22,7 @@ import pytest
 
 from agent.model_metadata import (
     anchored_context_tokens,
+    calibrated_request_pressure_tokens,
     capture_usage_anchor,
     estimate_messages_tokens_rough,
 )
@@ -30,6 +31,22 @@ from agent.turn_context import _preflight_request_tokens
 
 def _msg(role, content):
     return {"role": role, "content": content}
+
+
+def test_provider_anchor_bypasses_rough_estimate_calibration():
+    calls = []
+    compressor = SimpleNamespace(
+        calibrate_preflight_tokens=lambda value: calls.append(value) or 1,
+    )
+
+    result = calibrated_request_pressure_tokens(
+        compressor,
+        12_345,
+        provider_anchored=True,
+    )
+
+    assert result == 12_345
+    assert calls == []
 
 
 def _image_msg():

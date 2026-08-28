@@ -3764,6 +3764,35 @@ def estimate_request_tokens_rough(
     return total
 
 
+def calibrated_request_pressure_tokens(
+    compressor: Any,
+    rough_tokens: int,
+    *,
+    provider_anchored: bool = False,
+) -> int:
+    """Calibrate a rough estimate, but never re-calibrate exact usage anchors."""
+    if provider_anchored:
+        return rough_tokens
+    calibrate = getattr(compressor, "calibrate_preflight_tokens", None)
+    if not callable(calibrate):
+        return rough_tokens
+    try:
+        calibrated = calibrate(rough_tokens)
+    except Exception:
+        return rough_tokens
+    if isinstance(calibrated, bool) or not isinstance(calibrated, int):
+        return rough_tokens
+    return calibrated
+
+
+def real_prompt_tokens_for_log(compressor: Any) -> int:
+    """Last provider-reported prompt tokens, safe for ``:,`` log formatting."""
+    value = getattr(compressor, "last_real_prompt_tokens", 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
 # --- Usage-anchored context accounting ------------------------------------
 #
 # Provider responses carry ``usage.prompt_tokens`` — EXACT ground truth for

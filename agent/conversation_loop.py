@@ -73,13 +73,14 @@ from agent.model_metadata import (
     MINIMUM_CONTEXT_LENGTH,
     _estimate_tools_tokens_rough,
     anchored_context_tokens,
+    calibrated_request_pressure_tokens,
     capture_usage_anchor,
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
     get_context_length_from_provider_error,
     is_output_cap_error,
-
     parse_available_output_tokens_from_error,
+    real_prompt_tokens_for_log,
     save_context_length,
 )
 from agent.process_bootstrap import _install_safe_stdio
@@ -2882,7 +2883,19 @@ def _run_conversation_inner(
         # LLM cooldown + anti-thrash guards (#11529). compression_attempts is a
         # hard per-turn backstop shared with the overflow error handlers.
         _compressor = agent.context_compressor
-        compression_pressure_tokens = request_pressure_tokens
+        compression_pressure_tokens = calibrated_request_pressure_tokens(
+            _compressor,
+            request_pressure_tokens,
+            provider_anchored=_anchored_pressure is not None,
+        )
+        if compression_pressure_tokens != request_pressure_tokens:
+            logger.info(
+                "Calibrated pre-API pressure: rough ~%s -> ~%s using last "
+                "real provider prompt %s",
+                f"{request_pressure_tokens:,}",
+                f"{compression_pressure_tokens:,}",
+                f"{real_prompt_tokens_for_log(_compressor):,}",
+            )
         _preflight_threshold = int(
             getattr(_compressor, "threshold_tokens", 0) or 0
         )

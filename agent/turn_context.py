@@ -45,8 +45,10 @@ from agent.memory_provider import is_trivial_prompt
 from agent.message_metadata import append_message, stamp_message_timestamp
 from agent.model_metadata import (
     anchored_context_tokens,
+    calibrated_request_pressure_tokens,
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
+    real_prompt_tokens_for_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -966,12 +968,28 @@ def build_turn_context(
             agent.context_compressor.threshold_tokens,
         )
     ):
-        _preflight_tokens = _preflight_request_tokens(
+        _base_preflight_tokens = _preflight_request_tokens(
             agent,
             messages,
             active_system_prompt or "",
         )
         _compressor = agent.context_compressor
+        _preflight_is_anchored = anchored_context_tokens(
+            messages, getattr(agent, "_usage_anchor", None)
+        ) is not None
+        _preflight_tokens = calibrated_request_pressure_tokens(
+            _compressor,
+            _base_preflight_tokens,
+            provider_anchored=_preflight_is_anchored,
+        )
+        if _preflight_tokens != _base_preflight_tokens:
+            logger.info(
+                "Calibrated preflight pressure: rough ~%s -> ~%s using last "
+                "real provider prompt %s",
+                f"{_base_preflight_tokens:,}",
+                f"{_preflight_tokens:,}",
+                f"{real_prompt_tokens_for_log(_compressor):,}",
+            )
         # getattr guard: minimal compressor doubles (SimpleNamespace in the
         # engine-preflight tests) and plugin context engines lack this
         # ContextCompressor-only method — absence means no snapshot, and the

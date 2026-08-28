@@ -284,17 +284,31 @@ test('POSIX managed launcher executes the updater command and atomically publish
   const home = await mkdtemp(path.join(os.tmpdir(), 'hermes-managed-launch-'))
 
   try {
+    // The launcher targets remote Linux and correctly uses `setsid`, which is
+    // absent on macOS. Provide the narrow process-group shim this execution
+    // test needs so it proves the generated command/status flow on every host
+    // instead of failing 127 before the temporary updater stub runs.
+    const bin = path.join(home, 'bin')
+    const hermes = path.join(bin, 'hermes')
+
+    await mkdir(bin)
+    await writeFile(path.join(bin, 'setsid'), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 })
+    await writeFile(hermes, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+
     const command = buildPosixManagedUpdateLaunch(
       {
         ssh: { exec: async () => '' },
         platform: 'Linux',
-        hermesPath: '/bin/true',
+        hermesPath: hermes,
         hermesHome: home
       },
       CORRELATION
     )
 
-    const { stdout } = await exec(command, { shell: '/bin/sh' })
+    const { stdout } = await exec(command, {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+      shell: '/bin/sh'
+    })
     const statusPath = path.join(home, `.update_exit_code.${CORRELATION}`)
     let status = ''
 

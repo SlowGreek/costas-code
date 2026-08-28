@@ -382,6 +382,29 @@ def _resolve_review_runtime(
         return parent
 
 
+def _parent_can_emit_tool_calls(agent: Any) -> bool:
+    """Whether a fork inheriting ``agent``'s runtime could act at all.
+
+    The review fork's entire job is to emit ``memory`` / ``skill_manage`` tool
+    calls. A provider that IS an autonomous agent reaches Hermes through a client
+    shim, and a shim that cannot carry Hermes tool calls back turns the fork into
+    a guaranteed no-op — one that still pays for a full agent spawn (a whole CLI
+    process, sometimes a JVM) on every review cadence. The in-tree ACP client CAN
+    carry them (it uses the text bridge in ``agent/acp_openai_bridge.py``); this
+    exists so a shim that can't declares ``SUPPORTS_HERMES_TOOL_CALLS = False``
+    and is skipped instead of burning a spawn. Anything that doesn't say
+    otherwise is assumed capable, so ordinary providers are unaffected.
+    """
+    client = getattr(agent, "client", None)
+    for candidate in (client, type(client) if client is not None else None):
+        if candidate is None:
+            continue
+        supported = getattr(candidate, "SUPPORTS_HERMES_TOOL_CALLS", None)
+        if supported is not None:
+            return bool(supported)
+    return True
+
+
 def _msg_text(m: Dict) -> str:
     c = m.get("content")
     if isinstance(c, str):
@@ -480,8 +503,10 @@ _SKILL_REVIEW_PROMPT = (
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Look back through the "
     "conversation for skills the user loaded via /skill-name or you "
     "read via skill_view. If any of them covers the territory of the "
-    "new learning, PATCH that one first. It is the skill that was in "
-    "play, so it's the right one to extend — but only if it is "
+    "new learning, PATCH that one first (re-load it with skill_view "
+    "during this review — see Read-before-write below). It is the "
+    "skill that was in play, so it's the right one to extend — but "
+    "only if it is "
     "curator-managed. Bundled, hub, pinned, and user-owned skills are "
     "off-limits to you no matter how relevant (see Protected skills "
     "below); for those, fall through to the next option.\n"
@@ -514,6 +539,18 @@ _SKILL_REVIEW_PROMPT = (
     "codename, library-alone name, or 'fix-X / debug-Y / audit-Z-today' "
     "session artifact. If the proposed name only makes sense for "
     "today's task, it's wrong — fall back to (1), (2), or (3).\n\n"
+    "Read-before-write (ENFORCED — skill_manage refuses otherwise): "
+    "before you patch or edit an existing skill's SKILL.md, call "
+    "skill_view(name) for that skill during this review. Before you "
+    "overwrite or remove an EXISTING supporting file, call "
+    "skill_view(name, file_path=...) for that exact file. Content "
+    "quoted earlier in the conversation transcript does NOT count — "
+    "the guard requires a fresh load within this review, and your "
+    "write must be based on what skill_view just returned. Creating "
+    "a brand-new skill or adding a NEW supporting file needs no "
+    "prior read. If a write is refused with a read-before-write "
+    "error, call skill_view for the named target once and retry the "
+    "write once; do not loop.\n\n"
     "User-preference embedding (important): when the user expressed a "
     "style/format/workflow preference, the update belongs in the "
     "SKILL.md body, not just in memory. Memory captures 'who the user "
@@ -600,7 +637,9 @@ _COMBINED_REVIEW_PROMPT = (
     "Preference order for skills — pick the earliest that fits:\n"
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Check what skills were "
     "loaded via /skill-name or skill_view in the conversation. If one "
-    "of them covers the learning, PATCH it first. It was in play; "
+    "of them covers the learning, PATCH it first (re-load it with "
+    "skill_view during this review — see Read-before-write below). "
+    "It was in play; "
     "it's the right place — provided it is curator-managed. Protected "
     "and user-owned skills are off-limits however relevant; fall "
     "through when one of those is the best fit.\n"
@@ -620,6 +659,15 @@ _COMBINED_REVIEW_PROMPT = (
     "codename, library-alone name, or 'fix-X / debug-Y' session "
     "artifact. If the name only fits today's task, fall back to (1), "
     "(2), or (3).\n\n"
+    "Read-before-write (ENFORCED — skill_manage refuses otherwise): "
+    "before patching or editing an existing skill's SKILL.md, call "
+    "skill_view(name) during this review; before overwriting or "
+    "removing an EXISTING supporting file, call skill_view(name, "
+    "file_path=...) for that exact file. Content quoted earlier in "
+    "the transcript does NOT count — base the write on what "
+    "skill_view just returned. New skills and NEW supporting files "
+    "need no prior read. On a read-before-write refusal: view the "
+    "named target once, retry the write once, do not loop.\n\n"
     "User-preference embedding: when the user complains about how "
     "you handled a task, update the skill that governs that task — "
     "memory alone isn't enough. Memory says 'who the user is and "
@@ -1092,6 +1140,29 @@ def _run_review_in_thread(
         _set_approval_callback(_bg_review_auto_deny)
     except Exception:
         pass
+
+    # An agent-as-provider whose client can't carry Hermes tool calls back would
+    # produce a fork that spawns a whole agent and then cannot write anything.
+    # Don't spawn it — point at the override that does work. Checked BEFORE the
+    # thread-scoped silence below so the warning is not swallowed, and
+    # cheap-check-first so the normal path never resolves the runtime twice.
+    # Fixes the class, not one provider: any future agent-as-provider client
+    # inherits the guard.
+    if not _parent_can_emit_tool_calls(agent) and not bool(
+        _resolve_review_runtime(agent, task_cfg).get("routed")
+    ):
+        logger.warning(
+            "Background review skipped: provider %r cannot emit Hermes tool calls, "
+            "so the review fork could not write memories or skills. Set "
+            "auxiliary.background_review.{provider,model} to route the review to "
+            "a normal model.",
+            getattr(agent, "provider", "?"),
+        )
+        try:
+            _set_approval_callback(None)
+        except Exception:
+            pass
+        return
 
     review_agent = None
     review_messages: List[Dict] = []

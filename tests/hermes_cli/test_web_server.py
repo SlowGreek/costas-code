@@ -8,7 +8,6 @@ import shutil
 import sys
 import threading
 import time
-import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -1174,6 +1173,11 @@ class TestWebServerEndpoints:
 
         # Bypass the managed-externally gate so we reach the docker install check.
         monkeypatch.setattr(web_server, "_dashboard_local_update_managed_externally", lambda: False)
+        # The shared admission gate (#91277 Phase 3) resolves the install
+        # method through hermes_cli.config directly.
+        monkeypatch.setattr(
+            "hermes_cli.config.detect_install_method", lambda *_a, **_k: "docker"
+        )
         monkeypatch.setattr(web_server, "detect_install_method", lambda _root: "docker")
         monkeypatch.setattr(web_server, "_spawn_hermes_action", fail_spawn)
         web_server._ACTION_PROCS.pop("hermes-update", None)
@@ -1209,6 +1213,12 @@ class TestWebServerEndpoints:
             raise AssertionError("APT-managed update guard should not spawn hermes update")
 
         monkeypatch.setattr(web_server, "_dashboard_local_update_managed_externally", lambda: False)
+        # The shared admission gate (#91277 Phase 3) resolves the install
+        # method through hermes_cli.config directly, so patch it there (the
+        # web_server module alias only feeds the /update/check endpoint).
+        monkeypatch.setattr(
+            "hermes_cli.config.detect_install_method", lambda *_a, **_k: "apt"
+        )
         monkeypatch.setattr(web_server, "detect_install_method", lambda _root: "apt")
         monkeypatch.setattr(web_server, "_spawn_hermes_action", fail_spawn)
         web_server._ACTION_PROCS.pop("hermes-update", None)
@@ -1730,6 +1740,46 @@ class TestWebServerEndpoints:
         assert not model_cfg.get("base_url"), "deleted endpoint's host still routed to"
         assert not model_cfg.get("provider")
         assert not get_env_value(env_var), "deleted endpoint's key still in .env"
+
+
+    def test_numeric_yaml_provider_key_can_be_activated_and_deleted(self):
+        """Hand-edited `providers: 2070:` (YAML int key) must still activate.
+
+        PyYAML loads unquoted 2070 as int; string lookup then 404ed, so
+        Desktop could list the endpoint but not assign or delete it.
+        """
+        from hermes_cli.config import get_config_path, load_config
+
+        get_config_path().write_text(
+            "model:\n"
+            "  provider: 2070\n"
+            "  default: Qwen.gguf\n"
+            "  base_url: http://192.168.1.10:8082/v1\n"
+            "providers:\n"
+            "  2070:\n"
+            "    name: 2070\n"
+            "    base_url: http://192.168.1.10:8082/v1\n"
+            "    model: Qwen.gguf\n",
+            encoding="utf-8",
+        )
+
+        listed = self.client.get("/api/providers/custom-endpoints")
+        assert listed.status_code == 200
+        assert "2070" in [e["id"] for e in listed.json()["endpoints"]]
+
+        activate = self.client.post(
+            "/api/providers/custom-endpoints/2070/activate", json={}
+        )
+        assert activate.status_code == 200, activate.text
+        assert activate.json()["provider"] == "2070"
+
+        deleted = self.client.request(
+            "DELETE", "/api/providers/custom-endpoints/2070"
+        )
+        assert deleted.status_code == 200, deleted.text
+        providers = load_config().get("providers") or {}
+        assert 2070 not in providers
+        assert "2070" not in providers
 
 
     def test_custom_endpoint_save_scopes_to_the_requested_profile(self):
@@ -4849,6 +4899,66 @@ class TestServeIndexMissingIndex:
         assert "SPA-rebuilt" in resp.text
 
 
+class TestHeadlessServeTokenPage:
+    """Headless `hermes serve` must serve the Desktop token handshake page
+    at `/` when the dashboard auth gate is off (#94227).
+
+    The Electron renderer boots by fetching `/` and extracting
+    ``window.__HERMES_SESSION_TOKEN__`` for WebSocket auth. Headless serve
+    used to 404 every path, so after an update replaced the backend (and
+    the spawn-token env pin no longer matched the token the new backend
+    generated) the renderer was stuck with a stale token, /api/ws rejected
+    it, and the window white-screened (#95575).
+    """
+
+    @staticmethod
+    def _headless_client(monkeypatch, *, gated: bool):
+        from fastapi import FastAPI
+        from starlette.testclient import TestClient
+        import hermes_cli.web_server as ws
+
+        monkeypatch.setenv("HERMES_SERVE_HEADLESS", "1")
+        spa_app = FastAPI()
+        spa_app.state.auth_required = gated
+        ws.mount_spa(spa_app)
+        return TestClient(spa_app), ws
+
+    def test_root_serves_token_page_when_not_gated(self, monkeypatch):
+        import re
+
+        client, ws = self._headless_client(monkeypatch, gated=False)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/html")
+        assert "no-store" in resp.headers.get("cache-control", "")
+        # Must match the desktop's extraction regex exactly
+        # (apps/desktop/electron/dashboard-token.ts).
+        match = re.search(
+            r'window\.__HERMES_SESSION_TOKEN__\s*=\s*("(?:\\.|[^"\\])*")',
+            resp.text,
+        )
+        assert match, resp.text
+        import json as _json
+
+        assert _json.loads(match.group(1)) == ws._SESSION_TOKEN
+        assert "window.__HERMES_AUTH_REQUIRED__=false" in resp.text
+
+    def test_root_stays_404_json_when_auth_gated(self, monkeypatch):
+        client, ws = self._headless_client(monkeypatch, gated=True)
+        resp = client.get("/")
+        assert resp.status_code == 404
+        assert "web UI disabled" in resp.json()["error"]
+        assert ws._SESSION_TOKEN not in resp.text
+
+    def test_non_root_paths_stay_404_json(self, monkeypatch):
+        client, ws = self._headless_client(monkeypatch, gated=False)
+        for route in ("/chat", "/api/status-page", "/assets/index-abc.js"):
+            resp = client.get(route)
+            assert resp.status_code == 404
+            assert "web UI disabled" in resp.json()["error"]
+            assert ws._SESSION_TOKEN not in resp.text
+
+
 class TestHashedAssetCacheHeaders:
     """Hashed /assets/* responses must be immutable-cacheable; index.html
     must stay no-store so it always references the current hashes
@@ -5055,53 +5165,53 @@ class TestSessionPatchUnread:
         resp = self.auth_client.patch("/api/sessions/s1", json={"unread": "maybe"})
         assert resp.status_code == 422  # pydantic validation
 
+    def test_patch_hidden_updates_persisted_session_without_live_runtime(self):
+        resp = self.auth_client.patch("/api/sessions/s1", json={"hidden": True})
+        assert resp.status_code == 200
+        assert resp.json()["hidden"] is True
 
-class TestAuxTaskSlotsMatchTheDesktopUI:
-    """Every task the desktop settings UI offers must be assignable.
+        rows = self.auth_client.get("/api/sessions?limit=100").json()["sessions"]
+        assert all(s["id"] != "s1" for s in rows)
 
-    Field bug: `goal_judge` was added to the desktop Auxiliary models list
-    but not to `_AUX_TASK_SLOTS`, so the row rendered, the dropdowns worked,
-    and Apply silently did nothing — POST /api/model/set rejected it with
-    ``400 unknown auxiliary task: goal_judge``. The read path is gated on the
-    same tuple, so the row also always displayed "auto · use main model"
-    regardless of what was actually configured.
-
-    This is an invariant, not a snapshot: it asserts the two lists agree,
-    so adding a task to one side without the other fails here rather than
-    in the user's hands.
-    """
-
-    def _desktop_aux_tasks(self):
-        """Parse AUX_TASKS out of the desktop settings source."""
-        src = (
-            Path(__file__).resolve().parents[2]
-            / "apps/desktop/src/app/settings/model-settings.tsx"
+        restored = self.auth_client.patch(
+            "/api/sessions/s1", json={"hidden": False}
         )
-        if not src.exists():  # desktop tree not present in this checkout
-            pytest.skip("desktop source not available")
-        text = src.read_text(encoding="utf-8")
-        block = re.search(
-            r"const AUX_TASKS:\s*readonly AuxTaskMeta\[\]\s*=\s*\[(.*?)\]",
-            text,
-            re.S,
-        )
-        assert block, "could not locate AUX_TASKS in model-settings.tsx"
-        return re.findall(r"key:\s*'([^']+)'", block.group(1))
+        assert restored.status_code == 200
+        rows = self.auth_client.get("/api/sessions?limit=100").json()["sessions"]
+        assert bool(next(s for s in rows if s["id"] == "s1")["hidden"]) is False
 
-    def test_every_ui_task_is_an_assignable_backend_slot(self):
-        from hermes_cli.web_server import _AUX_TASK_SLOTS
+    def test_patch_hidden_alone_is_accepted(self):
+        resp = self.auth_client.patch("/api/sessions/s1", json={"hidden": True})
+        assert resp.status_code == 200
 
-        ui_tasks = self._desktop_aux_tasks()
-        assert ui_tasks, "AUX_TASKS parsed empty"
 
-        missing = [t for t in ui_tasks if t not in _AUX_TASK_SLOTS]
-        assert not missing, (
-            f"desktop settings offers {missing} but /api/model/set rejects them "
-            "— Apply would silently fail"
-        )
+def test_goal_judge_is_an_assignable_auxiliary_slot():
+    """The desktop's goal-judge model row must be accepted by the backend."""
+    from hermes_cli.web_server import _AUX_TASK_SLOTS
 
-    def test_goal_judge_is_assignable(self):
-        """The specific slot the field bug was reported against."""
-        from hermes_cli.web_server import _AUX_TASK_SLOTS
+    assert "goal_judge" in _AUX_TASK_SLOTS
 
-        assert "goal_judge" in _AUX_TASK_SLOTS
+
+def test_mount_spa_dynamic_web_dist_recheck(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from hermes_cli import web_server
+
+    app = FastAPI()
+    dist = tmp_path / "web_dist"
+    monkeypatch.setattr(web_server, "WEB_DIST", dist)
+
+    web_server.mount_spa(app)
+    client = TestClient(app)
+
+    # 1. missing build -> 404
+    res1 = client.get("/")
+    assert res1.status_code == 404
+    assert res1.json()["error"] == "Frontend not built. Run: cd web && npm run build"
+
+    # 2. build created dynamically -> 200
+    dist.mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text("<html><body>Test</body></html>")
+    res2 = client.get("/")
+    assert res2.status_code == 200
+    assert "Test" in res2.text

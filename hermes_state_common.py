@@ -446,6 +446,7 @@ CREATE TABLE IF NOT EXISTS messages (
     codex_message_items TEXT,
     platform_message_id TEXT,
     observed INTEGER DEFAULT 0,
+    _compressed_summary INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     compacted INTEGER NOT NULL DEFAULT 0,
     api_content TEXT,
@@ -519,6 +520,23 @@ CREATE TABLE IF NOT EXISTS gateway_routing (
 CREATE TABLE IF NOT EXISTS gateway_hygiene_state (
     session_key TEXT PRIMARY KEY,
     failure_streak INTEGER NOT NULL DEFAULT 0
+);
+
+-- Per-backend liveness heartbeat (#94895). Each serve / tui_gateway process
+-- registers a row at startup and refreshes ``last_heartbeat`` periodically.
+-- The startup orphan sweep (sessions.startup_orphan_reap) consults this
+-- table to avoid reaping rows whose owning backend is still alive but
+-- just idle (multi-backend state.db shared by isolated serve processes).
+-- A backend whose ``last_heartbeat`` is older than the heartbeat staleness
+-- window is treated as dead; rows without ANY matching heartbeat fall back
+-- to the original staleness predicate so legacy deployments keep working.
+CREATE TABLE IF NOT EXISTS gateway_heartbeats (
+    backend_id TEXT PRIMARY KEY,
+    pid INTEGER NOT NULL,
+    started_at REAL NOT NULL,
+    last_heartbeat REAL NOT NULL,
+    profile TEXT NOT NULL DEFAULT '',
+    host TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS compression_locks (

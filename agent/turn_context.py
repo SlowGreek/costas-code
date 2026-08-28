@@ -44,13 +44,62 @@ from agent.memory_manager import build_memory_context_block
 from agent.memory_provider import is_trivial_prompt
 from agent.message_metadata import append_message, stamp_message_timestamp
 from agent.model_metadata import (
-    calibrated_request_pressure_tokens,
+    anchored_context_tokens,
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
-    real_prompt_tokens_for_log,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _preflight_request_tokens(
+    agent: Any,
+    messages: List[Dict[str, Any]],
+    system_prompt: str,
+) -> int:
+    """Token estimate for automatic preflight compression.
+
+    When the upcoming request is eligible for native Responses compaction,
+    count the checkpoint-pruned wire payload rather than the full durable
+    transcript. Auxiliary compression still uses the generic estimator
+    (``native_compaction_eligible=False``).
+
+    Usage-anchored fast path: when a provider-reported usage anchor is
+    valid for ``messages`` (see ``anchored_context_tokens``), it already
+    covers system prompt + tool schemas + full history EXACTLY as the
+    provider counted them, with estimation confined to the messages
+    appended since that response. Prefer it over every heuristic.
+    """
+    anchored = anchored_context_tokens(
+        messages, getattr(agent, "_usage_anchor", None)
+    )
+    if anchored is not None:
+        return anchored
+    tools = getattr(agent, "tools", None) or None
+    try:
+        from agent.codex_responses_adapter import (
+            estimate_native_responses_preflight_tokens,
+        )
+
+        native = estimate_native_responses_preflight_tokens(
+            agent,
+            messages,
+            system_prompt=system_prompt or "",
+            tools=tools,
+        )
+        if isinstance(native, int) and not isinstance(native, bool) and native >= 0:
+            return native
+    except Exception:
+        logger.debug(
+            "native Responses preflight estimate unavailable; "
+            "using generic transcript estimate",
+            exc_info=True,
+        )
+    return estimate_request_tokens_rough(
+        messages,
+        system_prompt=system_prompt or "",
+        tools=tools,
+    )
 
 
 def compose_user_api_content(
@@ -917,23 +966,12 @@ def build_turn_context(
             agent.context_compressor.threshold_tokens,
         )
     ):
-        _rough_preflight_tokens = estimate_request_tokens_rough(
+        _preflight_tokens = _preflight_request_tokens(
+            agent,
             messages,
-            system_prompt=active_system_prompt or "",
-            tools=agent.tools or None,
+            active_system_prompt or "",
         )
         _compressor = agent.context_compressor
-        _preflight_tokens = calibrated_request_pressure_tokens(
-            _compressor, _rough_preflight_tokens
-        )
-        if _preflight_tokens != _rough_preflight_tokens:
-            logger.info(
-                "Calibrated preflight pressure: rough ~%s -> ~%s using last "
-                "real provider prompt %s",
-                f"{_rough_preflight_tokens:,}",
-                f"{_preflight_tokens:,}",
-                f"{real_prompt_tokens_for_log(_compressor):,}",
-            )
         # getattr guard: minimal compressor doubles (SimpleNamespace in the
         # engine-preflight tests) and plugin context engines lack this
         # ContextCompressor-only method — absence means no snapshot, and the
@@ -1092,10 +1130,10 @@ def build_turn_context(
                 # lower token count — e.g. summarising tool outputs) is
                 # recognised as progress instead of being misread as
                 # "Cannot compress further". Fixes #39548.
-                _preflight_tokens = estimate_request_tokens_rough(
+                _preflight_tokens = _preflight_request_tokens(
+                    agent,
                     messages,
-                    system_prompt=active_system_prompt or "",
-                    tools=agent.tools or None,
+                    active_system_prompt or "",
                 )
                 if not _compression_made_progress(
                     _orig_len, len(messages), _orig_tokens, _preflight_tokens

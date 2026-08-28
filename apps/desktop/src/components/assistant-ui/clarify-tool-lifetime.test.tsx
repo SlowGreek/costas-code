@@ -8,7 +8,7 @@ import { clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { $gateway } from '@/store/gateway'
 import { $activeSessionId } from '@/store/session'
 
-import { clarifyRequestMatchesRow, ClarifyTool } from './clarify-tool'
+import { ClarifyTool } from './clarify-tool'
 
 // The turn is NOT running — the state a `session.resume` leaves behind while a
 // clarify is still parked on the session (resume sets busy true on entry, then
@@ -114,30 +114,5 @@ describe('ClarifyTool lifetime is owned by the request, not the running turn', (
 
     expect(screen.queryByRole('button', { name: /staging/ })).toBeNull()
     expect(container.querySelector('[role="status"]')).toBeNull()
-  })
-})
-
-describe('clarifyRequestMatchesRow', () => {
-  const request = { question: 'Which deployment target?', requestId: 'req-1' }
-
-  it('matches on request id even when the questions differ', () => {
-    // A row hydrated straight from clarify.request carries the request id as
-    // its tool call id; the args may not have landed yet.
-    expect(clarifyRequestMatchesRow(request, 'req-1', undefined)).toBe(true)
-    expect(clarifyRequestMatchesRow(request, 'req-1', 'stale text')).toBe(true)
-  })
-
-  it('matches on question when the ids differ', () => {
-    // The tool.start row carries the model's own tool_call_id, so ids never
-    // line up and the question is the only correlator.
-    expect(clarifyRequestMatchesRow(request, 'call-abc', 'Which deployment target?')).toBe(true)
-  })
-
-  it('rejects a different question on a different id', () => {
-    expect(clarifyRequestMatchesRow(request, 'call-abc', 'Some other question?')).toBe(false)
-  })
-
-  it('rejects when there is no request at all', () => {
-    expect(clarifyRequestMatchesRow(null, 'req-1', 'Which deployment target?')).toBe(false)
   })
 })

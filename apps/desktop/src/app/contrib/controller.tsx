@@ -76,7 +76,7 @@ import { watchSessionPins } from '@/store/session-pin-sync'
 import { $focusedRuntimeId } from '@/store/session-states'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
-import { isHudWindow } from '@/store/windows'
+import { isBrowserWindow, isHudWindow } from '@/store/windows'
 import {
   $workbenchArtifact,
   $workbenchVoiceActive,
@@ -87,6 +87,7 @@ import {
   type WorkbenchArtifact
 } from '@/store/workbench'
 
+import { BrowserPopoutShell } from '../chat/browser-popout-shell'
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
 import { watchRouteTiles } from '../chat/route-tile'
@@ -466,10 +467,14 @@ discoverBundledPlugins()
 watchContributedPanes()
 
 // Session + route (page) tiles: persisted splits register panes docked beside
-// main.
-watchSessionTiles()
-watchRouteTiles()
-watchPreviewTiles()
+// main. A popped-out Browser has no layout tree — registering tiles there
+// would still run, and preview-tile watching would try to dock into a tree
+// this window never renders.
+if (!isBrowserWindow()) {
+  watchSessionTiles()
+  watchRouteTiles()
+  watchPreviewTiles()
+}
 
 // Composer pop-out state is keyed by layout zone, so drop entries for zones the
 // user has since closed or merged away — otherwise a long-lived install keeps a
@@ -970,6 +975,14 @@ export function ContribController() {
     return (
       <ContribWiring>
         <HudShell />
+      </ContribWiring>
+    )
+  }
+
+  if (isBrowserWindow()) {
+    return (
+      <ContribWiring>
+        <BrowserPopoutShell />
       </ContribWiring>
     )
   }

@@ -2319,7 +2319,7 @@ class AIAgent:
                 # prologue for prefetch/plugin injections). Written verbatim
                 # so replay can reproduce the sent prefix byte-for-byte.
                 _row_api_content = msg.get("api_content")
-                if not isinstance(_row_api_content, str):
+                if not isinstance(_row_api_content, (str, list)):
                     _row_api_content = None
                 _row_timestamp = msg.get("timestamp")
                 # Apply the persist override to THIS row's written values only

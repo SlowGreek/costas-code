@@ -11109,7 +11109,7 @@ class SessionDB(
         effect_disposition: Optional[str] = None,
         _compressed_summary: bool = False,
         timestamp: Any = None,
-        api_content: Optional[str] = None,
+        api_content: Any = None,
         display_kind: Optional[str] = None,
         display_metadata: Optional[Dict[str, Any]] = None,
         compression_lock_holder: Optional[str] = None,
@@ -11128,13 +11128,14 @@ class SessionDB(
         platform-specific flows like yuanbao's recall guard to redact a
         message by its platform-side identifier.
 
-        ``api_content`` is the exact content string sent to the API for this
-        message when it differs from ``content`` (ephemeral memory/plugin
-        injections, persist overrides).  It is a byte-fidelity sidecar for
-        prompt-cache-stable replay — stored as sent, except lone surrogates
-        (which sqlite3 cannot bind and which the conversation loop scrubs
-        from every outgoing payload anyway, so the scrubbed form IS the
-        wire bytes).
+        ``api_content`` is the exact content sent to the API for this message
+        when it differs from ``content`` (ephemeral memory/plugin injections,
+        persist overrides, multimodal steering scaffolds). It is a fidelity
+        sidecar for prompt-cache-stable replay: strings are stored as sent and
+        structured content is tagged JSON so it round-trips without colliding
+        with ordinary JSON-looking text. Lone surrogates are scrubbed because
+        sqlite3 cannot bind them and the conversation loop scrubs them from
+        outgoing payloads too.
         """
         # Display metadata is presentation-only and never changes the model
         # context role/content replayed to providers.
@@ -11153,8 +11154,15 @@ class SessionDB(
                 tool_calls = []
         tool_calls_json = json.dumps(tool_calls) if tool_calls else None
         # Multimodal content (list of parts) must be JSON-encoded: sqlite3
-        # cannot bind list/dict parameters directly.
+        # cannot bind list/dict parameters directly. The provider-replay
+        # sidecar uses the same tagged encoding so structured wire content can
+        # survive reload without being confused with a plain JSON-looking string.
         stored_content = self._encode_content(content)
+        stored_api_content = (
+            self._encode_content(api_content)
+            if isinstance(api_content, (str, list))
+            else None
+        )
 
         message_timestamp = time.time()
         if timestamp is not None:
@@ -11205,7 +11213,7 @@ class SessionDB(
                     1 if observed else 0,
                     1 if _compressed_summary else 0,
                     1,
-                    _scrub_surrogates(api_content) if isinstance(api_content, str) else None,
+                    stored_api_content,
                     _scrub_surrogates(display_kind) if isinstance(display_kind, str) else None,
                     display_metadata_json,
                 ),
@@ -11637,7 +11645,9 @@ class SessionDB(
                     1 if msg.get("observed") else 0,
                     1 if msg.get("_compressed_summary") else 0,
                     1,
-                    _scrub_surrogates(api_content) if isinstance(api_content, str) else None,
+                    self._encode_content(api_content)
+                    if isinstance(api_content, (str, list))
+                    else None,
                     _scrub_surrogates(msg.get("display_kind")) if isinstance(msg.get("display_kind"), str) else None,
                     self._encode_display_metadata(msg.get("display_metadata")),
                 ),
@@ -12116,6 +12126,8 @@ class SessionDB(
                 msg["_compressed_summary"] = True
             if "content" in msg:
                 msg["content"] = self._decode_content(msg["content"])
+            if msg.get("api_content") is not None:
+                msg["api_content"] = self._decode_content(msg["api_content"])
             if msg.get("tool_calls"):
                 try:
                     msg["tool_calls"] = json.loads(msg["tool_calls"])
@@ -12215,6 +12227,8 @@ class SessionDB(
             msg = dict(row)
             if "content" in msg:
                 msg["content"] = self._decode_content(msg["content"])
+            if msg.get("api_content") is not None:
+                msg["api_content"] = self._decode_content(msg["api_content"])
             if msg.get("tool_calls"):
                 try:
                     msg["tool_calls"] = json.loads(msg["tool_calls"])
@@ -12446,14 +12460,14 @@ class SessionDB(
             # strips it before the wire.
             if include_row_ids and row["id"] is not None:
                 msg["_row_id"] = row["id"]
-            # api_content is the byte-fidelity sidecar: the exact string sent
-            # to the API when it differed from the clean content. Returned
-            # VERBATIM — no sanitize_context, no strip — because the replay
-            # path substitutes it for content to keep the provider prompt
-            # cache prefix byte-stable across turns. Cleaning it here would
-            # re-introduce the divergence it exists to remove.
+            # api_content is the fidelity sidecar: the exact string or
+            # structured parts sent to the API when they differed from clean
+            # content. Decode tagged structured values but otherwise return it
+            # verbatim — no sanitize_context, no strip — because replay
+            # substitutes it for content to keep the provider prompt-cache
+            # prefix stable across turns.
             if row["api_content"]:
-                msg["api_content"] = row["api_content"]
+                msg["api_content"] = self._decode_content(row["api_content"])
             if row["display_kind"]:
                 msg["display_kind"] = row["display_kind"]
             if row["display_metadata"]:

@@ -4687,6 +4687,42 @@ class TestLoneSurrogatePersistence:
 
 
 
+class TestApiContentPersistence:
+    """Structured provider-replay sidecars survive SQLite round trips."""
+
+    PARTS = [
+        {"type": "text", "text": "Continue the original request."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]
+
+    def test_append_message_round_trips_structured_api_content(self, db):
+        db.create_session("s1", source="cli")
+        db.append_message(
+            "s1",
+            "user",
+            "clean transcript",
+            api_content=self.PARTS,
+        )
+
+        assert db.get_messages("s1")[0]["api_content"] == self.PARTS
+        assert db.get_messages_as_conversation("s1")[0]["api_content"] == self.PARTS
+
+    def test_batch_append_round_trips_structured_api_content(self, db):
+        db.create_session("s1", source="cli")
+        db.append_messages_batch(
+            "s1",
+            [
+                {
+                    "role": "user",
+                    "content": "clean transcript",
+                    "api_content": self.PARTS,
+                }
+            ],
+        )
+
+        assert db.get_messages_as_conversation("s1")[0]["api_content"] == self.PARTS
+
+
 class TestDisplayMetadataPersistence:
     """Round-trip display_kind/display_metadata through every write path."""
 

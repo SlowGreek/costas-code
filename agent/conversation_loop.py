@@ -115,6 +115,11 @@ logger = logging.getLogger(__name__)
 # Scaffold marker used by _apply_active_turn_redirect and the ghost-row filter
 # in the api_messages loop. Module-level so both sites can never drift.
 _INTERRUPT_SCAFFOLD_MARKER = "[This response was interrupted by a user correction.]"
+_REDIRECT_CONTINUATION_INSTRUCTION = (
+    "The original user request remains active. Apply the correction below to "
+    "that request, continue fulfilling the original user request, and do not "
+    "stop after only acknowledging this correction."
+)
 
 
 # One-time wrap-up notice appended when a wall-clock run budget crosses its
@@ -434,33 +439,31 @@ def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text
         getattr(agent, "_current_streamed_assistant_text", "") or ""
     ).strip()
 
-    checkpoint_parts = [_INTERRUPT_SCAFFOLD_MARKER]
+    checkpoint_parts = [
+        _INTERRUPT_SCAFFOLD_MARKER,
+        _REDIRECT_CONTINUATION_INSTRUCTION,
+    ]
     if visible:
         checkpoint_parts.extend(
             ["Visible response before the interruption:", visible]
         )
     checkpoint = "\n\n".join(checkpoint_parts)
-    correction = (
-        "[Context from the interrupted assistant response]\n"
-        f"{checkpoint}\n\n"
-        f"{text}"
-    )
 
     # The normal live tail is user or tool, so an assistant checkpoint followed
     # by the correction preserves strict alternation. If a transport already
     # committed an assistant item, attribute the checkpoint inside the user
     # correction instead of creating assistant→assistant.
     prefix = f"[Context from the interrupted assistant response]\n{checkpoint}"
+    if isinstance(text, list):
+        # Preserve multimodal parts structurally. Stringifying this list drops
+        # images before provider translation and turns dicts into prompt text.
+        correction: Any = [{"type": "text", "text": prefix}, *text]
+    else:
+        correction = f"{prefix}\n\n{text}"
 
     if messages and messages[-1].get("role") == "assistant":
         # An assistant item is already committed, so fold the checkpoint into
-        # the correction rather than creating assistant→assistant. With a parts
-        # list the prefix becomes its own text part — string-formatting it
-        # would stringify the list and drop the images.
-        if isinstance(text, list):
-            correction: Any = [{"type": "text", "text": prefix}, *text]
-        else:
-            correction = f"{prefix}\n\n{text}"
+        # the correction rather than creating assistant→assistant.
         # Transcript shows the user's own words; the provider replays the
         # scaffolded form so it still sees the interrupted context.
         append_message(
@@ -2485,6 +2488,13 @@ def _run_conversation_inner(
             # It is bookkeeping, never a provider field — pop it from EVERY
             # outgoing copy.
             _api_content = api_msg.pop("api_content", None)
+            _has_api_content = (
+                isinstance(_api_content, str) and bool(_api_content)
+            ) or (
+                msg.get("role") == "user"
+                and isinstance(_api_content, list)
+                and bool(_api_content)
+            )
 
             # Display-only timeline metadata. Never a provider field — strip
             # from every outgoing copy so strict OpenAI-compatible backends
@@ -2526,7 +2536,7 @@ def _run_conversation_inner(
             # never mutated beyond the api_content stamp, so nothing leaks
             # into the clean transcript content.
             if idx == current_turn_user_idx and msg.get("role") == "user":
-                if isinstance(_api_content, str) and _api_content:
+                if _has_api_content:
                     # Stamped by the prologue from the same composition —
                     # reuse it so the persisted sidecar and the wire cannot
                     # drift, and so every pass this turn sends identical
@@ -2543,8 +2553,7 @@ def _run_conversation_inner(
                     if _composed is not None:
                         api_msg["content"] = _composed
             elif (
-                isinstance(_api_content, str)
-                and _api_content
+                _has_api_content
                 and msg.get("role") in ("user", "assistant")
             ):
                 # Historical message: replay the exact bytes sent when it was

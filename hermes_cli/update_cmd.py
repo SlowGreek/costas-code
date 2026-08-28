@@ -2732,8 +2732,13 @@ def _sync_fork_with_upstream(
         return False
 
 def _sync_with_upstream_if_needed(
-    git_cmd: list[str], cwd: Path, branch: str | None = None
-) -> None:
+    git_cmd: list[str],
+    cwd: Path,
+    branch: str | None = None,
+    *,
+    assume_yes: bool = False,
+    input_fn=None,
+) -> bool:
     """Check if fork is behind upstream and sync if safe.
 
     This implements the fork upstream sync logic:
@@ -2741,6 +2746,12 @@ def _sync_with_upstream_if_needed(
     - Compare the selected branch on origin with the official Catalyst remote
     - If origin is strictly behind, fast-forward from the official remote
     - Try to sync fork back to origin if possible
+
+    Returns True when origin/main was actually verified against the official
+    upstream/main, False when the check never happened (prompt skipped or
+    declined, remote add failed, fetch or compare failed) so the caller can
+    avoid reporting the checkout as up to date on the strength of an origin
+    comparison alone (#97052 review).
     """
     if branch is None:
         branch = _m().COSTAS_UPDATE_BRANCH
@@ -2750,20 +2761,41 @@ def _sync_with_upstream_if_needed(
     if not has_upstream:
         # Check if user previously declined
         if _should_skip_upstream_prompt():
-            return
+            return False
 
-        # Ask user if they want to add upstream
         print()
         print("ℹ Your fork is not tracking the official Catalyst repository.")
         print("  This means you may miss updates from NousResearch/hermes-agent.")
         print()
-        try:
-            response = (
-                input("Add official repo as 'upstream' remote? [Y/n]: ").strip().lower()
+
+        if assume_yes or (
+            input_fn is None and not (sys.stdin.isatty() and sys.stdout.isatty())
+        ):
+            # --yes means "don't block", not "mutate my git remotes". Skip
+            # without persisting the decline so interactive runs still get asked.
+            print("  Skipping upstream setup (non-interactive run).")
+            print(
+                "  Add it later with: git remote add upstream https://github.com/NousResearch/hermes-agent.git"
             )
-        except (EOFError, KeyboardInterrupt, UnicodeDecodeError):
-            print()
-            response = "n"
+            return False
+
+        # Ask user if they want to add upstream
+        if input_fn is not None:
+            response = (
+                input_fn("Add official repo as 'upstream' remote? [y/N]", "n")
+                .strip()
+                .lower()
+            )
+        else:
+            try:
+                response = (
+                    input("Add official repo as 'upstream' remote? [Y/n]: ")
+                    .strip()
+                    .lower()
+                )
+            except (EOFError, KeyboardInterrupt, UnicodeDecodeError):
+                print()
+                response = "n"
 
         if response in {"", "y", "yes"}:
             print("→ Adding upstream remote...")
@@ -2774,13 +2806,13 @@ def _sync_with_upstream_if_needed(
                 has_upstream = True
             else:
                 print("  ✗ Failed to add upstream remote. Skipping upstream sync.")
-                return
+                return False
         else:
             print(
                 "  Skipped. Run 'git remote add upstream https://github.com/NousResearch/hermes-agent.git' to add later."
             )
             _mark_skip_upstream_prompt()
-            return
+            return False
 
     # Fetch the selected distribution branch only. This sync compares that
     # branch on both remotes, so there's no reason to pull every upstream ref — and a bare
@@ -2796,7 +2828,7 @@ def _sync_with_upstream_if_needed(
         )
     except subprocess.CalledProcessError:
         print("  ✗ Failed to fetch upstream. Skipping upstream sync.")
-        return
+        return False
 
     # Compare the branch across both remotes
     origin_ahead = _count_commits_between(git_cmd, cwd, f"upstream/{branch}", f"origin/{branch}")
@@ -2806,7 +2838,7 @@ def _sync_with_upstream_if_needed(
 
     if origin_ahead < 0 or upstream_ahead < 0:
         print("  ✗ Could not compare branches. Skipping upstream sync.")
-        return
+        return False
 
     # If origin has commits not on the official branch, don't trample
     if origin_ahead > 0:
@@ -2815,12 +2847,12 @@ def _sync_with_upstream_if_needed(
         print("  Skipping upstream sync to preserve your changes.")
         print("  If you want to merge upstream changes, run:")
         print(f"    git pull upstream {branch}")
-        return
+        return True
 
     # If upstream is not ahead, fork is up to date
     if upstream_ahead == 0:
         print("  ✓ Fork is up to date with upstream")
-        return
+        return True
 
     # origin is strictly behind the official branch (can fast-forward)
     print()
@@ -2837,7 +2869,7 @@ def _sync_with_upstream_if_needed(
         print(
             "  ✗ Failed to pull from upstream. You may need to resolve conflicts manually."
         )
-        return
+        return False
 
     print("  ✓ Updated from upstream")
 
@@ -2850,6 +2882,7 @@ def _sync_with_upstream_if_needed(
             "  ℹ Got updates from upstream but couldn't push to fork (no write access?)"
         )
         print("    Your local repo is updated, but your fork on GitHub may be behind.")
+    return True
 
 def _invalidate_update_cache():
     """Delete the update-check cache for ALL profiles so no banner
@@ -3735,6 +3768,7 @@ def _repair_node_deps_on_current_checkout(
     assume_yes: bool = False,
     gateway_mode: bool = False,
     pre_update_snapshot_id: str | None = None,
+    completion_message: str = "✓ Already up to date!",
 ) -> None:
     """Repair Node deps on the ``commit_count == 0`` path (#77211).
 
@@ -3765,7 +3799,7 @@ def _repair_node_deps_on_current_checkout(
         gateway_mode=gateway_mode,
         pre_update_snapshot_id=pre_update_snapshot_id,
     )
-    print_completion("✓ Already up to date!")
+    print_completion(completion_message)
 
 
 def _update_node_dependencies() -> list[str]:
@@ -7871,9 +7905,18 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # non-interactive callers (and upstream's parked-branch regressions,
         # which run against a NousResearch origin that this fork classifies as
         # a fork) on a blocking read.
+        # Non-fork checkouts have no upstream question: origin IS the official
+        # repo, so "Already up to date!" is fully verified there.
+        upstream_checked = True
         if commit_count == 0 and is_fork and _upstream_syncable_branch(branch):
             pre_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
-            _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT, branch)
+            upstream_checked = _m()._sync_with_upstream_if_needed(
+                git_cmd,
+                _m().PROJECT_ROOT,
+                branch,
+                assume_yes=assume_yes,
+                input_fn=gw_input_fn,
+            )
             post_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
             if pre_sync_sha and post_sync_sha and pre_sync_sha != post_sync_sha:
                 synced_count = _count_commits_between(
@@ -8032,6 +8075,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     assume_yes=assume_yes,
                     gateway_mode=gateway_mode,
                     pre_update_snapshot_id=pre_update_snapshot_id,
+                    completion_message=(
+                        "✓ Already up to date!"
+                        if upstream_checked
+                        else "✓ Up to date with your fork (official repo not checked)."
+                    ),
                 )
             if runtime_repaired is not None and not _m()._is_windows():
                 print()
@@ -8318,9 +8366,15 @@ def _cmd_update_impl(args, gateway_mode: bool):
         _m()._record_bytecode_fingerprint()
         _m()._refresh_bootstrap_cache_scripts(branch)
 
-        # Fork upstream sync logic (only for main branch on forks)
+        # Fork upstream sync logic (only for this fork's distribution branch)
         if is_fork and branch == _m().COSTAS_UPDATE_BRANCH:
-            _m()._sync_with_upstream_if_needed(git_cmd, _m().PROJECT_ROOT, branch)
+            _m()._sync_with_upstream_if_needed(
+                git_cmd,
+                _m().PROJECT_ROOT,
+                branch,
+                assume_yes=assume_yes,
+                input_fn=gw_input_fn,
+            )
 
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra
         # breaks on this machine, keep base deps and reinstall the remaining extras

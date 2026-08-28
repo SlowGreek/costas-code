@@ -9,10 +9,26 @@ Covers:
 """
 
 import subprocess
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from hermes_cli.main import cmd_update
+
+
+@contextmanager
+def _isolated_update_host():
+    """Keep config-prompt unit tests away from the developer's live gateway."""
+    with patch(
+        "hermes_cli.update_cmd._restart_macos_launchd_gateways"
+    ), patch(
+        "hermes_cli.update_inventory.collect_runtime_inventory",
+        return_value=SimpleNamespace(runtimes=[]),
+    ), patch(
+        "hermes_cli.update_receipt.collect_fleet_versions",
+        return_value=[],
+    ):
+        yield
 
 
 def _make_run_side_effect(
@@ -90,7 +106,7 @@ class TestUpdateYesConfigMigration:
 
         args = SimpleNamespace(yes=True)
 
-        with patch("builtins.input") as mock_input:
+        with _isolated_update_host(), patch("builtins.input") as mock_input:
             cmd_update(args)
             # Never prompted the user.
             mock_input.assert_not_called()
@@ -141,7 +157,7 @@ class TestUpdateYesConfigMigration:
         # "Non-interactive session" branch instead of prompting.
         import sys as _sys
 
-        with patch("builtins.input", return_value="n") as mock_input, patch.object(
+        with _isolated_update_host(), patch("builtins.input", return_value="n") as mock_input, patch.object(
             _sys.stdin, "isatty", return_value=True
         ), patch.object(_sys.stdout, "isatty", return_value=True):
             cmd_update(args)
@@ -192,7 +208,7 @@ class TestUnicodeDecodeErrorInUpdatePrompts:
 
         import sys as _sys
 
-        with patch(
+        with _isolated_update_host(), patch(
             "builtins.input",
             side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte"),
         ), patch.object(_sys.stdin, "isatty", return_value=True), patch.object(

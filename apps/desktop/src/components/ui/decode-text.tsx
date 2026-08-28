@@ -47,7 +47,7 @@ export function DecodeText({
   active = true,
   className,
   cursor = false,
-  loop = true,
+  loop = false,
   prefix = 0,
   text,
   ...props
@@ -55,10 +55,12 @@ export function DecodeText({
   const staticPrefix = text.slice(0, prefix)
   const tailText = text.slice(prefix)
   const [tail, setTail] = useState(tailText)
+  const [settled, setSettled] = useState(false)
 
   useEffect(() => {
     if (!active) {
       setTail(tailText)
+      setSettled(true)
 
       return
     }
@@ -68,24 +70,31 @@ export function DecodeText({
     // killed by the blanket reduced-motion CSS rule.
     if (prefersReducedMotion()) {
       setTail(tailText)
+      setSettled(true)
 
       return
     }
+
+    setSettled(false)
 
     let resolved = 0
     let hold = 0
 
     const id = window.setInterval(() => {
       if (resolved >= tailText.length) {
+        if (!loop) {
+          window.clearInterval(id)
+          setTail(tailText)
+          setSettled(true)
+
+          return
+        }
+
         hold += 1
 
         if (hold > HOLD_TICKS) {
-          if (loop) {
-            resolved = 0
-            hold = 0
-          } else {
-            window.clearInterval(id)
-          }
+          resolved = 0
+          hold = 0
         }
 
         setTail(tailText)
@@ -100,6 +109,8 @@ export function DecodeText({
     return () => window.clearInterval(id)
   }, [active, loop, tailText])
 
+  const showCursor = cursor && active && (loop || !settled)
+
   return (
     <span
       className={cn(
@@ -108,10 +119,10 @@ export function DecodeText({
       )}
       {...props}
     >
-      {cursor && <style>{'@keyframes decode-cursor { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }'}</style>}
+      {showCursor && <style>{'@keyframes decode-cursor { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }'}</style>}
       {staticPrefix}
       {tail}
-      {cursor && (
+      {showCursor && (
         <span
           aria-hidden="true"
           className="dither ml-0.5 inline-block size-2 shrink-0 -translate-y-px rounded-[1px]"

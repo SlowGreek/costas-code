@@ -576,6 +576,7 @@ class AIAgent:
         checkpoint_max_file_size_mb: int = 10,
         pass_session_id: bool = False,
         requested_provider: str = None,
+        capabilities: Dict[str, bool] | None = None,
     ):
         """Forwarder — see ``agent.agent_init.init_agent``."""
         if tool_delay is not None:
@@ -592,6 +593,7 @@ class AIAgent:
             api_key=api_key,
             provider=provider,
             requested_provider=requested_provider,
+            capabilities=capabilities,
             api_mode=api_mode,
             acp_command=acp_command,
             acp_args=acp_args,
@@ -707,8 +709,13 @@ class AIAgent:
             try:
                 from hermes_cli.profiles import get_active_profile_name
                 _profile_for_session = get_active_profile_name()
-                if _profile_for_session == "default":
-                    _profile_for_session = None
+                # Persist the profile name EXPLICITLY, including "default".
+                # NULL used to stand in for the default profile, but the
+                # #94724 legacy-owner backfill already stamps literal
+                # "default" onto old rows, and profile-keyed consumers
+                # (sidebar scope matching, @session:<profile>/<id> deep
+                # links) treat NULL as unowned — rows minted NULL after the
+                # one-shot backfill vanished from the sidebar (#99222).
             except Exception:
                 _profile_for_session = None
             # Carry the live YOLO bypass into the creation-time model_config so
@@ -952,10 +959,26 @@ class AIAgent:
             return_load_result=True,
         )
 
-    def switch_model(self, new_model, new_provider, api_key='', base_url='', api_mode=''):
+    def switch_model(
+        self,
+        new_model,
+        new_provider,
+        api_key='',
+        base_url='',
+        api_mode='',
+        capabilities=None,
+    ):
         """Forwarder — see ``agent.agent_runtime_helpers.switch_model``."""
         from agent.agent_runtime_helpers import switch_model
-        return switch_model(self, new_model, new_provider, api_key, base_url, api_mode)
+        return switch_model(
+            self,
+            new_model,
+            new_provider,
+            api_key,
+            base_url,
+            api_mode,
+            capabilities,
+        )
 
     def _safe_print(self, *args, **kwargs):
         """Print that silently handles broken pipes / closed stdout.
@@ -2282,6 +2305,7 @@ class AIAgent:
                 while (
                     _scan_start < _limit
                     and messages[_scan_start] is _prev_prefix[_scan_start]
+                    and bool(messages[_scan_start].get(_DB_PERSISTED_MARKER))
                 ):
                     _scan_start += 1
 
@@ -2407,7 +2431,7 @@ class AIAgent:
                     ]
                 elif isinstance(msg.get("tool_calls"), list):
                     tool_calls_data = msg["tool_calls"]
-                _batch_rows.append({
+                _row = {
                     "role": role,
                     "content": content,
                     "tool_name": msg.get("tool_name"),
@@ -2448,7 +2472,10 @@ class AIAgent:
                         else msg.get("display_kind")
                     ),
                     "display_metadata": msg.get("display_metadata"),
-                })
+                }
+                if isinstance(msg.get("_row_id"), int):
+                    _row["_row_id"] = msg["_row_id"]
+                _batch_rows.append(_row)
                 _batch_msgs.append(msg)
             # One transaction for the whole turn's new rows (typically 3-8
             # messages): one BEGIN IMMEDIATE / commit — and, off WAL, one
@@ -2472,8 +2499,9 @@ class AIAgent:
                     )
                     or 300.0,
                 )
-                for _written in _batch_msgs:
-                    _written[_DB_PERSISTED_MARKER] = True
+                from agent.transcript_repair import sync_flushed_message_markers
+
+                sync_flushed_message_markers(_batch_msgs, _batch_rows)
             # The intrinsic markers are now the sole source of truth. Reset the
             # one-shot seed so no id() outlives this flush to alias a message
             # allocated next turn at a recycled address.
@@ -4924,6 +4952,7 @@ class AIAgent:
 
         # Walk history backwards to find the most recent todo tool response
         last_todo_response = None
+        last_todo_revision = 0
         for idx in range(len(history) - 1, -1, -1):
             msg = history[idx]
             if msg.get("role") != "tool":
@@ -4949,15 +4978,32 @@ class AIAgent:
                 data = json.loads(content)
                 if "todos" in data and isinstance(data["todos"], list):
                     last_todo_response = data["todos"]
+                    last_todo_revision = data.get("revision", 1)
                     break
             except (json.JSONDecodeError, TypeError):
                 continue
 
-        if last_todo_response:
-            # Replay the items into the store (replace mode)
-            self._todo_store.write(last_todo_response, merge=False)
-            if not self.quiet_mode:
-                self._vprint(f"{self.log_prefix}📋 Restored {len(last_todo_response)} todo item(s) from history")
+        if last_todo_response is not None:
+            # Restore only when history carries a newer revision than the
+            # store already holds (a live store re-hydrated in place must not
+            # be rolled back by older history). Sessions that predate
+            # revisions default to 1 so they still hydrate. Empty lists
+            # matter: they are an authoritative clear after an earlier
+            # non-empty plan.
+            current_revision = int(
+                self._todo_store.snapshot().get("revision", 0) or 0
+            )
+            try:
+                history_revision = max(0, int(last_todo_revision or 0))
+            except (TypeError, ValueError):
+                history_revision = 1
+            if history_revision > current_revision:
+                self._todo_store.restore(
+                    last_todo_response,
+                    revision=history_revision,
+                )
+                if not self.quiet_mode:
+                    self._vprint(f"{self.log_prefix}📋 Restored {len(last_todo_response)} todo item(s) from history")
         _set_interrupt(False)
 
     @classmethod
@@ -6534,8 +6580,8 @@ class AIAgent:
         elif base_url_host_matches(base_url, "portal.qwen.ai"):
             self._client_kwargs["default_headers"] = _qwen_portal_headers()
         elif base_url_host_matches(base_url, "chatgpt.com"):
-            from agent.auxiliary_client import _codex_cloudflare_headers
-            self._client_kwargs["default_headers"] = _codex_cloudflare_headers(
+            from agent.codex_headers import codex_cloudflare_headers
+            self._client_kwargs["default_headers"] = codex_cloudflare_headers(
                 self._client_kwargs.get("api_key", ""), base_url=base_url,
             )
         elif base_url_host_matches(base_url, "x.ai"):
@@ -7946,7 +7992,7 @@ class AIAgent:
             "google/gemini-2",
             "google/gemma-4",
             "qwen/qwen3",
-            "tencent/hy3",
+            "tencent/hy",
             "xiaomi/",
         )
         return any(model.startswith(prefix) for prefix in reasoning_model_prefixes)
@@ -8271,6 +8317,11 @@ class AIAgent:
         auto-compress abort.  Auto-compress callers use the default
         ``force=False``.
         """
+        # Per-attempt signal consumed by turn-start preflight. A stalled
+        # compression must not be mistaken for a structural no-op and followed
+        # by the oversized provider request it was meant to prevent.
+        self._last_compression_timed_out = False
+
         from agent.conversation_compression import (
             CompressionCommitFence,
             compress_context,
@@ -8387,15 +8438,36 @@ class AIAgent:
                         )
                         return system_message or ""
 
+                timeout_cause = {
+                    "total_exhausted": False,
+                    "progress_observed": False,
+                }
+
+                def _on_timeout_cause(total_exhausted, progress_observed):
+                    timeout_cause["total_exhausted"] = total_exhausted
+                    timeout_cause["progress_observed"] = progress_observed
+
                 def _on_timeout(idle, waited, since_progress):
-                    logger.warning(
-                        "Context compression made no progress for %.1fs "
-                        "(total wait %.1fs, ceiling %.1fs); continuing without "
-                        "compression",
-                        since_progress,
-                        waited,
-                        total_ceiling,
-                    )
+                    self._last_compression_timed_out = True
+                    total_exhausted = timeout_cause["total_exhausted"]
+                    progress_observed = timeout_cause["progress_observed"]
+                    if total_exhausted:
+                        logger.warning(
+                            "Context compression reached its total ceiling "
+                            "after %.1fs (progress observed=%s); continuing "
+                            "without compression",
+                            waited,
+                            progress_observed,
+                        )
+                    else:
+                        logger.warning(
+                            "Context compression made no progress for %.1fs "
+                            "(total wait %.1fs, ceiling %.1fs); continuing "
+                            "without compression",
+                            since_progress,
+                            waited,
+                            total_ceiling,
+                        )
                     touch = getattr(self, "_touch_activity", None)
                     if callable(touch):
                         try:
@@ -8415,9 +8487,20 @@ class AIAgent:
                         record = getattr(compressor, "record_timeout_failure", None)
                         if callable(record):
                             try:
-                                record(
-                                    "host compress_context timeout "
+                                reason = (
+                                    "host compress_context total ceiling "
+                                    "exhausted"
+                                    if total_exhausted
+                                    else "host compress_context timeout "
                                     "(no summary progress)"
+                                )
+                                record(
+                                    reason,
+                                    failure_kind=(
+                                        "ceiling_exhausted"
+                                        if total_exhausted
+                                        else "stalled"
+                                    ),
                                 )
                             except Exception:
                                 logger.debug(
@@ -8427,13 +8510,27 @@ class AIAgent:
                                 )
                     emit = getattr(self, "_emit_warning", None)
                     if callable(emit):
-                        emit(
-                            "⚠ Context compression timed out "
-                            f"after {idle:.1f}s with no output from the summary "
-                            "model. No messages were dropped — continuing without "
-                            "compression. Run /compress to retry, /new for a clean "
-                            "session, or check auxiliary.compression."
-                        )
+                        if total_exhausted:
+                            progress = (
+                                " after summary output was observed"
+                                if progress_observed
+                                else ""
+                            )
+                            emit(
+                                "⚠ Context compression reached its total ceiling "
+                                f"after {waited:.1f}s{progress}. No messages were "
+                                "dropped — continuing without compression. Run "
+                                "/compress to retry or /new for a clean session."
+                            )
+                        else:
+                            emit(
+                                "⚠ Context compression timed out "
+                                f"after {idle:.1f}s with no output from the summary "
+                                "model. No messages were dropped — continuing "
+                                "without compression. Run /compress to retry, /new "
+                                "for a clean session, or check "
+                                "auxiliary.compression."
+                            )
 
                 def _on_commit_overrun(waited, ceiling):
                     # Commit-phase ceiling breach: the SessionDB mutation is in
@@ -8467,6 +8564,7 @@ class AIAgent:
                     idle_timeout_seconds=idle_timeout,
                     total_ceiling_seconds=total_ceiling,
                     on_timeout=_on_timeout,
+                    on_timeout_cause=_on_timeout_cause,
                     on_commit_overrun=_on_commit_overrun,
                     fence=active_fence,
                     telemetry_agent=self,

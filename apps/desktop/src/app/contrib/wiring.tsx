@@ -46,7 +46,7 @@ import { requestVoiceConversationStart } from '@/store/composer'
 import { $activeConnectionId } from '@/store/connections'
 import { $cronReviewRequest, setCronFocusJobId } from '@/store/cron'
 import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/store/layout'
-import { notify, notifyError } from '@/store/notifications'
+import { notifyError } from '@/store/notifications'
 import { $previewTarget } from '@/store/preview'
 import {
   $activeGatewayProfile,
@@ -72,8 +72,10 @@ import {
   $selectedStoredSessionId,
   $sessionResumeRequest,
   $sessions,
+  forgetSessionOwnerHintsForSession,
   requestSessionResume,
   sessionMatchesStoredId,
+  sessionOwnerRouteFromRow,
   sessionPinId,
   setAwaitingResponse,
   setBusy,
@@ -284,6 +286,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     activeSessionIdRef,
     ensureSessionState,
     getRuntimeIdForStoredSession,
+    holdSessionTranscriptView,
     resetViewSync,
     runtimeIdByStoredSessionIdRef,
     selectedStoredSessionIdRef,
@@ -503,6 +506,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     ensureSessionState,
     getRouteToken,
     getRoutedStoredSessionId,
+    holdSessionTranscriptView,
     navigate,
     onFreshDraftRouteIntent: clearRoutedSessionIntent,
     onSessionRouteIntent: setRoutedSessionIntent,
@@ -894,24 +898,17 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // the sidebar until its first message persists a turn and a refresh surfaces
   // it — Cursor-style. Every click opens a fresh "New session" tab (multiple
   // empty tabs are fine since none touch the session list).
+  //
+  // Bot Mode aims the "+" at the selected bot's own profile. Anything short of
+  // an exact route — a group chat's `blocked` target, an orphaned roster row —
+  // falls THROUGH to the ordinary session rather than refusing: the main strip
+  // carries plain session tabs alongside bot chats, so a "+" there must never
+  // be dead just because the sidebar's current selection has nowhere to route.
   const openNewSessionTab = useCallback(() => {
-    const workspaceMode = $workspaceMode.get()
     const workspaceOwnerKey = $workspaceOwnerKey.get()
     const workspaceNewSessionTarget = $workspaceNewSessionTarget.get()
 
-    if (workspaceMode === 'bots') {
-      if (workspaceNewSessionTarget?.kind !== 'route' || !workspaceOwnerKey) {
-        notify({
-          kind: 'info',
-          message:
-            workspaceNewSessionTarget?.kind === 'blocked'
-              ? workspaceNewSessionTarget.message
-              : 'Select a Bot or group first.'
-        })
-
-        return
-      }
-
+    if ($workspaceMode.get() === 'bots' && workspaceNewSessionTarget?.kind === 'route' && workspaceOwnerKey) {
       void openNewSessionTile('center', {
         listed: false,
         route: workspaceNewSessionTarget.route,
@@ -1016,17 +1013,18 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     // against whichever cached row is found first — the user clicks a row
     // previewing profile A and the resume dials profile B. Pin the row's own
     // (connection, profile) as the resume owner before navigating; untagged
-    // rows (single-profile installs, legacy pages) keep the id-only path.
+    // rows (single-profile installs and the legacy primary-SSH path) keep the
+    // ambient/id-only path. Clear any stale explicit hint first: older builds
+    // incorrectly persisted those rows as `local`, which made a remote session
+    // click switch to the Mac backend and fail with "session not found".
     onResumeSession: (sessionId, session) => {
-      const rowProfile = session?.profile?.trim()
+      const ownerRoute = sessionOwnerRouteFromRow(session)
 
-      if (rowProfile) {
-        requestSessionResume(sessionId, {
-          connectionId: session?.connection_id?.trim() || 'local',
-          ...(session?.connection_id?.trim() ? {} : { mode: 'local' as const }),
-          profile: rowProfile,
-          targetProfile: rowProfile
-        })
+      if (ownerRoute) {
+        requestSessionResume(sessionId, ownerRoute)
+      } else {
+        forgetSessionOwnerHintsForSession(sessionId)
+        requestSessionResume(sessionId)
       }
 
       openSession(sessionId, navigate)

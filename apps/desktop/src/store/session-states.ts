@@ -1076,7 +1076,50 @@ export function storedSessionIdForRuntimeId(sessionId: string): null | string {
   return mirrored || null
 }
 
+const BOT_CHAT_SCOPE_KEY = 'hermes.desktop.botChatSessions.v1'
+
+/** Stored ids last opened as a bot's chat. A tile carries `workspaceMode`, but
+ *  a bot chat normally lands in MAIN — `in-place` mints no tile when there is
+ *  none to front — and main has no tile to carry the scope on. Kept here so a
+ *  surface can still tell a companion chat from a working session, persisted
+ *  so that survives a relaunch the way tile scope does. */
+export const $botChatSessionIds = atom<ReadonlySet<string>>(
+  new Set((readJson<unknown>(BOT_CHAT_SCOPE_KEY) as unknown[] | null)?.filter(id => typeof id === 'string') ?? [])
+)
+
+function rememberBotChatScope(storedSessionId: string, isBotChat: boolean): void {
+  const current = $botChatSessionIds.get()
+
+  if (current.has(storedSessionId) === isBotChat) {
+    return
+  }
+
+  const next = new Set(current)
+
+  if (isBotChat) {
+    next.add(storedSessionId)
+  } else {
+    next.delete(storedSessionId)
+  }
+
+  $botChatSessionIds.set(next)
+  writeJson(BOT_CHAT_SCOPE_KEY, next.size ? [...next] : null)
+}
+
+/** True while this live session is a bot's chat rather than a working session.
+ *  Surfaces read it to drop coding chrome that means nothing in a companion
+ *  conversation — the composer's branch/worktree rail. */
+export function isBotChatSession(sessionId: null | string | undefined): boolean {
+  const stored = sessionId ? storedSessionIdForRuntimeId(sessionId) : null
+
+  return Boolean(stored && $botChatSessionIds.get().has(stored))
+}
+
 export function setSessionTileWorkspaceScope(storedSessionId: string, scope: SessionTileWorkspaceScope): boolean {
+  // Before the tile lookup: openSession routes every open through here, and a
+  // bot chat usually has no tile to record the scope on.
+  rememberBotChatScope(storedSessionId, scope.workspaceMode === 'bots')
+
   const tile = $sessionTiles.get().find(candidate => candidate.storedSessionId === storedSessionId)
   const workspaceOwnerKey = scope.workspaceMode === 'bots' ? scope.workspaceOwnerKey : undefined
   const ownerRoute = scope.workspaceMode === 'bots' ? scope.ownerRoute : undefined
@@ -1457,11 +1500,44 @@ export function focusOpenSession(
  *  with open tabs comes back to the one the user left, instead of re-opening
  *  its canonical Bot Chat beside them: nothing records a tab close except the
  *  tile bucket forgetting it, so any open path that ignores the open set
- *  resurrects closed chats on every bot switch. */
-export function focusWorkspaceOwnerSessionTile(workspaceOwnerKey: string): null | string {
-  const owned = $sessionTiles
+ *  resurrects closed chats on every bot switch.
+ *
+ *  `isStaleTile`: the caller's reconciliation probe against backend truth
+ *  (hermes-agent#90102). The tile bucket is a Local Storage cache, and a
+ *  persisted bot tile can outlive the session it names — a superseded
+ *  "Bot Chat" from the retired pointer design, a re-minted canonical row, a
+ *  finished session that stopped being the bot's chat. Fronting such a tile
+ *  made the row's click target a stale (often hidden) session forever while
+ *  the preview described the live one. A tile the probe rejects is DISCARDED
+ *  (resurrecting it would just front the stale session again — same
+ *  no-undo rationale as discardSessionTile) and never fronted, so the caller
+ *  falls through to its authoritative open. No probe = the old behavior. */
+export function focusWorkspaceOwnerSessionTile(
+  workspaceOwnerKey: string,
+  isStaleTile?: (tile: SessionTile) => boolean
+): null | string {
+  const allOwned = $sessionTiles
     .get()
     .filter(tile => tile.workspaceMode === 'bots' && tile.workspaceOwnerKey === workspaceOwnerKey)
+
+  let owned = allOwned
+
+  if (typeof isStaleTile === 'function') {
+    const stale = allOwned.filter(tile => {
+      try {
+        return isStaleTile(tile)
+      } catch {
+        // A throwing probe must not break the click path — keep the tile.
+        return false
+      }
+    })
+
+    for (const tile of stale) {
+      discardSessionTile(tile.storedSessionId)
+    }
+
+    owned = allOwned.filter(tile => !stale.includes(tile))
+  }
 
   if (owned.length === 0) {
     return null

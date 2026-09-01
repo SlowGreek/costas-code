@@ -3,12 +3,13 @@ import { atom, computed } from 'nanostores'
 
 import { translateNow } from '@/i18n'
 import { stableArray } from '@/lib/stable-array'
-import type { TodoItem, TodoStatus } from '@/lib/todos'
+import { type TodoItem, type TodoStatus, todoTree } from '@/lib/todos'
 
 import { $gateway } from './gateway'
 import { $goalsBySession, type SessionGoal, type GoalStatus as SessionGoalStatus } from './goals'
 import { dispatchNativeNotification } from './native-notifications'
 import { notifyError } from './notifications'
+import { markRuntimeGone, noteRuntimeAlive } from './runtime-gone'
 import { $sessions, lineageAliases } from './session'
 import { $sessionStates } from './session-states'
 import { $subagentsBySession, type SubagentProgress } from './subagents'
@@ -44,6 +45,8 @@ export interface ComposerStatusItem {
    *  blocked goal's reason is the one thing the user must act on, so it must
    *  never be clipped to "The agent has stopped iterating, stating S…". */
   detailNote?: string
+  /** todo: nesting depth (0 = top-level) for indented subtask rows. */
+  depth?: number
   /** Goal: lifecycle state driving its glyph/tone —
    *  active | blocked | cleared | done | paused | waiting. */
   goalStatus?: GoalStatus
@@ -169,7 +172,8 @@ const subToItem = (s: SubagentProgress): ComposerStatusItem => ({
   type: 'subagent'
 })
 
-const todoToItem = (t: TodoItem): ComposerStatusItem => ({
+const todoToItem = (t: TodoItem, depth: number): ComposerStatusItem => ({
+  depth,
   id: `todo:${t.id}`,
   state: t.status === 'in_progress' ? 'running' : 'done',
   title: t.content,
@@ -237,6 +241,7 @@ const sameStatusItem = (a: ComposerStatusItem, b: ComposerStatusItem) =>
   a.detailNote === b.detailNote &&
   a.goalStatus === b.goalStatus &&
   a.todoStatus === b.todoStatus &&
+  a.depth === b.depth &&
   a.sessionId === b.sessionId
 
 const stabilizeItems = (prev: ComposerStatusItem[] | undefined, next: ComposerStatusItem[]): ComposerStatusItem[] => {
@@ -270,7 +275,10 @@ export const $statusItemsBySession = computed(
     }
 
     for (const [sid, list] of Object.entries(todos)) {
-      push(sid, list.map(todoToItem))
+      push(
+        sid,
+        todoTree(list).map(([t, depth]) => todoToItem(t, depth))
+      )
     }
 
     for (const [sid, goal] of Object.entries(goals)) {
@@ -566,11 +574,19 @@ export async function refreshBackgroundProcesses(sid: string): Promise<void> {
     const result = await gateway.request<{ processes?: GatewayProcessEntry[] }>('process.list', { session_id: sid })
 
     reconcileBackgroundProcesses(sid, result?.processes ?? [])
+    // The binding answered, so it is healthy: refund the stored session's
+    // recovery budget (a heal that stuck must not count against the next one).
+    noteRuntimeAlive(sid)
   } catch (error) {
     // A gone session never comes back under this runtime id: stop polling it,
     // or the 5s timer hammers the gateway with 4001s for the window's lifetime.
     if (isSessionGoneForBackgroundPolling(error)) {
       goneSessions.add(sid)
+      // Latching stops the storm; it does not make the window usable again.
+      // This poll is the only caller that runs while the user is idle, so it is
+      // the only one that can carry the gateway's "resume the stored session"
+      // verdict to the view before the user types into a dead binding.
+      markRuntimeGone(sid)
 
       return
     }

@@ -496,6 +496,134 @@ def test_compute_host_turn_end_updates_metadata_mirror(monkeypatch):
         server._sessions.pop("iso-sid", None)
 
 
+def test_compute_host_clarify_snapshot_replays_and_proxies_batch_answers(monkeypatch):
+    """A host-owned clarify survives activation and receives its UI answers."""
+    class _Supervisor:
+        def __init__(self):
+            self.responses = []
+
+        def respond(self, sid, params, *, timeout=15.0):
+            self.responses.append((sid, dict(params), timeout))
+            remaining = ["q1"] if params.get("question_id") == "q0" else []
+            return {"type": "respond.ack", "response": {"result": {"status": "ok", "remaining": remaining}}}
+
+    sid = "host-clarify"
+    supervisor = _Supervisor()
+    session = _session(agent=None, agent_ready=threading.Event(), _compute_host_active=True)
+    server._sessions[sid] = session
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"dashboard": {"turn_isolation": True}})
+    monkeypatch.setattr(server, "_get_compute_host_supervisor", lambda _cfg=None: supervisor)
+    monkeypatch.setattr(server, "write_json", lambda _message: True)
+
+    try:
+        server._relay_compute_host_rpc(
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {
+                    "type": "clarify.request",
+                    "session_id": sid,
+                    "payload": {
+                        "request_id": "host-request",
+                        "questions": [
+                            {"qid": "q0", "question": "First?", "choices": ["a"]},
+                            {"qid": "q1", "question": "Second?", "choices": ["b"]},
+                        ],
+                    },
+                },
+            }
+        )
+
+        activated = server._live_session_payload(sid, session)
+        assert activated["pending_clarify"]["request_id"] == "host-request"
+
+        response = server.handle_request(
+            {
+                "id": "clarify-q0",
+                "method": "clarify.respond",
+                "params": {"request_id": "host-request", "question_id": "q0", "answer": "a"},
+            }
+        )
+
+        assert response["result"] == {"status": "ok", "remaining": ["q1"]}
+        assert supervisor.responses == [
+            (sid, {"request_id": "host-request", "question_id": "q0", "answer": "a"}, 15.0)
+        ]
+        replayed = server._live_session_payload(sid, session)["pending_clarify"]
+        assert replayed["answers"] == {"q0": "a"}
+
+        final_response = server.handle_request(
+            {
+                "id": "clarify-q1",
+                "method": "clarify.respond",
+                "params": {"request_id": "host-request", "question_id": "q1", "answer": "b"},
+            }
+        )
+
+        assert final_response["result"] == {"status": "ok", "remaining": []}
+        assert "pending_clarify" not in server._live_session_payload(sid, session)
+    finally:
+        server._sessions.pop(sid, None)
+
+
+def test_compute_host_interrupt_forwards_when_parent_running_mirror_is_stale(monkeypatch):
+    """The host, not the parent's mirrored running flag, owns interruption."""
+    interrupted = []
+
+    class _Supervisor:
+        def interrupt(self, sid, *, request_id=None):
+            interrupted.append((sid, request_id))
+
+    sid = "host-stale-running"
+    server._sessions[sid] = _session(
+        agent=None,
+        agent_ready=threading.Event(),
+        _compute_host_active=True,
+        running=False,
+    )
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"dashboard": {"turn_isolation": True}})
+    monkeypatch.setattr(server, "_get_compute_host_supervisor", lambda _cfg=None: _Supervisor())
+
+    try:
+        response = server.handle_request(
+            {"id": "interrupt", "method": "session.interrupt", "params": {"session_id": sid}}
+        )
+        assert response["result"] == {"status": "interrupted", "turn_isolation": True}
+        assert interrupted == [(sid, "interrupt-interrupt")]
+    finally:
+        server._sessions.pop(sid, None)
+
+
+def test_compute_host_interrupt_skips_lazy_session_with_no_hosted_turn(monkeypatch):
+    """A lazy session that never submitted a hosted turn must not spawn a host.
+
+    ``HostSupervisor.interrupt()`` calls ``start()``, so forwarding the
+    interrupt unconditionally would launch a compute-host child just to
+    deliver an interrupt for a session with no work in it.
+    """
+    class _Supervisor:
+        def interrupt(self, sid, *, request_id=None):  # pragma: no cover - must not run
+            raise AssertionError("interrupt must not be forwarded for idle lazy sessions")
+
+    sid = "lazy-idle"
+    session = _session(
+        agent_ready=threading.Event(),
+        running=False,
+    )
+    session["agent"] = None  # _session() substitutes a namespace for None
+    server._sessions[sid] = session
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"dashboard": {"turn_isolation": True}})
+    monkeypatch.setattr(server, "_get_compute_host_supervisor", lambda _cfg=None: _Supervisor())
+
+    try:
+        response = server.handle_request(
+            {"id": "interrupt", "method": "session.interrupt", "params": {"session_id": sid}}
+        )
+        assert response["result"] == {"status": "interrupted", "turn_isolation": True}
+    finally:
+        server._sessions.pop(sid, None)
+
+
 def test_slash_exec_compress_flag_on_applies_host_control_mirror(monkeypatch):
     class _ExplodingWorker:
         def __init__(self, *args, **kwargs):
@@ -7677,6 +7805,28 @@ def test_ensure_session_db_row_stamps_profile_name(monkeypatch, tmp_path):
     assert created[0]["db_path"] == profile_home / "state.db"
 
 
+def test_ensure_session_db_row_stamps_launch_profile_name(monkeypatch):
+    """A launch-profile session row is stamped with the ACTUAL profile name,
+    never NULL. NULL-as-launch-profile rows vanish from the desktop sidebar
+    (profile-keyed matching) and break @session:<profile>/<id> deep links, and
+    the #94724 one-shot backfill cannot keep repairing rows minted after it
+    ran (#99222)."""
+    created = []
+
+    class _FakeDB:
+        def create_session(self, key, **kwargs):
+            created.append({"key": key, "profile_name": kwargs.get("profile_name")})
+
+    monkeypatch.setattr(server, "_get_db", lambda: _FakeDB())
+    monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
+    monkeypatch.setattr(server, "_current_profile_name", lambda: "default")
+
+    server._ensure_session_db_row({"session_key": "k1"})
+
+    assert created and created[0]["key"] == "k1"
+    assert created[0]["profile_name"] == "default"
+
+
 def test_session_title_clears_pending_after_persist(monkeypatch):
     class _FakeDB:
         def __init__(self):
@@ -14292,6 +14442,61 @@ def test_get_db_degrades_cleanly_when_sessiondb_init_fails(monkeypatch):
     assert server._db_error == "locking protocol"
 
 
+def test_ensure_session_db_row_false_when_store_unavailable(monkeypatch):
+    """Store unavailable → False, so prompt.submit can fail the send loudly
+    instead of streaming into a store that will never save it (#98924)."""
+    fake_mod = types.ModuleType("hermes_state")
+
+    class _BrokenSessionDB:
+        def __init__(self):
+            raise RuntimeError("utf-8 boom")
+
+    fake_mod.SessionDB = _BrokenSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_mod)
+    monkeypatch.setattr(server, "_db", None)
+    monkeypatch.setattr(server, "_db_error", None)
+
+    assert server._ensure_session_db_row({"session_key": "k1"}) is False
+
+
+def test_ensure_session_db_row_true_when_row_persisted(monkeypatch):
+    created = []
+
+    class _FakeDB:
+        def create_session(self, key, **_kwargs):
+            created.append(key)
+
+    monkeypatch.setattr(server, "_get_db", lambda: _FakeDB())
+    monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
+
+    assert server._ensure_session_db_row({"session_key": "k1", "cwd": "/tmp"}) is True
+    assert created == ["k1"]
+
+
+def test_prompt_submit_fails_loudly_when_store_unavailable(monkeypatch):
+    """A send with no persistable store must fail the RPC with a real error
+    (desktop maps it to a toast) instead of streaming the message into a
+    store that will never save it (#98924)."""
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"dashboard": {}})
+    monkeypatch.setattr(server, "_get_db", lambda: None)
+    monkeypatch.setattr(server, "_db_error", "utf-8 decode failure")
+
+    server._sessions["lost-sid"] = _session()
+    try:
+        resp = server.handle_request(
+            {
+                "id": "lost",
+                "method": "prompt.submit",
+                "params": {"session_id": "lost-sid", "text": "will vanish"},
+            }
+        )
+    finally:
+        server._sessions.pop("lost-sid", None)
+
+    assert resp["error"]["code"] == 5072
+    assert "session storage unavailable" in resp["error"]["message"]
+
+
 @pytest.mark.real_agent_prewarm
 def test_session_create_continues_when_state_db_is_unavailable(monkeypatch):
     class _FakeWorker:
@@ -18853,6 +19058,51 @@ class _BareAgent:
     independent of the `if comp:` context-percent block."""
 
     model = "x"
+
+
+def test_get_usage_perf_readouts_present():
+    """cache_hit_pct / avg_latency_s / avg_tps mirror the classic CLI bar."""
+    from collections import deque
+
+    class _PerfAgent:
+        model = "x"
+        session_prompt_tokens = 27_873
+        session_cache_read_tokens = 24_369
+        _api_latency_history = deque([2.1, 4.3], maxlen=10)
+        _api_output_history = deque([130, 190], maxlen=10)
+
+    usage = server._get_usage(_PerfAgent())
+    assert usage["cache_hit_pct"] == 87
+    assert usage["avg_latency_s"] == 3.2
+    assert usage["avg_tps"] == 50.0  # true throughput sum(out)/sum(lat), not mean of ratios
+
+
+def test_get_usage_perf_readouts_omitted_without_data():
+    """Zero cache reads / empty history omit the keys — never fabricate 0s."""
+
+    class _ColdAgent:
+        model = "x"
+        session_prompt_tokens = 100
+        session_cache_read_tokens = 0
+
+    usage = server._get_usage(_ColdAgent())
+    assert "cache_hit_pct" not in usage
+    assert "avg_latency_s" not in usage
+    assert "avg_tps" not in usage
+
+
+def test_get_usage_perf_readouts_guard_negative_latency():
+    """Odd provider timings (negative durations seen in logs) are dropped."""
+    from collections import deque
+
+    class _WeirdAgent:
+        model = "x"
+        _api_latency_history = deque([-0.8], maxlen=10)
+        _api_output_history = deque([100], maxlen=10)
+
+    usage = server._get_usage(_WeirdAgent())
+    assert "avg_latency_s" not in usage
+    assert "avg_tps" not in usage
 
 
 def test_get_usage_includes_active_subagents(monkeypatch):

@@ -62,8 +62,10 @@ DEFAULT_CONFIG = {
         # Maximum time an alias routing key waits for the active turn holding
         # the same resolved session lease. On expiry the inbound message is
         # rejected with a resend notice rather than run without serialization.
-        # Non-positive values fall back to 1800 seconds.
-        "gateway_turn_lease_timeout": 1800,
+        # Keep this short: Telegram dispatches updates sequentially, so an
+        # inline lease waiter also delays unrelated topics. Non-positive values
+        # fall back to the five-second safety default.
+        "gateway_turn_lease_timeout": 5,
         # Per-session AIAgent cache in the gateway. Each cached agent keeps a
         # warm prompt prefix AND the session's full transcript, so the cache
         # trades memory for cost: too small and every turn re-pays an uncached
@@ -327,6 +329,17 @@ DEFAULT_CONFIG = {
         # synchronously before the gate runs.  Set to 0 to disable the bound
         # (historical "wait forever" behaviour).
         "gateway_startup_restore_drain_timeout": 30,
+        # Max seconds the boot turn-machinery warm-up (#99373) may hold the
+        # gateway's inbound gate shut.  On a fresh boot the gateway warms the
+        # agent-side turn prerequisites (run_agent import graph, tool schemas
+        # + availability probes, context-file tier) BEFORE accepting inbound
+        # messages, so a message seconds after boot is no longer served with
+        # a skeleton system prompt (missing context files / tool schemas).
+        # On timeout the gate opens anyway and warm-up finishes in the
+        # background — a wedged init can't make the gateway permanently
+        # unavailable.  Set to 0 to disable the warm-up (historical
+        # lazy-init behaviour).
+        "gateway_startup_warmup_timeout": 20,
         # Stale-stream ceiling for local providers (Ollama, oMLX, llama-cpp) in
         # seconds. When the base stale timeout is at its default (180s) and a
         # local endpoint is detected, this finite ceiling replaces the former
@@ -521,7 +534,7 @@ DEFAULT_CONFIG = {
         "extract_char_limit": 15000,  # per-page char budget for web_extract; larger pages truncate + store full text in cache/web
         # Keyless free-tier ring: with NO web backend configured or keyed,
         # web_search/web_extract rotate round-robin across five vendors'
-        # public free tiers (exa, parallel, tavily, firecrawl, keenable),
+        # public free tiers (exa, parallel, firecrawl, keenable),
         # failing over to the next ring vendor on rate limits. Never
         # pre-empts a configured or keyed backend. Set false to disable.
         "keyless_fallback": True,
@@ -531,7 +544,7 @@ DEFAULT_CONFIG = {
         # (no sticky failover). Off when keyless_fallback is false.
         "keyless_rescue": True,
         # Per-provider tier selection for ring vendors with both a keyless
-        # free endpoint and a keyed paid path (exa, parallel, tavily,
+        # free endpoint and a keyed paid path (exa, parallel,
         # firecrawl, keenable). Set by the `hermes tools` picker's
         # "Free (keyless)" / "Paid (API key)" rows.
         #   free  — always use the anonymous free endpoint (even with a key)
@@ -575,12 +588,17 @@ DEFAULT_CONFIG = {
         "record_sessions": False,  # Auto-record browser sessions as WebM videos
         "headed": False,  # Local mode: launch Chromium with a visible window (also skips per-turn cleanup so the window persists between turns; idle reaper still applies)
         "allow_private_urls": False,  # Allow navigating to private/internal IPs (localhost, 192.168.x.x, etc.)
-        # Browser engine for local mode.  Passed as ``--engine <value>`` to
-        # agent-browser v0.25.3+.
-        # "auto"       — use Chrome (default, don't pass --engine at all)
-        # "lightpanda" — use Lightpanda (1.3-5.8x faster navigation, no screenshots)
+        # Local browser engine, for both drivers:
+        #   Browser Use mode (default) — "lightpanda" makes Hermes spawn
+        #     ``lightpanda serve`` per session and point browser_exec at it.
+        #   Built-in tools (backend: off) — passed as ``--engine <value>`` to
+        #     agent-browser v0.25.3+ (with automatic Chrome fallback).
+        # "auto"       — Chrome (default)
+        # "lightpanda" — Lightpanda (faster navigation, no screenshots)
         # "chrome"     — explicitly request Chrome
-        # Also settable via AGENT_BROWSER_ENGINE env var.
+        # Ignored while a cloud provider, Camofox, browser.cdp_url or
+        # browser.use_real_profile is active — `/browser status` and
+        # `hermes doctor` say so. Also settable via AGENT_BROWSER_ENGINE.
         "engine": "auto",
         "auto_local_for_private_urls": True,  # When a cloud provider is set, auto-spawn local Chromium for LAN/localhost URLs instead of sending them to the cloud
         "cdp_url": "",  # Optional persistent CDP endpoint for attaching to an existing Chromium/Chrome
@@ -595,7 +613,7 @@ DEFAULT_CONFIG = {
         # never contends with the user's running browser. Turning this back off
         # deletes the snapshot store (~/.hermes/browser-profile/) so copied
         # credentials don't outlive consent. Only Chromium-family default
-        # browsers are supported (Chrome, Edge, Brave, Chromium); a non-Chromium
+        # browsers are supported (Chrome, Edge, Brave, Brave Origin, Chromium); a non-Chromium
         # default (e.g. Firefox) fails closed with a clear message. Default
         # false. Also gates the browser_exec ``local`` argument, which forces a
         # real-profile local session even under a cloud browser backend. Toggle
@@ -611,6 +629,14 @@ DEFAULT_CONFIG = {
         # retry. Still locked afterward → stays blocked, no loop, no auto-kill.
         # OFF by default. No effect on macOS/Linux (copy-while-running works).
         "real_profile_autoclose": False,
+        # Pin WHICH source browser profile directory gets snapshotted for
+        # real-profile browsing (e.g. "Profile 2"). Unset/empty: follows the
+        # browser's last-used profile (Local State → profile.last_used). On a
+        # machine with several profiles (work + personal), last-used roulette
+        # can silently hand the agent the wrong identity; a pin locks it. A pin
+        # naming a directory that doesn't exist FAILS CLOSED with a fixable
+        # message rather than falling back to last-used.
+        "real_profile_pin": "",
         "allow_unsafe_evaluate": False,  # Legacy override: when true, browser_console(expression=...) bypasses the restrict_evaluate denylist entirely
         "restrict_evaluate": False,  # Opt-in denylist blocking sensitive JS primitives (cookies/storage/clipboard/network/form values) in browser_console(expression=...)
         # CDP supervisor — dialog + frame detection via a persistent WebSocket.
@@ -910,6 +936,13 @@ DEFAULT_CONFIG = {
                                       # while tokens are still moving — bounds a degenerate
                                       # trickle stream. Clamped to >= hygiene_timeout_seconds.
         "hygiene_failure_cooldown_seconds": 300,  # skip repeated failed hygiene attempts for this session
+        "hygiene_max_turn_hold_seconds": 10,  # max seconds an ARRIVING user turn is held while a
+                                      # still-streaming hygiene summary finishes. Distinct from
+                                      # hygiene_timeout_seconds (compressor inactivity budget):
+                                      # this bounds user-visible latency once real input is
+                                      # waiting. Kept well under chat-transport idle timeouts
+                                      # (Telegram ~30s). On expiry the turn proceeds
+                                      # uncompressed — an availability boundary, not a failure.
         "context_timeout_seconds": 120,  # inactivity budget for in-agent compress_context
                                       # (conversation loop, /compress, preflight, etc.).
                                       # Same progress-aware semantics as hygiene_timeout_seconds:
@@ -978,10 +1011,11 @@ DEFAULT_CONFIG = {
                                       # the ChatGPT Codex backend; every other
                                       # route/model is unaffected. Hermes' local
                                       # compression stays armed as the fallback.
-        "codex_responses_compact_threshold": 200000,  # Server-side compaction trigger
-                                      # (input tokens). Clamped below the local
-                                      # compression threshold at request time so
-                                      # the server compacts before Hermes does.
+        "codex_responses_compact_threshold": None,  # Optional absolute server compaction
+                                      # trigger in input tokens. None follows the
+                                      # resolved local compression trigger with a
+                                      # safety margin. Explicit values only clamp
+                                      # downward so the server compacts first.
         "in_place": True,             # When True, compaction rewrites the message
                                       # list and rebuilds the system prompt WITHOUT
                                       # rotating the session id — the conversation
@@ -1619,6 +1653,20 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "fields": ["model", "context_pct", "cwd"],  # Order shown; drop any to hide
         },
+        # CLI/TUI interactive status bar field customization (mirrors the
+        # runtime_footer.fields pattern above). When the list is non-empty,
+        # only the listed fields appear; the built-in order is preserved
+        # (the config controls visibility, not ordering). Empty = show the
+        # default set. Available: model, context_detail, context_pct,
+        # cache_hit, latency, tps, compressions, bg_tasks, bg_processes,
+        # bg_subagents, goal, duration, prompt_elapsed, idle_since, focus,
+        # yolo, stash, battery, title, total_tokens.
+        # total_tokens (session Σ) is opt-in only — it never shows unless
+        # listed here. Narrow terminals still drop wide-mode-only fields
+        # (context_detail, prompt_elapsed, idle_since) regardless of config.
+        "status_bar": {
+            "fields": [],  # empty = built-in defaults (all fields)
+        },
         "copy_shortcut": "auto",  # "auto" (platform default) | "ctrl_c" | "ctrl_shift_c" | "disabled"
         # Petdex animated mascot (https://github.com/crafter-station/petdex).
         # A purely cosmetic sprite that reacts to agent activity across the
@@ -2131,6 +2179,15 @@ DEFAULT_CONFIG = {
         # Use cases: cross-model review (one model critiques another's work) and
         # mixture-of-agents fan-out (one batch across several models).
         "allowed_models": [],
+        # Per-child request settings sent on every delegation API call, on all
+        # three resolution branches (direct base_url, named provider, and
+        # parent-inherit). Top-level keys are API kwargs (e.g. service_tier);
+        # an "extra_body" sub-dict is merged into the request's extra_body —
+        # e.g. {"extra_body": {"provider": {"sort": "throughput"}}} routes
+        # OpenRouter delegation children to the fastest provider. Precedence:
+        # these explicit values merge OVER runtime/parent-derived overrides
+        # (explicit keys win; extra_body deep-merged one level).
+        "request_overrides": {},
         # When delegate_task narrows child toolsets explicitly, preserve any
         # MCP toolsets the parent already has enabled. On by default so
         # narrowing (e.g. toolsets=["web","browser"]) expresses "I want these
@@ -2581,6 +2638,16 @@ DEFAULT_CONFIG = {
     #             safe; mirrors cron_mode deny)
     #   approve — auto-approve all dangerous commands in single-query mode
     #
+    # unattended_mode — what to do when a session on an unattended
+    # programmatic platform (webhook, msgraph_webhook, api_server) hits a
+    # dangerous command. These surfaces bind a session platform like chat
+    # gateways do, but have no send_exec_approval and no /approve channel —
+    # a pending approval there just blocks for the full timeout with nobody
+    # to answer (#37284, #87509):
+    #   deny    — block the command instantly and let the agent find another
+    #             way (default, safe; mirrors cron_mode deny)
+    #   approve — auto-approve all dangerous commands on unattended platforms
+    #
     # timeout — seconds to wait for the user's approve/deny before failing
     # closed (deny). Shared by the CLI prompt and gateway/messaging waits.
     # Messaging approvals arrive as a push notification the user may not see
@@ -2591,6 +2658,7 @@ DEFAULT_CONFIG = {
         "timeout": 300,
         "cron_mode": "deny",
         "single_query_mode": "deny",
+        "unattended_mode": "deny",
         # Operator-customizable policy text for smart approvals. When
         # non-empty, this is appended to the smart-approval guardian's
         # SYSTEM prompt (trusted channel) as additional rules — e.g.
@@ -3202,6 +3270,12 @@ DEFAULT_CONFIG = {
         # Optional named-profile allowlist for multiplex mode. None preserves
         # the historical serve-all behavior; [] serves only the default.
         "multiplex_profile_allowlist": None,
+
+        # After an unexpected SIGTERM interrupts a running gateway agent,
+        # wait this many seconds for it to unwind before adapter and database
+        # teardown proceeds. Keep this short so service-manager shutdowns do
+        # not exhaust their stop budget before resource cleanup begins.
+        "signal_interrupt_grace_timeout": 1,
 
         # Durable delivery-obligation ledger: final agent responses are
         # recorded in state.db around the platform send, and a gateway that
@@ -3820,10 +3894,7 @@ DEFAULT_CONFIG = {
         #   False = always enable the overlay
         "no_overlay": None,
         # cua-driver permission mode for each Hermes computer-use runtime.
-        #   standard (default) — cua-driver's own approval boundary. Protected
-        #     operations (e.g. attaching to an existing signed-in browser
-        #     profile) fail closed unless grant_existing_profile is enabled
-        #     below.
+        #   standard (default) — cua-driver's own approval boundary.
         #   bounded — repeatable automation under a user-reviewed session
         #     capability manifest (set capability_manifest below). No runtime
         #     prompts; anything outside the manifest fails closed inside
@@ -3844,14 +3915,6 @@ DEFAULT_CONFIG = {
         # cua-driver identity (com.trycua.driver / an official signing team).
         # Enable only when developing the driver locally from source.
         "allow_unsigned_driver": False,
-        # Pre-authorize existing-profile browser attachment in standard mode
-        # (cua-driver's trusted-launcher `--grant existing-profile`). When
-        # true, the agent can attach to your already-running, signed-in
-        # Chrome/Edge window — exposing that profile's live pages, cookies,
-        # and storage to the browser protocol — without a per-use prompt.
-        # Leave false to keep existing-profile attachment failing closed;
-        # isolated driver-owned profiles work either way.
-        "grant_existing_profile": False,
     },
 
     # =========================================================================
@@ -4498,14 +4561,6 @@ OPTIONAL_ENV_VARS = {
         "category": "tool",
         "advanced": True,
     },
-    "TAVILY_API_KEY": {
-        "description": "Tavily API key for AI-native web search and extract (optional — keyless works without it)",
-        "prompt": "Tavily API key",
-        "url": "https://app.tavily.com/home",
-        "tools": ["web_search", "web_extract"],
-        "password": True,
-        "category": "tool",
-    },
     "KEENABLE_API_KEY": {
         "description": "Keenable API key for fast independent-index web search and page fetch (optional — keyless free tier works without it)",
         "prompt": "Keenable API key",
@@ -4562,10 +4617,10 @@ OPTIONAL_ENV_VARS = {
         "category": "tool",
     },
     "AGENT_BROWSER_ENGINE": {
-        "description": "Browser engine for local mode: auto (default Chrome), lightpanda (faster, no screenshots), chrome",
+        "description": "Local browser engine: auto (default Chrome), lightpanda (faster, no screenshots; Browser Use mode spawns lightpanda serve), chrome",
         "prompt": "Browser engine (auto/lightpanda/chrome)",
-        "url": "https://github.com/vercel-labs/agent-browser",
-        "tools": ["browser_navigate", "browser_snapshot", "browser_click", "browser_vision"],
+        "url": "https://lightpanda.io/docs/run-locally/installation/one-liner",
+        "tools": ["browser_exec", "browser_navigate", "browser_snapshot", "browser_click", "browser_vision"],
         "password": False,
         "category": "tool",
         "advanced": True,

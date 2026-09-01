@@ -120,6 +120,7 @@ import {
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { forgetSessionUnread } from '@/store/session-unread'
 import { $archivedSessions } from '@/store/sidebar-archive'
+import { restoreSessionTodosFromSnapshot } from '@/store/todos'
 import {
   dropTranscriptTail,
   dropTranscriptTailEverywhere,
@@ -136,6 +137,12 @@ import { sessionContextDrift } from '../session-context-drift'
 import { singleFlightSessionResume } from '../use-prompt-actions/single-flight-resume'
 
 import { pendingClarifyToolPayload, restorePendingClarifyFromSnapshot } from './restore-pending-clarify'
+import {
+  createPersistedDisplayTranscriptProvenance,
+  hasPersistedDisplayTranscriptProvenance,
+  suppressTranscriptForView,
+  withoutTranscriptProvenance
+} from './transcript-provenance'
 import {
   appendLiveSessionProjection,
   applyRuntimeInfo,
@@ -171,6 +178,7 @@ interface SessionActionsOptions {
   ensureSessionState: (sessionId: string, storedSessionId?: string | null) => ClientSessionState
   getRouteToken: () => string
   getRoutedStoredSessionId: () => null | string
+  holdSessionTranscriptView?: (runtimeId: string) => () => void
   navigate: NavigateFunction
   onFreshDraftRouteIntent?: () => void
   onSessionRouteIntent?: (storedSessionId: string) => void
@@ -324,6 +332,7 @@ export function useSessionActions({
   ensureSessionState,
   getRouteToken,
   getRoutedStoredSessionId,
+  holdSessionTranscriptView,
   navigate,
   onFreshDraftRouteIntent,
   onSessionRouteIntent,
@@ -1024,19 +1033,54 @@ export function useSessionActions({
           publishSessionState(cachedRuntimeId, cachedViewState)
         }
 
+        const expectedProvenance = stored
+          ? createPersistedDisplayTranscriptProvenance({
+              lineageRootId: stored._lineage_root_id ?? null,
+              scope: sessionRestScope,
+              storedSessionId
+            })
+          : null
+
+        const hasValidProvenance = Boolean(
+          expectedProvenance && hasPersistedDisplayTranscriptProvenance(cachedViewState, expectedProvenance)
+        )
+
+        if (!hasValidProvenance) {
+          cachedViewState = withoutTranscriptProvenance(cachedViewState)
+        }
+
         if (sessionShouldHaveTranscript(stored) && cachedViewState.messages.length === 0) {
           runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
           sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
           dropSessionState(cachedRuntimeId)
         } else {
-          // Paint the warm cache immediately. The persisted transcript still
-          // needs a refresh because a resumed runtime may carry only the
-          // agent's compressed projection, but that read must start after
-          // session.activate reattaches the live transport. Otherwise a turn
-          // can finish between the early REST snapshot and the reattach: its
-          // terminal events go to the detached socket while the stale snapshot
-          // leaves Desktop showing only the pre-disconnect partial answer.
+          // Bind the warm runtime immediately so cwd/workspace ownership don't
+          // wait on session.activate (#71254). Unproven cache entries (no
+          // persisted-display provenance) stay off the view until REST
+          // authority lands — a compressed runtime tail is legal in cache and
+          // is exactly the session-switch flicker (#73646). Proven caches and
+          // same-session re-resumes still paint immediately. The persisted
+          // refresh itself still starts after activate reattaches the live
+          // transport, so a turn finishing between snapshot and reattach
+          // cannot leave a stale partial on screen.
           const shouldRefreshPersistedTranscript = !isWatchWindow()
+
+          const suppressUnprovenWarmTranscript =
+            !resumedSameSelectedSession && shouldRefreshPersistedTranscript && !hasValidProvenance
+
+          let releaseHeldTranscriptView = suppressUnprovenWarmTranscript
+            ? holdSessionTranscriptView?.(cachedRuntimeId)
+            : undefined
+
+          const releaseTranscriptView = () => {
+            releaseHeldTranscriptView?.()
+            releaseHeldTranscriptView = undefined
+          }
+
+          const publishDegradedWarmCache = () => {
+            releaseTranscriptView()
+            syncSessionStateToView(cachedRuntimeId, cachedViewState)
+          }
 
           setFreshDraftReady(false)
           clearNotifications()
@@ -1044,7 +1088,10 @@ export function useSessionActions({
           selectedStoredSessionIdRef.current = storedSessionId
           setActiveSessionId(cachedRuntimeId)
           activeSessionIdRef.current = cachedRuntimeId
-          syncSessionStateToView(cachedRuntimeId, cachedViewState)
+          syncSessionStateToView(
+            cachedRuntimeId,
+            suppressTranscriptForView(cachedViewState, suppressUnprovenWarmTranscript)
+          )
           setCurrentCwdTransient(cachedViewState.cwd)
           // The warm cache IS this conversation's own workspace truth, so the
           // switch is already re-homed here. This claim cannot wait for
@@ -1084,6 +1131,8 @@ export function useSessionActions({
               if (usage) {
                 setCurrentUsage(current => ({ ...current, ...usage }))
               }
+
+              publishDegradedWarmCache()
 
               return
             }
@@ -1147,6 +1196,8 @@ export function useSessionActions({
                   ? false
                   : resolveResumedBusy(activated.running ?? cachedViewState.busy, Boolean(latestCachedState?.busy))
 
+              restoreSessionTodosFromSnapshot(cachedRuntimeId, activated.todo_state, running)
+
               const activatedTurnStartedAt =
                 typeof activated.turn_started_at === 'number' && activated.turn_started_at > 0
                   ? activated.turn_started_at * 1000
@@ -1182,7 +1233,10 @@ export function useSessionActions({
               busyRef.current = running
               setBusy(running)
               setAwaitingResponse(running && !pendingClarify)
-              syncSessionStateToView(cachedRuntimeId, activatedLivenessState)
+              syncSessionStateToView(
+                cachedRuntimeId,
+                suppressTranscriptForView(activatedLivenessState, suppressUnprovenWarmTranscript)
+              )
 
               // session.activate is the ordering barrier for reconnect recovery:
               // it atomically rebinds a running turn before returning. If the
@@ -1200,6 +1254,8 @@ export function useSessionActions({
               // which is intentionally smaller than the user-visible conversation.
               // Reconcile its in-flight/queued tail onto the complete transcript
               // instead of replacing durable history while the turn is running.
+              let acceptedPersistedDisplayTranscript = false
+
               if (persistedTranscriptPromise) {
                 const persisted = await persistedTranscriptPromise
 
@@ -1225,6 +1281,8 @@ export function useSessionActions({
                   persistedMatchesActivatedSession &&
                   (persisted.messages.length || !activatedMessages.length)
                 ) {
+                  acceptedPersistedDisplayTranscript = Boolean(expectedProvenance)
+
                   // The REST hydration is a newest-tail page; graft it onto any
                   // older pages the previous view already backfilled so
                   // re-activating a scrolled-back session keeps its history.
@@ -1275,11 +1333,17 @@ export function useSessionActions({
               const visibleActivatedMessages =
                 pendingClarifyProjection?.messages ?? clearedClarifyProjection?.messages ?? activatedMessages
 
+              releaseTranscriptView()
+
               const activatedState = updateSessionState(
                 cachedRuntimeId,
                 state => ({
                   ...state,
                   messages: visibleActivatedMessages,
+                  transcriptProvenance:
+                    acceptedPersistedDisplayTranscript || hasValidProvenance
+                      ? (expectedProvenance ?? undefined)
+                      : undefined,
                   ...(pendingClarifyProjection
                     ? {
                         awaitingResponse: false,
@@ -1326,12 +1390,16 @@ export function useSessionActions({
             }
 
             if (!isSessionGoneError(error)) {
+              publishDegradedWarmCache()
+
               return
             }
 
             runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
             sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
             dropSessionState(cachedRuntimeId)
+          } finally {
+            releaseTranscriptView()
           }
         }
       }
@@ -1569,6 +1637,8 @@ export function useSessionActions({
           (resumed as { running?: boolean }).running,
           Boolean(sessionStateByRuntimeIdRef.current.get(resumed.session_id)?.busy)
         )
+
+        restoreSessionTodosFromSnapshot(resumed.session_id, resumed.todo_state, resumedRunning)
 
         // Crash-survivable turn progress: fold a journaled in-flight tail
         // (persisted by use-session-state-cache while the turn streamed;
@@ -1875,6 +1945,7 @@ export function useSessionActions({
       activeSessionIdRef,
       busyRef,
       copy,
+      holdSessionTranscriptView,
       requestGateway,
       resetViewSync,
       runtimeIdByStoredSessionIdRef,

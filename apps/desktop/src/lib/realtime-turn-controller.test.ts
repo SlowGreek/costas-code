@@ -53,9 +53,9 @@ describe('RealtimeTurnController', () => {
     expect(outcome).toEqual({ continued: true, settled: false })
   })
 
-  it('settles after a successful terminal declaration without another inference', async () => {
+  it('settles after a successful blocked declaration without another inference', async () => {
     const sent: Record<string, unknown>[] = []
-    const execute = vi.fn(async ({ name }: { name: string }) => ({ status: name === 'finish_turn' ? 'complete' : 'ok' }))
+    const execute = vi.fn(async ({ name }: { name: string }) => ({ status: name === 'finish_turn' ? 'blocked' : 'ok' }))
 
     const controller = createRealtimeTurnController({
       execute,
@@ -82,6 +82,40 @@ describe('RealtimeTurnController', () => {
     expect(sent.filter(event => event.type === 'conversation.item.create')).toHaveLength(1)
     expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
     expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('requires Realtime to confirm a complete declaration against the original goal', async () => {
+    const sent: Record<string, unknown>[] = []
+
+    const controller = createRealtimeTurnController({
+      execute: async () => ({ status: 'complete' }),
+      laneFor: () => 'terminal',
+      send: event => sent.push(event)
+    })
+
+    controller.beginTurn('Build the complete customer support voice agent.')
+    controller.responseCreated('response-1')
+    controller.functionCallDone(call('response-1', 'call-finish-1', 'finish_turn'))
+
+    await expect(controller.responseDone('response-1')).resolves.toEqual({
+      continued: true,
+      settled: false
+    })
+    expect(sent.at(-1)).toMatchObject({
+      response: {
+        instructions: expect.stringMatching(/re-check the original user goal.*actual tool results/i),
+        tool_choice: 'required'
+      },
+      type: 'response.create'
+    })
+
+    controller.responseCreated('response-2')
+    controller.functionCallDone(call('response-2', 'call-finish-2', 'finish_turn'))
+
+    await expect(controller.responseDone('response-2')).resolves.toEqual({
+      continued: false,
+      settled: true
+    })
   })
 
   it('rejects a terminal declaration bundled with an unobserved action', async () => {
@@ -471,6 +505,39 @@ describe('RealtimeTurnController', () => {
     })
     expect(stop).toHaveBeenCalledOnce()
     expect(controller.activeTurn()).toBeNull()
+  })
+
+  it('holds a required-tool stop checkpoint behind spoken playback', async () => {
+    const send = vi.fn()
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      send,
+      stop: () => ({
+        context: 'Choose the next action or finish_turn.',
+        kind: 'continue_once',
+        toolChoice: 'required'
+      })
+    })
+
+    controller.beginTurn('Build every component.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'The current component is ready.')
+    controller.assistantAudioStarted()
+
+    const completing = controller.responseDone('response-1')
+
+    await Promise.resolve()
+    expect(send).not.toHaveBeenCalled()
+
+    controller.assistantAudioEnded()
+    await expect(completing).resolves.toEqual({ continued: true, settled: false })
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response: expect.objectContaining({ tool_choice: 'required' }),
+        type: 'response.create'
+      })
+    )
   })
 
   it('challenges an unfinished goal more than once within its bounded budget', async () => {

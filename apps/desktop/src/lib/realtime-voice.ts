@@ -992,14 +992,8 @@ export async function startRealtimeVoiceConnection(
     baseInstructions: instructions,
     execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
     laneFor: voiceToolLane,
-    // Bound a useful multi-step voice task without encoding any task-specific
-    // route. Actions, tool rounds, checkpoint retries, and wall time all cap it.
-    maxActions: 16,
-    // Realtime gets several opportunities to recover from a premature stop,
-    // but every recovery must choose a real next action or finish_turn.
-    maxStopChallenges: 6,
-    maxToolRounds: 8,
-    maxTurnMs: 120_000,
+    // The controller owns one coherent practical safety vector. Keeping a
+    // shorter production override here silently truncates real voice turns.
     send,
     stop: semanticTurnStopCheckpoint,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
@@ -1500,6 +1494,7 @@ export async function executeRealtimeVoiceTool(
     }
 
     const editResults: Record<string, unknown> = {}
+    let subjectLabel = subjectId
 
     if (parsed.add !== undefined) {
       if (!parsed.add || typeof parsed.add !== 'object' || Array.isArray(parsed.add)) {
@@ -1513,6 +1508,8 @@ export async function executeRealtimeVoiceTool(
       if (!label) {
         return { error: 'present_step add requires a label' }
       }
+
+      subjectLabel = label
 
       editResults.add = await deps.request('workbench.edit', {
         session_id: deps.runtimeSessionId,
@@ -1584,6 +1581,8 @@ export async function executeRealtimeVoiceTool(
           camera: pan ? 'pan' : framing,
           ...(Object.keys(editResults).length ? { edits: editResults } : {}),
           focus: focusResult,
+          next_response_guidance:
+            `Briefly explain ${subjectLabel}, then choose the next useful action without waiting for the user.`,
           status: 'presented',
           subject_id: subjectId,
           ...(contextIds.length ? { context_ids: contextIds } : {})

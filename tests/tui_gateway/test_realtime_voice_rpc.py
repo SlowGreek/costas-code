@@ -297,17 +297,49 @@ def test_realtime_transcript_rpc_persists_and_emits_once(tmp_path, monkeypatch):
                 "text": "Draw the canvas as we talk.",
             },
         )["result"]
+
+        from run_agent import AIAgent
+
+        agent = object.__new__(AIAgent)
+        agent.__dict__.update(
+            {
+                "_session_db": db,
+                "_session_db_created": True,
+                "session_id": "stored-session",
+                "platform": "desktop",
+                "model": "test-model",
+                "_last_flushed_db_idx": 0,
+                "_flushed_db_message_ids": set(),
+                "_flushed_db_message_session_id": None,
+                "_persist_disabled": False,
+                "_cached_system_prompt": None,
+                "_session_init_model_config": None,
+                "_parent_session_id": None,
+                "_session_json_enabled": False,
+                "quiet_mode": True,
+            }
+        )
+
+        # Session finalization flushes this aliased history without a separate
+        # conversation_history seed. The already-durable Realtime row must not
+        # be appended again through the generic persistence path.
+        agent._persist_session(live_session["history"])
+        persisted_messages = db.get_messages("stored-session")
     finally:
         server._sessions.pop(runtime_id, None)
         db.close()
 
     assert first["inserted"] is True
     assert duplicate == {"inserted": False, "message_id": first["message_id"]}
+    assert [(message["role"], message["content"]) for message in persisted_messages] == [
+        ("user", "Draw the canvas as we talk.")
+    ]
     assert live_session["history"] == [
         {
             "role": "user",
             "content": "Draw the canvas as we talk.",
             "display_kind": "realtime_transcript",
+            "_db_persisted": True,
             "display_metadata": {"semantic_turn_id": "voice-turn-7"},
         }
     ]

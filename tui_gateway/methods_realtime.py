@@ -342,6 +342,11 @@ def _(rid, params: dict) -> dict:
                     "role": role,
                     "content": text,
                     "display_kind": "realtime_transcript",
+                    # This row was just committed through the dedicated
+                    # idempotent Realtime path. The live history may alias
+                    # agent._session_messages; without the intrinsic marker,
+                    # generic session finalization appends it again.
+                    "_db_persisted": True,
                     **(
                         {"display_metadata": {"semantic_turn_id": semantic_turn_id}}
                         if semantic_turn_id

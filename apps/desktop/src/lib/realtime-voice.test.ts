@@ -458,7 +458,11 @@ describe('routeRealtimeServerEvent', () => {
       transition: 'smooth',
       zoom: 2
     })
-    expect(output).toMatchObject({ status: 'presented', subject_id: 'planner' })
+    expect(output).toMatchObject({
+      next_response_guidance: 'Briefly explain planner, then choose the next useful action without waiting for the user.',
+      status: 'presented',
+      subject_id: 'planner'
+    })
   })
 
   it('frames a subject with its related context in one presentation beat', async () => {
@@ -1231,6 +1235,38 @@ describe('startRealtimeVoiceConnection', () => {
       .map(event => JSON.parse(event.item?.output ?? '{}'))
 
     expect(outputs).not.toContainEqual({ error: 'Voice action budget exhausted' })
+  })
+
+  it('keeps the production voice loop alive beyond eight sequential tool rounds', async () => {
+    const harness = await connectHarness({}, undefined, async () => ({ artifacts: [] }))
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+
+    for (let index = 1; index <= 9; index += 1) {
+      const responseId = `response-${index}`
+
+      harness.emit({ type: 'response.created', response: { id: responseId } })
+      harness.emit({
+        type: 'response.function_call_arguments.done',
+        response_id: responseId,
+        call_id: `call-${index}`,
+        name: 'session_snapshot',
+        arguments: '{}'
+      })
+      harness.emit({ type: 'response.done', response: { id: responseId } })
+      await vi.waitFor(() =>
+        expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(index)
+      )
+
+      const continuation = harness.sent
+        .map(raw => JSON.parse(raw) as { response?: { tool_choice?: string }; type: string })
+        .filter(event => event.type === 'response.create')
+        .at(-1)
+
+      expect(continuation?.response?.tool_choice).not.toBe('none')
+    }
   })
 
   it('does not resurrect an interrupted turn when a slow tool finishes late', async () => {

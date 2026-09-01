@@ -78,6 +78,7 @@ interface ActiveTurn {
   abortController: AbortController
   callIds: Set<string>
   cancelled: boolean
+  completionConfirmationPending: boolean
   completedActions: string[]
   executions: RealtimeToolExecution[]
   generation: number
@@ -242,6 +243,47 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     expectAudio()
   }
 
+  const awaitActivePlayback = async (
+    turn: ActiveTurn,
+    generationAtStart: number
+  ): Promise<'cancelled' | 'ended' | 'timed-out'> => {
+    if (!audioPlaying) {
+      return 'ended'
+    }
+
+    const playbackRemainingMs = maxTurnMs - (now() - turn.startedAt)
+
+    if (playbackRemainingMs <= 0) {
+      finishAudio()
+
+      return 'timed-out'
+    }
+
+    const playbackTimeout = Symbol('voice-playback-timeout')
+    let playbackTimeoutId: ReturnType<typeof setTimeout> | undefined
+
+    const playbackOutcome = await Promise.race([
+      audioEndedPromise,
+      new Promise<typeof playbackTimeout>(resolve => {
+        playbackTimeoutId = setTimeout(() => resolve(playbackTimeout), playbackRemainingMs)
+      })
+    ])
+
+    if (playbackTimeoutId !== undefined) {
+      clearTimeout(playbackTimeoutId)
+    }
+
+    if (playbackOutcome === playbackTimeout) {
+      finishAudio()
+
+      return 'timed-out'
+    }
+
+    return closed || current !== turn || turn.cancelled || turn.generation !== generationAtStart
+      ? 'cancelled'
+      : 'ended'
+  }
+
   const currentSnapshot = (): null | RealtimeTurnSnapshot =>
     current ? snapshot(current, maxActions, maxToolRounds) : null
 
@@ -255,6 +297,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
       abortController: new AbortController(),
       callIds: new Set(),
       cancelled: false,
+      completionConfirmationPending: false,
       completedActions: [],
       executions: [],
       generation,
@@ -452,6 +495,19 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
           const context = stopOutcome.kind === 'continue_once' ? stopOutcome.context.trim() : ''
 
           if (stopOutcome.kind === 'continue_once' && canContinue && context && context.length <= 64_000) {
+            const playback = await awaitActivePlayback(turn, response.generation)
+
+            if (playback === 'timed-out') {
+              current = null
+              options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
+
+              return { continued: false, settled: true }
+            }
+
+            if (playback === 'cancelled') {
+              return { continued: false, settled: false }
+            }
+
             options.send({
               type: 'response.create',
               response: {
@@ -695,6 +751,10 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
 
           const lane = options.laneFor?.(call) ?? 'serial'
 
+          if (lane !== 'terminal' && result.status === 'success') {
+            turn.completionConfirmationPending = false
+          }
+
           if ((lane === 'gesture' || lane === 'presentation') && result.status === 'success') {
             turn.gestureNarrationPending = true
           }
@@ -707,7 +767,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         return { continued: false, settled: false }
       }
 
-      const terminalAccepted = response.calls.some(call => {
+      const terminalCall = response.calls.find(call => {
         const result = results.get(call.callId)
 
         return (
@@ -717,7 +777,50 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
         )
       })
 
-      if (terminalAccepted) {
+      if (terminalCall) {
+        const terminalResult = results.get(terminalCall.callId)
+        const terminalOutput = terminalResult?.output
+
+        const terminalStatus =
+          terminalOutput && typeof terminalOutput === 'object' && !Array.isArray(terminalOutput)
+            ? (terminalOutput as { status?: unknown }).status
+            : undefined
+
+        if (terminalStatus === 'complete' && !turn.completionConfirmationPending) {
+          turn.completionConfirmationPending = true
+          const playback = await awaitActivePlayback(turn, generationAtStart)
+
+          if (playback === 'timed-out') {
+            current = null
+            options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
+
+            return { continued: false, settled: true }
+          }
+
+          if (playback === 'cancelled') {
+            return { continued: false, settled: false }
+          }
+
+          options.send({
+            type: 'response.create',
+            response: {
+              instructions: continuationInstructions(
+                turn,
+                maxActions,
+                maxToolRounds,
+                false,
+                options.baseInstructions?.(),
+                'Silent completion checkpoint: re-check the original user goal against actual tool results. ' +
+                  'If anything remains, call the next useful tool now. If the whole goal is satisfied, call ' +
+                  'finish_turn with status complete again. Do not speak during this checkpoint.'
+              ),
+              tool_choice: 'required'
+            }
+          })
+
+          return { continued: true, settled: false }
+        }
+
         current = null
         options.onSettled?.(snapshot(turn, maxActions, maxToolRounds))
 

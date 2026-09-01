@@ -247,7 +247,7 @@ export function createRealtimeTurnController(options: RealtimeTurnControllerOpti
     turn: ActiveTurn,
     generationAtStart: number
   ): Promise<'cancelled' | 'ended' | 'timed-out'> => {
-    if (!audioPlaying) {
+    if (!audioPlaying && resolveAudioEnded === null) {
       return 'ended'
     }
 

@@ -1423,6 +1423,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-1',
       transcript: 'Hi! I’m here.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
 
     await vi.waitFor(() =>
@@ -1469,6 +1470,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-1',
       transcript: 'Alright, we’ll walk through it step by step.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
 
     await vi.waitFor(() =>
@@ -1509,6 +1511,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-2',
       transcript: 'The canvas contains one map.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
     await vi.waitFor(() =>
       expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
@@ -1774,6 +1777,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-planner',
       transcript: 'First, this Planner is where the intent forms.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
 
     await vi.waitFor(() =>

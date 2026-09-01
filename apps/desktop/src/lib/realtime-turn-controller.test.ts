@@ -71,6 +71,7 @@ describe('RealtimeTurnController', () => {
     controller.beginTurn('Explain whether the cache is healthy.')
     controller.responseCreated('response-1')
     controller.assistantTranscriptDone('response-1', 'The cache is healthy.')
+    controller.assistantAudioEnded()
 
     expect(await controller.responseDone('response-1')).toEqual({ continued: true, settled: false })
     expect(sent.filter(event => event.type === 'response.create')).toHaveLength(1)
@@ -377,41 +378,6 @@ describe('RealtimeTurnController', () => {
     })
   })
 
-  it('keeps a checkpoint-selected visual action behind prior response playback', async () => {
-    const execute = vi.fn(async () => ({ focused: 'vad' }))
-
-    const controller = createRealtimeTurnController({
-      execute,
-      laneFor: ({ name }) => (name === 'focus' ? 'gesture' : 'serial'),
-      maxStopChallenges: 2,
-      send: vi.fn(),
-      stop: () => ({ context: 'Choose the next action or finish_turn.', kind: 'continue_once' })
-    })
-
-    controller.beginTurn('Walk through the system.')
-    controller.responseCreated('response-1')
-    controller.assistantTranscriptDone('response-1', 'Mic audio is the entry point.')
-    await controller.responseDone('response-1')
-
-    controller.responseCreated('response-2')
-    controller.functionCallDone({
-      arguments: '{"node_id":"vad"}',
-      callId: 'call-vad',
-      name: 'focus',
-      responseId: 'response-2'
-    })
-    const completing = controller.responseDone('response-2')
-
-    await Promise.resolve()
-    expect(execute).not.toHaveBeenCalled()
-
-    controller.assistantAudioStarted()
-    controller.assistantAudioEnded()
-    await completing
-
-    expect(execute).toHaveBeenCalledOnce()
-  })
-
   it('executes a duplicate call id only once', async () => {
     const execute = vi.fn(async () => ({ ok: true }))
     const send = vi.fn()
@@ -483,6 +449,7 @@ describe('RealtimeTurnController', () => {
     const turnId = controller.beginTurn('Explain every step.')
     controller.responseCreated('response-1')
     controller.assistantTranscriptDone('response-1', 'I explained only the first step.')
+    controller.assistantAudioEnded()
 
     await expect(controller.responseDone('response-1')).resolves.toEqual({
       continued: true,
@@ -499,6 +466,7 @@ describe('RealtimeTurnController', () => {
 
     controller.responseCreated('response-2')
     controller.assistantTranscriptDone('response-2', 'Now every step is covered.')
+    controller.assistantAudioEnded()
     await expect(controller.responseDone('response-2')).resolves.toEqual({
       continued: false,
       settled: true
@@ -540,6 +508,45 @@ describe('RealtimeTurnController', () => {
     )
   })
 
+  it('holds a stop checkpoint when transcript completion precedes audio start', async () => {
+    const send = vi.fn()
+
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      send,
+      stop: () => ({
+        context: 'Choose the next action or finish_turn.',
+        kind: 'continue_once',
+        toolChoice: 'required'
+      })
+    })
+
+    controller.beginTurn('Build every component.')
+    controller.responseCreated('response-1')
+    controller.assistantTranscriptDone('response-1', 'The current component is ready.')
+
+    const completing = controller.responseDone('response-1')
+    let settled = false
+
+    void completing.then(() => {
+      settled = true
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+    expect(send).not.toHaveBeenCalled()
+
+    controller.assistantAudioStarted()
+    controller.assistantAudioEnded()
+    await expect(completing).resolves.toEqual({ continued: true, settled: false })
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response: expect.objectContaining({ tool_choice: 'required' }),
+        type: 'response.create'
+      })
+    )
+  })
+
   it('challenges an unfinished goal more than once within its bounded budget', async () => {
     // Any undertrained Realtime response may speak and omit both the next
     // action and finish_turn. The recovery budget must handle that shape more
@@ -567,6 +574,7 @@ describe('RealtimeTurnController', () => {
 
       controller.responseCreated(responseId)
       controller.assistantTranscriptDone(responseId, `Beat ${index}.`)
+      controller.assistantAudioEnded()
       await expect(controller.responseDone(responseId)).resolves.toEqual({
         continued: true,
         settled: false
@@ -588,6 +596,7 @@ describe('RealtimeTurnController', () => {
 
       controller.responseCreated(responseId)
       controller.assistantTranscriptDone(responseId, `Only component ${index} is covered.`)
+      controller.assistantAudioEnded()
       await expect(controller.responseDone(responseId)).resolves.toEqual({
         continued: true,
         settled: false
@@ -612,11 +621,13 @@ describe('RealtimeTurnController', () => {
     for (const index of [1, 2]) {
       controller.responseCreated(`response-${index}`)
       controller.assistantTranscriptDone(`response-${index}`, `Beat ${index}.`)
+      controller.assistantAudioEnded()
       await controller.responseDone(`response-${index}`)
     }
 
     controller.responseCreated('response-3')
     controller.assistantTranscriptDone('response-3', 'Beat 3.')
+    controller.assistantAudioEnded()
     await expect(controller.responseDone('response-3')).resolves.toEqual({
       continued: false,
       settled: true

@@ -195,7 +195,7 @@ export interface RealtimeTurnController {
 
 export function createRealtimeTurnController(options: RealtimeTurnControllerOptions): RealtimeTurnController {
   const maxActions = Math.max(1, options.maxActions ?? 999)
-  const maxStopChallenges = Math.max(0, options.maxStopChallenges ?? 1)
+  const maxStopChallenges = Math.max(0, options.maxStopChallenges ?? 999)
   const maxToolRounds = Math.max(1, options.maxToolRounds ?? 999)
   const maxTurnMs = Math.max(1_000, options.maxTurnMs ?? 24 * 60 * 60 * 1_000)
   const now = options.now ?? Date.now

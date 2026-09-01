@@ -439,7 +439,12 @@ describe('RealtimeTurnController', () => {
       } as const
     })
 
-    const controller = createRealtimeTurnController({ execute: vi.fn(), send, stop })
+    const controller = createRealtimeTurnController({
+      execute: vi.fn(),
+      maxStopChallenges: 1,
+      send,
+      stop
+    })
 
     const turnId = controller.beginTurn('Explain every step.')
     controller.responseCreated('response-1')
@@ -503,6 +508,26 @@ describe('RealtimeTurnController', () => {
 
     expect(seen).toEqual([0, 1, 2])
     expect(stop).toHaveBeenCalledTimes(3)
+  })
+
+  it('challenges 999 unfinished candidate stops by default', async () => {
+    const stop = vi.fn(async () => ({ context: 'The original goal is unfinished.', kind: 'continue_once' }) as const)
+    const controller = createRealtimeTurnController({ execute: vi.fn(), send: vi.fn(), stop })
+
+    controller.beginTurn('Walk through every component one at a time.')
+
+    for (let index = 1; index <= 999; index += 1) {
+      const responseId = `response-${index}`
+
+      controller.responseCreated(responseId)
+      controller.assistantTranscriptDone(responseId, `Only component ${index} is covered.`)
+      await expect(controller.responseDone(responseId)).resolves.toEqual({
+        continued: true,
+        settled: false
+      })
+    }
+
+    expect(stop).toHaveBeenCalledTimes(999)
   })
 
   it('stops challenging once the bounded budget is spent', async () => {

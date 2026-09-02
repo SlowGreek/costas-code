@@ -1047,6 +1047,42 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.connection.resumeMission(event)).toBe(false)
   })
 
+  it('flushes conversation history seeded before the data channel opens', async () => {
+    const harness = await connectHarness()
+
+    harness.connection.seedHistory([
+      { id: 'seed-user', role: 'user', text: 'The launch codename is cobalt mango.' },
+      { id: 'seed-assistant', role: 'assistant', text: 'OK' }
+    ])
+
+    expect(harness.sent).toEqual([])
+
+    harness.open()
+
+    const events = harness.sent.map(raw => JSON.parse(raw))
+    const seeded = events.filter(event => event.type === 'conversation.item.create')
+
+    expect(events[0]).toMatchObject({ type: 'session.update' })
+    expect(seeded).toEqual([
+      {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'The launch codename is cobalt mango.' }]
+        }
+      },
+      {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'OK' }]
+        }
+      }
+    ])
+  })
+
   it('closes the mission boundary when the remote data channel closes', async () => {
     const onConnectionClosed = vi.fn()
     const harness = await connectHarness({}, undefined, undefined, onConnectionClosed)

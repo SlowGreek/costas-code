@@ -201,6 +201,18 @@ CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE = (
 )
 
 
+# Appended to EVERY continuation prompt variant when the user has sent one
+# or more `/goal steer <text>` corrections. Steers are the user's live
+# course corrections and outrank the original wording where they conflict —
+# the goal says what to achieve, a steer says how to go about it now.
+STEER_BLOCK_TEMPLATE = (
+    "Course corrections the user sent mid-loop (most recent last). These "
+    "are direct user instructions and take precedence over your earlier "
+    "approach wherever they conflict — apply them from this turn on:\n"
+    "{steers_block}"
+)
+
+
 # Fed back when a quality gate fails: the gate's bounded output is the
 # evidence the agent must repair against. Deterministic — no judge involved.
 CONTINUATION_PROMPT_GATE_FAILED_TEMPLATE = (
@@ -749,6 +761,14 @@ class GoalState:
     # them into the verdict. Backwards-compatible: defaults to empty so
     # old state_meta rows load unchanged.
     subgoals: List[str] = field(default_factory=list)
+    # Mid-loop course corrections from ``/goal steer <text>``. A steer sent
+    # through the normal steering path only mutates the LIVE turn, but the
+    # continuation prompt is rebuilt from this state every judge cycle — so
+    # an un-persisted correction evaporates at the next boundary and the loop
+    # resumes chasing the original wording. Persisting them here makes a steer
+    # durable: every subsequent continuation prompt renders them, in order.
+    # Backwards-compatible: defaults to empty so old state_meta rows load.
+    steers: List[str] = field(default_factory=list)
     # Wait barrier: when the agent is blocked on long-running async work
     # (CI poller, build, test run, deploy, rate-limit cooldown) the goal loop
     # PARKS instead of being re-poked every turn into busy-work. Two barrier
@@ -794,6 +814,10 @@ class GoalState:
         subgoals: List[str] = []
         if isinstance(raw_subgoals, list):
             subgoals = [str(s).strip() for s in raw_subgoals if str(s).strip()]
+        raw_steers = data.get("steers") or []
+        steers: List[str] = []
+        if isinstance(raw_steers, list):
+            steers = [str(s).strip() for s in raw_steers if str(s).strip()]
         return cls(
             goal=data.get("goal", ""),
             status=data.get("status", "active"),
@@ -812,6 +836,7 @@ class GoalState:
             no_progress_streak=int(data.get("no_progress_streak", 0) or 0),
             verify_downgrades=int(data.get("verify_downgrades", 0) or 0),
             subgoals=subgoals,
+            steers=steers,
             waiting_on_pid=(int(data["waiting_on_pid"]) if data.get("waiting_on_pid") else None),
             waiting_on_session=(str(data["waiting_on_session"]) if data.get("waiting_on_session") else None),
             waiting_until=float(data.get("waiting_until", 0.0) or 0.0),
@@ -838,6 +863,16 @@ class GoalState:
         if not self.subgoals:
             return ""
         return "\n".join(f"- {i}. {text}" for i, text in enumerate(self.subgoals, start=1))
+
+    # --- steer helpers ----------------------------------------------------
+
+    def render_steers_block(self) -> str:
+        """Render persisted /goal steer corrections, oldest first. Empty when
+        there are none."""
+        if not self.steers:
+            return ""
+        return "\n".join(f"- {i}. {text}" for i, text in enumerate(self.steers, start=1))
+
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -2221,6 +2256,44 @@ class GoalManager:
             return "(no subgoals — use /subgoal <text> to add criteria)"
         return self._state.render_subgoals_block()
 
+    # --- /goal steer user controls -------------------------------------
+
+    def add_steer(self, text: str) -> str:
+        """Persist a mid-loop course correction onto the active goal.
+
+        A steer delivered only to the live turn dies at the judge boundary,
+        because ``next_continuation_prompt`` rebuilds from stored state each
+        cycle. Persisting it here makes the correction stick for the rest of
+        the goal. Requires a live goal; raises ``RuntimeError`` otherwise.
+        Returns the cleaned text so the caller can echo it.
+        """
+        if self._state is None or not self.has_goal():
+            raise RuntimeError("no active goal")
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("steer text is empty")
+        self._state.steers.append(text)
+        save_goal(self.session_id, self._state)
+        return text
+
+    def clear_steers(self) -> int:
+        """Drop all persisted steers. Returns the previous count."""
+        if self._state is None or not self.has_goal():
+            raise RuntimeError("no active goal")
+        prev = len(self._state.steers)
+        self._state.steers = []
+        save_goal(self.session_id, self._state)
+        return prev
+
+    def render_steers(self) -> str:
+        """Public helper for the /goal steer slash command."""
+        if self._state is None:
+            return "(no active goal)"
+        if not self._state.steers:
+            return "(no steers — use /goal steer <text> to course-correct)"
+        return self._state.render_steers_block()
+
+
     # --- /goal gate quality gates ---------------------------------------
 
     def add_gate(
@@ -2354,6 +2427,10 @@ class GoalManager:
                 max_retries=gate.max_retries,
                 output=tail or "(no output)",
             )
+            # Gate failures are a continuation path too — a /goal steer must
+            # not silently vanish exactly when gates are red (that is when a
+            # course correction matters most).
+            prompt = self._append_steers_block(prompt)
             return {
                 "status": "active",
                 "should_continue": True,
@@ -2545,6 +2622,27 @@ class GoalManager:
         # Barrier satisfied and now cleared → advance the goal autonomously.
         return self.next_continuation_prompt()
 
+    def _effective_goal_text(self) -> str:
+        """The goal text as the judge and verifier should read it TODAY.
+
+        Base goal plus any ``/goal steer`` corrections. Without this the
+        agent follows a steered continuation while the judge still assesses
+        the ORIGINAL wording — so a correctly-steered turn can be scored as
+        off-track, or a goal can be declared done against instructions the
+        user has already superseded. Returns the bare goal when unsteered,
+        keeping the judge prompt byte-identical for the common path.
+        """
+        state = self._state
+        if state is None:
+            return ""
+        if not state.steers:
+            return state.goal
+        return (
+            f"{state.goal}\n\n"
+            f"User course corrections (these supersede the wording above "
+            f"where they conflict):\n{state.render_steers_block()}"
+        )
+
     # --- the main entry point called after every turn -----------------
 
     def evaluate_after_turn(
@@ -2658,7 +2756,7 @@ class GoalManager:
             return gate_decision
         _status("judging", "assessing goal progress")
         verdict, reason, parse_failed, wait_directive, transport_failed = judge_goal(
-            state.goal,
+            self._effective_goal_text(),
             last_response,
             subgoals=state.subgoals or None,
             background_processes=background_processes,
@@ -2754,7 +2852,7 @@ class GoalManager:
             verify_reason = reason
             if _verify_enabled():
                 confirmed, vreason, infra_failed = verify_completion(
-                    state.goal,
+                    self._effective_goal_text(),
                     last_response,
                     contract=state.contract if state.has_contract() else None,
                     background_processes=background_processes,
@@ -2955,16 +3053,35 @@ class GoalManager:
                     for i, text in enumerate(self._state.subgoals, start=1)
                 )
                 contract_block = f"{contract_block}\n{extra}"
-            return CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE.format(
+            prompt = CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE.format(
                 goal=self._state.goal,
                 contract_block=contract_block,
             )
-        if self._state.subgoals:
-            return CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE.format(
+        elif self._state.subgoals:
+            prompt = CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE.format(
                 goal=self._state.goal,
                 subgoals_block=self._state.render_subgoals_block(),
             )
-        return CONTINUATION_PROMPT_TEMPLATE.format(goal=self._state.goal)
+        else:
+            prompt = CONTINUATION_PROMPT_TEMPLATE.format(goal=self._state.goal)
+        return self._append_steers_block(prompt)
+
+    def _append_steers_block(self, prompt: str) -> str:
+        """Fold persisted /goal steer corrections into a continuation prompt.
+
+        Appended after the template body — one call site covers all three
+        template variants (plain / contract / subgoals), so a steer can never
+        be silently dropped by whichever shape the goal happens to have.
+        Returns ``prompt`` unchanged when there are no steers, keeping the
+        no-steer prompt byte-identical to before.
+        """
+        if not self._state or not self._state.steers:
+            return prompt
+        return (
+            f"{prompt}\n\n"
+            f"{STEER_BLOCK_TEMPLATE.format(steers_block=self._state.render_steers_block())}"
+        )
+
 
     def render_contract(self) -> str:
         """Public helper for the /goal show + /goal draft slash commands."""
@@ -3154,6 +3271,7 @@ __all__ = [
     "workspace_fingerprint",
     "CONTINUATION_PROMPT_TEMPLATE",
     "CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE",
+    "STEER_BLOCK_TEMPLATE",
     "CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE",
     "JUDGE_USER_PROMPT_TEMPLATE",
     "JUDGE_USER_PROMPT_WITH_SUBGOALS_TEMPLATE",

@@ -457,7 +457,7 @@ const VOICE_OWNED_REDRAW_INSTRUCTIONS =
   'You decide when the drawing should change and how to change it. For deliberate live construction, use add_node, connect, rename, focus, and remove directly so each accepted action becomes the next state you can explain. For one missing endpoint, call add_node, inspect the result, then connect it in the next action. Add and explain one presentation step before moving to the next. Use speed_draw only when the user explicitly asks for a quick draft, the whole picture all at once, or to rearrange or wholesale-rethink an existing canvas. It updates the canvas asynchronously and edits in place when possible. Explicit visual requests always require a real canvas action; spoken description alone does not satisfy them. `status: drawing` means the canvas update started, not that it finished; continue with the actual answer while it appears and let the user confirm what they see.'
 
 const VOICE_ACTION_LOOP_INSTRUCTIONS =
-  'You operate inside one continuous agent loop for each user request. Each response is one step, not necessarily the whole answer. Act, observe the real result, explain progress when useful, and choose what to do next. Speech is not completion: while work remains, call the next useful tool before the response ends. When the entire user goal is satisfied, call finish_turn with status complete in the same response. When progress genuinely requires new user input, explain what is needed and call finish_turn with status blocked. When already-dispatched background or external work will resume the goal later, explain that it is continuing and call finish_turn with status deferred. A tool-free response is only a candidate stop; the harness may give you a silent checkpoint to call finish_turn or choose the next action. Continue after each tool result without greeting, restarting, or recapping. Run dependent actions sequentially so you can inspect each real result before choosing the next; independent reads may share one response.'
+  'You operate inside one continuous agent loop for each user request. Each response is one step, not necessarily the whole answer. Act, observe the real result, explain progress when useful, and choose what to do next. Speech is not completion: while work remains, call the next useful tool before the response ends. If the user requested a spoken answer, the requested answer must already have been spoken before you call finish_turn complete; an acknowledgement, plan, or “let me” intention is not completion. When the entire user goal is satisfied, call finish_turn with status complete in the same response. When progress genuinely requires new user input, explain what is needed and call finish_turn with status blocked. When already-dispatched background or external work will resume the goal later, explain that it is continuing and call finish_turn with status deferred. A tool-free response is only a candidate stop; the harness may give you a silent checkpoint to call finish_turn or choose the next action. Continue after each tool result without greeting, restarting, or recapping. Run dependent actions sequentially so you can inspect each real result before choosing the next; independent reads may share one response.'
 
 /** Test seam: the agent-loop contract must remain independent of every tool domain. */
 export const VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS = VOICE_ACTION_LOOP_INSTRUCTIONS
@@ -943,6 +943,7 @@ export async function startRealtimeVoiceConnection(
   const pendingTranscription = createPendingTranscriptionTracker()
   let channelOpen = false
   let closed = false
+  let pendingHistory: RealtimeTranscript[] = []
   let workbenchContext = ''
   // Tracks whether OpenAI currently has audio in the browser's output buffer.
   // output_audio_buffer.clear errors if the buffer is empty, so barge-in must
@@ -979,6 +980,24 @@ export async function startRealtimeVoiceConnection(
     }
   }
 
+  const sendHistory = (turns: RealtimeTranscript[]) => {
+    for (const turn of turns) {
+      send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: turn.role,
+          content: [
+            {
+              type: turn.role === 'assistant' ? 'output_text' : 'input_text',
+              text: turn.text
+            }
+          ]
+        }
+      })
+    }
+  }
+
   const voiceToolDeps = {
     beforeToolCall: options.beforeToolCall,
     createMissionId: options.createMissionId,
@@ -992,14 +1011,8 @@ export async function startRealtimeVoiceConnection(
     baseInstructions: instructions,
     execute: (call, signal) => executeRealtimeVoiceTool(call, { ...voiceToolDeps, signal }),
     laneFor: voiceToolLane,
-    // Bound a useful multi-step voice task without encoding any task-specific
-    // route. Actions, tool rounds, checkpoint retries, and wall time all cap it.
-    maxActions: 16,
-    // Realtime gets several opportunities to recover from a premature stop,
-    // but every recovery must choose a real next action or finish_turn.
-    maxStopChallenges: 6,
-    maxToolRounds: 8,
-    maxTurnMs: 120_000,
+    // The controller owns one coherent practical safety vector. Keeping a
+    // shorter production override here silently truncates real voice turns.
     send,
     stop: semanticTurnStopCheckpoint,
     turnIdPrefix: `voice-${semanticConnectionId}-turn`
@@ -1058,6 +1071,12 @@ export async function startRealtimeVoiceConnection(
     channel.addEventListener('open', () => {
       channelOpen = true
       send(sessionUpdateEvent(instructions(), webSearchAvailable))
+
+      if (pendingHistory.length > 0) {
+        const history = pendingHistory
+        pendingHistory = []
+        sendHistory(history)
+      }
     })
     channel.addEventListener('close', markRemoteClosed)
     channel.addEventListener('message', event => {
@@ -1157,28 +1176,20 @@ export async function startRealtimeVoiceConnection(
       workbenchContext = boundWorkbenchContext(summary)
     },
     seedHistory: turns => {
-      if (!channelOpen || closed) {
+      if (closed) {
         return
       }
 
       // Insert prior turns as conversation items so the model continues the
       // discussion instead of greeting the user cold. No `response.create`:
       // seeding context must not make it start talking on its own.
-      for (const turn of turns) {
-        send({
-          type: 'conversation.item.create',
-          item: {
-            type: 'message',
-            role: turn.role,
-            content: [
-              {
-                type: turn.role === 'assistant' ? 'output_text' : 'input_text',
-                text: turn.text
-              }
-            ]
-          }
-        })
+      if (!channelOpen) {
+        pendingHistory = turns.map(turn => ({ ...turn }))
+
+        return
       }
+
+      sendHistory(turns)
     },
     resumeMission: event => {
       if (!channelOpen || closed) {
@@ -1500,6 +1511,7 @@ export async function executeRealtimeVoiceTool(
     }
 
     const editResults: Record<string, unknown> = {}
+    let subjectLabel = subjectId
 
     if (parsed.add !== undefined) {
       if (!parsed.add || typeof parsed.add !== 'object' || Array.isArray(parsed.add)) {
@@ -1513,6 +1525,8 @@ export async function executeRealtimeVoiceTool(
       if (!label) {
         return { error: 'present_step add requires a label' }
       }
+
+      subjectLabel = label
 
       editResults.add = await deps.request('workbench.edit', {
         session_id: deps.runtimeSessionId,
@@ -1584,6 +1598,8 @@ export async function executeRealtimeVoiceTool(
           camera: pan ? 'pan' : framing,
           ...(Object.keys(editResults).length ? { edits: editResults } : {}),
           focus: focusResult,
+          next_response_guidance:
+            `Briefly explain ${subjectLabel}, then choose the next useful action without waiting for the user.`,
           status: 'presented',
           subject_id: subjectId,
           ...(contextIds.length ? { context_ids: contextIds } : {})

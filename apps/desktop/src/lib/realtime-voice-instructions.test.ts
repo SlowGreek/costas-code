@@ -65,6 +65,11 @@ describe('realtime instructions', () => {
     expect(text).toMatch(/tool-free response.*candidate stop/i)
   })
 
+  it('requires a requested answer to be spoken before declaring completion', () => {
+    expect(VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS).toMatch(/requested answer.*already.*spoken/i)
+    expect(VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS).toMatch(/acknowledg.*not.*completion/i)
+  })
+
   it('keeps the core agent loop independent of any particular tool domain', () => {
     expect(VOICE_ACTION_LOOP_INSTRUCTIONS_FOR_TESTS).not.toMatch(
       /graph|canvas|node|subject|present_step|focus|camera|research|speed_draw/i

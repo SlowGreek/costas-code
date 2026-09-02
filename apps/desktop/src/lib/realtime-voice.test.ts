@@ -458,7 +458,11 @@ describe('routeRealtimeServerEvent', () => {
       transition: 'smooth',
       zoom: 2
     })
-    expect(output).toMatchObject({ status: 'presented', subject_id: 'planner' })
+    expect(output).toMatchObject({
+      next_response_guidance: 'Briefly explain planner, then choose the next useful action without waiting for the user.',
+      status: 'presented',
+      subject_id: 'planner'
+    })
   })
 
   it('frames a subject with its related context in one presentation beat', async () => {
@@ -1043,6 +1047,42 @@ describe('startRealtimeVoiceConnection', () => {
     expect(harness.connection.resumeMission(event)).toBe(false)
   })
 
+  it('flushes conversation history seeded before the data channel opens', async () => {
+    const harness = await connectHarness()
+
+    harness.connection.seedHistory([
+      { id: 'seed-user', role: 'user', text: 'The launch codename is cobalt mango.' },
+      { id: 'seed-assistant', role: 'assistant', text: 'OK' }
+    ])
+
+    expect(harness.sent).toEqual([])
+
+    harness.open()
+
+    const events = harness.sent.map(raw => JSON.parse(raw))
+    const seeded = events.filter(event => event.type === 'conversation.item.create')
+
+    expect(events[0]).toMatchObject({ type: 'session.update' })
+    expect(seeded).toEqual([
+      {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'The launch codename is cobalt mango.' }]
+        }
+      },
+      {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'OK' }]
+        }
+      }
+    ])
+  })
+
   it('closes the mission boundary when the remote data channel closes', async () => {
     const onConnectionClosed = vi.fn()
     const harness = await connectHarness({}, undefined, undefined, onConnectionClosed)
@@ -1233,6 +1273,38 @@ describe('startRealtimeVoiceConnection', () => {
     expect(outputs).not.toContainEqual({ error: 'Voice action budget exhausted' })
   })
 
+  it('keeps the production voice loop alive beyond eight sequential tool rounds', async () => {
+    const harness = await connectHarness({}, undefined, async () => ({ artifacts: [] }))
+
+    harness.open()
+    harness.sent.length = 0
+    harness.emit({ type: 'input_audio_buffer.committed', item_id: 'user-1' })
+
+    for (let index = 1; index <= 9; index += 1) {
+      const responseId = `response-${index}`
+
+      harness.emit({ type: 'response.created', response: { id: responseId } })
+      harness.emit({
+        type: 'response.function_call_arguments.done',
+        response_id: responseId,
+        call_id: `call-${index}`,
+        name: 'session_snapshot',
+        arguments: '{}'
+      })
+      harness.emit({ type: 'response.done', response: { id: responseId } })
+      await vi.waitFor(() =>
+        expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(index)
+      )
+
+      const continuation = harness.sent
+        .map(raw => JSON.parse(raw) as { response?: { tool_choice?: string }; type: string })
+        .filter(event => event.type === 'response.create')
+        .at(-1)
+
+      expect(continuation?.response?.tool_choice).not.toBe('none')
+    }
+  })
+
   it('does not resurrect an interrupted turn when a slow tool finishes late', async () => {
     let finishSearch!: (value: unknown) => void
 
@@ -1387,6 +1459,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-1',
       transcript: 'Hi! I’m here.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
 
     await vi.waitFor(() =>
@@ -1433,6 +1506,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-1',
       transcript: 'Alright, we’ll walk through it step by step.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-1', status: 'completed' } })
 
     await vi.waitFor(() =>
@@ -1473,6 +1547,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-2',
       transcript: 'The canvas contains one map.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
     await vi.waitFor(() =>
       expect(harness.sentTypes().filter(type => type === 'response.create')).toHaveLength(2)
@@ -1738,6 +1813,7 @@ describe('startRealtimeVoiceConnection', () => {
       item_id: 'assistant-planner',
       transcript: 'First, this Planner is where the intent forms.'
     })
+    harness.emit({ type: 'output_audio_buffer.stopped' })
     harness.emit({ type: 'response.done', response: { id: 'response-2', status: 'completed' } })
 
     await vi.waitFor(() =>

@@ -12255,6 +12255,108 @@ def _maybe_fire_tui_loop_tick(sid: str, session: dict) -> None:
             pass
 
 
+def _maybe_wake_parked_goal(sid: str, session: dict) -> None:
+    """Autonomously wake a goal parked on a satisfied wait barrier.
+
+    The gateway analogue of ``HermesCLI._maybe_wake_parked_goal``. Called from
+    the per-session notification poller — the gateway's existing idle loop, so
+    this adds no new thread and no busy-poll.
+
+    Without this the Desktop/TUI backend could PARK a goal (judge WAIT verdict,
+    ``/goal wait``) but had no path to UNPARK it: ``poll_wake()`` was called
+    only from ``cli.py``, so a goal whose process exited — or whose bounded
+    max-park ceiling elapsed — sat parked until the user happened to send a
+    message. The CLI self-resumed; the desktop did not. Both drivers must run
+    the same goal lifecycle.
+
+    Claims the session under ``history_lock`` before dispatching, so a racing
+    user prompt wins cleanly; on a busy session we return without consuming the
+    barrier, leaving it for the next poll. Never raises.
+    """
+    try:
+        from hermes_cli.goals import GoalManager
+    except Exception:
+        return
+
+    sid_key = session.get("session_key") or ""
+    if not sid_key:
+        return
+
+    try:
+        mgr = GoalManager(session_id=sid_key)
+        # Cheap pre-check BEFORE claiming the session: only an active, parked
+        # goal is a wake candidate. Claiming first would flip running=True on
+        # every idle poll for every session that has no goal at all.
+        state = mgr.state
+        if state is None or state.status != "active":
+            return
+        if not (
+            state.waiting_on_session is not None
+            or state.waiting_on_pid is not None
+            or state.waiting_until
+        ):
+            return
+
+        # CLAIM BEFORE PROBING. poll_wake() CLEARS a satisfied barrier as a
+        # side effect, so it must never be called speculatively: checking
+        # `running` first and claiming afterwards leaves a window where a user
+        # turn claims the session in between, and the wake we just consumed is
+        # silently discarded — the goal would sit parked forever with its
+        # barrier already gone. Claiming first makes the probe and the
+        # dispatch atomic with respect to prompt.submit; we release the claim
+        # below if the goal turns out to still be parked.
+        with session["history_lock"]:
+            if session.get("running"):
+                return  # busy — barrier untouched, next poll retries
+            session["running"] = True
+
+        try:
+            prompt = mgr.poll_wake()
+        except Exception:
+            with session["history_lock"]:
+                session["running"] = False
+            raise
+
+        if not prompt:
+            # Still parked (or nothing to do) — hand the session straight back.
+            with session["history_lock"]:
+                session["running"] = False
+            return
+
+        # Fail-closed staleness recheck, mirroring the post-turn continuation
+        # path (_goal_active_in_db at the goal_followup dispatch). A user
+        # `/goal pause|clear` can persist a terminal state to the DB while this
+        # poller holds the claim — firing a continuation for a goal that no
+        # longer exists would be worse than a missed wake.
+        if not _goal_active_in_db(sid_key):
+            with session["history_lock"]:
+                session["running"] = False
+            return
+    except Exception as exc:
+        print(
+            f"[tui_gateway] goal wake poll failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    rid = f"__goalwake__{int(time.time() * 1000)}"
+    try:
+        _emit(
+            "status.update",
+            sid,
+            {"kind": "goal", "text": "⏳→▶ Goal wait cleared — continuing…"},
+        )
+        _emit("message.start", sid)
+        _run_prompt_submit(rid, sid, session, prompt)
+    except Exception as exc:
+        print(
+            f"[tui_gateway] goal wake dispatch failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        with session["history_lock"]:
+            session["running"] = False
+
+
 def _format_kanban_event_text(sub: dict, task, ev, board_slug: str) -> Optional[str]:
     """Single-line notification text for one kanban event.
 
@@ -12447,6 +12549,18 @@ def _notification_poller_loop(
                 print(
                     f"[tui_gateway] loop wakeup poll failed: "
                     f"{type(_loop_exc).__name__}: {_loop_exc}",
+                    file=sys.stderr,
+                )
+            # ── /goal wake driver ────────────────────────────────────
+            # Same cadence, same idle boundary: release a goal whose wait
+            # barrier is now satisfied. Without this the desktop can park a
+            # goal but never unpark it (cli.py had the only poll_wake call).
+            try:
+                _maybe_wake_parked_goal(sid, session)
+            except Exception as _goal_exc:
+                print(
+                    f"[tui_gateway] goal wake poll failed: "
+                    f"{type(_goal_exc).__name__}: {_goal_exc}",
                     file=sys.stderr,
                 )
         if _now - _last_kanban_poll >= _KANBAN_POLL_SECONDS:

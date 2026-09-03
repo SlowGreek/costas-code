@@ -353,6 +353,19 @@ _MULTIMODAL_TOOL_CONTENT_PATTERNS = [
     "tool_call.content must be string",
 ]
 
+# Input-length wording strong enough to override a provider's generic
+# INVALID_REQUEST_BODY code. Keep this narrower than the full overflow list:
+# entries such as bare "max_tokens" can also describe a malformed output cap.
+_EXPLICIT_INPUT_OVERFLOW_PATTERNS = (
+    "input exceeds the context window",
+    "input is too long",
+    "prompt is too long",
+    "context length exceeded",
+    "exceeds the maximum number of input tokens",
+    "maximum allowed input length",
+    "tokens in request more than max tokens allowed",
+)
+
 # Context overflow patterns
 _CONTEXT_OVERFLOW_PATTERNS = [
     "context length",
@@ -1722,7 +1735,13 @@ def _classify_400(
     # format_error and fall back. Checked against the message text AND the
     # structured error code, since proxies (litellm/Bedrock) surface the
     # signal in errorCode=INVALID_REQUEST_BODY.
-    if (
+    # A generic invalid-request code does not override explicit oversized-input
+    # wording. Copilot reports real context overflow as INVALID_REQUEST_BODY;
+    # let that case reach the compression branch below.
+    _explicit_input_overflow = any(
+        p in error_msg for p in _EXPLICIT_INPUT_OVERFLOW_PATTERNS
+    )
+    if not _explicit_input_overflow and (
         any(p in error_msg for p in _INVALID_MESSAGE_BODY_PATTERNS)
         or error_code_lower == "invalid_request_body"
     ):

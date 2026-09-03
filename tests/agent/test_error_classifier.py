@@ -858,6 +858,36 @@ class TestClassifyApiError:
             for r in caplog.records
         ), "Expected a distinct warning identifying the malformed-body 400"
 
+    def test_explicit_context_overflow_beats_invalid_request_body_code(self):
+        """Copilot uses INVALID_REQUEST_BODY for a recoverable oversized input."""
+        message = (
+            "Your input exceeds the context window of this model. "
+            "Please adjust your input and try again."
+        )
+        error = MockAPIError(
+            message,
+            status_code=400,
+            body={
+                "error": {
+                    "message": message,
+                    "code": "invalid_request_body",
+                }
+            },
+        )
+
+        result = classify_api_error(
+            error,
+            provider="github-copilot",
+            model="gpt-5.6-sol",
+            approx_tokens=921_809,
+            context_length=922_000,
+            num_messages=1_483,
+        )
+
+        assert result.reason == FailoverReason.context_overflow
+        assert result.retryable is True
+        assert result.should_compress is True
+
 
     # ── Peer closed + large session ──
 

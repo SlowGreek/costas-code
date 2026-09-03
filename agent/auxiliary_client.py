@@ -5120,17 +5120,22 @@ def _refresh_provider_credentials(provider: str) -> bool:
     try:
         if normalized == "copilot":
             from hermes_cli.copilot_auth import (
-                _jwt_cache,
-                _token_fingerprint,
-                exchange_copilot_token,
+                evict_cached_exchanged_token,
+                get_copilot_api_token,
                 resolve_copilot_token,
             )
 
             raw_token, _source = resolve_copilot_token()
             if not str(raw_token or "").strip():
                 return False
-            _jwt_cache.pop(_token_fingerprint(raw_token), None)
-            exchange_copilot_token(raw_token)
+            # The exchanged IDE JWT is short-lived and persisted on disk. A
+            # memory-only cache pop lets get_copilot_api_token reload the same
+            # expired JWT, so auxiliary compression keeps 401ing until process
+            # restart. Evict both caches, then force the normal exchange path.
+            evict_cached_exchanged_token(raw_token)
+            api_token, _base_url = get_copilot_api_token(raw_token)
+            if not str(api_token or "").strip() or api_token == raw_token:
+                return False
             _evict_cached_clients(normalized)
             return True
         if normalized == "openai-codex":

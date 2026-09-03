@@ -201,6 +201,56 @@ def test_lock_contender_preserves_terminal_compaction_lifecycle(tmp_path: Path) 
     assert status_events.count(("compacted", COMPACTION_DONE_STATUS)) == 1
 
 
+def test_lock_contender_does_not_supersede_lock_owner_candidate(
+    tmp_path: Path,
+) -> None:
+    """A lock loser must not invalidate the summary produced by the lock owner."""
+    db = SessionDB(db_path=tmp_path / "state.db")
+    session_id = "LOCK_OWNER_GENERATION_TEST"
+    db.create_session(session_id, source="desktop")
+    agent = _build_agent_with_db(db, session_id)
+
+    summary_started = threading.Event()
+    release_summary = threading.Event()
+
+    def _blocking_summary(*_args, **_kwargs):
+        summary_started.set()
+        assert release_summary.wait(timeout=5)
+        return [
+            {"role": "user", "content": "[CONTEXT COMPACTION] summary"},
+            {"role": "user", "content": "tail"},
+        ]
+
+    getattr(agent, "context_compressor").compress.side_effect = _blocking_summary
+    messages = [{"role": "user", "content": f"m{i}"} for i in range(20)]
+    winner_result: dict[str, tuple] = {}
+    winner = threading.Thread(
+        target=lambda: winner_result.setdefault(
+            "value",
+            agent._compress_context(messages, "sys", approx_tokens=120_000),
+        ),
+        daemon=True,
+    )
+
+    winner.start()
+    assert summary_started.wait(timeout=5)
+    contender, _ = agent._compress_context(
+        messages,
+        "sys",
+        approx_tokens=120_000,
+    )
+    assert contender is messages
+
+    release_summary.set()
+    winner.join(timeout=10)
+    assert not winner.is_alive()
+    assert "value" in winner_result
+
+    compressed, _ = winner_result["value"]
+    assert len(compressed) < len(messages)
+    assert _count_children(db, session_id) == 1
+
+
 def test_failed_session_split_does_not_announce_compaction_complete(tmp_path: Path) -> None:
     """A failed durable split must not emit a successful completion edge."""
     from agent.conversation_compression import COMPACTION_DONE_STATUS

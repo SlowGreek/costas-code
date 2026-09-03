@@ -3121,10 +3121,12 @@ def compress_context(
     _compressor_attempt_snapshot = _snapshot_compressor_attempt_state(
         agent.context_compressor
     )
-    # Claim attempt ownership: a detached, late-unwinding sibling attempt
-    # (stall-fallback overlap) must not restore its snapshot over ours or
-    # clear our cancellation consult (#96634 post-merge review).
-    _attempt_generation = _claim_compressor_attempt(agent.context_compressor)
+    # Attempt ownership is claimed only after this path wins the durable
+    # compression lock. A lock contender is not a successor: letting it claim
+    # here invalidates the real lock owner's summary before returning unchanged
+    # messages. Codex app-server compaction has no durable-lock phase, so that
+    # path claims explicitly below.
+    _attempt_generation = 0
     _durable_cooldown_authoritative: Optional[bool] = None
     _durable_cooldown_state: Optional[dict[str, Any]] = None
     if (
@@ -3185,6 +3187,7 @@ def compress_context(
                 "codex_app_server owns the authoritative thread and does not "
                 "expose a truthful pre-compaction transcript boundary"
             )
+        _attempt_generation = _claim_compressor_attempt(agent.context_compressor)
         _codex_fence_entered = False
         if commit_fence is not None:
             _codex_fence_entered = commit_fence.begin_commit(
@@ -3524,6 +3527,11 @@ def compress_context(
             )
             _complete_compaction_lifecycle(force_terminal=True)
             return messages, _existing_sp
+    # The standard path now owns the durable lock (or is running through the
+    # explicit legacy no-lock compatibility path). Claim shared compressor
+    # state only after that admission boundary. Lock losers returned above and
+    # therefore cannot supersede the admitted attempt.
+    _attempt_generation = _claim_compressor_attempt(agent.context_compressor)
     _lock_released = False
     _lock_release_guard = threading.Lock()
 

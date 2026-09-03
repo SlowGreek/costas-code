@@ -15,6 +15,7 @@ from agent.conversation_compression import (
     CompressionCheckpointUnavailable,
     _checkpoint_blocked,
     _direct_messages_for_pre_compress_memory,
+    compress_context,
 )
 from agent.context_compressor import COMPRESSED_SUMMARY_METADATA_KEY
 from agent.memory_manager import MemoryManager
@@ -422,6 +423,34 @@ def test_codex_app_server_turn_fails_closed_before_codex_can_compact():
             messages=[],
             effective_task_id="t1",
         )
+
+
+def test_blocked_codex_compaction_does_not_claim_attempt_generation():
+    """A preflight refusal is not a successor to an in-flight compressor."""
+    from types import SimpleNamespace
+
+    compressor = SimpleNamespace(_compression_attempt_generation=7)
+    agent = SimpleNamespace(
+        api_mode="codex_app_server",
+        compression_checkpoint_required=True,
+        context_compressor=compressor,
+        session_id="codex-checkpoint-blocked",
+        model="gpt-5.6-sol",
+    )
+
+    with pytest.raises(CompressionCheckpointUnavailable, match="codex_app_server"):
+        compress_context(
+            agent,
+            [
+                {"role": "user", "content": "one"},
+                {"role": "assistant", "content": "two"},
+                {"role": "user", "content": "three"},
+                {"role": "assistant", "content": "four"},
+            ],
+            "",
+        )
+
+    assert compressor._compression_attempt_generation == 7
 
 
 def test_agent_init_refuses_checkpoint_required_on_codex_app_server():

@@ -2543,6 +2543,63 @@ class _AsyncFailingThenSuccessCompletions:
 
 
 class TestAuxiliaryAuthRefreshRetry:
+    def test_copilot_refresh_evicts_persisted_ide_token_before_exchange(self):
+        """The auxiliary path must not reload the expired IDE JWT from disk."""
+        from agent.auxiliary_client import _refresh_provider_credentials
+
+        with (
+            patch(
+                "hermes_cli.copilot_auth.resolve_copilot_token",
+                return_value=("gho_raw", "env:COPILOT_GITHUB_TOKEN"),
+            ),
+            patch(
+                "hermes_cli.copilot_auth.evict_cached_exchanged_token"
+            ) as mock_evict,
+            patch(
+                "hermes_cli.copilot_auth.get_copilot_api_token",
+                return_value=(
+                    "tid=fresh-ide-token",
+                    "https://api.enterprise.githubcopilot.com",
+                ),
+            ) as mock_exchange,
+            patch(
+                "agent.auxiliary_client._evict_cached_clients"
+            ) as mock_client_evict,
+        ):
+            refreshed = _refresh_provider_credentials("copilot")
+
+        assert refreshed is True
+        mock_evict.assert_called_once_with("gho_raw")
+        mock_exchange.assert_called_once_with("gho_raw")
+        mock_client_evict.assert_called_once_with("copilot")
+
+    def test_copilot_refresh_refuses_raw_token_exchange_fallback(self):
+        """A failed IDE exchange must not be reported as refreshed auth."""
+        from agent.auxiliary_client import _refresh_provider_credentials
+
+        with (
+            patch(
+                "hermes_cli.copilot_auth.resolve_copilot_token",
+                return_value=("gho_raw", "env:COPILOT_GITHUB_TOKEN"),
+            ),
+            patch(
+                "hermes_cli.copilot_auth.evict_cached_exchanged_token"
+            ) as mock_evict,
+            patch(
+                "hermes_cli.copilot_auth.get_copilot_api_token",
+                return_value=("gho_raw", None),
+            ) as mock_exchange,
+            patch(
+                "agent.auxiliary_client._evict_cached_clients"
+            ) as mock_client_evict,
+        ):
+            refreshed = _refresh_provider_credentials("copilot")
+
+        assert refreshed is False
+        mock_evict.assert_called_once_with("gho_raw")
+        mock_exchange.assert_called_once_with("gho_raw")
+        mock_client_evict.assert_not_called()
+
     def test_call_llm_refreshes_codex_on_401_for_vision(self):
         failing_client = MagicMock()
         failing_client.base_url = "https://chatgpt.com/backend-api/codex"

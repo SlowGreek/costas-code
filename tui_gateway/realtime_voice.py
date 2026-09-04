@@ -12,6 +12,17 @@ _OPENAI_REALTIME_BASE_URL = "https://api.openai.com/v1"
 _MAX_RESPONSE_BYTES = 128 * 1024
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject redirects before urllib can forward the bearer header."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        return None
+
+
+def _default_open(request: urllib.request.Request, *, timeout: int):
+    return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
+
+
 class RealtimeCredentialError(RuntimeError):
     """The backend could not mint a short-lived browser credential."""
 
@@ -71,7 +82,7 @@ def create_realtime_client_secret(
         },
         method="POST",
     )
-    open_request = opener or urllib.request.urlopen
+    open_request = opener or _default_open
 
     try:
         with open_request(request, timeout=timeout) as response:

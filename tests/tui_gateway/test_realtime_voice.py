@@ -1,5 +1,7 @@
 import json
+import threading
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hermes_cli.config_defaults import DEFAULT_CONFIG
 from tui_gateway.realtime_voice import RealtimeCredentialError, create_realtime_client_secret
@@ -209,3 +211,58 @@ def test_client_secret_does_not_classify_service_or_connectivity_failures_as_aut
         assert exc.status is None
     else:
         raise AssertionError("expected credential failure")
+
+
+def test_client_secret_default_opener_does_not_forward_bearer_across_redirects():
+    forwarded_headers = []
+
+    class SinkHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            forwarded_headers.append(dict(self.headers.items()))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    sink = ThreadingHTTPServer(("127.0.0.1", 0), SinkHandler)
+    sink_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+    sink_thread.start()
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{sink.server_address[1]}/steal",
+            )
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+    redirect_thread.start()
+
+    try:
+        try:
+            create_realtime_client_secret(
+                api_key="bearer-must-not-cross-redirect",
+                model="gpt-realtime-2.1",
+                voice="marin",
+                transcription_model="gpt-live-transcribe",
+                base_url=f"http://127.0.0.1:{redirect.server_address[1]}/openai/v1",
+            )
+        except RealtimeCredentialError as exc:
+            assert exc.kind == "http"
+            assert exc.status == 302
+        else:
+            raise AssertionError("expected redirect rejection")
+
+        assert forwarded_headers == []
+    finally:
+        redirect.shutdown()
+        sink.shutdown()
+        redirect.server_close()
+        sink.server_close()

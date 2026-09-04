@@ -89,7 +89,11 @@ const diagnosticProductSpawnSync = ((command: string, args: readonly string[], o
 
   if (result.error || result.status !== 0) {
     const stage = PRODUCT_STAGE_BY_SCRIPT.get(args.at(-1) ?? '') ?? 'unknown'
-    console.error(`peeps_windows_stage=${stage} status=${result.status ?? 'spawn-error'}`)
+    const detail = String(result.error?.message || result.stderr || '')
+      .replace(/[A-Za-z0-9+/_-]{64,}={0,2}/g, '[redacted]')
+      .replace(/[\r\n]+/g, ' ')
+      .slice(0, 1500)
+    console.error(`peeps_windows_stage=${stage} status=${result.status ?? 'spawn-error'} detail=${detail}`)
   }
 
   return result

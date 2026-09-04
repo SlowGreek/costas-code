@@ -480,6 +480,83 @@ test('an abandoned claimed flow cancels backend state on the proved companion so
   )
 })
 
+test('a lost claim response still triggers best-effort backend cancellation', async () => {
+  const requestGateway = vi.fn(async (method: string) => {
+    if (method === 'voice.realtime.peeps.claim') {
+      throw new Error('claim response lost')
+    }
+
+    return { ok: true }
+  })
+  const harness = createHarness({
+    connectGateway: vi.fn(async () => ({ close: vi.fn(), request: requestGateway }))
+  })
+  const prepared = harness.handlers.prepare()
+
+  await assert.rejects(
+    () =>
+      harness.handlers.complete({
+        authSessionId: 'auth-lost-response',
+        connectionId: 'remote-1',
+        handle: prepared.handle,
+        profile: 'work',
+        runtimeSessionId: 'runtime-1'
+      }),
+    /claim response lost/
+  )
+  assert.deepEqual(
+    requestGateway.mock.calls.map(call => call[0]),
+    ['voice.realtime.peeps.claim', 'voice.realtime.peeps.cancel']
+  )
+})
+
+test('cancellation while claim is pending prevents a listener and clears backend state', async () => {
+  let resolveClaim!: (value: unknown) => void
+  const claim = new Promise(resolve => {
+    resolveClaim = resolve
+  })
+  const requestGateway = vi.fn(async (method: string) => {
+    if (method === 'voice.realtime.peeps.claim') {
+      return claim
+    }
+
+    return { ok: true }
+  })
+  const harness = createHarness({
+    connectGateway: vi.fn(async () => ({ close: vi.fn(), request: requestGateway }))
+  })
+  const prepared = harness.handlers.prepare()
+  const completion = harness.handlers.complete({
+    authSessionId: 'auth-cancel-pending-claim',
+    connectionId: 'remote-1',
+    handle: prepared.handle,
+    profile: 'work',
+    runtimeSessionId: 'runtime-1'
+  })
+
+  await vi.waitFor(() => assert.equal(requestGateway.mock.calls[0]?.[0], 'voice.realtime.peeps.claim'))
+  assert.equal(
+    harness.handlers.cancel({
+      authSessionId: 'auth-cancel-pending-claim',
+      handle: prepared.handle
+    }),
+    true
+  )
+  resolveClaim({
+    auth_session_id: 'auth-cancel-pending-claim',
+    public_key: flow.publicKey,
+    state: 'trusted-state',
+    timeout_seconds: 5
+  })
+
+  await assert.rejects(completion, /cancelled or timed out/)
+  assert.equal(harness.servers.length, 0)
+  assert.deepEqual(
+    requestGateway.mock.calls.map(call => call[0]),
+    ['voice.realtime.peeps.claim', 'voice.realtime.peeps.cancel']
+  )
+})
+
 test('start rejects non-localhost loopback aliases when the page is authorized only for localhost', async () => {
   const harness = createHarness()
 

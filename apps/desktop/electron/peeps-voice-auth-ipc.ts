@@ -51,6 +51,11 @@ interface Pending {
   waiters: Array<(result: PeepsEnvelope | null) => void>
 }
 
+interface ActiveCompletion {
+  cancelled: boolean
+  handle: string
+}
+
 export interface PeepsVoiceAuthDeps {
   appPath: () => string
   connectGateway?: (route: { connectionId: null | string; profile: string }) => Promise<{
@@ -250,6 +255,7 @@ export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps)
 export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
   const pending = new Map<string, Pending>()
   const capabilities = new Map<string, MainCapability>()
+  const activeCompletions = new Map<string, ActiveCompletion>()
   const createServer = deps.createServer ?? https.createServer
   let activeListenerId: string | null = null
 
@@ -466,19 +472,28 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       throw new Error('Peeps voice authorization request is invalid')
     }
     capabilities.delete(handle)
+    if (activeCompletions.size >= MAX_MAIN_CAPABILITIES) {
+      capability.secret.fill(0)
+      throw new Error('Too many Peeps voice authorization requests are active')
+    }
+    const operation: ActiveCompletion = { cancelled: false, handle }
+    activeCompletions.set(authSessionId, operation)
     let gateway: Awaited<ReturnType<NonNullable<PeepsVoiceAuthDeps['connectGateway']>>> | null = null
-    let didClaim = false
+    let attemptedClaim = false
     let completed = false
 
     try {
       gateway = await deps.connectGateway({ connectionId, profile })
+      attemptedClaim = true
       const claimed = (await gateway.request('voice.realtime.peeps.claim', {
         auth_session_id: authSessionId,
         native_main_proof: capability.secret.toString('base64url'),
         peeps_main_handle: handle,
         session_id: runtimeSessionId
       })) as Record<string, unknown>
-      didClaim = true
+      if (operation.cancelled) {
+        throw new Error('Peeps voice authorization was cancelled or timed out')
+      }
       const claimedAuthSessionId = typeof claimed?.auth_session_id === 'string' ? claimed.auth_session_id : ''
       const publicKey = typeof claimed?.public_key === 'string' ? claimed.public_key : ''
       const state = typeof claimed?.state === 'string' ? claimed.state : ''
@@ -524,13 +539,16 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
 
       return true
     } finally {
-      if (gateway && didClaim && !completed) {
+      if (gateway && attemptedClaim && !completed) {
         await gateway
           .request('voice.realtime.peeps.cancel', {
             auth_session_id: authSessionId,
             session_id: runtimeSessionId
           })
           .catch(() => undefined)
+      }
+      if (activeCompletions.get(authSessionId) === operation) {
+        activeCompletions.delete(authSessionId)
       }
       capability.secret.fill(0)
       close(authSessionId, null)
@@ -542,6 +560,10 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     cancel: (input: string | PeepsVoiceAuthCancellationRequest) => {
       const handle = typeof input === 'string' ? input : String(input?.handle || '')
       const authSessionId = typeof input === 'string' ? input : String(input?.authSessionId || '')
+      const operation = activeCompletions.get(authSessionId)
+      if (operation?.handle === handle) {
+        operation.cancelled = true
+      }
       destroyCapability(handle)
       if (authSessionId) {
         close(authSessionId, null)

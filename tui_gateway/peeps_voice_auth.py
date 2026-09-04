@@ -197,6 +197,7 @@ class _Pending:
 @dataclass
 class _Ready:
     binding: PeepsAuthBinding
+    completion_transport: object | None
     expires: float
     provider: "PeepsCognitiveTokenProvider"
 
@@ -422,7 +423,12 @@ class PeepsVoiceAuthSessionStore:
         except Exception as exc:
             raise PeepsAuthError("Peeps authorization envelope is invalid", code="invalid_envelope") from exc
         with self._lock:
-            self._ready[auth_id] = _Ready(pending.binding, pending.expires, provider)
+            self._ready[auth_id] = _Ready(
+                pending.binding,
+                pending.completion_transport,
+                pending.expires,
+                provider,
+            )
 
     def consume_ready(self, binding: PeepsAuthBinding, auth_id: str) -> PeepsCognitiveTokenProvider | None:
         with self._lock:
@@ -444,7 +450,13 @@ class PeepsVoiceAuthSessionStore:
                     and _same_runtime_binding(pending.binding, binding)
                 )
             )
-            ready_matches = ready is not None and _same_binding(ready.binding, binding)
+            ready_matches = ready is not None and (
+                _same_binding(ready.binding, binding)
+                or (
+                    ready.completion_transport is binding.transport
+                    and _same_runtime_binding(ready.binding, binding)
+                )
+            )
             if not pending_matches and not ready_matches:
                 return False
             self._pending.pop(auth_id, None)

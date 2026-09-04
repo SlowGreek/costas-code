@@ -40,7 +40,7 @@ import type { RpcEvent, SessionMessage } from '@/types/hermes'
 import { recentRealtimeSeedTurns } from './realtime-history-seed'
 import { realtimeTranscriptRpcParams } from './realtime-transcript-persistence'
 import type { ConversationStatus } from './use-voice-conversation'
-import { voiceStartReadiness } from './voice-start-readiness'
+import { resolveVoiceRuntimeSession, voiceStartReadiness } from './voice-start-readiness'
 
 interface RealtimeVoiceConversationOptions {
   beforeConnect?: () => Promise<void> | void
@@ -171,34 +171,27 @@ export function useRealtimeVoiceConversation({
     let targetSessionId = runtimeSessionId
 
     if (readiness.kind === 'wait-for-session') {
-      if (!ensureRuntimeSession) {
-        pendingStartRef.current = true
-
-        return
-      }
-
       const generation = startGenerationRef.current
+      const resolution = await resolveVoiceRuntimeSession({
+        ensureRuntimeSession,
+        isCurrent: () => generation === startGenerationRef.current,
+        runtimeSessionId
+      })
 
-      try {
-        targetSessionId = await ensureRuntimeSession()
-      } catch (error) {
-        if (generation === startGenerationRef.current) {
-          notifyError(error, t.notifications.voice.couldNotStartSession)
+      if (resolution.kind !== 'ready') {
+        pendingStartRef.current = resolution.kind === 'pending'
+
+        if (resolution.kind === 'failed') {
+          if (resolution.error) {
+            notifyError(resolution.error, t.notifications.voice.couldNotStartSession)
+          }
           onFatalError?.()
         }
 
         return
       }
 
-      if (generation !== startGenerationRef.current) {
-        return
-      }
-
-      if (!targetSessionId) {
-        onFatalError?.()
-
-        return
-      }
+      targetSessionId = resolution.runtimeSessionId
     }
 
     if (readiness.kind === 'fail' || !gateway || !targetSessionId) {

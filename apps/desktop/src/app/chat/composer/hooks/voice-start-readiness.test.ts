@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { voiceStartReadiness } from './voice-start-readiness'
+import { resolveVoiceRuntimeSession, voiceStartReadiness } from './voice-start-readiness'
 
 /**
  * Hitting the mic on a brand-new chat reported:
@@ -17,6 +17,64 @@ describe('voiceStartReadiness', () => {
   it('is ready when the gateway and a session are both present', () => {
     expect(voiceStartReadiness({ hasGateway: true, sessionId: 'runtime-1' })).toEqual({
       kind: 'ready'
+    })
+  })
+
+  describe('resolveVoiceRuntimeSession', () => {
+    it('returns the existing runtime without creating another session', async () => {
+      const ensureRuntimeSession = vi.fn()
+
+      await expect(
+        resolveVoiceRuntimeSession({
+          ensureRuntimeSession,
+          isCurrent: () => true,
+          runtimeSessionId: 'runtime-existing'
+        })
+      ).resolves.toEqual({ kind: 'ready', runtimeSessionId: 'runtime-existing' })
+      expect(ensureRuntimeSession).not.toHaveBeenCalled()
+    })
+
+    it('parks startup when no initializer is available', async () => {
+      await expect(
+        resolveVoiceRuntimeSession({
+          isCurrent: () => true,
+          runtimeSessionId: null
+        })
+      ).resolves.toEqual({ kind: 'pending' })
+    })
+
+    it('returns the newly created runtime while the start is current', async () => {
+      await expect(
+        resolveVoiceRuntimeSession({
+          ensureRuntimeSession: async () => 'runtime-created',
+          isCurrent: () => true,
+          runtimeSessionId: null
+        })
+      ).resolves.toEqual({ kind: 'ready', runtimeSessionId: 'runtime-created' })
+    })
+
+    it('discards a session result after startup was cancelled', async () => {
+      await expect(
+        resolveVoiceRuntimeSession({
+          ensureRuntimeSession: async () => 'runtime-created',
+          isCurrent: () => false,
+          runtimeSessionId: null
+        })
+      ).resolves.toEqual({ kind: 'cancelled' })
+    })
+
+    it('reports a current initialization failure', async () => {
+      const error = new Error('session create failed')
+
+      await expect(
+        resolveVoiceRuntimeSession({
+          ensureRuntimeSession: async () => {
+            throw error
+          },
+          isCurrent: () => true,
+          runtimeSessionId: null
+        })
+      ).resolves.toEqual({ error, kind: 'failed' })
     })
   })
 

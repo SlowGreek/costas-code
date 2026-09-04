@@ -8,6 +8,18 @@ interface ReadinessInput {
   sessionId: null | string | undefined
 }
 
+interface RuntimeSessionResolutionInput {
+  ensureRuntimeSession?: () => Promise<string | null>
+  isCurrent: () => boolean
+  runtimeSessionId: null | string | undefined
+}
+
+export type VoiceRuntimeSessionResolution =
+  | { kind: 'cancelled' }
+  | { error?: unknown; kind: 'failed' }
+  | { kind: 'pending' }
+  | { kind: 'ready'; runtimeSessionId: string }
+
 /**
  * Whether a voice session can start right now.
  *
@@ -35,4 +47,28 @@ export function voiceStartReadiness(input: ReadinessInput): VoiceStartReadiness 
   }
 
   return { kind: 'ready' }
+}
+
+export async function resolveVoiceRuntimeSession(
+  input: RuntimeSessionResolutionInput
+): Promise<VoiceRuntimeSessionResolution> {
+  if (input.runtimeSessionId) {
+    return { kind: 'ready', runtimeSessionId: input.runtimeSessionId }
+  }
+
+  if (!input.ensureRuntimeSession) {
+    return { kind: 'pending' }
+  }
+
+  try {
+    const runtimeSessionId = await input.ensureRuntimeSession()
+
+    if (!input.isCurrent()) {
+      return { kind: 'cancelled' }
+    }
+
+    return runtimeSessionId ? { kind: 'ready', runtimeSessionId } : { kind: 'failed' }
+  } catch (error) {
+    return input.isCurrent() ? { error, kind: 'failed' } : { kind: 'cancelled' }
+  }
 }

@@ -443,6 +443,43 @@ test('complete proves the trusted main capability and never accepts renderer OAu
   )
 })
 
+test('an abandoned claimed flow cancels backend state on the proved companion socket', async () => {
+  const requestGateway = vi.fn(async (method: string) => {
+    if (method === 'voice.realtime.peeps.claim') {
+      return {
+        auth_session_id: 'auth-abandoned',
+        public_key: flow.publicKey,
+        state: 'trusted-state',
+        timeout_seconds: 5
+      }
+    }
+
+    return { ok: true }
+  })
+  const harness = createHarness({
+    connectGateway: vi.fn(async () => ({ close: vi.fn(), request: requestGateway }))
+  })
+  const prepared = harness.handlers.prepare()
+  const completion = harness.handlers.complete({
+    authSessionId: 'auth-abandoned',
+    connectionId: 'remote-1',
+    handle: prepared.handle,
+    profile: 'work',
+    runtimeSessionId: 'runtime-1'
+  })
+
+  await vi.waitFor(() => assert.equal(harness.servers.length, 1))
+  assert.equal(
+    harness.handlers.cancel({ authSessionId: 'auth-abandoned', handle: prepared.handle }),
+    true
+  )
+  await assert.rejects(completion, /cancelled or timed out/)
+  assert.deepEqual(
+    requestGateway.mock.calls.map(call => call[0]),
+    ['voice.realtime.peeps.claim', 'voice.realtime.peeps.cancel']
+  )
+})
+
 test('start rejects non-localhost loopback aliases when the page is authorized only for localhost', async () => {
   const harness = createHarness()
 

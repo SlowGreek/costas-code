@@ -467,6 +467,8 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     }
     capabilities.delete(handle)
     let gateway: Awaited<ReturnType<NonNullable<PeepsVoiceAuthDeps['connectGateway']>>> | null = null
+    let didClaim = false
+    let completed = false
 
     try {
       gateway = await deps.connectGateway({ connectionId, profile })
@@ -476,6 +478,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
         peeps_main_handle: handle,
         session_id: runtimeSessionId
       })) as Record<string, unknown>
+      didClaim = true
       const claimedAuthSessionId = typeof claimed?.auth_session_id === 'string' ? claimed.auth_session_id : ''
       const publicKey = typeof claimed?.public_key === 'string' ? claimed.public_key : ''
       const state = typeof claimed?.state === 'string' ? claimed.state : ''
@@ -517,9 +520,18 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
         session_id: runtimeSessionId,
         state
       })
+      completed = true
 
       return true
     } finally {
+      if (gateway && didClaim && !completed) {
+        await gateway
+          .request('voice.realtime.peeps.cancel', {
+            auth_session_id: authSessionId,
+            session_id: runtimeSessionId
+          })
+          .catch(() => undefined)
+      }
       capability.secret.fill(0)
       close(authSessionId, null)
       gateway?.close()

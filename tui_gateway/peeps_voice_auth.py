@@ -437,8 +437,15 @@ class PeepsVoiceAuthSessionStore:
         with self._lock:
             pending = self._pending.get(auth_id)
             ready = self._ready.get(auth_id)
-            target = pending or ready
-            if target is None or not _same_binding(target.binding, binding):
+            pending_matches = pending is not None and (
+                _same_binding(pending.binding, binding)
+                or (
+                    pending.completion_transport is binding.transport
+                    and _same_runtime_binding(pending.binding, binding)
+                )
+            )
+            ready_matches = ready is not None and _same_binding(ready.binding, binding)
+            if not pending_matches and not ready_matches:
                 return False
             self._pending.pop(auth_id, None)
             self._ready.pop(auth_id, None)

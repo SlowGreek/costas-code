@@ -184,6 +184,27 @@ def test_claim_requires_one_time_native_main_proof_and_preserves_original_retry_
     assert store.consume_ready(original, started["auth_session_id"]) is not None
 
 
+def test_claimed_companion_can_cancel_without_leaking_pending_capacity():
+    store = PeepsVoiceAuthSessionStore(max_pending=1)
+    session = object()
+    original = _binding(session=session, transport=object())
+    companion = _binding(session=session, transport=object())
+    handle, challenge, proof = _main_capability()
+    config = _config()
+    assert config is not None
+    started = store.start(original, config, main_handle=handle, main_challenge=challenge)
+    store.claim(
+        companion,
+        started["auth_session_id"],
+        main_handle=handle,
+        native_main_proof=proof,
+    )
+
+    assert store.cancel(companion, started["auth_session_id"]) is True
+    replacement = store.start(original, config, main_handle=handle, main_challenge=challenge)
+    assert replacement["auth_session_id"] != started["auth_session_id"]
+
+
 def test_claim_rejects_a_companion_authenticated_as_a_different_remote_user():
     store = PeepsVoiceAuthSessionStore()
     session = object()

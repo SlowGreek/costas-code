@@ -205,7 +205,7 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
-    binding = _peeps_binding(params, session)
+    binding = _peeps_binding(params, session) or _peeps_companion_binding(params, session)
     if binding is None:
         return _err(rid, 4613, "Peeps voice authorization failed")
     cancelled = _peeps_state()["sessions"].cancel(

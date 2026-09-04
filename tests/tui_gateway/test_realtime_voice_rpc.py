@@ -97,12 +97,20 @@ def test_peeps_public_start_is_removed_and_generation_is_transport_session_bound
         )
         assert replay["error"]["code"] == 4613
 
-        cross_transport = _dispatch_and_wait(
+        bystander = _BoundTransport()
+        unproved_cancel = _dispatch_and_wait(
+            "voice.realtime.peeps.cancel",
+            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            bystander,
+        )
+        assert unproved_cancel["result"] == {"ok": False}
+
+        companion_cancel = _dispatch_and_wait(
             "voice.realtime.peeps.cancel",
             {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
             attacker,
         )
-        assert cross_transport["error"]["code"] == 4613
+        assert companion_cancel["result"] == {"ok": True}
 
         rebound = {**session, "transport": transport}
         server._sessions[runtime_id] = rebound

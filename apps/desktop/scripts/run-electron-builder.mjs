@@ -37,16 +37,14 @@ function electronBuilderCli() {
 }
 
 const dist = electronDistDir()
-// Local `hermes desktop` builds only ever package (--dir or dist), never
-// publish a GitHub release — no CI workflow drives this script. But the npm
-// lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
-// animations), and electron-builder treats CI=1 as a signal to implicitly
-// resolve a publish target. That resolution reads <projectDir>/.git/config
-// directly — projectDir here is apps/desktop, which has no .git of its own
-// (only the repo root does) and no "repository" field in its package.json —
-// so it fails with "Cannot detect repository by .git/config". Pin publish to
-// "never" so electron-builder skips that lookup entirely.
-const args = ["--publish", "never"]
+// Default to packaging without publishing, but never duplicate an explicit
+// policy: yargs turns repeated --publish values into an array, which bypasses
+// electron-builder's string comparison against "never".
+const inputArgs = process.argv.slice(2)
+const hasPublishPolicy = inputArgs.some(arg =>
+  arg === "--publish" || arg.startsWith("--publish=") || arg === "-p" || arg.startsWith("-p=")
+)
+const args = hasPublishPolicy ? [] : ["--publish", "never"]
 if (dist && fs.existsSync(distBinary(dist))) {
   args.push(`-c.electronDist=${dist}`)
 } else {

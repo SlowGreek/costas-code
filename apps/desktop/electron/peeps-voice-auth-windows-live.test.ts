@@ -24,11 +24,13 @@ const POWERSHELL_ARGS = ['-NoLogo', '-NoProfile', '-NonInteractive', '-Execution
 const ADMIN_CHECK = String.raw`$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 [Console]::Out.Write($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator).ToString().ToLowerInvariant())`
 
-const PROTECT = String.raw`$bytes = [Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_SECRET_B64', 'Process'))
+const PROTECT = String.raw`Add-Type -AssemblyName System.Security
+$bytes = [Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_SECRET_B64', 'Process'))
 $encrypted = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
 [Console]::Out.Write([Convert]::ToBase64String($encrypted))`
 
-const UNPROTECT = String.raw`$bytes = [Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_SECRET_B64', 'Process'))
+const UNPROTECT = String.raw`Add-Type -AssemblyName System.Security
+$bytes = [Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_SECRET_B64', 'Process'))
 $decrypted = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
 [Console]::Out.Write([Convert]::ToBase64String($decrypted))`
 

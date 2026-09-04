@@ -54,6 +54,19 @@ def test_peeps_public_start_is_removed_and_generation_is_transport_session_bound
         assert set(started) >= {"auth_session_id", "state", "public_key"}
 
         attacker = _BoundTransport()
+        claimed = _dispatch_and_wait(
+            "voice.realtime.peeps.claim",
+            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            attacker,
+        )
+        assert "result" in claimed, claimed
+        assert claimed["result"] == {
+            "auth_session_id": started["auth_session_id"],
+            "state": started["state"],
+            "public_key": started["public_key"],
+            "timeout_seconds": 180,
+        }
+
         cross_transport = _dispatch_and_wait(
             "voice.realtime.peeps.cancel",
             {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},

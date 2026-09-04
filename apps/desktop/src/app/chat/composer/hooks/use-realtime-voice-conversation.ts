@@ -21,12 +21,13 @@ import {
 } from '@/lib/workbench-context-sync'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
+import { $activeGatewayProfile } from '@/store/profile'
 import {
   applyRealtimeMissionGatewayEvent,
   publishRealtimeMission,
   type RealtimeResearchEventPayload
 } from '@/store/realtime-mission'
-import { $gatewayState } from '@/store/session'
+import { $connection, $gatewayState } from '@/store/session'
 import {
   $workbenchArtifact,
   $workbenchCamera,
@@ -204,6 +205,7 @@ export function useRealtimeVoiceConversation({
       startAbortRef.current = startAbort
 
       const connection = await startRealtimeVoiceConnection({
+        connectionId: $connection.get()?.connectionId ?? null,
         beforeToolCall: async () => {
           // Wait for the *specific* in-flight transcription events rather than
           // sleeping a fixed interval: a normal turn adds no latency, and a
@@ -279,6 +281,7 @@ export function useRealtimeVoiceConversation({
         },
         onUserSpeechEnded: missionRuntime.userSpeechEnded,
         onUserSpeechStarted: missionRuntime.userSpeechStarted,
+        profile: $activeGatewayProfile.get(),
         request: (method, params) => gateway.request(method, params),
         runtimeSessionId,
         signal: startAbort.signal

@@ -61,6 +61,25 @@ def _peeps_binding(params: dict, session: dict):
     )
 
 
+def _peeps_companion_binding(params: dict, session: dict):
+    from tui_gateway import server as gateway_server
+
+    runtime_session_id = str(params.get("session_id") or "")
+    transport = gateway_server.current_transport()
+    with gateway_server._sessions_lock:
+        authoritative_session = gateway_server._sessions.get(runtime_session_id)
+    if transport is None or authoritative_session is not session:
+        return None
+    from tui_gateway.peeps_voice_auth import PeepsAuthBinding
+
+    return PeepsAuthBinding.create(
+        _peeps_profile_key(session).removeprefix("home:"),
+        session,
+        runtime_session_id,
+        transport,
+    )
+
+
 def _with_session_profile(session: dict | None, fn):
     from pathlib import Path
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
@@ -135,6 +154,27 @@ def _primary_realtime_api_key(key_cmd: str) -> str:
     return resolve_openai_audio_api_key()
 
 
+@method("voice.realtime.peeps.claim")
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    try:
+        config = _with_session_profile(
+            session,
+            lambda: _peeps_config(_realtime_cfg(_load_cfg())),
+        )
+        binding = _peeps_companion_binding(params, session)
+        if config is None or binding is None:
+            return _err(rid, 4613, "Peeps voice authorization failed")
+        claimed = _peeps_state()["sessions"].claim(
+            binding, str(params.get("auth_session_id") or "")
+        )
+        return _ok(rid, {**claimed, "timeout_seconds": config.timeout_seconds})
+    except Exception:
+        return _err(rid, 4613, "Peeps voice authorization failed")
+
+
 @method("voice.realtime.peeps.complete")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
@@ -147,7 +187,7 @@ def _(rid, params: dict) -> dict:
         )
         if config is None:
             return _err(rid, 4612, "Peeps voice fallback is disabled")
-        binding = _peeps_binding(params, session)
+        binding = _peeps_companion_binding(params, session)
         envelope = params.get("envelope")
         if binding is None or not isinstance(envelope, dict):
             return _err(rid, 4613, "Peeps voice authorization failed")
@@ -576,6 +616,7 @@ def register(server) -> None:
     server._peeps_interaction_payload = _peeps_interaction_payload
     server._peeps_profile_key = _peeps_profile_key
     server._peeps_binding = _peeps_binding
+    server._peeps_companion_binding = _peeps_companion_binding
     server._with_session_profile = _with_session_profile
     server._coarse_realtime_failure = _coarse_realtime_failure
 

@@ -2199,25 +2199,16 @@ describe('startRealtimeVoiceConnection', () => {
         state: 'state-123',
         timeout_seconds: 1
       })
-      .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         client_secret: 'ek_short',
         model: 'gpt-realtime-2.1',
         voice: 'marin'
       })
 
-    const start = vi.fn().mockResolvedValue(true)
-
-    const wait = vi.fn().mockResolvedValue({
-      version: 1,
-      ephemeral_public_key: 'ephemeral',
-      nonce: 'nonce',
-      ciphertext: 'ciphertext',
-      tag: 'tag'
-    })
+    const complete = vi.fn().mockResolvedValue(true)
 
     vi.stubGlobal('window', {
-      hermesDesktop: { peepsVoiceAuth: { start, wait, cancel: vi.fn().mockResolvedValue(true) } }
+      hermesDesktop: { peepsVoiceAuth: { complete, cancel: vi.fn().mockResolvedValue(true) } }
     })
     const channel = { addEventListener: vi.fn(), close: vi.fn(), send: vi.fn() }
 
@@ -2243,16 +2234,17 @@ describe('startRealtimeVoiceConnection', () => {
       runtimeSessionId: 'runtime-session'
     })
 
-    expect(start).toHaveBeenCalledWith(
-      'auth-session',
-      expect.objectContaining({ redirectUri: 'https://localhost:8080/' })
-    )
+    expect(complete).toHaveBeenCalledWith({
+      authSessionId: 'auth-session',
+      connectionId: null,
+      profile: 'default',
+      runtimeSessionId: 'runtime-session'
+    })
     expect(request.mock.calls.map(([method]) => method)).toEqual([
       'voice.realtime.token',
-      'voice.realtime.peeps.complete',
       'voice.realtime.token'
     ])
-    expect(request.mock.calls[2]?.[1]).toEqual({
+    expect(request.mock.calls[1]?.[1]).toEqual({
       session_id: 'runtime-session',
       peeps_auth_session_id: 'auth-session'
     })
@@ -2264,7 +2256,7 @@ describe('startRealtimeVoiceConnection', () => {
   it('cancels an interactive auth start before microphone access when the caller aborts', async () => {
     const getUserMedia = vi.fn()
     const controller = new AbortController()
-    let releaseWait: ((value: null | string) => void) | undefined
+    let releaseCompletion: (() => void) | undefined
     const cancel = vi.fn().mockResolvedValue(true)
 
     const request = vi.fn().mockResolvedValue({
@@ -2283,13 +2275,9 @@ describe('startRealtimeVoiceConnection', () => {
       hermesDesktop: {
         peepsVoiceAuth: {
           cancel,
-          start: vi.fn().mockResolvedValue(true),
-          wait: vi.fn(
-            () =>
-              new Promise<null | string>(resolve => {
-                releaseWait = resolve
-              })
-          )
+          complete: vi.fn(() => new Promise<boolean>(resolve => {
+            releaseCompletion = () => resolve(true)
+          }))
         }
       }
     })
@@ -2302,15 +2290,12 @@ describe('startRealtimeVoiceConnection', () => {
     })
 
     controller.abort()
-    releaseWait?.(null)
+    releaseCompletion?.()
 
     await expect(pending).rejects.toThrow(/cancelled/i)
     expect(cancel).toHaveBeenCalledWith('auth-session')
     expect(getUserMedia).not.toHaveBeenCalled()
-    expect(request.mock.calls.map(([method]) => method)).toEqual([
-      'voice.realtime.token',
-      'voice.realtime.peeps.cancel'
-    ])
+    expect(request.mock.calls.map(([method]) => method)).toEqual(['voice.realtime.token'])
   })
 
   it('appends context WITHOUT making the model speak', async () => {

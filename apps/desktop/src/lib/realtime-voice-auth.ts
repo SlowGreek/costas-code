@@ -9,27 +9,19 @@ export interface PeepsInteraction {
   timeout_seconds: number
 }
 
+export interface PeepsVoiceAuthRoute {
+  connectionId: null | string
+  profile: string
+}
+
 interface PeepsVoiceAuthBridge {
   cancel: (id: string) => Promise<boolean>
-  start: (
-    id: string,
-    flow: {
-      authSessionId: string
-      authority: string
-      clientId: string
-      publicKey: string
-      redirectUri: string
-      scope: string
-      state: string
-    }
-  ) => Promise<boolean>
-  wait: (id: string, timeoutMs: number) => Promise<null | {
-    version: 1
-    ephemeral_public_key: string
-    nonce: string
-    ciphertext: string
-    tag: string
-  }>
+  complete: (request: {
+    authSessionId: string
+    connectionId: null | string
+    profile: string
+    runtimeSessionId: string
+  }) => Promise<boolean>
 }
 
 export interface CompleteRealtimePeepsAuthOptions {
@@ -40,73 +32,6 @@ function cancellationError(): Error {
   return new Error('Peeps voice authorization was cancelled or timed out')
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw cancellationError()
-  }
-}
-
-async function cancelAuthFlow(
-  bridge: PeepsVoiceAuthBridge,
-  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
-  runtimeSessionId: string,
-  interaction: PeepsInteraction
-): Promise<void> {
-  await Promise.allSettled([
-    bridge.cancel(interaction.auth_session_id),
-    request('voice.realtime.peeps.cancel', {
-      auth_session_id: interaction.auth_session_id,
-      session_id: runtimeSessionId
-    })
-  ])
-}
-
-function waitForBridgeResult(
-  bridge: PeepsVoiceAuthBridge,
-  runtimeSessionId: string,
-  interaction: PeepsInteraction,
-  options: CompleteRealtimePeepsAuthOptions,
-  request: (method: string, params: Record<string, unknown>) => Promise<unknown>
-): ReturnType<PeepsVoiceAuthBridge['wait']> {
-  const waitPromise = bridge.wait(interaction.auth_session_id, interaction.timeout_seconds * 1000)
-
-  if (!options.signal) {
-    return waitPromise
-  }
-
-  const signal = options.signal
-
-  return new Promise((resolve, reject) => {
-    let settled = false
-
-    const finish = (fn: () => void) => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      signal.removeEventListener('abort', onAbort)
-      fn()
-    }
-
-    const onAbort = () => {
-      void cancelAuthFlow(bridge, request, runtimeSessionId, interaction).finally(() =>
-        finish(() => reject(cancellationError()))
-      )
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true })
-    void waitPromise.then(
-      value => finish(() => resolve(value)),
-      error => finish(() => reject(error))
-    )
-
-    if (signal.aborted) {
-      onAbort()
-    }
-  })
-}
-
 export function createRealtimePeepsAuthCoordinator(
   resolveBridge: () => PeepsVoiceAuthBridge | undefined = () => window.hermesDesktop?.peepsVoiceAuth
 ) {
@@ -115,9 +40,9 @@ export function createRealtimePeepsAuthCoordinator(
 
   return {
     async complete(
-      request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
       runtimeSessionId: string,
       interaction: PeepsInteraction,
+      route: PeepsVoiceAuthRoute,
       options: CompleteRealtimePeepsAuthOptions = {}
     ): Promise<void> {
       const bridge = resolveBridge()
@@ -134,74 +59,51 @@ export function createRealtimePeepsAuthCoordinator(
       }
 
       let cancelled = false
-      let resolveCancelledWait: ((value: null) => void) | null = null
-
-      const cancelledWait = new Promise<null>(resolve => {
-        resolveCancelledWait = resolve
+      let rejectCancelled: ((error: Error) => void) | null = null
+      const cancelledPromise = new Promise<never>((_resolve, reject) => {
+        rejectCancelled = reject
       })
-
       const cancelCurrent = async () => {
         if (cancelled) {
           return
         }
-
         cancelled = true
-        resolveCancelledWait?.(null)
-        await cancelAuthFlow(bridge, request, runtimeSessionId, interaction)
+        rejectCancelled?.(cancellationError())
+        await Promise.allSettled([bridge.cancel(interaction.auth_session_id)])
+      }
+      const onAbort = () => {
+        void cancelCurrent()
       }
 
       activeCancel = cancelCurrent
-
-      const ensureCurrent = () => {
-        throwIfAborted(options.signal)
-
-        if (runId !== activeRunId) {
-          throw cancellationError()
-        }
-      }
+      options.signal?.addEventListener('abort', onAbort, { once: true })
 
       try {
-        ensureCurrent()
-        await bridge.start(interaction.auth_session_id, {
-          authSessionId: interaction.auth_session_id,
-          authority: interaction.authority,
-          clientId: interaction.client_id,
-          publicKey: interaction.public_key,
-          redirectUri: interaction.redirect_uri,
-          scope: interaction.scope,
-          state: interaction.state
-        })
-        ensureCurrent()
+        if (options.signal?.aborted) {
+          await cancelCurrent()
+        }
 
-        let envelope = await Promise.race([
-          waitForBridgeResult(bridge, runtimeSessionId, interaction, options, request),
-          cancelledWait
+        await Promise.race([
+          bridge.complete({
+            authSessionId: interaction.auth_session_id,
+            connectionId: route.connectionId,
+            profile: route.profile,
+            runtimeSessionId
+          }),
+          cancelledPromise
         ])
 
-        ensureCurrent()
-
-        if (!envelope) {
-          await cancelCurrent()
+        if (cancelled || runId !== activeRunId || options.signal?.aborted) {
           throw cancellationError()
         }
-
-        try {
-          await request('voice.realtime.peeps.complete', {
-            auth_session_id: interaction.auth_session_id,
-            envelope,
-            session_id: runtimeSessionId,
-            state: interaction.state
-          })
-        } finally {
-          envelope = null
-        }
       } catch (error) {
-        if (!cancelled && (options.signal?.aborted || runId !== activeRunId)) {
-          await cancelCurrent()
+        if (cancelled || runId !== activeRunId || options.signal?.aborted) {
+          throw cancellationError()
         }
 
         throw error
       } finally {
+        options.signal?.removeEventListener('abort', onAbort)
         if (runId === activeRunId) {
           activeCancel = null
         }
@@ -212,12 +114,12 @@ export function createRealtimePeepsAuthCoordinator(
 
 const realtimePeepsAuthCoordinator = createRealtimePeepsAuthCoordinator()
 
-/** Complete one backend-requested, desktop-local Peeps authorization handoff. */
+/** Ask Electron main to resolve and complete one backend-bound Peeps flow. */
 export async function completeRealtimePeepsAuth(
-  request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   runtimeSessionId: string,
   interaction: PeepsInteraction,
+  route: PeepsVoiceAuthRoute,
   options?: CompleteRealtimePeepsAuthOptions
 ): Promise<void> {
-  await realtimePeepsAuthCoordinator.complete(request, runtimeSessionId, interaction, options)
+  await realtimePeepsAuthCoordinator.complete(runtimeSessionId, interaction, route, options)
 }

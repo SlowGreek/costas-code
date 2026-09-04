@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 
 import { test, vi } from 'vitest'
 
@@ -126,24 +127,30 @@ interface FakeServer {
   onRequest: (req: FakeRequest, res: FakeResponse) => void
 }
 
-function createHarness(options: {
-  currentUid?: () => null | number
-  lstatSync?: (path: string) => {
-    isDirectory: () => boolean
-    isFile: () => boolean
-    isSymbolicLink: () => boolean
-    mode: number
-    uid: number
-  }
-  now?: () => Date
-  listenError?: Error
-  openExternal?: (url: string) => Promise<void>
-  platform?: NodeJS.Platform
-  readFile?: (path: string, encoding?: BufferEncoding) => string | Buffer
-  spawnSync?: () => { error?: Error; status: number }
-  tlsPaths?: () => { certificatePath?: string; keyPath?: string }
-  userDataPath?: string
-} = {}) {
+function createHarness(
+  options: {
+    currentUid?: () => null | number
+    lstatSync?: (path: string) => {
+      isDirectory: () => boolean
+      isFile: () => boolean
+      isSymbolicLink: () => boolean
+      mode: number
+      uid: number
+    }
+    now?: () => Date
+    listenError?: Error
+    openExternal?: (url: string) => Promise<void>
+    platform?: NodeJS.Platform
+    readFile?: (path: string, encoding?: BufferEncoding) => string | Buffer
+    connectGateway?: (route: { connectionId: null | string; profile: string }) => Promise<{
+      close: () => void
+      request: (method: string, params: Record<string, unknown>) => Promise<unknown>
+    }>
+    spawnSync?: () => { error?: Error; status: number }
+    tlsPaths?: () => { certificatePath?: string; keyPath?: string }
+    userDataPath?: string
+  } = {}
+) {
   const harnessOptions = options
   const servers: FakeServer[] = []
   const created: Array<{ cert: Buffer | string; key: Buffer | string }> = []
@@ -181,9 +188,7 @@ function createHarness(options: {
           }
     )
 
-  const tlsPaths =
-    options.tlsPaths ??
-    (() => defaultTlsPaths)
+  const tlsPaths = options.tlsPaths ?? (() => defaultTlsPaths)
 
   const handlers = createPeepsVoiceAuthHandlers({
     appPath: () => '/app',
@@ -231,6 +236,7 @@ function createHarness(options: {
     openExternal,
     platform: options.platform ?? 'darwin',
     readFile,
+    connectGateway: options.connectGateway,
     spawnSync: (options.spawnSync ?? (() => ({ status: 0 }))) as never,
     tlsPaths,
     userDataPath: () => userDataPath
@@ -248,6 +254,15 @@ const flow: PeepsVoiceAuthFlow = {
   scope: 'https://peeps.asgprototype.com/api/access-as-user',
   state: 'state-123'
 }
+
+test('preload exposes only complete and cancel, never start wait or an envelope result', () => {
+  const preload = readFileSync(new URL('./preload.ts', import.meta.url), 'utf8')
+  const bridge = preload.slice(preload.indexOf('peepsVoiceAuth:'), preload.indexOf('openPreviewInBrowser:'))
+
+  assert.match(bridge, /complete:/)
+  assert.match(bridge, /cancel:/)
+  assert.doesNotMatch(bridge, /start:|wait:|ephemeral_public_key|ciphertext|envelope/)
+})
 
 test('auth page uses local-only scripts and a restrictive CSP', () => {
   const html = authPage()
@@ -293,6 +308,64 @@ test('start serves only the exact auth page paths and relays a valid callback on
   assert.equal(replayRes.status, 404)
 })
 
+test('complete resolves the trusted backend flow and never accepts renderer OAuth values or returns an envelope', async () => {
+  const requestGateway = vi.fn(async (method: string, _params: Record<string, unknown>) => {
+    if (method === 'voice.realtime.peeps.claim') {
+      return {
+        auth_session_id: 'auth-trusted',
+        authority: 'https://attacker.invalid/common',
+        client_id: 'attacker-client',
+        public_key: flow.publicKey,
+        redirect_uri: 'https://attacker.invalid/callback',
+        scope: 'attacker-scope',
+        state: 'trusted-state',
+        timeout_seconds: 5
+      }
+    }
+
+    return { ok: true }
+  })
+  const closeGateway = vi.fn()
+  const connectGateway = vi.fn(async () => ({ close: closeGateway, request: requestGateway }))
+  const harness = createHarness({ connectGateway })
+  const completion = harness.handlers.complete({
+    authSessionId: 'auth-trusted',
+    authority: 'https://renderer-attacker.invalid/common',
+    clientId: 'renderer-attacker',
+    connectionId: 'remote-1',
+    profile: 'work',
+    publicKey: 'renderer-key',
+    runtimeSessionId: 'runtime-1',
+    scope: 'renderer-scope'
+  } as never)
+
+  await vi.waitFor(() => assert.equal(harness.servers.length, 1))
+
+  const htmlRes = new FakeResponse()
+  harness.servers[0].onRequest(new FakeRequest('GET', '/'), htmlRes)
+  assert.match(htmlRes.body, /b6ca153a-37a1-4f59-ad95-c4e30313c64b/)
+  assert.match(htmlRes.body, /https:\/\/login\.microsoftonline\.com\/organizations/)
+  assert.match(htmlRes.body, /https:\/\/peeps\.asgprototype\.com\/api\/access-as-user/)
+  assert.doesNotMatch(htmlRes.body, /renderer-attacker|attacker\.invalid|attacker-scope/)
+
+  const callbackRes = new FakeResponse()
+  const callbackReq = new FakeRequest('POST', '/', { origin: 'https://localhost:8080' })
+  harness.servers[0].onRequest(callbackReq, callbackRes)
+  callbackReq.emit('data', JSON.stringify({ state: 'trusted-state', token: 'peeps-bearer' }))
+  callbackReq.emit('end')
+
+  assert.equal(await completion, true)
+  assert.equal(vi.mocked(harness.openExternal).mock.calls[0]?.[0], 'https://localhost:8080/')
+  assert.deepEqual(connectGateway.mock.calls[0], [{ connectionId: 'remote-1', profile: 'work' }])
+  assert.deepEqual(requestGateway.mock.calls[0], [
+    'voice.realtime.peeps.claim',
+    { auth_session_id: 'auth-trusted', session_id: 'runtime-1' }
+  ])
+  assert.equal(requestGateway.mock.calls[1]?.[0], 'voice.realtime.peeps.complete')
+  assert.equal(typeof (requestGateway.mock.calls[1]?.[1] as any).envelope.ciphertext, 'string')
+  assert.equal(closeGateway.mock.calls.length, 1)
+})
+
 test('start rejects non-localhost loopback aliases when the page is authorized only for localhost', async () => {
   const harness = createHarness()
 
@@ -320,10 +393,7 @@ test('invalid origin state method and oversized body fail closed without echoing
   await handlersStart(harness, 'auth-2')
   const waitWrongOrigin = harness.handlers.wait('auth-2', 5_000)
   const wrongOriginRes = new FakeResponse()
-  harness.servers[0].onRequest(
-    new FakeRequest('POST', '/', { origin: 'https://example.com' }),
-    wrongOriginRes
-  )
+  harness.servers[0].onRequest(new FakeRequest('POST', '/', { origin: 'https://example.com' }), wrongOriginRes)
   assert.equal(wrongOriginRes.status, 400)
   assert.equal(await waitWrongOrigin, null)
 
@@ -404,23 +474,30 @@ test('preflight rejects unsupported platforms untrusted certs mismatched keys an
   })
 
   await assert.rejects(
-    () => handlersStart(createHarness({
-      readFile: filePath => filePath.endsWith('.js') ? 'local' : filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : wrongKey
-    }), 'mismatch'),
+    () =>
+      handlersStart(
+        createHarness({
+          readFile: filePath =>
+            filePath.endsWith('.js') ? 'local' : filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : wrongKey
+        }),
+        'mismatch'
+      ),
     /TLS preflight failed/
   )
   await assert.rejects(
-    () => handlersStart(createHarness({ listenError: Object.assign(new Error('in use'), { code: 'EADDRINUSE' }) }), 'collision'),
+    () =>
+      handlersStart(
+        createHarness({ listenError: Object.assign(new Error('in use'), { code: 'EADDRINUSE' }) }),
+        'collision'
+      ),
     /in use/
   )
 })
 
 test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron userData', () => {
   assert.deepEqual(resolvePeepsVoiceAuthTlsPaths('/Users/test/Library/Application Support/Catalyst'), {
-    certificatePath:
-      '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-cert.pem',
-    keyPath:
-      '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-key.pem'
+    certificatePath: '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-cert.pem',
+    keyPath: '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-key.pem'
   })
 })
 
@@ -446,8 +523,7 @@ test('tls material loader accepts only the Electron-owned localhost certificate 
 })
 
 test('tls material loader rejects path escapes symlinks non-files wrong owners weak key perms and invalid certs', () => {
-  const invalidMessage =
-    /TLS preflight failed/
+  const invalidMessage = /TLS preflight failed/
 
   assert.throws(
     () =>
@@ -617,8 +693,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
 })
 
 test('tls material loader rejects symlinked directory components from userData through peeps-voice-auth', () => {
-  const invalidMessage =
-    /TLS preflight failed/
+  const invalidMessage = /TLS preflight failed/
 
   for (const symlinkPath of ['/user/data', '/user/data/peeps-voice-auth']) {
     assert.throws(
@@ -644,8 +719,7 @@ test('tls material loader rejects symlinked directory components from userData t
                 }) as never,
           now: () => new Date('2026-09-05T00:00:00.000Z'),
           openExternal: async () => {},
-          readFile: filePath =>
-            filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY,
+          readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
           tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
           userDataPath: () => '/user/data'
         }),

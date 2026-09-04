@@ -133,10 +133,24 @@ class PeepsAuthBinding:
     runtime_session: object
     runtime_session_id: str
     transport: object
+    auth_identity: tuple[str, str] | None
 
     @classmethod
     def create(cls, profile_home: str | Path, runtime_session: object, runtime_session_id: str, transport: object) -> "PeepsAuthBinding":
-        return cls(str(Path(profile_home).expanduser().resolve()), runtime_session, runtime_session_id, transport)
+        identity = getattr(transport, "auth_identity", None)
+        normalized_identity = None
+        if isinstance(identity, dict):
+            provider = str(identity.get("provider") or "").strip()
+            user_id = str(identity.get("user_id") or "").strip()
+            if provider and user_id:
+                normalized_identity = (provider, user_id)
+        return cls(
+            str(Path(profile_home).expanduser().resolve()),
+            runtime_session,
+            runtime_session_id,
+            transport,
+            normalized_identity,
+        )
 
 
 def _same_binding(left: PeepsAuthBinding, right: PeepsAuthBinding) -> bool:
@@ -148,12 +162,22 @@ def _same_binding(left: PeepsAuthBinding, right: PeepsAuthBinding) -> bool:
     )
 
 
+def _same_runtime_binding(left: PeepsAuthBinding, right: PeepsAuthBinding) -> bool:
+    return (
+        left.profile_home == right.profile_home
+        and left.runtime_session is right.runtime_session
+        and left.runtime_session_id == right.runtime_session_id
+        and left.auth_identity == right.auth_identity
+    )
+
+
 @dataclass
 class _Pending:
     binding: PeepsAuthBinding
     expires: float
     state: str
     private_key: X25519PrivateKey | None
+    completion_transport: object | None = None
 
 
 @dataclass
@@ -288,11 +312,33 @@ class PeepsVoiceAuthSessionStore:
         public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         return {"auth_session_id": auth_id, "state": state, "public_key": _b64url_encode(public)}
 
+    def claim(self, binding: PeepsAuthBinding, auth_id: str) -> dict[str, Any]:
+        with self._lock:
+            self._prune_locked(self._monotonic())
+            pending = self._pending.get(auth_id)
+            if (
+                pending is None
+                or pending.private_key is None
+                or pending.completion_transport is not None
+                or not _same_runtime_binding(pending.binding, binding)
+            ):
+                raise PeepsAuthError("Peeps authorization session is invalid or expired", code="invalid_auth_session")
+            pending.completion_transport = binding.transport
+            public = pending.private_key.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+            return {"auth_session_id": auth_id, "state": pending.state, "public_key": _b64url_encode(public)}
+
     def _take_pending(self, binding: PeepsAuthBinding, auth_id: str, state: str) -> _Pending:
         with self._lock:
             self._prune_locked(self._monotonic())
             pending = self._pending.get(auth_id)
-            if pending is None or pending.state != state or not _same_binding(pending.binding, binding):
+            if (
+                pending is None
+                or pending.state != state
+                or (pending.completion_transport or pending.binding.transport) is not binding.transport
+                or not _same_runtime_binding(pending.binding, binding)
+            ):
                 raise PeepsAuthError("Peeps authorization session is invalid or expired", code="invalid_auth_session")
             self._pending.pop(auth_id)
             return pending
@@ -334,7 +380,7 @@ class PeepsVoiceAuthSessionStore:
         except Exception as exc:
             raise PeepsAuthError("Peeps authorization envelope is invalid", code="invalid_envelope") from exc
         with self._lock:
-            self._ready[auth_id] = _Ready(binding, pending.expires, provider)
+            self._ready[auth_id] = _Ready(pending.binding, pending.expires, provider)
 
     def consume_ready(self, binding: PeepsAuthBinding, auth_id: str) -> PeepsCognitiveTokenProvider | None:
         with self._lock:

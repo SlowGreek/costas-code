@@ -47,6 +47,11 @@ def _binding(profile="/tmp/profile", session=None, session_id="runtime", transpo
     return PeepsAuthBinding.create(profile, session or object(), session_id, transport or object())
 
 
+class _AuthenticatedTransport:
+    def __init__(self, user_id):
+        self.auth_identity = {"provider": "oauth", "user_id": user_id}
+
+
 def _seal(started, token):
     remote = X25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(started["public_key"] + "=="))
     ephemeral = X25519PrivateKey.generate()
@@ -116,6 +121,59 @@ def test_envelope_decrypts_once_exchanges_immediately_and_ready_provider_is_one_
     assert store.consume_ready(binding, started["auth_session_id"]) is None
     with pytest.raises(PeepsAuthError):
         store.complete(binding, started["auth_session_id"], started["state"], envelope, _config(), opener=opener)
+
+
+def test_claim_allows_one_authenticated_companion_transport_but_preserves_original_retry_binding():
+    store = PeepsVoiceAuthSessionStore()
+    session, original_transport, companion_transport = object(), object(), object()
+    original = _binding(session=session, transport=original_transport)
+    companion = _binding(session=session, transport=companion_transport)
+    started = store.start(original, _config())
+
+    for wrong in (
+        _binding(profile="/tmp/other", session=session),
+        _binding(session=object()),
+        _binding(session=session, session_id="other"),
+    ):
+        with pytest.raises(PeepsAuthError):
+            store.claim(wrong, started["auth_session_id"])
+
+    claimed = store.claim(companion, started["auth_session_id"])
+    assert claimed == started
+    with pytest.raises(PeepsAuthError):
+        store.claim(_binding(session=session), started["auth_session_id"])
+
+    peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
+    cognitive = _jwt({"aud": COGNITIVE_AUDIENCE, "exp": time.time() + 300})
+    store.complete(
+        companion,
+        started["auth_session_id"],
+        started["state"],
+        _seal(started, peeps),
+        _config(),
+        opener=lambda *_: _Response(json.dumps({"accessToken": cognitive}).encode()),
+    )
+
+    assert store.consume_ready(companion, started["auth_session_id"]) is None
+    assert store.consume_ready(original, started["auth_session_id"]) is not None
+
+
+def test_claim_rejects_a_companion_authenticated_as_a_different_remote_user():
+    store = PeepsVoiceAuthSessionStore()
+    session = object()
+    original = _binding(session=session, transport=_AuthenticatedTransport("user-a"))
+    started = store.start(original, _config())
+
+    with pytest.raises(PeepsAuthError):
+        store.claim(
+            _binding(session=session, transport=_AuthenticatedTransport("user-b")),
+            started["auth_session_id"],
+        )
+
+    assert store.claim(
+        _binding(session=session, transport=_AuthenticatedTransport("user-a")),
+        started["auth_session_id"],
+    ) == started
 
 
 def test_cross_transport_session_profile_and_rebound_session_cannot_complete_or_consume():

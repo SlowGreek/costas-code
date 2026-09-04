@@ -1,157 +1,83 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  completeRealtimePeepsAuth,
-  createRealtimePeepsAuthCoordinator
-} from './realtime-voice-auth'
+import { completeRealtimePeepsAuth, createRealtimePeepsAuthCoordinator } from './realtime-voice-auth'
 
 const interaction = {
   auth_session_id: 'auth',
-  authority: 'authority',
-  client_id: 'client',
-  public_key: 'backend-public-key',
-  redirect_uri: 'https://localhost:8080/',
-  scope: 'scope',
-  state: 'state',
+  authority: 'renderer-authority',
+  client_id: 'renderer-client',
+  public_key: 'renderer-key',
+  redirect_uri: 'https://renderer.invalid/',
+  scope: 'renderer-scope',
+  state: 'renderer-state',
   timeout_seconds: 1
 }
+const route = { connectionId: 'remote-1', profile: 'work' }
 
 describe('completeRealtimePeepsAuth', () => {
-  it('relays only an encrypted envelope through generic RPC', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
-    const start = vi.fn().mockResolvedValue(true)
-    const envelope = { version: 1 as const, ephemeral_public_key: 'ephemeral', nonce: 'nonce', ciphertext: 'ciphertext', tag: 'tag' }
-    const wait = vi.fn().mockResolvedValue(envelope)
+  it('gives Electron only route and session identifiers, never OAuth values or an envelope', async () => {
+    const complete = vi.fn().mockResolvedValue(true)
     vi.stubGlobal('window', {
-      hermesDesktop: { peepsVoiceAuth: { start, wait, cancel: vi.fn().mockResolvedValue(true) } }
+      hermesDesktop: { peepsVoiceAuth: { complete, cancel: vi.fn().mockResolvedValue(true) } }
     })
 
-    await completeRealtimePeepsAuth(request, 'runtime', interaction)
+    await completeRealtimePeepsAuth('runtime', interaction, route)
 
-    expect(start).toHaveBeenCalledWith(
-      'auth',
-      expect.objectContaining({ redirectUri: 'https://localhost:8080/' })
-    )
-    expect(request).toHaveBeenCalledWith(
-      'voice.realtime.peeps.complete',
-      expect.objectContaining({ envelope })
-    )
-    expect(JSON.stringify(request.mock.calls)).not.toContain('peeps-bearer')
-    expect(JSON.stringify(request.mock.calls)).not.toContain('peeps_token')
-    expect(request).not.toHaveBeenCalledWith(
-      'voice.realtime.peeps.cancel',
-      expect.anything()
-    )
-  })
-
-  it('cancels the backend flow when the browser never returns a bearer', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
-    const cancel = vi.fn().mockResolvedValue(true)
-    vi.stubGlobal('window', {
-      hermesDesktop: {
-        peepsVoiceAuth: { start: vi.fn(), wait: vi.fn().mockResolvedValue(null), cancel }
-      }
+    expect(complete).toHaveBeenCalledWith({
+      authSessionId: 'auth',
+      connectionId: 'remote-1',
+      profile: 'work',
+      runtimeSessionId: 'runtime'
     })
-
-    await expect(
-      completeRealtimePeepsAuth(request, 'runtime', interaction)
-    ).rejects.toThrow(/cancelled/)
-
-    expect(cancel).toHaveBeenCalledWith('auth')
-    expect(request).toHaveBeenCalledWith(
-      'voice.realtime.peeps.cancel',
-      expect.objectContaining({ auth_session_id: 'auth', session_id: 'runtime' })
-    )
+    expect(JSON.stringify(complete.mock.calls)).not.toMatch(/renderer-key|renderer-client|renderer-scope|envelope/)
   })
 
-  it('aborts an in-flight auth wait and cancels both legs', async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true })
-    const cancel = vi.fn().mockResolvedValue(true)
+  it('aborts an in-flight completion without exposing a wait result', async () => {
     const controller = new AbortController()
-    let releaseWait: ((value: null | typeof envelope) => void) | undefined
-    const envelope = { version: 1 as const, ephemeral_public_key: 'e', nonce: 'n', ciphertext: 'c', tag: 't' }
+    const cancel = vi.fn().mockResolvedValue(true)
+    let release: (() => void) | undefined
+    const complete = vi.fn(
+      () =>
+        new Promise<boolean>(resolve => {
+          release = () => resolve(true)
+        })
+    )
+    vi.stubGlobal('window', { hermesDesktop: { peepsVoiceAuth: { complete, cancel } } })
 
-    vi.stubGlobal('window', {
-      hermesDesktop: {
-        peepsVoiceAuth: {
-          cancel,
-          start: vi.fn().mockResolvedValue(true),
-          wait: vi.fn(
-            () =>
-              new Promise<null | typeof envelope>(resolve => {
-                releaseWait = resolve
-              })
-          )
-        }
-      }
-    })
-
-    const pending = completeRealtimePeepsAuth(request, 'runtime', interaction, {
-      signal: controller.signal
-    })
-
+    const pending = completeRealtimePeepsAuth('runtime', interaction, route, { signal: controller.signal })
     controller.abort()
-    releaseWait?.(null)
 
     await expect(pending).rejects.toThrow(/cancelled/)
     expect(cancel).toHaveBeenCalledWith('auth')
-    expect(request).toHaveBeenCalledWith(
-      'voice.realtime.peeps.cancel',
-      expect.objectContaining({ auth_session_id: 'auth' })
-    )
+    release?.()
   })
 })
 
 describe('createRealtimePeepsAuthCoordinator', () => {
   it('cancels a stale generation when a newer auth flow starts', async () => {
-    const firstRequest = vi.fn().mockResolvedValue({ ok: true })
-    const secondRequest = vi.fn().mockResolvedValue({ ok: true })
     const cancel = vi.fn().mockResolvedValue(true)
-    const nextEnvelope = { version: 1 as const, ephemeral_public_key: 'e', nonce: 'n', ciphertext: 'c', tag: 't' }
-    let releaseFirst: ((value: null | typeof nextEnvelope) => void) | undefined
-
+    let releaseFirst: (() => void) | undefined
     const bridge = {
       cancel,
-      start: vi.fn().mockResolvedValue(true),
-      wait: vi
+      complete: vi
         .fn()
         .mockImplementationOnce(
           () =>
-            new Promise<null | typeof nextEnvelope>(resolve => {
-              releaseFirst = resolve
+            new Promise<boolean>(resolve => {
+              releaseFirst = () => resolve(true)
             })
         )
-        .mockResolvedValueOnce(nextEnvelope)
+        .mockResolvedValueOnce(true)
     }
-
     const coordinator = createRealtimePeepsAuthCoordinator(() => bridge)
 
-    const first = coordinator.complete(firstRequest, 'runtime', {
-      ...interaction,
-      auth_session_id: 'auth-1'
-    })
-
-    await vi.waitFor(() => expect(bridge.wait).toHaveBeenCalledTimes(1))
-
-    const second = coordinator.complete(secondRequest, 'runtime', {
-      ...interaction,
-      auth_session_id: 'auth-2'
-    })
-
-    releaseFirst?.(nextEnvelope)
+    const first = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-1' }, route)
+    await vi.waitFor(() => expect(bridge.complete).toHaveBeenCalledTimes(1))
+    const second = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-2' }, route)
+    releaseFirst?.()
 
     await expect(first).rejects.toThrow(/cancelled/)
     await expect(second).resolves.toBeUndefined()
-
     expect(cancel).toHaveBeenCalledWith('auth-1')
-    expect(firstRequest).toHaveBeenCalledWith(
-      'voice.realtime.peeps.cancel',
-      expect.objectContaining({ auth_session_id: 'auth-1' })
-    )
-    expect(secondRequest).toHaveBeenCalledWith(
-      'voice.realtime.peeps.complete',
-      expect.objectContaining({ envelope: nextEnvelope })
-    )
-    expect(JSON.stringify(secondRequest.mock.calls)).not.toContain('peeps_token')
   })
 })

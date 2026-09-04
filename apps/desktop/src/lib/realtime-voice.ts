@@ -382,6 +382,7 @@ export interface RealtimeVoiceConnection {
 export interface StartRealtimeVoiceOptions {
   audioFactory?: () => HTMLAudioElement
   beforeToolCall?: () => Promise<void>
+  connectionId?: null | string
   createMissionId?: () => string
   fetchFn?: typeof fetch
   instructions?: string
@@ -404,6 +405,7 @@ export interface StartRealtimeVoiceOptions {
   onUserSpeechEnded?: () => void
   onUserSpeechStarted?: () => void
   peerConnectionFactory?: () => RTCPeerConnection
+  profile?: string
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
 }
@@ -928,9 +930,9 @@ export async function startRealtimeVoiceConnection(
 
   if (token.status === 'interaction_required') {
     await completeRealtimePeepsAuth(
-      options.request,
       options.runtimeSessionId,
       token as RealtimeTokenResponse & PeepsInteraction,
+      { connectionId: options.connectionId ?? null, profile: options.profile || 'default' },
       { signal: options.signal }
     )
     throwIfCancelled()

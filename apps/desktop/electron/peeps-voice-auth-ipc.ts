@@ -20,6 +20,9 @@ const MAX_AUTH_BODY_BYTES = 16_384
 const PEEPS_TLS_DIRNAME = 'peeps-voice-auth'
 const REDIRECT_ORIGIN = 'https://localhost:8080'
 const REDIRECT_URI = `${REDIRECT_ORIGIN}/`
+const PEEPS_AUTHORITY = 'https://login.microsoftonline.com/organizations'
+const PEEPS_CLIENT_ID = 'b6ca153a-37a1-4f59-ad95-c4e30313c64b'
+const PEEPS_SCOPE = 'https://peeps.asgprototype.com/api/access-as-user'
 const INFO = Buffer.from('hermes-peeps-voice-auth-v1')
 
 export interface PeepsEnvelope {
@@ -47,6 +50,10 @@ interface Pending {
 
 export interface PeepsVoiceAuthDeps {
   appPath: () => string
+  connectGateway?: (route: { connectionId: null | string; profile: string }) => Promise<{
+    close: () => void
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>
+  }>
   currentUid?: () => null | number
   createServer?: typeof https.createServer
   lstatSync?: (filePath: string) => fs.Stats
@@ -57,6 +64,13 @@ export interface PeepsVoiceAuthDeps {
   spawnSync?: typeof nodeSpawnSync
   tlsPaths: () => { certificatePath?: string; keyPath?: string }
   userDataPath: () => string
+}
+
+export interface PeepsVoiceAuthCompletionRequest {
+  authSessionId: string
+  connectionId: null | string
+  profile: string
+  runtimeSessionId: string
 }
 
 export const authPage = () =>
@@ -164,7 +178,7 @@ export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps)
   }
 
   const lstatSync = deps.lstatSync ?? fs.lstatSync
-  const uid = deps.currentUid ? deps.currentUid() : process.getuid?.() ?? null
+  const uid = deps.currentUid ? deps.currentUid() : (process.getuid?.() ?? null)
   statOwnedPath(userData, 'directory', false, uid, lstatSync)
   statOwnedPath(path.dirname(certificatePath), 'directory', false, uid, lstatSync)
   statOwnedPath(certificatePath, 'file', false, uid, lstatSync)
@@ -227,18 +241,26 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
   const close = (id: string, result: PeepsEnvelope | null) => {
     const entry = pending.get(id)
 
-    if (!entry) {return}
+    if (!entry) {
+      return
+    }
     pending.delete(id)
 
-    if (activeListenerId === id) {activeListenerId = null}
+    if (activeListenerId === id) {
+      activeListenerId = null
+    }
     closeServer(entry.server)
     entry.waiters.splice(0).forEach(waiter => waiter(result))
   }
 
   const start = async (id: string, flow: PeepsVoiceAuthFlow) => {
-    if (activeListenerId && activeListenerId !== id) {close(activeListenerId, null)}
+    if (activeListenerId && activeListenerId !== id) {
+      close(activeListenerId, null)
+    }
 
-    if (pending.has(id)) {throw new Error('Peeps voice authorization is already pending')}
+    if (pending.has(id)) {
+      throw new Error('Peeps voice authorization is already pending')
+    }
 
     if (id !== flow.authSessionId || flow.redirectUri !== REDIRECT_URI) {
       throw new Error('Peeps voice authorization flow is invalid')
@@ -291,12 +313,19 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       req.on('aborted', () => close(id, null))
       req.on('error', () => close(id, null))
       req.on('end', () => {
-        if (!pending.has(id)) {return}
+        if (!pending.has(id)) {
+          return
+        }
 
         try {
           const message = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { state?: unknown; token?: unknown }
 
-          if (message.state !== flow.state || typeof message.token !== 'string' || !message.token || message.token.length > 8192) {
+          if (
+            message.state !== flow.state ||
+            typeof message.token !== 'string' ||
+            !message.token ||
+            message.token.length > 8192
+          ) {
             throw new Error('invalid')
           }
 
@@ -329,7 +358,9 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       closeServer(server)
       pending.delete(id)
 
-      if (activeListenerId === id) {activeListenerId = null}
+      if (activeListenerId === id) {
+        activeListenerId = null
+      }
       throw error
     }
   }
@@ -337,13 +368,18 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
   const wait = async (id: string, timeout: number) => {
     const entry = pending.get(id)
 
-    if (!entry) {return null}
+    if (!entry) {
+      return null
+    }
 
     return new Promise<PeepsEnvelope | null>(resolve => {
-      const timer = setTimeout(() => {
-        close(id, null)
-        resolve(null)
-      }, Math.min(Math.max(timeout, 1000), 300_000))
+      const timer = setTimeout(
+        () => {
+          close(id, null)
+          resolve(null)
+        },
+        Math.min(Math.max(timeout, 1000), 300_000)
+      )
 
       entry.waiters.push(result => {
         clearTimeout(timer)
@@ -352,27 +388,103 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     })
   }
 
+  const complete = async (input: PeepsVoiceAuthCompletionRequest): Promise<boolean> => {
+    const authSessionId = typeof input?.authSessionId === 'string' ? input.authSessionId.trim() : ''
+    const connectionId = typeof input?.connectionId === 'string' ? input.connectionId.trim() : null
+    const profile = typeof input?.profile === 'string' ? input.profile.trim() : ''
+    const runtimeSessionId = typeof input?.runtimeSessionId === 'string' ? input.runtimeSessionId.trim() : ''
+
+    if (
+      !deps.connectGateway ||
+      !authSessionId ||
+      authSessionId.length > 256 ||
+      (connectionId !== null && (!connectionId || connectionId.length > 256)) ||
+      !profile ||
+      profile.length > 128 ||
+      !runtimeSessionId ||
+      runtimeSessionId.length > 256
+    ) {
+      throw new Error('Peeps voice authorization request is invalid')
+    }
+
+    const gateway = await deps.connectGateway({ connectionId, profile })
+
+    try {
+      const claimed = (await gateway.request('voice.realtime.peeps.claim', {
+        auth_session_id: authSessionId,
+        session_id: runtimeSessionId
+      })) as Record<string, unknown>
+      const claimedAuthSessionId = typeof claimed?.auth_session_id === 'string' ? claimed.auth_session_id : ''
+      const publicKey = typeof claimed?.public_key === 'string' ? claimed.public_key : ''
+      const state = typeof claimed?.state === 'string' ? claimed.state : ''
+      const timeoutSeconds = claimed?.timeout_seconds
+
+      if (
+        claimedAuthSessionId !== authSessionId ||
+        !/^[A-Za-z0-9_-]{43}$/.test(publicKey) ||
+        !state ||
+        state.length > 256 ||
+        typeof timeoutSeconds !== 'number' ||
+        !Number.isInteger(timeoutSeconds) ||
+        timeoutSeconds < 1 ||
+        timeoutSeconds > 300
+      ) {
+        throw new Error('Peeps voice authorization flow is invalid')
+      }
+
+      const flow: PeepsVoiceAuthFlow = {
+        authSessionId,
+        authority: PEEPS_AUTHORITY,
+        clientId: PEEPS_CLIENT_ID,
+        publicKey,
+        redirectUri: REDIRECT_URI,
+        scope: PEEPS_SCOPE,
+        state
+      }
+
+      await start(authSessionId, flow)
+      const envelope = await wait(authSessionId, timeoutSeconds * 1000)
+
+      if (!envelope) {
+        throw new Error('Peeps voice authorization was cancelled or timed out')
+      }
+
+      await gateway.request('voice.realtime.peeps.complete', {
+        auth_session_id: authSessionId,
+        envelope,
+        session_id: runtimeSessionId,
+        state
+      })
+
+      return true
+    } finally {
+      close(authSessionId, null)
+      gateway.close()
+    }
+  }
+
   return {
     cancel: (id: string) => {
       close(id, null)
 
       return true
     },
+    complete,
     start,
     wait
   }
 }
 
-export function registerPeepsVoiceAuthIpc() {
+export function registerPeepsVoiceAuthIpc(connectGateway: NonNullable<PeepsVoiceAuthDeps['connectGateway']>) {
   const handlers = createPeepsVoiceAuthHandlers({
     appPath: () => app.getAppPath(),
+    connectGateway,
     openExternal: shell.openExternal,
     userDataPath: () => app.getPath('userData'),
     readFile: fs.readFileSync,
     tlsPaths: () => resolvePeepsVoiceAuthTlsPaths(app.getPath('userData'))
   })
 
-  ipcMain.handle('hermes:peeps-voice-auth:start', (_event, id, flow) => handlers.start(id, flow))
-  ipcMain.handle('hermes:peeps-voice-auth:wait', (_event, id, timeout) => handlers.wait(id, timeout))
+  ipcMain.handle('hermes:peeps-voice-auth:complete', (_event, input) => handlers.complete(input))
   ipcMain.handle('hermes:peeps-voice-auth:cancel', (_event, id) => handlers.cancel(id))
 }

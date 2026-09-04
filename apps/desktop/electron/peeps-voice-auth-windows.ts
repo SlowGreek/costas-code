@@ -37,7 +37,7 @@ $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
 $certificate = $null
 $keyContainerPath = $null
 try {
-  $certificate = New-SelfSignedCertificate -Subject 'CN=localhost' -FriendlyName ('Catalyst Peeps localhost ' + [Guid]::NewGuid().ToString('N')) -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -KeyUsage DigitalSignature,KeyEncipherment -HashAlgorithm SHA256 -NotAfter ([DateTimeOffset]::Now.AddDays(397).DateTime) -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1','2.5.29.19={critical}{text}ca=false','2.5.29.37={text}1.3.6.1.5.5.7.3.1')
+  $certificate = New-SelfSignedCertificate -Subject 'CN=localhost' -FriendlyName ('Catalyst Peeps localhost ' + [Guid]::NewGuid().ToString('N')) -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -KeyUsage DigitalSignature,KeyEncipherment -HashAlgorithm SHA256 -NotAfter ([DateTimeOffset]::Now.AddDays(396).DateTime) -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1','2.5.29.19={critical}{text}ca=false','2.5.29.37={text}1.3.6.1.5.5.7.3.1')
   $rsa = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
   try {
     if ($rsa -is [Security.Cryptography.RSACng]) {

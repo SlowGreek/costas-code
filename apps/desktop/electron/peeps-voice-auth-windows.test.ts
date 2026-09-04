@@ -382,7 +382,7 @@ test('Windows provisioning and validation scripts are fixed CurrentUser-only non
   assert.match(WINDOWS_PROVISION_SCRIPT, /ca=false/i)
   assert.match(WINDOWS_PROVISION_SCRIPT, /KeyLength 2048/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /SHA256/)
-  assert.match(WINDOWS_PROVISION_SCRIPT, /AddDays\(397\)/)
+  assert.match(WINDOWS_PROVISION_SCRIPT, /AddDays\(396\)/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /Export-PfxCertificate/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /Remove-Item -Path .*Cert:\\CurrentUser\\My.*-DeleteKey/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /Test-Path.*Cert:\\CurrentUser\\My/s)

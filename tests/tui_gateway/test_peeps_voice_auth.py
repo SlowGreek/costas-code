@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import time
 import urllib.error
@@ -69,6 +70,13 @@ def _seal(started, token):
     }
 
 
+def _main_capability(secret=b"m" * 32, handle=None):
+    handle = handle or base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(secret).digest()).rstrip(b"=").decode()
+    proof = base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+    return handle, challenge, proof
+
+
 def test_config_pins_every_identity_value_and_allows_only_timeout():
     config = _config(timeout_seconds=12)
     assert config.client_id == PEEPS_CLIENT_ID
@@ -89,9 +97,15 @@ def test_pending_generation_is_bound_by_object_identity_and_supersedes_only_same
     store = PeepsVoiceAuthSessionStore()
     session, transport = object(), object()
     binding = _binding(session=session, transport=transport)
-    first = store.start(binding, _config())
-    other_transport = store.start(_binding(session=session, transport=object()), _config())
-    second = store.start(binding, _config())
+    handle, challenge, _proof = _main_capability()
+    first = store.start(binding, _config(), main_handle=handle, main_challenge=challenge)
+    other_transport = store.start(
+        _binding(session=session, transport=object()),
+        _config(),
+        main_handle=_main_capability(handle=base64.urlsafe_b64encode(b"i" * 32).rstrip(b"=").decode())[0],
+        main_challenge=challenge,
+    )
+    second = store.start(binding, _config(), main_handle=handle, main_challenge=challenge)
     assert first["auth_session_id"] != second["auth_session_id"]
     assert other_transport["auth_session_id"]
     assert store.cancel(_binding(session=session, transport=transport), first["auth_session_id"]) is False
@@ -101,7 +115,9 @@ def test_pending_generation_is_bound_by_object_identity_and_supersedes_only_same
 def test_envelope_decrypts_once_exchanges_immediately_and_ready_provider_is_one_use():
     store = PeepsVoiceAuthSessionStore()
     binding = _binding()
-    started = store.start(binding, _config())
+    handle, challenge, proof = _main_capability()
+    started = store.start(binding, _config(), main_handle=handle, main_challenge=challenge)
+    store.claim(binding, started["auth_session_id"], main_handle=handle, native_main_proof=proof)
     peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
     cognitive = _jwt({"aud": COGNITIVE_AUDIENCE, "exp": time.time() + 300})
     calls = []
@@ -123,12 +139,13 @@ def test_envelope_decrypts_once_exchanges_immediately_and_ready_provider_is_one_
         store.complete(binding, started["auth_session_id"], started["state"], envelope, _config(), opener=opener)
 
 
-def test_claim_allows_one_authenticated_companion_transport_but_preserves_original_retry_binding():
+def test_claim_requires_one_time_native_main_proof_and_preserves_original_retry_binding():
     store = PeepsVoiceAuthSessionStore()
     session, original_transport, companion_transport = object(), object(), object()
     original = _binding(session=session, transport=original_transport)
     companion = _binding(session=session, transport=companion_transport)
-    started = store.start(original, _config())
+    handle, challenge, proof = _main_capability()
+    started = store.start(original, _config(), main_handle=handle, main_challenge=challenge)
 
     for wrong in (
         _binding(profile="/tmp/other", session=session),
@@ -136,12 +153,21 @@ def test_claim_allows_one_authenticated_companion_transport_but_preserves_origin
         _binding(session=session, session_id="other"),
     ):
         with pytest.raises(PeepsAuthError):
-            store.claim(wrong, started["auth_session_id"])
+            store.claim(wrong, started["auth_session_id"], main_handle=handle, native_main_proof=proof)
 
-    claimed = store.claim(companion, started["auth_session_id"])
+    for invalid in (
+        {},
+        {"main_handle": handle, "native_main_proof": ""},
+        {"main_handle": handle, "native_main_proof": _main_capability(b"w" * 32)[2]},
+        {"main_handle": "x" * 43, "native_main_proof": proof},
+    ):
+        with pytest.raises(PeepsAuthError):
+            store.claim(companion, started["auth_session_id"], **invalid)
+
+    claimed = store.claim(companion, started["auth_session_id"], main_handle=handle, native_main_proof=proof)
     assert claimed == started
     with pytest.raises(PeepsAuthError):
-        store.claim(_binding(session=session), started["auth_session_id"])
+        store.claim(companion, started["auth_session_id"], main_handle=handle, native_main_proof=proof)
 
     peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
     cognitive = _jwt({"aud": COGNITIVE_AUDIENCE, "exp": time.time() + 300})
@@ -162,17 +188,22 @@ def test_claim_rejects_a_companion_authenticated_as_a_different_remote_user():
     store = PeepsVoiceAuthSessionStore()
     session = object()
     original = _binding(session=session, transport=_AuthenticatedTransport("user-a"))
-    started = store.start(original, _config())
+    handle, challenge, proof = _main_capability()
+    started = store.start(original, _config(), main_handle=handle, main_challenge=challenge)
 
     with pytest.raises(PeepsAuthError):
         store.claim(
             _binding(session=session, transport=_AuthenticatedTransport("user-b")),
             started["auth_session_id"],
+            main_handle=handle,
+            native_main_proof=proof,
         )
 
     assert store.claim(
         _binding(session=session, transport=_AuthenticatedTransport("user-a")),
         started["auth_session_id"],
+        main_handle=handle,
+        native_main_proof=proof,
     ) == started
 
 
@@ -180,7 +211,9 @@ def test_cross_transport_session_profile_and_rebound_session_cannot_complete_or_
     store = PeepsVoiceAuthSessionStore()
     session, transport = object(), object()
     binding = _binding(session=session, transport=transport)
-    started = store.start(binding, _config())
+    handle, challenge, proof = _main_capability()
+    started = store.start(binding, _config(), main_handle=handle, main_challenge=challenge)
+    store.claim(binding, started["auth_session_id"], main_handle=handle, native_main_proof=proof)
     token = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
     for wrong in (
         _binding(profile="/tmp/other", session=session, transport=transport),

@@ -1,6 +1,7 @@
 import { spawnSync as nodeSpawnSync, type SpawnSyncReturns } from 'node:child_process'
 import {
   createCipheriv,
+  createHash,
   createPrivateKey,
   createPublicKey,
   diffieHellman,
@@ -24,6 +25,8 @@ const PEEPS_AUTHORITY = 'https://login.microsoftonline.com/organizations'
 const PEEPS_CLIENT_ID = 'b6ca153a-37a1-4f59-ad95-c4e30313c64b'
 const PEEPS_SCOPE = 'https://peeps.asgprototype.com/api/access-as-user'
 const INFO = Buffer.from('hermes-peeps-voice-auth-v1')
+const MAIN_CAPABILITY_TTL_MS = 300_000
+const MAX_MAIN_CAPABILITIES = 32
 
 export interface PeepsEnvelope {
   version: 1
@@ -69,8 +72,19 @@ export interface PeepsVoiceAuthDeps {
 export interface PeepsVoiceAuthCompletionRequest {
   authSessionId: string
   connectionId: null | string
+  handle: string
   profile: string
   runtimeSessionId: string
+}
+
+export interface PeepsVoiceAuthCancellationRequest {
+  authSessionId?: string
+  handle: string
+}
+
+interface MainCapability {
+  expiresAt: number
+  secret: Buffer
 }
 
 export const authPage = () =>
@@ -235,8 +249,38 @@ export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps)
 
 export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
   const pending = new Map<string, Pending>()
+  const capabilities = new Map<string, MainCapability>()
   const createServer = deps.createServer ?? https.createServer
   let activeListenerId: string | null = null
+
+  const nowMs = () => (deps.now?.() ?? new Date()).getTime()
+  const destroyCapability = (handle: string) => {
+    const capability = capabilities.get(handle)
+    capabilities.delete(handle)
+    capability?.secret.fill(0)
+  }
+  const pruneCapabilities = () => {
+    const now = nowMs()
+    for (const [handle, capability] of capabilities) {
+      if (capability.expiresAt <= now) {
+        destroyCapability(handle)
+      }
+    }
+  }
+  const prepare = () => {
+    pruneCapabilities()
+    while (capabilities.size >= MAX_MAIN_CAPABILITIES) {
+      const oldest = capabilities.keys().next().value as string | undefined
+      if (!oldest) {
+        break
+      }
+      destroyCapability(oldest)
+    }
+    const secret = randomBytes(32)
+    const handle = randomBytes(32).toString('base64url')
+    capabilities.set(handle, { expiresAt: nowMs() + MAIN_CAPABILITY_TTL_MS, secret })
+    return { challenge: createHash('sha256').update(secret).digest('base64url'), handle }
+  }
 
   const close = (id: string, result: PeepsEnvelope | null) => {
     const entry = pending.get(id)
@@ -389,13 +433,22 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
   }
 
   const complete = async (input: PeepsVoiceAuthCompletionRequest): Promise<boolean> => {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      Object.keys(input).sort().join(',') !== 'authSessionId,connectionId,handle,profile,runtimeSessionId'
+    ) {
+      throw new Error('Peeps voice authorization request is invalid')
+    }
     const authSessionId = typeof input?.authSessionId === 'string' ? input.authSessionId.trim() : ''
     const connectionId = typeof input?.connectionId === 'string' ? input.connectionId.trim() : null
+    const handle = typeof input?.handle === 'string' ? input.handle : ''
     const profile = typeof input?.profile === 'string' ? input.profile.trim() : ''
     const runtimeSessionId = typeof input?.runtimeSessionId === 'string' ? input.runtimeSessionId.trim() : ''
 
     if (
       !deps.connectGateway ||
+      !/^[A-Za-z0-9_-]{43}$/.test(handle) ||
       !authSessionId ||
       authSessionId.length > 256 ||
       (connectionId !== null && (!connectionId || connectionId.length > 256)) ||
@@ -407,11 +460,20 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       throw new Error('Peeps voice authorization request is invalid')
     }
 
-    const gateway = await deps.connectGateway({ connectionId, profile })
+    pruneCapabilities()
+    const capability = capabilities.get(handle)
+    if (!capability) {
+      throw new Error('Peeps voice authorization request is invalid')
+    }
+    capabilities.delete(handle)
+    let gateway: Awaited<ReturnType<NonNullable<PeepsVoiceAuthDeps['connectGateway']>>> | null = null
 
     try {
+      gateway = await deps.connectGateway({ connectionId, profile })
       const claimed = (await gateway.request('voice.realtime.peeps.claim', {
         auth_session_id: authSessionId,
+        native_main_proof: capability.secret.toString('base64url'),
+        peeps_main_handle: handle,
         session_id: runtimeSessionId
       })) as Record<string, unknown>
       const claimedAuthSessionId = typeof claimed?.auth_session_id === 'string' ? claimed.auth_session_id : ''
@@ -458,18 +520,25 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
 
       return true
     } finally {
+      capability.secret.fill(0)
       close(authSessionId, null)
-      gateway.close()
+      gateway?.close()
     }
   }
 
   return {
-    cancel: (id: string) => {
-      close(id, null)
+    cancel: (input: string | PeepsVoiceAuthCancellationRequest) => {
+      const handle = typeof input === 'string' ? input : String(input?.handle || '')
+      const authSessionId = typeof input === 'string' ? input : String(input?.authSessionId || '')
+      destroyCapability(handle)
+      if (authSessionId) {
+        close(authSessionId, null)
+      }
 
       return true
     },
     complete,
+    prepare,
     start,
     wait
   }
@@ -486,5 +555,6 @@ export function registerPeepsVoiceAuthIpc(connectGateway: NonNullable<PeepsVoice
   })
 
   ipcMain.handle('hermes:peeps-voice-auth:complete', (_event, input) => handlers.complete(input))
-  ipcMain.handle('hermes:peeps-voice-auth:cancel', (_event, id) => handlers.cancel(id))
+  ipcMain.handle('hermes:peeps-voice-auth:prepare', () => handlers.prepare())
+  ipcMain.handle('hermes:peeps-voice-auth:cancel', (_event, input) => handlers.cancel(input))
 }

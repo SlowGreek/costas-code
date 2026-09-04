@@ -924,22 +924,58 @@ export async function startRealtimeVoiceConnection(
 
   throwIfCancelled()
 
-  let token = (await options.request('voice.realtime.token', {
-    session_id: options.runtimeSessionId
-  })) as RealtimeTokenResponse
+  const requestToken = async (extra: Record<string, unknown> = {}) => {
+    const bridge = window.hermesDesktop?.peepsVoiceAuth
+    const prepared = bridge ? await bridge.prepare() : null
+    if (
+      prepared &&
+      (!/^[A-Za-z0-9_-]{43}$/.test(prepared.handle) ||
+        !/^[A-Za-z0-9_-]{43}$/.test(prepared.challenge))
+    ) {
+      await bridge?.cancel({ handle: prepared.handle })
+      throw new Error('Peeps voice authorization preparation is invalid')
+    }
+    try {
+      const token = (await options.request('voice.realtime.token', {
+        session_id: options.runtimeSessionId,
+        ...(prepared
+          ? {
+              peeps_main_handle: prepared.handle,
+              peeps_main_challenge: prepared.challenge
+            }
+          : {}),
+        ...extra
+      })) as RealtimeTokenResponse
+      return { bridge, prepared, token }
+    } catch (error) {
+      if (bridge && prepared) {
+        await bridge.cancel({ handle: prepared.handle })
+      }
+      throw error
+    }
+  }
+
+  let requested = await requestToken()
+  let token = requested.token
 
   if (token.status === 'interaction_required') {
+    if (!requested.prepared) {
+      throw new Error('Peeps voice authorization is unavailable in this client')
+    }
     await completeRealtimePeepsAuth(
       options.runtimeSessionId,
       token as RealtimeTokenResponse & PeepsInteraction,
+      requested.prepared,
       { connectionId: options.connectionId ?? null, profile: options.profile || 'default' },
       { signal: options.signal }
     )
     throwIfCancelled()
-    token = (await options.request('voice.realtime.token', {
-      session_id: options.runtimeSessionId,
-      peeps_auth_session_id: token.auth_session_id
-    })) as RealtimeTokenResponse
+    requested = await requestToken({ peeps_auth_session_id: token.auth_session_id })
+    token = requested.token
+  }
+
+  if (requested.bridge && requested.prepared) {
+    await requested.bridge.cancel({ handle: requested.prepared.handle })
   }
 
   if (!token?.client_secret) {

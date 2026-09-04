@@ -20,14 +20,8 @@ def _realtime_cfg(cfg: dict | None) -> dict:
 
 def _peeps_interaction_payload(config, started: dict) -> dict:
     return {
-        "authority": config.authority,
         "auth_session_id": started["auth_session_id"],
-        "client_id": config.client_id,
         "provider": "peeps",
-        "public_key": started["public_key"],
-        "redirect_uri": config.redirect_uri,
-        "scope": config.scope,
-        "state": started["state"],
         "status": "interaction_required",
         "timeout_seconds": config.timeout_seconds,
     }
@@ -168,7 +162,10 @@ def _(rid, params: dict) -> dict:
         if config is None or binding is None:
             return _err(rid, 4613, "Peeps voice authorization failed")
         claimed = _peeps_state()["sessions"].claim(
-            binding, str(params.get("auth_session_id") or "")
+            binding,
+            str(params.get("auth_session_id") or ""),
+            main_handle=str(params.get("peeps_main_handle") or ""),
+            native_main_proof=str(params.get("native_main_proof") or ""),
         )
         return _ok(rid, {**claimed, "timeout_seconds": config.timeout_seconds})
     except Exception:
@@ -271,7 +268,12 @@ def _(rid, params: dict) -> dict:
 
         auth_session_id = str(params.get("peeps_auth_session_id") or "")
         if not auth_session_id:
-            started = _peeps_state()["sessions"].start(binding, peeps_config)
+            started = _peeps_state()["sessions"].start(
+                binding,
+                peeps_config,
+                main_handle=str(params.get("peeps_main_handle") or ""),
+                main_challenge=str(params.get("peeps_main_challenge") or ""),
+            )
             return _ok(rid, _peeps_interaction_payload(peeps_config, started))
 
         provider = _peeps_state()["sessions"].consume_ready(binding, auth_session_id)

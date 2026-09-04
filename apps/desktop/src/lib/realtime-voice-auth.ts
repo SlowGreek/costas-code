@@ -1,12 +1,11 @@
 export interface PeepsInteraction {
   auth_session_id: string
-  authority: string
-  client_id: string
-  public_key: string
-  redirect_uri: string
-  scope: string
-  state: string
   timeout_seconds: number
+}
+
+export interface PeepsMainPreparation {
+  challenge: string
+  handle: string
 }
 
 export interface PeepsVoiceAuthRoute {
@@ -15,10 +14,12 @@ export interface PeepsVoiceAuthRoute {
 }
 
 interface PeepsVoiceAuthBridge {
-  cancel: (id: string) => Promise<boolean>
+  prepare: () => Promise<PeepsMainPreparation>
+  cancel: (request: { authSessionId?: string; handle: string }) => Promise<boolean>
   complete: (request: {
     authSessionId: string
     connectionId: null | string
+    handle: string
     profile: string
     runtimeSessionId: string
   }) => Promise<boolean>
@@ -42,6 +43,7 @@ export function createRealtimePeepsAuthCoordinator(
     async complete(
       runtimeSessionId: string,
       interaction: PeepsInteraction,
+      prepared: PeepsMainPreparation,
       route: PeepsVoiceAuthRoute,
       options: CompleteRealtimePeepsAuthOptions = {}
     ): Promise<void> {
@@ -69,7 +71,9 @@ export function createRealtimePeepsAuthCoordinator(
         }
         cancelled = true
         rejectCancelled?.(cancellationError())
-        await Promise.allSettled([bridge.cancel(interaction.auth_session_id)])
+        await Promise.allSettled([
+          bridge.cancel({ authSessionId: interaction.auth_session_id, handle: prepared.handle })
+        ])
       }
       const onAbort = () => {
         void cancelCurrent()
@@ -87,6 +91,7 @@ export function createRealtimePeepsAuthCoordinator(
           bridge.complete({
             authSessionId: interaction.auth_session_id,
             connectionId: route.connectionId,
+            handle: prepared.handle,
             profile: route.profile,
             runtimeSessionId
           }),
@@ -118,8 +123,9 @@ const realtimePeepsAuthCoordinator = createRealtimePeepsAuthCoordinator()
 export async function completeRealtimePeepsAuth(
   runtimeSessionId: string,
   interaction: PeepsInteraction,
+  prepared: PeepsMainPreparation,
   route: PeepsVoiceAuthRoute,
   options?: CompleteRealtimePeepsAuthOptions
 ): Promise<void> {
-  await realtimePeepsAuthCoordinator.complete(runtimeSessionId, interaction, route, options)
+  await realtimePeepsAuthCoordinator.complete(runtimeSessionId, interaction, prepared, route, options)
 }

@@ -4,32 +4,28 @@ import { completeRealtimePeepsAuth, createRealtimePeepsAuthCoordinator } from '.
 
 const interaction = {
   auth_session_id: 'auth',
-  authority: 'renderer-authority',
-  client_id: 'renderer-client',
-  public_key: 'renderer-key',
-  redirect_uri: 'https://renderer.invalid/',
-  scope: 'renderer-scope',
-  state: 'renderer-state',
   timeout_seconds: 1
 }
+const prepared = { challenge: 'challenge', handle: 'handle' }
 const route = { connectionId: 'remote-1', profile: 'work' }
 
 describe('completeRealtimePeepsAuth', () => {
   it('gives Electron only route and session identifiers, never OAuth values or an envelope', async () => {
     const complete = vi.fn().mockResolvedValue(true)
     vi.stubGlobal('window', {
-      hermesDesktop: { peepsVoiceAuth: { complete, cancel: vi.fn().mockResolvedValue(true) } }
+      hermesDesktop: { peepsVoiceAuth: { prepare: vi.fn(), complete, cancel: vi.fn().mockResolvedValue(true) } }
     })
 
-    await completeRealtimePeepsAuth('runtime', interaction, route)
+    await completeRealtimePeepsAuth('runtime', interaction, prepared, route)
 
     expect(complete).toHaveBeenCalledWith({
       authSessionId: 'auth',
       connectionId: 'remote-1',
+      handle: 'handle',
       profile: 'work',
       runtimeSessionId: 'runtime'
     })
-    expect(JSON.stringify(complete.mock.calls)).not.toMatch(/renderer-key|renderer-client|renderer-scope|envelope/)
+    expect(JSON.stringify(complete.mock.calls)).not.toMatch(/challenge|secret|proof|envelope/)
   })
 
   it('aborts an in-flight completion without exposing a wait result', async () => {
@@ -42,13 +38,13 @@ describe('completeRealtimePeepsAuth', () => {
           release = () => resolve(true)
         })
     )
-    vi.stubGlobal('window', { hermesDesktop: { peepsVoiceAuth: { complete, cancel } } })
+    vi.stubGlobal('window', { hermesDesktop: { peepsVoiceAuth: { prepare: vi.fn(), complete, cancel } } })
 
-    const pending = completeRealtimePeepsAuth('runtime', interaction, route, { signal: controller.signal })
+    const pending = completeRealtimePeepsAuth('runtime', interaction, prepared, route, { signal: controller.signal })
     controller.abort()
 
     await expect(pending).rejects.toThrow(/cancelled/)
-    expect(cancel).toHaveBeenCalledWith('auth')
+    expect(cancel).toHaveBeenCalledWith({ authSessionId: 'auth', handle: 'handle' })
     release?.()
   })
 })
@@ -59,6 +55,7 @@ describe('createRealtimePeepsAuthCoordinator', () => {
     let releaseFirst: (() => void) | undefined
     const bridge = {
       cancel,
+      prepare: vi.fn(),
       complete: vi
         .fn()
         .mockImplementationOnce(
@@ -71,13 +68,13 @@ describe('createRealtimePeepsAuthCoordinator', () => {
     }
     const coordinator = createRealtimePeepsAuthCoordinator(() => bridge)
 
-    const first = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-1' }, route)
+    const first = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-1' }, prepared, route)
     await vi.waitFor(() => expect(bridge.complete).toHaveBeenCalledTimes(1))
-    const second = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-2' }, route)
+    const second = coordinator.complete('runtime', { ...interaction, auth_session_id: 'auth-2' }, prepared, route)
     releaseFirst?.()
 
     await expect(first).rejects.toThrow(/cancelled/)
     await expect(second).resolves.toBeUndefined()
-    expect(cancel).toHaveBeenCalledWith('auth-1')
+    expect(cancel).toHaveBeenCalledWith({ authSessionId: 'auth-1', handle: 'handle' })
   })
 })

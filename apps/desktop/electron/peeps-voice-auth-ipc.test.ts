@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 
@@ -255,13 +255,75 @@ const flow: PeepsVoiceAuthFlow = {
   state: 'state-123'
 }
 
-test('preload exposes only complete and cancel, never start wait or an envelope result', () => {
+test('preload exposes only prepare complete and cancel, never start wait proof or an envelope result', () => {
   const preload = readFileSync(new URL('./preload.ts', import.meta.url), 'utf8')
   const bridge = preload.slice(preload.indexOf('peepsVoiceAuth:'), preload.indexOf('openPreviewInBrowser:'))
 
+  assert.match(bridge, /prepare:/)
   assert.match(bridge, /complete:/)
   assert.match(bridge, /cancel:/)
-  assert.doesNotMatch(bridge, /start:|wait:|ephemeral_public_key|ciphertext|envelope/)
+  assert.doesNotMatch(bridge, /start:|wait:|native_main_proof|secret|ephemeral_public_key|ciphertext|envelope/)
+})
+
+test('prepare returns only an opaque handle and its challenge', () => {
+  const prepared = createHarness().handlers.prepare()
+
+  assert.deepEqual(Object.keys(prepared).sort(), ['challenge', 'handle'])
+  assert.match(prepared.handle, /^[A-Za-z0-9_-]{43}$/)
+  assert.match(prepared.challenge, /^[A-Za-z0-9_-]{43}$/)
+  assert.doesNotMatch(JSON.stringify(prepared), /secret|proof/i)
+})
+
+test('capability map clears on cancel expiry failure and bounded-map eviction', async () => {
+  let now = new Date('2026-09-05T00:00:00.000Z')
+  const connectGateway = vi.fn(async () => ({
+    close: vi.fn(),
+    request: vi.fn(async () => {
+      throw new Error('claim failed')
+    })
+  }))
+  const harness = createHarness({ connectGateway, now: () => now })
+  const input = (handle: string) => ({
+    authSessionId: 'auth',
+    connectionId: null,
+    handle,
+    profile: 'default',
+    runtimeSessionId: 'runtime'
+  })
+
+  const cancelled = harness.handlers.prepare()
+  assert.equal(harness.handlers.cancel({ authSessionId: 'auth', handle: cancelled.handle }), true)
+  await assert.rejects(() => harness.handlers.complete(input(cancelled.handle)), /invalid/)
+
+  const expired = harness.handlers.prepare()
+  now = new Date(now.getTime() + 300_001)
+  await assert.rejects(() => harness.handlers.complete(input(expired.handle)), /invalid/)
+
+  const failed = harness.handlers.prepare()
+  await assert.rejects(() => harness.handlers.complete(input(failed.handle)), /claim failed/)
+  await assert.rejects(() => harness.handlers.complete(input(failed.handle)), /invalid/)
+
+  const entries = Array.from({ length: 33 }, () => harness.handlers.prepare())
+  await assert.rejects(() => harness.handlers.complete(input(entries[0].handle)), /invalid/)
+  assert.equal(connectGateway.mock.calls.length, 1)
+})
+
+test('complete rejects renderer-provided key identity and envelope fields', async () => {
+  const harness = createHarness()
+  const prepared = harness.handlers.prepare()
+  await assert.rejects(
+    () =>
+      harness.handlers.complete({
+        authSessionId: 'auth',
+        connectionId: null,
+        envelope: { ciphertext: 'renderer' },
+        handle: prepared.handle,
+        profile: 'default',
+        publicKey: 'renderer-key',
+        runtimeSessionId: 'runtime'
+      } as never),
+    /invalid/
+  )
 })
 
 test('auth page uses local-only scripts and a restrictive CSP', () => {
@@ -308,16 +370,15 @@ test('start serves only the exact auth page paths and relays a valid callback on
   assert.equal(replayRes.status, 404)
 })
 
-test('complete resolves the trusted backend flow and never accepts renderer OAuth values or returns an envelope', async () => {
+test('complete proves the trusted main capability and never accepts renderer OAuth values or an envelope', async () => {
+  let preparedChallenge = ''
   const requestGateway = vi.fn(async (method: string, _params: Record<string, unknown>) => {
     if (method === 'voice.realtime.peeps.claim') {
+      const proof = String(_params.native_main_proof || '')
+      assert.equal(createHash('sha256').update(Buffer.from(proof, 'base64url')).digest('base64url'), preparedChallenge)
       return {
         auth_session_id: 'auth-trusted',
-        authority: 'https://attacker.invalid/common',
-        client_id: 'attacker-client',
         public_key: flow.publicKey,
-        redirect_uri: 'https://attacker.invalid/callback',
-        scope: 'attacker-scope',
         state: 'trusted-state',
         timeout_seconds: 5
       }
@@ -328,16 +389,15 @@ test('complete resolves the trusted backend flow and never accepts renderer OAut
   const closeGateway = vi.fn()
   const connectGateway = vi.fn(async () => ({ close: closeGateway, request: requestGateway }))
   const harness = createHarness({ connectGateway })
+  const prepared = harness.handlers.prepare()
+  preparedChallenge = prepared.challenge
   const completion = harness.handlers.complete({
     authSessionId: 'auth-trusted',
-    authority: 'https://renderer-attacker.invalid/common',
-    clientId: 'renderer-attacker',
     connectionId: 'remote-1',
+    handle: prepared.handle,
     profile: 'work',
-    publicKey: 'renderer-key',
-    runtimeSessionId: 'runtime-1',
-    scope: 'renderer-scope'
-  } as never)
+    runtimeSessionId: 'runtime-1'
+  })
 
   await vi.waitFor(() => assert.equal(harness.servers.length, 1))
 
@@ -346,7 +406,6 @@ test('complete resolves the trusted backend flow and never accepts renderer OAut
   assert.match(htmlRes.body, /b6ca153a-37a1-4f59-ad95-c4e30313c64b/)
   assert.match(htmlRes.body, /https:\/\/login\.microsoftonline\.com\/organizations/)
   assert.match(htmlRes.body, /https:\/\/peeps\.asgprototype\.com\/api\/access-as-user/)
-  assert.doesNotMatch(htmlRes.body, /renderer-attacker|attacker\.invalid|attacker-scope/)
 
   const callbackRes = new FakeResponse()
   const callbackReq = new FakeRequest('POST', '/', { origin: 'https://localhost:8080' })
@@ -357,13 +416,31 @@ test('complete resolves the trusted backend flow and never accepts renderer OAut
   assert.equal(await completion, true)
   assert.equal(vi.mocked(harness.openExternal).mock.calls[0]?.[0], 'https://localhost:8080/')
   assert.deepEqual(connectGateway.mock.calls[0], [{ connectionId: 'remote-1', profile: 'work' }])
-  assert.deepEqual(requestGateway.mock.calls[0], [
-    'voice.realtime.peeps.claim',
-    { auth_session_id: 'auth-trusted', session_id: 'runtime-1' }
+  const claimParams = requestGateway.mock.calls[0]?.[1] as Record<string, unknown>
+  assert.equal(requestGateway.mock.calls[0]?.[0], 'voice.realtime.peeps.claim')
+  assert.deepEqual(Object.keys(claimParams).sort(), [
+    'auth_session_id',
+    'native_main_proof',
+    'peeps_main_handle',
+    'session_id'
   ])
+  assert.equal(claimParams.peeps_main_handle, prepared.handle)
+  assert.match(String(claimParams.native_main_proof), /^[A-Za-z0-9_-]{43}$/)
   assert.equal(requestGateway.mock.calls[1]?.[0], 'voice.realtime.peeps.complete')
   assert.equal(typeof (requestGateway.mock.calls[1]?.[1] as any).envelope.ciphertext, 'string')
   assert.equal(closeGateway.mock.calls.length, 1)
+
+  await assert.rejects(
+    () =>
+      harness.handlers.complete({
+        authSessionId: 'auth-trusted',
+        connectionId: 'remote-1',
+        handle: prepared.handle,
+        profile: 'work',
+        runtimeSessionId: 'runtime-1'
+      }),
+    /invalid/
+  )
 })
 
 test('start rejects non-localhost loopback aliases when the page is authorized only for localhost', async () => {

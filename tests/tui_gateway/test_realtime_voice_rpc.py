@@ -5,6 +5,8 @@ from tools import tool_backend_helpers, web_tools
 
 import threading
 import copy
+import base64
+import hashlib
 from pathlib import Path
 
 
@@ -48,24 +50,52 @@ def test_peeps_public_start_is_removed_and_generation_is_transport_session_bound
         lambda *_: lambda: (_ for _ in ()).throw(CommandTokenError("no")),
     )
     try:
-        started = _dispatch_and_wait("voice.realtime.token", {"session_id": runtime_id}, transport)["result"]
+        secret = b"m" * 32
+        proof = base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(secret).digest()).rstrip(b"=").decode()
+        handle = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
+        started = _dispatch_and_wait(
+            "voice.realtime.token",
+            {"session_id": runtime_id, "peeps_main_handle": handle, "peeps_main_challenge": challenge},
+            transport,
+        )["result"]
         assert "voice.realtime.peeps.start" not in server._methods
         assert "voice.realtime.peeps.start" not in server._LONG_HANDLERS
-        assert set(started) >= {"auth_session_id", "state", "public_key"}
+        assert set(started) == {"auth_session_id", "provider", "status", "timeout_seconds"}
 
         attacker = _BoundTransport()
+        for unproved_transport in (attacker, transport):
+            missing_proof = _dispatch_and_wait(
+                "voice.realtime.peeps.claim",
+                {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+                unproved_transport,
+            )
+            assert missing_proof["error"]["code"] == 4613
+
         claimed = _dispatch_and_wait(
             "voice.realtime.peeps.claim",
-            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            {
+                "session_id": runtime_id,
+                "auth_session_id": started["auth_session_id"],
+                "peeps_main_handle": handle,
+                "native_main_proof": proof,
+            },
             attacker,
         )
         assert "result" in claimed, claimed
-        assert claimed["result"] == {
-            "auth_session_id": started["auth_session_id"],
-            "state": started["state"],
-            "public_key": started["public_key"],
-            "timeout_seconds": 180,
-        }
+        assert set(claimed["result"]) == {"auth_session_id", "state", "public_key", "timeout_seconds"}
+
+        replay = _dispatch_and_wait(
+            "voice.realtime.peeps.claim",
+            {
+                "session_id": runtime_id,
+                "auth_session_id": started["auth_session_id"],
+                "peeps_main_handle": handle,
+                "native_main_proof": proof,
+            },
+            transport,
+        )
+        assert replay["error"]["code"] == 4613
 
         cross_transport = _dispatch_and_wait(
             "voice.realtime.peeps.cancel",

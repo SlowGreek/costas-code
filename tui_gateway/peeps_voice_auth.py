@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import secrets
@@ -33,6 +35,7 @@ _EXCHANGE_TIMEOUT_SECONDS = 15
 _MAX_PENDING = 32
 _MAX_RESPONSE_BYTES = 128 * 1024
 _MAX_ENVELOPE_FIELD = 16 * 1024
+_NATIVE_MAIN_VALUE_BYTES = 32
 
 
 class PeepsAuthError(RuntimeError):
@@ -55,6 +58,15 @@ def _b64url_decode(value: str, *, code: str) -> bytes:
 
 def _b64url_encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _native_main_value(value: str, *, code: str) -> bytes:
+    if not isinstance(value, str) or len(value) != 43:
+        raise PeepsAuthError("Peeps native-main capability is invalid", code=code)
+    decoded = _b64url_decode(value, code=code)
+    if len(decoded) != _NATIVE_MAIN_VALUE_BYTES or _b64url_encode(decoded) != value:
+        raise PeepsAuthError("Peeps native-main capability is invalid", code=code)
+    return decoded
 
 
 def _decode_jwt_payload(token: str) -> dict[str, Any]:
@@ -177,6 +189,8 @@ class _Pending:
     expires: float
     state: str
     private_key: X25519PrivateKey | None
+    main_handle: str
+    main_challenge: bytes | None
     completion_transport: object | None = None
 
 
@@ -293,8 +307,17 @@ class PeepsVoiceAuthSessionStore:
                 if isinstance(removed, _Pending):
                     removed.private_key = None
 
-    def start(self, binding: PeepsAuthBinding, config: PeepsVoiceAuthConfig) -> dict[str, Any]:
+    def start(
+        self,
+        binding: PeepsAuthBinding,
+        config: PeepsVoiceAuthConfig,
+        *,
+        main_handle: str,
+        main_challenge: str,
+    ) -> dict[str, Any]:
         now = self._monotonic()
+        _native_main_value(main_handle, code="invalid_main_handle")
+        challenge = _native_main_value(main_challenge, code="invalid_main_challenge")
         private = X25519PrivateKey.generate()
         auth_id, state = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
         with self._lock:
@@ -308,21 +331,40 @@ class PeepsVoiceAuthSessionStore:
                     self._ready.pop(key)
             if len(self._pending) >= self._max_pending:
                 raise PeepsAuthError("Too many Peeps authorization sessions are pending", code="too_many_pending_sessions")
-            self._pending[auth_id] = _Pending(binding, now + config.timeout_seconds, state, private)
+            self._pending[auth_id] = _Pending(
+                binding,
+                now + config.timeout_seconds,
+                state,
+                private,
+                main_handle,
+                challenge,
+            )
         public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         return {"auth_session_id": auth_id, "state": state, "public_key": _b64url_encode(public)}
 
-    def claim(self, binding: PeepsAuthBinding, auth_id: str) -> dict[str, Any]:
+    def claim(
+        self,
+        binding: PeepsAuthBinding,
+        auth_id: str,
+        *,
+        main_handle: str = "",
+        native_main_proof: str = "",
+    ) -> dict[str, Any]:
+        proof = _native_main_value(native_main_proof, code="invalid_main_proof")
         with self._lock:
             self._prune_locked(self._monotonic())
             pending = self._pending.get(auth_id)
             if (
                 pending is None
                 or pending.private_key is None
+                or pending.main_challenge is None
                 or pending.completion_transport is not None
                 or not _same_runtime_binding(pending.binding, binding)
+                or not hmac.compare_digest(pending.main_handle, main_handle)
+                or not hmac.compare_digest(hashlib.sha256(proof).digest(), pending.main_challenge)
             ):
                 raise PeepsAuthError("Peeps authorization session is invalid or expired", code="invalid_auth_session")
+            pending.main_challenge = None
             pending.completion_transport = binding.transport
             public = pending.private_key.public_key().public_bytes(
                 serialization.Encoding.Raw, serialization.PublicFormat.Raw

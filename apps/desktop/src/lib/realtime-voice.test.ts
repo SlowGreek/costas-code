@@ -2191,12 +2191,6 @@ describe('startRealtimeVoiceConnection', () => {
       .mockResolvedValueOnce({
         status: 'interaction_required',
         auth_session_id: 'auth-session',
-        authority: 'https://login.microsoftonline.com/organizations',
-        client_id: 'client-id',
-        public_key: 'backend-public-key',
-        redirect_uri: 'https://localhost:8080/',
-        scope: 'https://peeps.asgprototype.com/api/access-as-user',
-        state: 'state-123',
         timeout_seconds: 1
       })
       .mockResolvedValueOnce({
@@ -2206,9 +2200,13 @@ describe('startRealtimeVoiceConnection', () => {
       })
 
     const complete = vi.fn().mockResolvedValue(true)
+    const prepare = vi
+      .fn()
+      .mockResolvedValueOnce({ handle: 'a'.repeat(43), challenge: 'b'.repeat(43) })
+      .mockResolvedValueOnce({ handle: 'c'.repeat(43), challenge: 'd'.repeat(43) })
 
     vi.stubGlobal('window', {
-      hermesDesktop: { peepsVoiceAuth: { complete, cancel: vi.fn().mockResolvedValue(true) } }
+      hermesDesktop: { peepsVoiceAuth: { prepare, complete, cancel: vi.fn().mockResolvedValue(true) } }
     })
     const channel = { addEventListener: vi.fn(), close: vi.fn(), send: vi.fn() }
 
@@ -2237,6 +2235,7 @@ describe('startRealtimeVoiceConnection', () => {
     expect(complete).toHaveBeenCalledWith({
       authSessionId: 'auth-session',
       connectionId: null,
+      handle: 'a'.repeat(43),
       profile: 'default',
       runtimeSessionId: 'runtime-session'
     })
@@ -2246,7 +2245,14 @@ describe('startRealtimeVoiceConnection', () => {
     ])
     expect(request.mock.calls[1]?.[1]).toEqual({
       session_id: 'runtime-session',
-      peeps_auth_session_id: 'auth-session'
+      peeps_auth_session_id: 'auth-session',
+      peeps_main_handle: 'c'.repeat(43),
+      peeps_main_challenge: 'd'.repeat(43)
+    })
+    expect(request.mock.calls[0]?.[1]).toEqual({
+      session_id: 'runtime-session',
+      peeps_main_handle: 'a'.repeat(43),
+      peeps_main_challenge: 'b'.repeat(43)
     })
     expect(JSON.stringify(request.mock.calls)).not.toContain('peeps-token')
     expect(JSON.stringify(request.mock.calls)).not.toContain('peeps_token')
@@ -2262,12 +2268,6 @@ describe('startRealtimeVoiceConnection', () => {
     const request = vi.fn().mockResolvedValue({
       status: 'interaction_required',
       auth_session_id: 'auth-session',
-      authority: 'https://login.microsoftonline.com/organizations',
-      client_id: 'client-id',
-      public_key: 'backend-public-key',
-      redirect_uri: 'https://localhost:8080/',
-      scope: 'https://peeps.asgprototype.com/api/access-as-user',
-      state: 'state-123',
       timeout_seconds: 1
     })
 
@@ -2275,6 +2275,7 @@ describe('startRealtimeVoiceConnection', () => {
       hermesDesktop: {
         peepsVoiceAuth: {
           cancel,
+          prepare: vi.fn().mockResolvedValue({ handle: 'a'.repeat(43), challenge: 'b'.repeat(43) }),
           complete: vi.fn(() => new Promise<boolean>(resolve => {
             releaseCompletion = () => resolve(true)
           }))
@@ -2293,7 +2294,7 @@ describe('startRealtimeVoiceConnection', () => {
     releaseCompletion?.()
 
     await expect(pending).rejects.toThrow(/cancelled/i)
-    expect(cancel).toHaveBeenCalledWith('auth-session')
+    expect(cancel).toHaveBeenCalledWith({ authSessionId: 'auth-session', handle: 'a'.repeat(43) })
     expect(getUserMedia).not.toHaveBeenCalled()
     expect(request.mock.calls.map(([method]) => method)).toEqual(['voice.realtime.token'])
   })

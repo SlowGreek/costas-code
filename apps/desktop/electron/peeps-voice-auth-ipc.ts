@@ -14,7 +14,12 @@ import fs from 'node:fs'
 import https from 'node:https'
 import path from 'node:path'
 
-import { app, ipcMain, shell } from 'electron'
+import { app, ipcMain, safeStorage, shell } from 'electron'
+
+import {
+  loadOrCreateWindowsPeepsVoiceAuthTlsMaterial,
+  type WindowsPeepsVoiceAuthTlsMaterial
+} from './peeps-voice-auth-windows'
 
 const AUTH_PAGE_JS_PATH = '/peeps-voice-auth-page.js'
 const MAX_AUTH_BODY_BYTES = 16_384
@@ -65,6 +70,7 @@ export interface PeepsVoiceAuthDeps {
   currentUid?: () => null | number
   createServer?: typeof https.createServer
   lstatSync?: (filePath: string) => fs.Stats
+  loadWindowsTlsMaterial?: () => WindowsPeepsVoiceAuthTlsMaterial
   now?: () => Date
   openExternal: (url: string) => Promise<void>
   platform?: NodeJS.Platform
@@ -73,6 +79,14 @@ export interface PeepsVoiceAuthDeps {
   tlsPaths: () => { certificatePath?: string; keyPath?: string }
   userDataPath: () => string
 }
+
+interface DarwinPeepsVoiceAuthTlsMaterial {
+  certificatePem: Buffer
+  keyPem: Buffer
+  kind: 'pem'
+}
+
+type PeepsVoiceAuthTlsMaterial = DarwinPeepsVoiceAuthTlsMaterial | WindowsPeepsVoiceAuthTlsMaterial
 
 export interface PeepsVoiceAuthCompletionRequest {
   authSessionId: string
@@ -180,8 +194,16 @@ function statOwnedPath(
   }
 }
 
-export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps) {
+export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps): PeepsVoiceAuthTlsMaterial {
   const platform = deps.platform ?? process.platform
+
+  if (platform === 'win32') {
+    if (deps.loadWindowsTlsMaterial) {
+      return deps.loadWindowsTlsMaterial()
+    }
+
+    throw new Error('Peeps voice authorization Windows Current User certificate setup failed')
+  }
 
   if (platform !== 'darwin') {
     throw new Error('Peeps voice authorization TLS trust verification is supported only on macOS')
@@ -249,7 +271,7 @@ export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps)
     throw tlsValidationError()
   }
 
-  return { certificatePem, keyPem }
+  return { certificatePem, keyPem, kind: 'pem' }
 }
 
 export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
@@ -324,7 +346,9 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       `<script id="peeps-flow" type="application/json">${escapeHtmlJson(flow)}</script>`
     )
 
-    const server = createServer({ cert: tls.certificatePem, key: tls.keyPem }, (req, res) => {
+    const serverOptions =
+      tls.kind === 'pem' ? { cert: tls.certificatePem, key: tls.keyPem } : { passphrase: tls.passphrase, pfx: tls.pfx }
+    const server = createServer(serverOptions, (req, res) => {
       if (req.method === 'GET' && req.url === '/') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html)
 
@@ -579,13 +603,20 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
 }
 
 export function registerPeepsVoiceAuthIpc(connectGateway: NonNullable<PeepsVoiceAuthDeps['connectGateway']>) {
+  const userDataPath = () => app.getPath('userData')
   const handlers = createPeepsVoiceAuthHandlers({
     appPath: () => app.getAppPath(),
     connectGateway,
+    loadWindowsTlsMaterial: () =>
+      loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+        platform: process.platform,
+        safeStorage,
+        userDataPath
+      }),
     openExternal: shell.openExternal,
-    userDataPath: () => app.getPath('userData'),
+    userDataPath,
     readFile: fs.readFileSync,
-    tlsPaths: () => resolvePeepsVoiceAuthTlsPaths(app.getPath('userData'))
+    tlsPaths: () => resolvePeepsVoiceAuthTlsPaths(userDataPath())
   })
 
   ipcMain.handle('hermes:peeps-voice-auth:complete', (_event, input) => handlers.complete(input))

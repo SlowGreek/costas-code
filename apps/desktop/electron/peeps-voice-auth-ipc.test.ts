@@ -137,6 +137,7 @@ function createHarness(
       mode: number
       uid: number
     }
+    loadWindowsTlsMaterial?: () => { kind: 'pfx'; passphrase: string; pfx: Buffer }
     now?: () => Date
     listenError?: Error
     openExternal?: (url: string) => Promise<void>
@@ -153,7 +154,12 @@ function createHarness(
 ) {
   const harnessOptions = options
   const servers: FakeServer[] = []
-  const created: Array<{ cert: Buffer | string; key: Buffer | string }> = []
+  const created: Array<{
+    cert?: Buffer | string
+    key?: Buffer | string
+    passphrase?: string
+    pfx?: Buffer | string
+  }> = []
   const openExternal = options.openExternal ?? vi.fn(async () => {})
   const userDataPath = options.userDataPath ?? '/user/data'
   const defaultTlsPaths = resolvePeepsVoiceAuthTlsPaths(userDataPath)
@@ -194,7 +200,7 @@ function createHarness(
     appPath: () => '/app',
     currentUid: options.currentUid ?? (() => 501),
     createServer: ((options, onRequest) => {
-      created.push({ cert: options.cert, key: options.key })
+      created.push({ cert: options.cert, key: options.key, passphrase: options.passphrase, pfx: options.pfx })
 
       let errorHandler: ((error: Error) => void) | undefined
 
@@ -232,6 +238,7 @@ function createHarness(
       return server as never
     }) as never,
     lstatSync: lstatSync as never,
+    loadWindowsTlsMaterial: options.loadWindowsTlsMaterial,
     now: options.now,
     openExternal,
     platform: options.platform ?? 'darwin',
@@ -685,6 +692,24 @@ test('preflight rejects unsupported platforms untrusted certs mismatched keys an
   )
 })
 
+test('Windows listener passes only PFX and passphrase to https.createServer', async () => {
+  const harness = createHarness({
+    loadWindowsTlsMaterial: () => ({
+      kind: 'pfx',
+      passphrase: 'main-only-passphrase',
+      pfx: Buffer.from('validated-pfx')
+    }),
+    platform: 'win32'
+  })
+
+  await handlersStart(harness, 'windows-pfx')
+
+  assert.equal(harness.created[0].pfx?.toString(), 'validated-pfx')
+  assert.equal(harness.created[0].passphrase, 'main-only-passphrase')
+  assert.equal(harness.created[0].cert, undefined)
+  assert.equal(harness.created[0].key, undefined)
+})
+
 test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron userData', () => {
   assert.deepEqual(resolvePeepsVoiceAuthTlsPaths('/Users/test/Library/Application Support/Catalyst'), {
     certificatePath: '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-cert.pem',
@@ -709,6 +734,10 @@ test('tls material loader accepts only the Electron-owned localhost certificate 
     appPath: () => '/app'
   })
 
+  assert.equal(material.kind, 'pem')
+  if (material.kind !== 'pem') {
+    assert.fail('expected macOS PEM material')
+  }
   assert.match(material.certificatePem.toString('utf8'), /BEGIN CERTIFICATE/)
   assert.match(material.keyPem.toString('utf8'), /BEGIN PRIVATE KEY/)
 })

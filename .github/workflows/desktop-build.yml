@@ -176,6 +176,29 @@ jobs:
           npm run typecheck
           npm run lint
 
+      - name: Exercise non-admin Peeps Current User certificate provisioning
+        if: (needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform) && matrix.platform == 'windows'
+        working-directory: apps/desktop
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $userName = 'PeepsCert' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+          $passwordText = [Convert]::ToBase64String([byte[]](1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+          $securePassword = ConvertTo-SecureString $passwordText -AsPlainText -Force
+          New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
+          try {
+            $credential = New-Object Management.Automation.PSCredential(".\$userName", $securePassword)
+            $node = (Get-Command node.exe).Source
+            $vitest = (Resolve-Path '..\..\node_modules\vitest\vitest.mjs').Path
+            $arguments = @("`"$vitest`"", 'run', '--project', 'electron', 'electron/peeps-voice-auth-windows-live.test.ts')
+            $process = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory (Get-Location).Path -Credential $credential -LoadUserProfile -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Non-admin Peeps certificate test failed with exit code $($process.ExitCode)" }
+          } finally {
+            Remove-LocalUser -Name $userName -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -eq "C:\Users\$userName" } | Remove-CimInstance -ErrorAction SilentlyContinue
+            $passwordText = $null
+          }
+
       - name: Build (${{ matrix.script }})
         if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform
         working-directory: apps/desktop

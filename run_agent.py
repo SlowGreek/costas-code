@@ -419,59 +419,6 @@ class _StreamErrorEvent(Exception):
         }
 
 
-
-_ADDITIONAL_CORRECTION_MARKER = "[Additional user correction]"
-
-
-def _normalize_redirect_payload(value: Any) -> Any:
-    """Normalize a redirect correction to text, a parts list, or falsy.
-
-    A correction is normally a string. It may also be an OpenAI-style content
-    parts list so the correction can carry images. A parts list is only
-    meaningful if it actually holds something — a list whose text parts are all
-    blank and which has no image parts is treated as empty, so the surface
-    falls back to queueing rather than redirecting into a no-op.
-    """
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped if stripped else None
-    if isinstance(value, list):
-        parts = [p for p in value if isinstance(p, dict)]
-        has_media = any(p.get("type") not in (None, "text") for p in parts)
-        has_text = any(str(p.get("text") or "").strip() for p in parts)
-        return parts if (parts and (has_media or has_text)) else None
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text if text else None
-
-
-def _merge_redirect_payloads(existing: Any, incoming: Any) -> Any:
-    """Combine a queued correction with a newer one.
-
-    Two corrections can land before the loop drains either. Merging is lossless
-    (both reach the model) and must survive images: string concatenation would
-    stringify a parts list into ``"[{'type': 'text'...}]"``, so a list on either
-    side merges structurally instead.
-    """
-    if not existing:
-        return incoming
-    if not incoming:
-        return existing
-
-    if isinstance(existing, str) and isinstance(incoming, str):
-        return f"{existing}\n\n{_ADDITIONAL_CORRECTION_MARKER}\n{incoming}"
-
-    def _as_parts(value: Any) -> List[Dict[str, Any]]:
-        if isinstance(value, list):
-            return [p for p in value if isinstance(p, dict)]
-        return [{"type": "text", "text": str(value)}]
-
-    merged = _as_parts(existing)
-    merged.append({"type": "text", "text": _ADDITIONAL_CORRECTION_MARKER})
-    merged.extend(_as_parts(incoming))
-    return merged
-
 class AIAgent:
     """
     AI Agent with tool calling capabilities.
@@ -2343,7 +2290,7 @@ class AIAgent:
                 # prologue for prefetch/plugin injections). Written verbatim
                 # so replay can reproduce the sent prefix byte-for-byte.
                 _row_api_content = msg.get("api_content")
-                if not isinstance(_row_api_content, (str, list)):
+                if not isinstance(_row_api_content, str):
                     _row_api_content = None
                 _row_timestamp = msg.get("timestamp")
                 # Apply the persist override to THIS row's written values only
@@ -3719,7 +3666,7 @@ class AIAgent:
                 self._pending_steer = cleaned
         return True
 
-    def redirect(self, text: Any) -> bool:
+    def redirect(self, text: str) -> bool:
         """Redirect the active turn without converting it into a new task.
 
         During a normal Hermes model request this cancels only that request;
@@ -3730,17 +3677,12 @@ class AIAgent:
         Codex app-server has a native ``turn/steer`` operation and uses it
         directly instead of cancelling.
 
-        ``text`` is normally a string, but may also be an OpenAI-style content
-        parts list (``[{"type": "text", ...}, {"type": "image_url", ...}]``) so
-        a correction can carry images. Parts survive to the conversation loop
-        intact; the adapters translate them per provider.
-
-        Returns ``False`` when there is no live turn or the correction is
-        empty, so surfaces can fall back to their existing next-turn queue.
+        Returns ``False`` when there is no live turn or the text is empty, so
+        surfaces can fall back to their existing next-turn queue.
         """
-        cleaned = _normalize_redirect_payload(text)
-        if not cleaned:
+        if not text or not text.strip():
             return False
+        cleaned = text.strip()
 
         # Codex owns its internal reasoning/tool loop, so use its first-class
         # active-turn steering protocol rather than interrupting the subprocess.
@@ -3775,7 +3717,11 @@ class AIAgent:
             existing = getattr(self, "_pending_redirect", None)
             if self._interrupt_requested and not existing:
                 return False
-            self._pending_redirect = _merge_redirect_payloads(existing, cleaned)
+            self._pending_redirect = (
+                f"{existing}\n\n[Additional user correction]\n{cleaned}"
+                if existing
+                else cleaned
+            )
             self._interrupt_requested = True
             self._interrupt_message = None
         else:
@@ -3786,9 +3732,13 @@ class AIAgent:
                     return False
                 if self._interrupt_requested and not self._pending_redirect:
                     return False
-                self._pending_redirect = _merge_redirect_payloads(
-                    self._pending_redirect, cleaned
-                )
+                if self._pending_redirect:
+                    self._pending_redirect = (
+                        f"{self._pending_redirect}\n\n"
+                        f"[Additional user correction]\n{cleaned}"
+                    )
+                else:
+                    self._pending_redirect = cleaned
                 self._interrupt_requested = True
                 self._interrupt_message = None
 

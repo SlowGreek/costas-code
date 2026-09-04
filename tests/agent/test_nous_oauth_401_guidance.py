@@ -23,7 +23,7 @@ def test_nous_provider_is_in_oauth_401_set():
     """The provider-set gate that selects OAuth-specific guidance must
     include ``nous`` alongside ``openai-codex`` and ``xai-oauth``.
     """
-    source = inspect.getsource(conversation_loop._run_conversation_inner)
+    source = inspect.getsource(conversation_loop.run_conversation)
 
     # Be flexible about set element ordering — assert all three are listed
     # near each other in the gating expression.
@@ -42,7 +42,7 @@ def test_nous_provider_is_in_oauth_401_set():
 
 def test_nous_401_guidance_strings_present():
     """User-facing remediation strings for Nous OAuth 401s must exist."""
-    source = inspect.getsource(conversation_loop._run_conversation_inner)
+    source = inspect.getsource(conversation_loop.run_conversation)
 
     # Must tell the user it's an OAuth token problem, NOT an API key problem
     # (Nous Portal has no API key path — auth_type=oauth_device_code only).
@@ -64,7 +64,7 @@ def test_free_slug_hint_for_nous_provider():
     on the next message because Nous Portal doesn't carry the OpenRouter
     free-tier slug.
     """
-    source = inspect.getsource(conversation_loop._run_conversation_inner)
+    source = inspect.getsource(conversation_loop.run_conversation)
 
     assert "endswith(\":free\")" in source
     assert "OpenRouter slug" in source

@@ -176,10 +176,8 @@ def test_conversation_loop_sanitizes_api_kwargs_after_build():
 
     import agent.conversation_loop as cl
 
-    # Upstream split run_conversation into a thin wrapper +
-    # _run_conversation_inner; the build/sanitize/perform sequence this pins
-    # lives in the inner function now.
-    src = inspect.getsource(cl._run_conversation_inner)
+    # The build/sanitize/perform sequence lives in the public conversation entry point.
+    src = inspect.getsource(cl.run_conversation)
     build_idx = src.index("api_kwargs = agent._build_api_kwargs(api_messages)")
     sanitize_idx = src.index("_sanitize_structure_surrogates(api_kwargs)")
     perform_idx = src.index("def _perform_api_call")

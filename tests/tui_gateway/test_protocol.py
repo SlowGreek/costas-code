@@ -1909,48 +1909,6 @@ def test_skin_change_broadcasts_to_every_connected_client(server, monkeypatch):
         assert transport.frames[-1]["params"]["payload"]["name"] == "synthwave"
 
 
-def test_session_redirect_drains_staged_images(server, monkeypatch):
-    """A correction must take ownership of images image.attach staged.
-
-    Reading (rather than draining) the queue would leave the pixels in place to
-    ride the NEXT turn — long after the user attached them to this correction,
-    and attached to a message they were never meant for.
-    """
-    captured = {}
-
-    class _Agent:
-        _supports_active_turn_redirect = True
-
-        def redirect(self, payload):
-            captured["payload"] = payload
-
-            return True
-
-    sid = "redir-img"
-    server._sessions[sid] = {
-        "session_key": "20260101_000000_redir",
-        "agent": _Agent(),
-        "attached_images": ["/tmp/shot-a.png", "/tmp/shot-b.png"],
-        "history": [],
-        "history_lock": threading.Lock(),
-        "running": True,
-        "inflight_turn": None,
-    }
-
-    monkeypatch.setattr(
-        server, "_redirect_payload_with_images", lambda _a, text, images: {"text": text, "images": images}
-    )
-
-    resp = server.handle_request(
-        {"id": "r1", "method": "session.redirect", "params": {"session_id": sid, "text": "look"}}
-    )
-
-    assert "error" not in resp, resp
-    assert captured["payload"]["images"] == ["/tmp/shot-a.png", "/tmp/shot-b.png"]
-    # Drained, so the next turn starts clean.
-    assert server._sessions[sid]["attached_images"] == []
-
-
 def test_session_redirect_without_images_is_plain_text(server, monkeypatch):
     """No staged images means the payload stays a plain string — the common
     case must not pay for the image path."""

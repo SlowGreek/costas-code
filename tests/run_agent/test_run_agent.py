@@ -65,7 +65,7 @@ def test_run_conversation_dict_returns_include_final_response():
     from agent import conversation_loop
 
     try:
-        source = inspect.getsource(conversation_loop._run_conversation_inner)
+        source = inspect.getsource(conversation_loop.run_conversation)
     except OSError as exc:
         pytest.skip(f"run_conversation source is unavailable: {exc}")
     tree = ast.parse(source)
@@ -153,34 +153,6 @@ def test_flush_persist_override_replaces_api_local_multimodal_note(agent):
     batch = agent._session_db.append_messages_batch.call_args.kwargs["messages"]
     assert batch[0]["content"] == "Describe this screenshot\n[screenshot]"
     assert api_content[0]["text"] == "[MODEL SWITCH NOTE]\n\nDescribe this screenshot"
-
-
-def test_flush_persists_structured_api_content_sidecar(agent):
-    """Multimodal steering replay must survive the agent-to-DB boundary."""
-    clean_content = [
-        {"type": "text", "text": "Use this screenshot."},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
-    ]
-    wire_content = [
-        {"type": "text", "text": "Continue the original request."},
-        *clean_content,
-    ]
-    agent._session_db = MagicMock()
-    agent._session_db_created = True
-    agent.session_id = "session-structured-sidecar"
-    agent._last_flushed_db_idx = 0
-    agent._persist_user_message_idx = None
-    agent._persist_user_message_override = None
-    agent._persist_user_message_timestamp = None
-
-    agent._flush_messages_to_session_db(
-        [{"role": "user", "content": clean_content, "api_content": wire_content}],
-        [],
-    )
-
-    batch = agent._session_db.append_messages_batch.call_args.kwargs["messages"]
-    assert batch[0]["content"] == "Use this screenshot.\n[screenshot]"
-    assert batch[0]["api_content"] == wire_content
 
 
 def test_direct_session_db_flushes_share_marker_claim(agent):
@@ -4037,9 +4009,9 @@ class TestRunConversation:
         correction = replay[-1]["content"]
         assert "interrupted by a user correction" not in (placeholder or "")
         assert "interrupted by a user correction" in correction
-        assert "original user request remains active" in correction
-        assert "continue fulfilling the original user request" in correction
-        assert "do not stop after only acknowledging this correction" in correction
+        assert "original user request remains active" not in correction
+        assert "continue fulfilling the original user request" not in correction
+        assert "do not stop after only acknowledging this correction" not in correction
         assert correction.endswith("No, use Postgres instead.")
         assert replay[-3]["content"] == "Choose a database and implement it."
         # Displayed chain-of-thought must NOT be replayed: an assistant turn
@@ -4054,45 +4026,6 @@ class TestRunConversation:
             for snapshot in persisted
             if len(snapshot) >= 2
         )
-
-    def test_redirect_with_image_reaches_wire_with_continuation_context(self, agent):
-        """A multimodal correction keeps both its image and steering contract."""
-        self._setup_agent(agent)
-        final = _mock_response(content="Continued comparison.", finish_reason="stop")
-        requests = []
-        correction_parts = [
-            {"type": "text", "text": "Use this diagram as the correction."},
-            {
-                "type": "image_url",
-                "image_url": {"url": "data:image/png;base64,aW1hZ2U="},
-            },
-        ]
-
-        def _fake_api_call(api_kwargs):
-            requests.append(api_kwargs)
-            if len(requests) == 1:
-                assert agent.redirect(correction_parts) is True
-                raise InterruptedError("redirect cancelled the first request")
-            return final
-
-        with (
-            patch.object(agent, "_model_supports_vision", return_value=True),
-            patch.object(agent, "_interruptible_api_call", side_effect=_fake_api_call),
-            patch.object(agent, "_persist_session"),
-            patch.object(agent, "_save_trajectory"),
-            patch.object(agent, "_cleanup_task_resources"),
-        ):
-            result = agent.run_conversation("Compare our architecture to Codex.")
-
-        assert result["completed"] is True
-        assert len(requests) == 2
-        replay = requests[1]["messages"]
-        assert replay[-3]["content"] == "Compare our architecture to Codex."
-        wire_correction = replay[-1]["content"]
-        assert isinstance(wire_correction, list)
-        assert "continue fulfilling the original user request" in wire_correction[0]["text"]
-        assert "Use this diagram as the correction." in wire_correction[1]["text"]
-        assert wire_correction[2] == correction_parts[1]
 
     def test_assistant_list_api_content_is_not_projected_to_provider(self, agent):
         """Structured replay sidecars are user-only; assistant images are invalid."""
@@ -7213,7 +7146,7 @@ class TestDeadRetryCode:
 
     def test_no_unreachable_max_retries_after_backoff(self):
         import inspect
-        from agent.conversation_loop import _run_conversation_inner as _rc
+        from agent.conversation_loop import run_conversation as _rc
         source = inspect.getsource(_rc)
         occurrences = source.count("if retry_count >= max_retries:")
         assert occurrences == 2, (
@@ -7252,7 +7185,7 @@ class TestMemoryContextSanitization:
         a literal <memory-context> tag we don't silently delete their text.
         The streaming scrubber + plugin-side scrub cover real leak paths."""
         import inspect
-        from agent.conversation_loop import _run_conversation_inner as _rc
+        from agent.conversation_loop import run_conversation as _rc
         src = inspect.getsource(_rc)
         assert "sanitize_context(user_message)" not in src
         assert "sanitize_context(persist_user_message)" not in src

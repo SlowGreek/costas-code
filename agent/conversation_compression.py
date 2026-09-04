@@ -2756,6 +2756,79 @@ def _is_real_user_message(message: Any) -> bool:
     return not ContextCompressor._is_synthetic_compression_user_turn(message)
 
 
+def _message_contains_busy_steer(message: Any) -> bool:
+    """Return whether *message* carries a busy-steer marker.
+
+    With ``display.busy_input_mode: steer`` the follow-up is embedded as an
+    out-of-band marker inside a ``role=tool`` result (see
+    ``agent_runtime_helpers.apply_pending_steer_to_tool_results``). That marker
+    carries real user intent but lives outside ``role=user``, so the
+    ``_is_real_user_message`` / ``_transcript_has_real_user_turn`` checks
+    alone would miss it.
+    """
+    text = _message_text(message)
+    if not text:
+        return False
+    try:
+        from agent.prompt_builder import STEER_MARKER_CLOSE, STEER_MARKER_OPEN
+
+        return STEER_MARKER_OPEN in text and STEER_MARKER_CLOSE in text
+    except Exception:
+        return "[OUT-OF-BAND USER MESSAGE" in text and "[/OUT-OF-BAND USER MESSAGE]" in text
+
+
+def _extract_steer_text_from_message(message: Any) -> Optional[str]:
+    """Extract the inner user text from a steer marker, or None."""
+    text = _message_text(message)
+    if not text:
+        return None
+    try:
+        from agent.prompt_builder import STEER_MARKER_CLOSE, STEER_MARKER_OPEN
+
+        open_marker = STEER_MARKER_OPEN
+        close_marker = STEER_MARKER_CLOSE
+    except Exception:
+        open_marker = "[OUT-OF-BAND USER MESSAGE"
+        close_marker = "[/OUT-OF-BAND USER MESSAGE]"
+    start = text.find(open_marker)
+    if start == -1:
+        # Fallback: marker wording may evolve; look for the stable prefix.
+        fallback_open = "[OUT-OF-BAND USER MESSAGE"
+        start = text.find(fallback_open)
+        if start == -1:
+            return None
+        # Skip to end of the opening line.
+        nl = text.find("\n", start)
+        if nl != -1:
+            start = nl + 1
+        else:
+            start += len(fallback_open)
+    else:
+        start += len(open_marker)
+    end = text.find(close_marker, start)
+    if end == -1:
+        end = text.find("[/OUT-OF-BAND USER MESSAGE]", start)
+        if end == -1:
+            return None
+    extracted = text[start:end].strip()
+    return extracted if extracted else None
+
+
+def _compressed_has_busy_steer(messages: list) -> bool:
+    """Whether *messages* already carries a steer marker (intent present).
+
+    Only ``role=tool`` rows count: that is the sole place the runtime ever
+    delivers a steer, so a compaction summary that merely quotes the marker
+    text must not be mistaken for live intent.
+    """
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        if _message_contains_busy_steer(msg):
+            return True
+    return False
+
+
 def _strip_stale_todo_snapshot(content: Any) -> Any:
     """Remove a previously merged todo-snapshot block from message content.
 
@@ -2958,16 +3031,33 @@ def _ensure_compressed_has_user_turn(
     """Preserve human intent, not merely a synthetic user-role placeholder."""
     if any(_is_real_user_message(message) for message in compressed):
         return "already_present"
+    if _compressed_has_busy_steer(compressed):
+        return "already_present"
     from agent.context_compressor import (
         COMPRESSION_CONTINUATION_USER_CONTENT,
         _fresh_compaction_message_copy,
     )
 
+    # One reversed positional scan: the anchor is whichever intent-bearing
+    # row is LAST in the original transcript — a real ``role=user`` turn or
+    # a steer marker riding inside a ``role=tool`` result. Scanning the two
+    # kinds separately (steer first, then user) would let an older, already
+    # consumed steer outrank a newer real user request and replay it
+    # (#100053 follow-up: ``[user A, tool(steer B), ..., user C]`` must
+    # anchor C, not B).
     for message in reversed(original_messages):
         if _is_real_user_message(message):
             return _insert_real_user_anchor(
                 compressed,
                 _fresh_compaction_message_copy(message),
+            )
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            continue
+        steer_text = _extract_steer_text_from_message(message)
+        if steer_text:
+            return _insert_real_user_anchor(
+                compressed,
+                {"role": "user", "content": steer_text},
             )
     from agent.message_metadata import append_message
 

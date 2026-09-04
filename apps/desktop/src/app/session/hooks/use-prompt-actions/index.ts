@@ -767,17 +767,12 @@ export function usePromptActions({
   // completed work intact. During a tool it waits for the safe result boundary.
   // Returns false when the turn raced to completion so the composer can queue.
   const redirectPrompt = useCallback(
-    async (rawText: string, attachments?: ComposerAttachment[]): Promise<boolean> => {
+    async (rawText: string): Promise<boolean> => {
       const text = sanitizeComposerInput(rawText).trim()
       // Ref, not the closure-captured prop — see cancelRun above. A redirect
       // reaches the live model mid-turn, so a stale target delivers the user's
       // correction into a conversation they are no longer looking at.
       const sessionId = activeSessionIdRef.current
-
-      // Only images ride a correction. A @file/@folder/terminal ref is resolved
-      // by the turn-setup path a redirect bypasses, so the composer keeps those
-      // on the queue path and they must never reach here.
-      const imageAttachments = (attachments ?? []).filter(a => a?.kind === 'image')
 
       if (!text || !sessionId) {
         return false
@@ -812,33 +807,7 @@ export function usePromptActions({
           })
 
         try {
-          // Stage the images into the session workspace first — the gateway
-          // reads them off disk to build the content parts, so an unstaged
-          // local path (or a remote-mode path the backend can't see) would
-          // silently yield a text-only correction.
-          let images: string[] = []
-
-          if (imageAttachments.length) {
-            try {
-              const synced = await syncAttachmentsForSubmit(id, imageAttachments, {
-                updateComposerAttachments: false
-              })
-
-              // Upstream changed the return shape to { attachments, sessionId };
-              // the fork's call read the old bare array.
-              images = synced.attachments.map(a => a.path).filter((p): p is string => Boolean(p))
-            } catch (uploadErr) {
-              // Staging failed — send the words anyway. Losing the pixels is
-              // recoverable; dropping the correction mid-turn is not.
-              console.warn('[redirect] image staging failed, sending text only', uploadErr)
-            }
-          }
-
-          const result = await requestGateway<SessionRedirectResponse>('session.redirect', {
-            session_id: id,
-            text,
-            ...(images.length ? { images } : {})
-          })
+          const result = await requestGateway<SessionRedirectResponse>('session.redirect', { session_id: id, text })
 
           if (result?.status === 'redirected') {
             triggerHaptic('submit')
@@ -888,7 +857,6 @@ export function usePromptActions({
       appendSessionTextMessage,
       requestGateway,
       selectedStoredSessionIdRef,
-      syncAttachmentsForSubmit,
       updateSessionState
     ]
   )

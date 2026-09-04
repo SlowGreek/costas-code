@@ -390,7 +390,7 @@ test('Windows provisioning and validation scripts are fixed CurrentUser-only non
   assert.match(WINDOWS_CLEANUP_SCRIPT, /Remove-Item -Path \$myPath -DeleteKey/)
   assert.match(WINDOWS_CLEANUP_SCRIPT, /Certificate cleanup postcondition failed/)
   assert.match(WINDOWS_ACL_SCRIPT, /SetAccessRuleProtection\(\$true, \$false\)/)
-  assert.match(WINDOWS_ACL_SCRIPT, /SetOwner\(\$currentSid\)/)
+  assert.doesNotMatch(WINDOWS_ACL_SCRIPT, /SetOwner/)
   assert.match(WINDOWS_VALIDATE_SCRIPT, /\.Owner.*currentSid|currentSid.*\.Owner/s)
   assert.match(WINDOWS_ACL_SCRIPT, /S-1-5-18/)
   assert.match(WINDOWS_ACL_SCRIPT, /S-1-5-32-544/)

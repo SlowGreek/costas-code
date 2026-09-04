@@ -326,6 +326,44 @@ The 10 s preflight is a soft check. Choose "Save anyway and validate later" and 
 **401 on Anthropic-style endpoint with Entra ID.**
 Verify the same `Azure AI User` (or `Foundry User`) role is assigned on the Foundry resource (it covers both `/openai/v1` and `/anthropic` paths). If the OpenAI-style probe works during the wizard but `claude-*` requests fail at runtime, the most common cause is a stale `model.entra.scope` left over from an earlier wizard run — delete the `entra.scope` line from `config.yaml` so the runtime falls back to the default `https://ai.azure.com/.default` scope.
 
+## Cognitive Services bearer tokens via `key_cmd` (Peeps / az CLI)
+
+Some Azure OpenAI resources are reached with an **Entra bearer token** rather
+than an `api-key`. `scripts/cs_token.py` mints one and prints it on stdout, so
+any provider can consume it through `key_cmd`:
+
+```yaml
+providers:
+  astra:
+    base_url: https://<resource>.cognitiveservices.azure.com/openai/v1
+    key_cmd: python3 /path/to/hermes-agent/scripts/cs_token.py
+    api_mode: codex_responses
+    default_model: gpt-6-astra
+```
+
+The script tries, in order:
+
+1. A cached token in `$HERMES_HOME/.cs-token.json`, while more than five
+   minutes from expiry.
+2. A Peeps bearer in `$HERMES_HOME/.peeps-token` (override the path with
+   `PEEPS_TOKEN_FILE`), exchanged at the Seastar
+   `token/getCognitiveServicesToken` endpoint.
+3. `az account get-access-token --resource https://cognitiveservices.azure.com`.
+
+`key_cmd` runs per request, so tokens refresh on their own and a long session
+does not 401 after an hour. Grab a Peeps bearer from
+`https://peepsapp.azurewebsites.net/token.html?token=cs` and write it to
+`~/.hermes/.peeps-token` if you are not signed in with the Azure CLI.
+
+The script is pure stdlib and runs the same on macOS, Linux, and Windows.
+
+### Choosing `api_mode`
+
+Reasoning deployments such as `gpt-6-astra` reject function tools on
+`/chat/completions` — the endpoint returns `Function tools with
+reasoning_effort are not supported`. Set `api_mode: codex_responses` so Hermes
+uses `/openai/v1/responses`, where tool calls work normally.
+
 ## Related
 
 - [Environment variables](/reference/environment-variables)

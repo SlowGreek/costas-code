@@ -4,6 +4,124 @@ from tui_gateway import realtime_voice, server
 from tools import tool_backend_helpers, web_tools
 
 import threading
+import copy
+import base64
+import hashlib
+from pathlib import Path
+
+
+class _BoundTransport:
+    def __init__(self):
+        self.frames = []
+        self.ready = threading.Event()
+
+    def write(self, frame):
+        self.frames.append(frame)
+        self.ready.set()
+        return True
+
+
+def _dispatch_and_wait(method, params, transport):
+    result = server.dispatch({"jsonrpc": "2.0", "id": method, "method": method, "params": params}, transport)
+    if result is not None:
+        return result
+    assert transport.ready.wait(3)
+    return transport.frames[-1]
+
+
+def test_peeps_public_start_is_removed_and_generation_is_transport_session_bound(monkeypatch):
+    from agent.command_token_source import CommandTokenError
+    from tui_gateway.peeps_voice_auth import PeepsVoiceAuthSessionStore
+
+    runtime_id = "runtime-peeps-bound"
+    transport = _BoundTransport()
+    session = {"session_key": "stored", "profile_home": None, "transport": transport}
+    server._sessions[runtime_id] = session
+    server._realtime_peeps_auth = {"sessions": PeepsVoiceAuthSessionStore()}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"].update({
+        "base_url": "https://res.openai.azure.com/openai/v1",
+        "key_cmd": "false",
+    })
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    monkeypatch.setattr(
+        "agent.command_token_source.build_command_token_provider",
+        lambda *_: lambda: (_ for _ in ()).throw(CommandTokenError("no")),
+    )
+    try:
+        secret = b"m" * 32
+        proof = base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(secret).digest()).rstrip(b"=").decode()
+        handle = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
+        started = _dispatch_and_wait(
+            "voice.realtime.token",
+            {"session_id": runtime_id, "peeps_main_handle": handle, "peeps_main_challenge": challenge},
+            transport,
+        )["result"]
+        assert "voice.realtime.peeps.start" not in server._methods
+        assert "voice.realtime.peeps.start" not in server._LONG_HANDLERS
+        assert set(started) == {"auth_session_id", "provider", "status", "timeout_seconds"}
+
+        attacker = _BoundTransport()
+        for unproved_transport in (attacker, transport):
+            missing_proof = _dispatch_and_wait(
+                "voice.realtime.peeps.claim",
+                {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+                unproved_transport,
+            )
+            assert missing_proof["error"]["code"] == 4613
+
+        claimed = _dispatch_and_wait(
+            "voice.realtime.peeps.claim",
+            {
+                "session_id": runtime_id,
+                "auth_session_id": started["auth_session_id"],
+                "peeps_main_handle": handle,
+                "native_main_proof": proof,
+            },
+            attacker,
+        )
+        assert "result" in claimed, claimed
+        assert set(claimed["result"]) == {"auth_session_id", "state", "public_key", "timeout_seconds"}
+
+        replay = _dispatch_and_wait(
+            "voice.realtime.peeps.claim",
+            {
+                "session_id": runtime_id,
+                "auth_session_id": started["auth_session_id"],
+                "peeps_main_handle": handle,
+                "native_main_proof": proof,
+            },
+            transport,
+        )
+        assert replay["error"]["code"] == 4613
+
+        bystander = _BoundTransport()
+        unproved_cancel = _dispatch_and_wait(
+            "voice.realtime.peeps.cancel",
+            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            bystander,
+        )
+        assert unproved_cancel["result"] == {"ok": False}
+
+        companion_cancel = _dispatch_and_wait(
+            "voice.realtime.peeps.cancel",
+            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            attacker,
+        )
+        assert companion_cancel["result"] == {"ok": True}
+
+        rebound = {**session, "transport": transport}
+        server._sessions[runtime_id] = rebound
+        rebound_result = _dispatch_and_wait(
+            "voice.realtime.peeps.cancel",
+            {"session_id": runtime_id, "auth_session_id": started["auth_session_id"]},
+            transport,
+        )
+        assert rebound_result["result"] == {"ok": False}
+    finally:
+        server._sessions.pop(runtime_id, None)
 
 
 def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch):
@@ -39,6 +157,7 @@ def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch)
         "client_secret": "ek_short",
         "expires_at": 1234,
         "model": "gpt-realtime-2.1",
+        "status": "ready",
         "voice": "marin",
         "voice_capabilities": {"web_search": True},
     }

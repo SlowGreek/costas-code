@@ -12,8 +12,24 @@ _OPENAI_REALTIME_BASE_URL = "https://api.openai.com/v1"
 _MAX_RESPONSE_BYTES = 128 * 1024
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject redirects before urllib can forward the bearer header."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        return None
+
+
+def _default_open(request: urllib.request.Request, *, timeout: int):
+    return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
+
+
 class RealtimeCredentialError(RuntimeError):
     """The backend could not mint a short-lived browser credential."""
+
+    def __init__(self, message: str, *, kind: str = "credential", status: int | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
 
 
 def create_realtime_client_secret(
@@ -66,7 +82,7 @@ def create_realtime_client_secret(
         },
         method="POST",
     )
-    open_request = opener or urllib.request.urlopen
+    open_request = opener or _default_open
 
     try:
         with open_request(request, timeout=timeout) as response:
@@ -75,10 +91,12 @@ def create_realtime_client_secret(
                 raise RealtimeCredentialError("OpenAI Realtime credential response was too large")
     except urllib.error.HTTPError as exc:
         raise RealtimeCredentialError(
-            f"OpenAI Realtime rejected the credential request (HTTP {exc.code})"
+            f"OpenAI Realtime rejected the credential request (HTTP {exc.code})",
+            kind="auth_rejected" if exc.code in (401, 403) else "http",
+            status=exc.code,
         ) from exc
     except urllib.error.URLError as exc:
-        raise RealtimeCredentialError("Could not reach OpenAI Realtime") from exc
+        raise RealtimeCredentialError("Could not reach OpenAI Realtime", kind="connectivity") from exc
 
     try:
         payload = json.loads(raw.decode("utf-8"))

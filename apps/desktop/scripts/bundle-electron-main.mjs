@@ -23,6 +23,8 @@ const mainEntry = resolve(root, 'electron/main.ts')
 const mainOut = resolve(distDir, 'electron-main.mjs')
 const preloadEntry = resolve(root, 'electron/preload.ts')
 const preloadOut = resolve(distDir, 'electron-preload.js')
+const peepsAuthPage = resolve(root, 'electron/peeps-voice-auth-page.ts')
+const peepsAuthOut = resolve(distDir, 'peeps-voice-auth-page.js')
 
 const external = ['electron', 'node-pty', 'get-windows', 'fs']
 // Production bundles bake packaged=true so unpackaged `electron .` still
@@ -63,3 +65,9 @@ await build({
   logLevel: 'info',
 })
 console.log(`bundled ${preloadOut}${isDev ? ' (dev)' : ''}`)
+
+await build({
+  entryPoints: [peepsAuthPage], bundle: true, format: 'iife', platform: 'browser',
+  target: 'es2022', outfile: peepsAuthOut, logLevel: 'info'
+})
+console.log(`bundled ${peepsAuthOut}${isDev ? ' (dev)' : ''}`)

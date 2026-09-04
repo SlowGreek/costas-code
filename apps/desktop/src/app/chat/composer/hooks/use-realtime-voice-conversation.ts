@@ -21,12 +21,13 @@ import {
 } from '@/lib/workbench-context-sync'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
+import { $activeGatewayProfile } from '@/store/profile'
 import {
   applyRealtimeMissionGatewayEvent,
   publishRealtimeMission,
   type RealtimeResearchEventPayload
 } from '@/store/realtime-mission'
-import { $gatewayState } from '@/store/session'
+import { $connection, $gatewayState } from '@/store/session'
 import {
   $workbenchArtifact,
   $workbenchCamera,
@@ -108,6 +109,7 @@ export function useRealtimeVoiceConversation({
   const startGenerationRef = useRef(0)
   // A start attempted before the chat had a session, waiting for one.
   const pendingStartRef = useRef(false)
+  const startAbortRef = useRef<AbortController | null>(null)
   const transcriptWriteChainRef = useRef(Promise.resolve())
   const failedTranscriptsRef = useRef<RealtimeTranscript[]>([])
   // Populated once the connection exists. `beforeToolCall` closes over the ref
@@ -118,6 +120,8 @@ export function useRealtimeVoiceConversation({
 
   const end = useCallback(() => {
     startGenerationRef.current += 1
+    startAbortRef.current?.abort()
+    startAbortRef.current = null
     connectionRef.current?.close()
     connectionRef.current = null
     missionRuntime.connectionClosed()
@@ -197,7 +201,11 @@ export function useRealtimeVoiceConversation({
         return
       }
 
+      const startAbort = new AbortController()
+      startAbortRef.current = startAbort
+
       const connection = await startRealtimeVoiceConnection({
+        connectionId: $connection.get()?.connectionId ?? null,
         beforeToolCall: async () => {
           // Wait for the *specific* in-flight transcription events rather than
           // sleeping a fixed interval: a normal turn adds no latency, and a
@@ -273,8 +281,10 @@ export function useRealtimeVoiceConversation({
         },
         onUserSpeechEnded: missionRuntime.userSpeechEnded,
         onUserSpeechStarted: missionRuntime.userSpeechStarted,
+        profile: $activeGatewayProfile.get(),
         request: (method, params) => gateway.request(method, params),
-        runtimeSessionId
+        runtimeSessionId,
+        signal: startAbort.signal
       })
 
       if (generation !== startGenerationRef.current) {
@@ -283,6 +293,7 @@ export function useRealtimeVoiceConversation({
         return
       }
 
+      startAbortRef.current = null
       connectionRef.current = connection
       missionRuntime.focusSession(runtimeSessionId)
       missionRuntime.connectionOpened()
@@ -323,6 +334,9 @@ export function useRealtimeVoiceConversation({
       setMuted(false)
       setStatus('listening')
     } catch (error) {
+      if (startAbortRef.current?.signal.aborted) {
+        startAbortRef.current = null
+      }
       if (generation === startGenerationRef.current) {
         notifyError(error, t.notifications.voice.couldNotStartSession)
         setStatus('idle')

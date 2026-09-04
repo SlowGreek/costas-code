@@ -244,6 +244,8 @@ _LONG_HANDLERS = frozenset(
         "session.usage",
         "billing.step_up",
         "browser.manage",
+        "voice.realtime.token",
+        "voice.realtime.peeps.complete",
         "cli.exec",
         # Completion RPCs run inline on the reader thread by default, but both
         # can block it for seconds: complete.path spawns `git ls-files` and
@@ -373,6 +375,27 @@ _LONG_HANDLERS = frozenset(
         "slash.exec",
     }
 )
+
+
+def _peeps_config(realtime_cfg):
+    from tui_gateway.peeps_voice_auth import PeepsVoiceAuthConfig
+
+    return PeepsVoiceAuthConfig.from_dict(realtime_cfg.get("peeps_fallback"))
+
+
+def _peeps_profile(params):
+    return str(params.get("profile") or "default")
+
+
+def _peeps_state():
+    global _realtime_peeps_auth
+    try:
+        return _realtime_peeps_auth
+    except NameError:
+        from tui_gateway.peeps_voice_auth import PeepsVoiceAuthSessionStore
+
+        _realtime_peeps_auth = {"sessions": PeepsVoiceAuthSessionStore()}
+        return _realtime_peeps_auth
 
 try:
     _rpc_pool_workers = max(

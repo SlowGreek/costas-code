@@ -111,6 +111,63 @@ class TestVoiceSubmitModeValidation:
         )
 
 
+class TestPeepsRealtimeFallbackValidation:
+    def _issues(self, peeps_fallback):
+        return validate_config_structure({"voice": {"realtime": {"peeps_fallback": peeps_fallback}}})
+
+    def test_enabled_and_timeout_only_are_accepted(self):
+        issues = self._issues({
+            "enabled": True,
+            "timeout_seconds": 180,
+        })
+        assert not any(issue.severity == "error" for issue in issues)
+
+    def test_rejects_non_mapping(self):
+        issues = self._issues(True)
+        assert any("voice.realtime.peeps_fallback must be a mapping" in issue.message for issue in issues)
+
+    def test_fixed_fields_need_not_be_exposed(self):
+        issues = self._issues({"enabled": True})
+        assert not any(issue.severity == "error" for issue in issues)
+
+    def test_rejects_bad_authority_scope_redirect_token_url_and_timeout(self):
+        issues = self._issues({
+            "enabled": True,
+            "client_id": "client-id",
+            "authority": "http://login.microsoftonline.com",
+            "scope": "scope-one scope-two",
+            "redirect_uri": "https://127.0.0.1:8080/",
+            "cognitive_token_url": "https://example.com/token",
+            "timeout_seconds": 0,
+        })
+        messages = [issue.message for issue in issues]
+        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
+            assert any(f"{field} must be exactly" in message for message in messages)
+        assert any("timeout_seconds must be between 1 and 300" in message for message in messages)
+
+    def test_rejects_non_integer_timeout(self):
+        issues = self._issues({
+            "enabled": True,
+            "client_id": "client-id",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "api://resource/access",
+            "redirect_uri": "https://localhost:8080/",
+            "cognitive_token_url": "https://example.com/token",
+            "timeout_seconds": "180",
+        })
+        assert any("timeout_seconds must be an integer" in issue.message for issue in issues)
+
+    def test_changed_fixed_fields_are_rejected_even_when_disabled(self):
+        issues = self._issues({
+            "client_id": "",
+            "authority": "https://example.com/tenant",
+            "scope": "https://example.com/.default",
+            "redirect_uri": "https://127.0.0.1:8080/",
+            "cognitive_token_url": "https://example.com/token",
+        })
+        assert any(issue.severity == "error" for issue in issues)
+
+
 class TestUnknownTopLevelKeys:
     """Arbitrary top-level keys must NOT warn — they are bridged to os.environ.
 
@@ -140,4 +197,3 @@ class TestUnknownTopLevelKeys:
         ]
         assert any("base_url" in i.message for i in misplaced)
         assert any("api_key" in i.message for i in misplaced)
-

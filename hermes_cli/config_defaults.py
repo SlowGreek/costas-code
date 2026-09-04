@@ -2023,6 +2023,15 @@ DEFAULT_CONFIG = {
             # Cached until shortly before expiry; takes precedence over the
             # OPENAI_API_KEY / VOICE_TOOLS_OPENAI_KEY fallback.
             "key_cmd": "",
+            "peeps_fallback": {
+                "enabled": False,
+                "client_id": "b6ca153a-37a1-4f59-ad95-c4e30313c64b",
+                "authority": "https://login.microsoftonline.com/organizations",
+                "scope": "https://peeps.asgprototype.com/api/access-as-user",
+                "redirect_uri": "https://localhost:8080/",
+                "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+                "timeout_seconds": 180,
+            },
         },
         # Saying EXACTLY one of these phrases (and nothing else) ends the
         # voice chat instead of being sent to the agent. Case-insensitive,

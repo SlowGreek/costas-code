@@ -1,7 +1,10 @@
 import json
+import threading
+import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hermes_cli.config_defaults import DEFAULT_CONFIG
-from tui_gateway.realtime_voice import create_realtime_client_secret
+from tui_gateway.realtime_voice import RealtimeCredentialError, create_realtime_client_secret
 
 
 class _Response:
@@ -29,6 +32,15 @@ def test_realtime_voice_defaults_are_provider_specific():
         "vad": {"type": "semantic_vad", "eagerness": "auto"},
         "base_url": "",
         "key_cmd": "",
+        "peeps_fallback": {
+            "enabled": False,
+            "client_id": "b6ca153a-37a1-4f59-ad95-c4e30313c64b",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "https://peeps.asgprototype.com/api/access-as-user",
+            "redirect_uri": "https://localhost:8080/",
+            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+            "timeout_seconds": 180,
+        },
     }
 
 
@@ -137,3 +149,120 @@ def test_client_secret_request_uses_current_realtime_session_schema():
         "voice": "marin",
         "webrtc_url": "https://api.openai.com/v1/realtime/calls",
     }
+
+
+def test_client_secret_classifies_only_azure_auth_rejections_without_secrets():
+    bearer = "entra-bearer-must-not-leak"
+    body = b'{"detail":"must-not-leak"}'
+
+    for status in (401, 403):
+        def opener(request, timeout, status=status):
+            raise urllib.error.HTTPError(request.full_url, status, "denied", {}, None)
+
+        try:
+            create_realtime_client_secret(
+                api_key=bearer,
+                model="gpt-realtime-2.1",
+                voice="marin",
+                transcription_model="gpt-live-transcribe",
+                opener=opener,
+            )
+        except RealtimeCredentialError as exc:
+            assert exc.kind == "auth_rejected"
+            assert exc.status == status
+            assert bearer not in str(exc)
+            assert body.decode() not in str(exc)
+        else:
+            raise AssertionError("expected credential failure")
+
+
+def test_client_secret_does_not_classify_service_or_connectivity_failures_as_auth():
+    for status in (429, 500):
+        def opener(request, timeout, status=status):
+            raise urllib.error.HTTPError(request.full_url, status, "failed", {}, None)
+
+        try:
+            create_realtime_client_secret(
+                api_key="bearer",
+                model="gpt-realtime-2.1",
+                voice="marin",
+                transcription_model="gpt-live-transcribe",
+                opener=opener,
+            )
+        except RealtimeCredentialError as exc:
+            assert exc.kind != "auth_rejected"
+            assert exc.status == status
+        else:
+            raise AssertionError("expected credential failure")
+
+    def unreachable(_request, timeout):
+        raise urllib.error.URLError("offline")
+
+    try:
+        create_realtime_client_secret(
+            api_key="bearer",
+            model="gpt-realtime-2.1",
+            voice="marin",
+            transcription_model="gpt-live-transcribe",
+            opener=unreachable,
+        )
+    except RealtimeCredentialError as exc:
+        assert exc.kind == "connectivity"
+        assert exc.status is None
+    else:
+        raise AssertionError("expected credential failure")
+
+
+def test_client_secret_default_opener_does_not_forward_bearer_across_redirects():
+    forwarded_headers = []
+
+    class SinkHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            forwarded_headers.append(dict(self.headers.items()))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    sink = ThreadingHTTPServer(("127.0.0.1", 0), SinkHandler)
+    sink_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+    sink_thread.start()
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{sink.server_address[1]}/steal",
+            )
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+    redirect_thread.start()
+
+    try:
+        try:
+            create_realtime_client_secret(
+                api_key="bearer-must-not-cross-redirect",
+                model="gpt-realtime-2.1",
+                voice="marin",
+                transcription_model="gpt-live-transcribe",
+                base_url=f"http://127.0.0.1:{redirect.server_address[1]}/openai/v1",
+            )
+        except RealtimeCredentialError as exc:
+            assert exc.kind == "http"
+            assert exc.status == 302
+        else:
+            raise AssertionError("expected redirect rejection")
+
+        assert forwarded_headers == []
+    finally:
+        redirect.shutdown()
+        sink.shutdown()
+        redirect.server_close()
+        sink.server_close()

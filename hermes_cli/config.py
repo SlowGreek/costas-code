@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Set
@@ -2292,6 +2293,50 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
 
     issues: List[ConfigIssue] = []
 
+    def _realtime_cfg_dict(cfg: dict | None) -> Optional[Dict[str, Any]]:
+        voice_section = cfg.get("voice") if isinstance(cfg, dict) else None
+        if not isinstance(voice_section, dict):
+            return None
+        realtime_section = voice_section.get("realtime")
+        return realtime_section if isinstance(realtime_section, dict) else None
+
+    def _validate_https_url(field: str, value: Any, *, allow_api_scope: bool = False) -> None:
+        if not isinstance(value, str) or not value.strip():
+            issues.append(ConfigIssue("error", f"{field} must be a non-empty string", f"Set {field} to the expected URL string"))
+            return
+        parsed = urlparse(value.strip())
+        if allow_api_scope and value.startswith("api://"):
+            return
+        if parsed.scheme != "https" or not parsed.netloc:
+            issues.append(ConfigIssue("error", f"{field} must be an https URL", f"Set {field} to an https endpoint"))
+
+    def _validate_peeps_fallback(cfg: dict | None) -> None:
+        realtime_section = _realtime_cfg_dict(cfg)
+        if realtime_section is None or "peeps_fallback" not in realtime_section:
+            return
+        peeps = realtime_section.get("peeps_fallback")
+        if not isinstance(peeps, dict):
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback must be a mapping", "Use enabled and timeout_seconds only"))
+            return
+        pinned = {
+            "client_id": "b6ca153a-37a1-4f59-ad95-c4e30313c64b",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "https://peeps.asgprototype.com/api/access-as-user",
+            "redirect_uri": "https://localhost:8080/",
+            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+        }
+        unknown = set(peeps) - {"enabled", "timeout_seconds", *pinned}
+        for field in sorted(unknown):
+            issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} is unsupported", "Use enabled and timeout_seconds only"))
+        for field, expected in pinned.items():
+            if field in peeps and peeps[field] != expected:
+                issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} must be exactly {expected}", "Remove the override or restore the pinned value"))
+        timeout_seconds = peeps.get("timeout_seconds", 180)
+        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be an integer", "Set a value between 1 and 300"))
+        elif timeout_seconds < 1 or timeout_seconds > 300:
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be between 1 and 300", "Choose a timeout between 1 and 300 seconds"))
+
     # ── voice.submit_mode: direct | draft ────────────────────────────────
     voice_cfg = config.get("voice")
     if isinstance(voice_cfg, dict) and "submit_mode" in voice_cfg:
@@ -2305,6 +2350,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
                 f"voice.submit_mode must be 'direct' or 'draft', got {submit_mode!r}",
                 "Set voice.submit_mode to direct (submit immediately) or draft (edit before sending)",
             ))
+
+    _validate_peeps_fallback(config)
 
     # ── custom_providers must be a list, not a dict ──────────────────────
     cp = config.get("custom_providers")

@@ -10,6 +10,7 @@ import {
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
+import { completeRealtimePeepsAuth, type PeepsInteraction } from './realtime-voice-auth'
 
 export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
   if (!input.canContinue) {
@@ -336,7 +337,9 @@ export function boundWorkbenchContext(
 }
 
 interface RealtimeTokenResponse {
+  auth_session_id?: string
   client_secret: string
+  status?: 'interaction_required' | 'ready'
   connection_id?: string
   expires_at?: number
   model: string
@@ -379,10 +382,12 @@ export interface RealtimeVoiceConnection {
 export interface StartRealtimeVoiceOptions {
   audioFactory?: () => HTMLAudioElement
   beforeToolCall?: () => Promise<void>
+  connectionId?: null | string
   createMissionId?: () => string
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  signal?: AbortSignal
   onCameraCommand?: (
     command: RealtimeCameraCommand,
     signal?: AbortSignal
@@ -400,6 +405,7 @@ export interface StartRealtimeVoiceOptions {
   onUserSpeechEnded?: () => void
   onUserSpeechStarted?: () => void
   peerConnectionFactory?: () => RTCPeerConnection
+  profile?: string
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   runtimeSessionId: string
 }
@@ -910,13 +916,73 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
 export async function startRealtimeVoiceConnection(
   options: StartRealtimeVoiceOptions
 ): Promise<RealtimeVoiceConnection> {
-  const token = (await options.request('voice.realtime.token', {
-    session_id: options.runtimeSessionId
-  })) as RealtimeTokenResponse
+  const throwIfCancelled = () => {
+    if (options.signal?.aborted) {
+      throw new Error('Voice start was cancelled')
+    }
+  }
+
+  throwIfCancelled()
+
+  const requestToken = async (extra: Record<string, unknown> = {}) => {
+    const bridge = window.hermesDesktop?.peepsVoiceAuth
+    const prepared = bridge ? await bridge.prepare() : null
+    if (
+      prepared &&
+      (!/^[A-Za-z0-9_-]{43}$/.test(prepared.handle) ||
+        !/^[A-Za-z0-9_-]{43}$/.test(prepared.challenge))
+    ) {
+      await bridge?.cancel({ handle: prepared.handle })
+      throw new Error('Peeps voice authorization preparation is invalid')
+    }
+    try {
+      const token = (await options.request('voice.realtime.token', {
+        session_id: options.runtimeSessionId,
+        ...(prepared
+          ? {
+              peeps_main_handle: prepared.handle,
+              peeps_main_challenge: prepared.challenge
+            }
+          : {}),
+        ...extra
+      })) as RealtimeTokenResponse
+      return { bridge, prepared, token }
+    } catch (error) {
+      if (bridge && prepared) {
+        await bridge.cancel({ handle: prepared.handle })
+      }
+      throw error
+    }
+  }
+
+  let requested = await requestToken()
+  let token = requested.token
+
+  if (token.status === 'interaction_required') {
+    if (!requested.prepared) {
+      throw new Error('Peeps voice authorization is unavailable in this client')
+    }
+    await completeRealtimePeepsAuth(
+      options.runtimeSessionId,
+      token as RealtimeTokenResponse & PeepsInteraction,
+      requested.prepared,
+      { connectionId: options.connectionId ?? null, profile: options.profile || 'default' },
+      { signal: options.signal }
+    )
+    throwIfCancelled()
+    requested = await requestToken({ peeps_auth_session_id: token.auth_session_id })
+    token = requested.token
+  }
+
+  if (requested.bridge && requested.prepared) {
+    await requested.bridge.cancel({ handle: requested.prepared.handle })
+  }
 
   if (!token?.client_secret) {
     throw new Error('Hermes returned no GPT Realtime credential')
   }
+
+  throwIfCancelled()
 
   const mediaDevices = options.mediaDevices ?? navigator.mediaDevices
   const createPeer = options.peerConnectionFactory ?? (() => new RTCPeerConnection())

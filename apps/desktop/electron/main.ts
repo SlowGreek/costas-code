@@ -30,6 +30,7 @@ import {
   shell,
   systemPreferences
 } from 'electron'
+import WebSocket from 'ws'
 
 import { classifyActiveRuntime } from './active-runtime-state'
 import { destroyKeepaliveAgents, downloadAgentFor, jsonAgentFor, withRetry } from './api-transport'
@@ -200,6 +201,7 @@ import {
   resolveGatewayFileBackend,
   writeBufferToFile
 } from './gateway-file-download'
+import { connectGatewayRpc } from './gateway-rpc-client'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
 import { registerGitIpc } from './git-ipc'
 import { clearStaleGitLocks } from './gitlock'
@@ -273,6 +275,7 @@ import { loadNativeTokenSet, type NativeTokenStoreIo, persistNativeTokenSet } fr
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { LEGACY_OAUTH_PARTITION, resolveOauthPartition } from './oauth-partition'
 import { createParentStartMarkerResolver, parentWatchdogEnv } from './parent-process-identity'
+import { registerPeepsVoiceAuthIpc } from './peeps-voice-auth-ipc'
 import { registerPetOverlayIpc } from './pet-overlay-ipc'
 import {
   buildRegistryProfileRoutes,
@@ -16930,6 +16933,14 @@ registerGitIpc({ resolveGitBinary, resolveGhBinary })
 // Client-side loopback callback for MCP OAuth against remote backends — see
 // mcp-oauth-callback-ipc.ts.
 registerMcpOauthCallbackIpc()
+registerPeepsVoiceAuthIpc(async ({ connectionId, profile }) => {
+  const wsUrl = connectionId
+    ? await registryGatewayWsUrlHandler({ connectionId, profile })
+    : await freshGatewayWsUrl(profile)
+  const headers = headersForRemoteRequest(wsUrl)
+
+  return connectGatewayRpc({ wsUrl, headers, WebSocketImpl: WebSocket as never })
+})
 
 // Embedded terminal PTY host (hermes:terminal:*) — see terminal-ipc.ts.
 const terminalIpc = registerTerminalIpc({

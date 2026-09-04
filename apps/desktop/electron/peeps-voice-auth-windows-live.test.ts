@@ -112,6 +112,15 @@ const diagnosticProductSpawnSync = ((command: string, args: readonly string[], o
       .replace(/[\r\n]+/g, ' ')
       .slice(0, 1500)
     console.error(`peeps_windows_stage=${stage} status=${result.status ?? 'spawn-error'} detail=${detail}`)
+  } else if (PRODUCT_STAGE_BY_SCRIPT.get(args.at(-1) ?? '') === 'trust-validate') {
+    try {
+      const trust = JSON.parse(String(result.stdout || '{}')) as { rootPresent?: unknown; trusted?: unknown }
+      console.error(
+        `peeps_windows_trust_state=root:${trust.rootPresent === true ? 'present' : 'missing'},trusted:${trust.trusted === true ? 'yes' : 'no'}`
+      )
+    } catch {
+      console.error('peeps_windows_trust_state=malformed')
+    }
   }
 
   return result

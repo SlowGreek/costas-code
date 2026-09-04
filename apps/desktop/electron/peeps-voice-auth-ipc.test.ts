@@ -578,25 +578,18 @@ test('tls material loader rejects symlinked directory components from userData t
   const invalidMessage =
     /valid pre-provisioned Electron-owned localhost certificate and private key/
 
-  assert.throws(
-    () =>
-      loadValidatedPeepsVoiceAuthTlsMaterial({
-        appPath: () => '/app',
-        currentUid: () => 501,
-        lstatSync: ((filePath: string) =>
-          filePath === '/user/data'
-            ? {
-                isDirectory: () => true,
-                isFile: () => false,
-                isSymbolicLink: () => false,
-                mode: 0o700,
-                uid: 501
-              }
-            : filePath === '/user/data/peeps-voice-auth'
+  for (const symlinkPath of ['/user/data', '/user/data/peeps-voice-auth']) {
+    assert.throws(
+      () =>
+        loadValidatedPeepsVoiceAuthTlsMaterial({
+          appPath: () => '/app',
+          currentUid: () => 501,
+          lstatSync: ((filePath: string) =>
+            filePath === '/user/data' || filePath === '/user/data/peeps-voice-auth'
               ? {
                   isDirectory: () => true,
                   isFile: () => false,
-                  isSymbolicLink: () => true,
+                  isSymbolicLink: () => filePath === symlinkPath,
                   mode: 0o700,
                   uid: 501
                 }
@@ -607,14 +600,16 @@ test('tls material loader rejects symlinked directory components from userData t
                   mode: 0o600,
                   uid: 501
                 }) as never,
-        now: () => new Date('2026-09-05T00:00:00.000Z'),
-        openExternal: async () => {},
-        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
-        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
-        userDataPath: () => '/user/data'
-      }),
-    invalidMessage
-  )
+          now: () => new Date('2026-09-05T00:00:00.000Z'),
+          openExternal: async () => {},
+          readFile: filePath =>
+            filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY,
+          tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+          userDataPath: () => '/user/data'
+        }),
+      invalidMessage
+    )
+  }
 })
 
 async function handlersStart(

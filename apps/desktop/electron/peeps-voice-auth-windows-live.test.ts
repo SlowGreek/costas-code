@@ -148,7 +148,7 @@ async function proveHttpsHandshake(material: { passphrase: string; pfx: Buffer }
 }
 
 test.runIf(process.platform === 'win32')(
-  'provisions and reuses a non-admin CurrentUser localhost certificate with native security postconditions',
+  'provisions and reuses a non-admin CurrentUser localhost certificate around the OS consent seam',
   async () => {
     assert.equal(powershell(ADMIN_CHECK, {}), 'false')
     const userData = process.env.HERMES_PEEPS_TEST_USER_DATA
@@ -172,9 +172,18 @@ test.runIf(process.platform === 'win32')(
         Buffer.from(powershell(PROTECT, { HERMES_SECRET_B64: Buffer.from(value).toString('base64') }), 'base64'),
       isEncryptionAvailable: () => true
     }
+    const headlessTrustConsent = {
+      // GitHub's temporary account has no interactive desktop. Production
+      // uses the visible Windows root-trust confirmation; this test replaces
+      // only that OS-owned consent result and keeps every other native path.
+      installTrustedCertificate: () => undefined,
+      removeTrustedCertificate: () => undefined,
+      validateTrustedCertificate: () => true
+    }
 
     try {
       const first = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+        ...headlessTrustConsent,
         platform: 'win32',
         safeStorage,
         spawnSync: diagnosticProductSpawnSync,
@@ -188,7 +197,7 @@ test.runIf(process.platform === 'win32')(
 
       assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
         my: false,
-        root: true
+        root: false
       })
       assert.equal(
         powershell(ACL_CHECK, {
@@ -199,6 +208,7 @@ test.runIf(process.platform === 'win32')(
       await proveHttpsHandshake(first, certificateDer)
 
       const second = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+        ...headlessTrustConsent,
         platform: 'win32',
         safeStorage,
         spawnSync: diagnosticProductSpawnSync,

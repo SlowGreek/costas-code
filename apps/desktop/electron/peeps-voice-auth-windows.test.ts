@@ -11,6 +11,8 @@ import {
   WINDOWS_ACL_SCRIPT,
   WINDOWS_CLEANUP_SCRIPT,
   WINDOWS_PROVISION_SCRIPT,
+  WINDOWS_TRUST_SCRIPT,
+  WINDOWS_TRUST_VALIDATE_SCRIPT,
   WINDOWS_VALIDATE_SCRIPT,
   type WindowsPeepsVoiceAuthDeps
 } from './peeps-voice-auth-windows'
@@ -75,8 +77,14 @@ function createWindowsHarness(
     files.set(paths.certificatePath, VALID_CERT_DER)
   }
 
-  const spawnCalls: Array<{ argv: readonly string[]; env: NodeJS.ProcessEnv }> = []
+  const spawnCalls: Array<{
+    argv: readonly string[]
+    env: NodeJS.ProcessEnv
+    windowsHide?: boolean
+  }> = []
   const provisionScript = Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
+  const trustScript = Buffer.from(WINDOWS_TRUST_SCRIPT, 'utf16le').toString('base64')
+  const trustValidateScript = Buffer.from(WINDOWS_TRUST_VALIDATE_SCRIPT, 'utf16le').toString('base64')
   const validateScript = Buffer.from(WINDOWS_VALIDATE_SCRIPT, 'utf16le').toString('base64')
   const aclScript = Buffer.from(WINDOWS_ACL_SCRIPT, 'utf16le').toString('base64')
 
@@ -90,11 +98,21 @@ function createWindowsHarness(
     ...options.validation
   }
 
-  const spawnSync = vi.fn((_command: string, argv: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
+  const spawnSync = vi.fn(
+    (_command: string, argv: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv; windowsHide?: boolean }) => {
     const env = spawnOptions.env ?? {}
-    spawnCalls.push({ argv, env })
+    spawnCalls.push({ argv, env, windowsHide: spawnOptions.windowsHide })
     const encoded = argv.at(-1)
-    const name = encoded === provisionScript ? 'provision' : encoded === validateScript ? 'validate' : 'acl'
+    const name =
+      encoded === provisionScript
+        ? 'provision'
+        : encoded === trustScript
+          ? 'trust'
+          : encoded === trustValidateScript
+            ? 'trust-validate'
+            : encoded === validateScript
+              ? 'validate'
+              : 'acl'
 
     if (options.failScript === name) {
       return { status: 1, stdout: '', stderr: 'sensitive failure output' }
@@ -109,6 +127,14 @@ function createWindowsHarness(
 
     if (name === 'acl') {
       return { status: 0, stdout: '', stderr: '' }
+    }
+
+    if (name === 'trust') {
+      return { status: 0, stdout: '', stderr: '' }
+    }
+
+    if (name === 'trust-validate') {
+      return { status: 0, stdout: JSON.stringify({ trusted: validation.trusted }), stderr: '' }
     }
 
     const provisioned = files.get(paths.pfxPath)?.toString() === 'new-pfx'
@@ -127,7 +153,8 @@ function createWindowsHarness(
           }),
       stderr: ''
     }
-  })
+    }
+  )
 
   const deps: WindowsPeepsVoiceAuthDeps = {
     createSecureContext: vi.fn(
@@ -219,7 +246,9 @@ test('Windows first use provisions CurrentUser certificate files and returns PFX
 
 test('Windows provisioning and validation scripts are fixed CurrentUser-only non-elevating contracts', () => {
   assert.match(WINDOWS_PROVISION_SCRIPT, /Cert:\\CurrentUser\\My/)
-  assert.match(WINDOWS_PROVISION_SCRIPT, /Cert:\\CurrentUser\\Root/)
+  assert.doesNotMatch(WINDOWS_PROVISION_SCRIPT, /Cert:\\CurrentUser\\Root/)
+  assert.match(WINDOWS_TRUST_SCRIPT, /Cert:\\CurrentUser\\Root/)
+  assert.doesNotMatch(WINDOWS_TRUST_SCRIPT, /PFX_PASSWORD|PFX_PATH/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /New-SelfSignedCertificate/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /DNS=localhost&IPAddress=127\.0\.0\.1/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /1\.3\.6\.1\.5\.5\.7\.3\.1/)
@@ -238,10 +267,16 @@ test('Windows provisioning and validation scripts are fixed CurrentUser-only non
   assert.match(WINDOWS_VALIDATE_SCRIPT, /\.Owner.*currentSid|currentSid.*\.Owner/s)
   assert.match(WINDOWS_ACL_SCRIPT, /S-1-5-18/)
   assert.match(WINDOWS_ACL_SCRIPT, /S-1-5-32-544/)
-  assert.match(WINDOWS_VALIDATE_SCRIPT, /X509Chain/)
-  assert.match(WINDOWS_VALIDATE_SCRIPT, /RevocationMode.*Offline/)
+  assert.match(WINDOWS_TRUST_VALIDATE_SCRIPT, /X509Chain/)
+  assert.match(WINDOWS_TRUST_VALIDATE_SCRIPT, /RevocationMode.*Offline/)
   assert.doesNotMatch(
-    [WINDOWS_PROVISION_SCRIPT, WINDOWS_ACL_SCRIPT, WINDOWS_VALIDATE_SCRIPT].join('\n'),
+    [
+      WINDOWS_PROVISION_SCRIPT,
+      WINDOWS_TRUST_SCRIPT,
+      WINDOWS_TRUST_VALIDATE_SCRIPT,
+      WINDOWS_ACL_SCRIPT,
+      WINDOWS_VALIDATE_SCRIPT
+    ].join('\n'),
     /LocalMachine|Start-Process|RunAs|Verb/
   )
 })
@@ -403,6 +438,24 @@ test('Windows leaf validator requires exact localhost SANs serverAuth validity C
   assert.throws(() =>
     validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(LONG_LIVED_CERT_DER), new Date('2026-09-05T00:00:00.000Z'))
   )
+})
+
+test('Windows shows only the public-certificate trust mutation', () => {
+  const harness = createWindowsHarness()
+
+  loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+
+  const trustScript = Buffer.from(WINDOWS_TRUST_SCRIPT, 'utf16le').toString('base64')
+  const trustCall = harness.spawnCalls.find(call => call.argv.at(-1) === trustScript)
+  assert.ok(trustCall)
+  assert.equal(trustCall.windowsHide, false)
+  assert.equal(trustCall.argv.includes('-NonInteractive'), false)
+  assert.equal('HERMES_PEEPS_PFX_PASSWORD_B64' in trustCall.env, false)
+  assert.ok('HERMES_PEEPS_CERT_PATH_B64' in trustCall.env)
+
+  for (const call of harness.spawnCalls.filter(candidate => candidate !== trustCall)) {
+    assert.equal(call.windowsHide, true)
+  }
 })
 
 test('Windows bundle paths are fixed beneath Electron userData', () => {

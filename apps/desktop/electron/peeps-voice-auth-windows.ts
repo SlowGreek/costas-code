@@ -27,7 +27,6 @@ $certificatePath = Read-HermesValue 'HERMES_PEEPS_CERT_PATH_B64'
 $passwordText = Read-HermesValue 'HERMES_PEEPS_PFX_PASSWORD_B64'
 $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
 $certificate = $null
-$trustedThumbprint = $null
 $keyContainerPath = $null
 try {
   $certificate = New-SelfSignedCertificate -Subject 'CN=localhost' -FriendlyName ('Catalyst Peeps localhost ' + [Guid]::NewGuid().ToString('N')) -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -KeyUsage DigitalSignature,KeyEncipherment -HashAlgorithm SHA256 -NotAfter ([DateTimeOffset]::Now.AddDays(397).DateTime) -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1','2.5.29.19={critical}{text}ca=false','2.5.29.37={text}1.3.6.1.5.5.7.3.1')
@@ -41,19 +40,7 @@ try {
   }
   Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $password -Force | Out-Null
   Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT -Force | Out-Null
-  $trustedCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
-  $rootStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::Root, [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-  try {
-    $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $rootStore.Add($trustedCertificate)
-    $trustedThumbprint = $trustedCertificate.Thumbprint
-    if ($trustedThumbprint -ne $certificate.Thumbprint) { throw 'Trusted certificate thumbprint mismatch' }
-  } finally {
-    if ($rootStore) { $rootStore.Close() }
-    if ($trustedCertificate) { $trustedCertificate.Dispose() }
-  }
 } catch {
-  if ($trustedThumbprint) { Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $trustedThumbprint) -Force -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath $pfxPath,$certificatePath -Force -ErrorAction SilentlyContinue
   throw
 } finally {
@@ -63,6 +50,31 @@ try {
 if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $certificate.Thumbprint)) { throw 'Generated certificate remained in CurrentUser My' }
 if ($keyContainerPath -and (Test-Path -LiteralPath $keyContainerPath)) { throw 'Generated private key container remained accessible' }
 [Console]::Out.Write((@{ thumbprint = $certificate.Thumbprint } | ConvertTo-Json -Compress))`
+
+export const WINDOWS_TRUST_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
+$value = [Environment]::GetEnvironmentVariable('HERMES_PEEPS_CERT_PATH_B64', 'Process')
+if ([string]::IsNullOrWhiteSpace($value)) { throw 'Missing required value' }
+$certificatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value))
+$certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
+$trusted = Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root'
+if ($trusted.Thumbprint -ne $certificate.Thumbprint) { throw 'Trusted certificate thumbprint mismatch' }`
+
+export const WINDOWS_TRUST_VALIDATE_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
+function Read-HermesValue([string]$Name) {
+  $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+  if ([string]::IsNullOrWhiteSpace($value)) { throw 'Missing required value' }
+  return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value))
+}
+$certificatePath = Read-HermesValue 'HERMES_PEEPS_CERT_PATH_B64'
+$expectedThumbprint = Read-HermesValue 'HERMES_PEEPS_THUMBPRINT_B64'
+$publicCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
+$root = Get-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $expectedThumbprint) -ErrorAction Stop
+$chain = New-Object Security.Cryptography.X509Certificates.X509Chain
+$chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Offline
+$chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
+$chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::Zero
+$trusted = $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 0 -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint -and $root.Thumbprint -eq $expectedThumbprint
+[Console]::Out.Write((@{ trusted = $trusted } | ConvertTo-Json -Compress))`
 
 export const WINDOWS_ACL_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
 function Read-HermesValue([string]$Name) {
@@ -125,13 +137,7 @@ try {
 }
 $publicCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
 $pfxMatchesPublic = $pfxValid -and $certificate.Thumbprint -eq $publicCertificate.Thumbprint -and $certificate.Thumbprint -eq $expectedThumbprint
-$root = Get-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $expectedThumbprint) -ErrorAction Stop
-$chain = New-Object Security.Cryptography.X509Certificates.X509Chain
-$chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Offline
-$chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
-$chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::Zero
-$trusted = $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 0 -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint -and $root.Thumbprint -eq $expectedThumbprint
-[Console]::Out.Write((@{ aclValid = $aclValid; certificateDerBase64 = [Convert]::ToBase64String($publicCertificate.RawData); pfxMatchesPublic = $pfxMatchesPublic; pfxValid = $pfxValid; thumbprint = $publicCertificate.Thumbprint; trusted = $trusted } | ConvertTo-Json -Compress))
+[Console]::Out.Write((@{ aclValid = $aclValid; certificateDerBase64 = [Convert]::ToBase64String($publicCertificate.RawData); pfxMatchesPublic = $pfxMatchesPublic; pfxValid = $pfxValid; thumbprint = $publicCertificate.Thumbprint } | ConvertTo-Json -Compress))
 $passwordText = $null`
 
 export const WINDOWS_CLEANUP_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
@@ -156,6 +162,7 @@ interface SafeStorageApi {
 export interface WindowsPeepsVoiceAuthDeps {
   createSecureContext?: typeof tls.createSecureContext
   existsSync?: (filePath: string) => boolean
+  installTrustedCertificate?: (certificatePath: string) => void
   lstatSync?: (filePath: string) => fs.Stats
   mkdirSync?: (filePath: string, options: { mode: number; recursive: boolean }) => unknown
   now?: () => Date
@@ -163,10 +170,12 @@ export interface WindowsPeepsVoiceAuthDeps {
   randomBytes?: typeof nodeRandomBytes
   readFileSync?: (filePath: string) => Buffer
   realpathSync?: (filePath: string) => string
+  removeTrustedCertificate?: (thumbprint: string) => void
   safeStorage: SafeStorageApi
   spawnSync?: typeof nodeSpawnSync
   unlinkSync?: (filePath: string) => unknown
   userDataPath: () => string
+  validateTrustedCertificate?: (certificatePath: string, thumbprint: string) => boolean
   writeFileSync?: (filePath: string, data: Uint8Array, options: { flag: string; mode: number }) => unknown
 }
 
@@ -384,25 +393,90 @@ function assertBundleFilePaths(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsP
 function runPowerShell(
   script: string,
   env: NodeJS.ProcessEnv,
-  deps: WindowsPeepsVoiceAuthDeps
+  deps: WindowsPeepsVoiceAuthDeps,
+  visible = false
 ): SpawnSyncReturns<string> {
-  return (deps.spawnSync ?? nodeSpawnSync)(POWERSHELL, encodedPowerShell(script), {
+  const argv = visible
+    ? encodedPowerShell(script).filter(argument => argument !== '-NonInteractive')
+    : encodedPowerShell(script)
+
+  return (deps.spawnSync ?? nodeSpawnSync)(POWERSHELL, argv, {
     encoding: 'utf8',
     env: { ...process.env, ...env },
     maxBuffer: 1024 * 1024,
     shell: false,
-    windowsHide: true
+    windowsHide: !visible
   }) as SpawnSyncReturns<string>
 }
 
-function runCheckedPowerShell(script: string, env: NodeJS.ProcessEnv, deps: WindowsPeepsVoiceAuthDeps): string {
-  const result = runPowerShell(script, env, deps)
+function runCheckedPowerShell(
+  script: string,
+  env: NodeJS.ProcessEnv,
+  deps: WindowsPeepsVoiceAuthDeps,
+  visible = false
+): string {
+  const result = runPowerShell(script, env, deps, visible)
 
   if (result.error || result.status !== 0) {
     throw setupError()
   }
 
   return result.stdout
+}
+
+function installTrustedCertificate(certificatePath: string, deps: WindowsPeepsVoiceAuthDeps): void {
+  if (deps.installTrustedCertificate) {
+    deps.installTrustedCertificate(certificatePath)
+
+    return
+  }
+
+  runCheckedPowerShell(
+    WINDOWS_TRUST_SCRIPT,
+    { HERMES_PEEPS_CERT_PATH_B64: envValue(certificatePath) },
+    deps,
+    true
+  )
+}
+
+function validateTrustedCertificate(
+  certificatePath: string,
+  thumbprint: string,
+  deps: WindowsPeepsVoiceAuthDeps
+): boolean {
+  if (deps.validateTrustedCertificate) {
+    return deps.validateTrustedCertificate(certificatePath, thumbprint)
+  }
+
+  const output = runCheckedPowerShell(
+    WINDOWS_TRUST_VALIDATE_SCRIPT,
+    {
+      HERMES_PEEPS_CERT_PATH_B64: envValue(certificatePath),
+      HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint)
+    },
+    deps
+  )
+
+  try {
+    return JSON.parse(output).trusted === true
+  } catch {
+    return false
+  }
+}
+
+function removeTrustedCertificate(thumbprint: string, deps: WindowsPeepsVoiceAuthDeps): void {
+  if (deps.removeTrustedCertificate) {
+    deps.removeTrustedCertificate(thumbprint)
+
+    return
+  }
+
+  runCheckedPowerShell(
+    WINDOWS_CLEANUP_SCRIPT,
+    { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) },
+    deps,
+    true
+  )
 }
 
 function removeLocalFiles(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): void {
@@ -431,11 +505,7 @@ function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPe
   }
 
   if (thumbprint) {
-    const result = runPowerShell(WINDOWS_CLEANUP_SCRIPT, { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) }, deps)
-
-    if (result.error || result.status !== 0) {
-      throw setupError()
-    }
+    removeTrustedCertificate(thumbprint, deps)
   }
 
   removeLocalFiles(paths, deps)
@@ -509,7 +579,6 @@ function validateExistingBundle(
     pfxMatchesPublic?: unknown
     pfxValid?: unknown
     thumbprint?: unknown
-    trusted?: unknown
   }
 
   try {
@@ -530,7 +599,11 @@ function validateExistingBundle(
     throw bundleValidationError('certificate-corrupt', true)
   }
 
-  if (validation.aclValid !== true || validation.trusted !== true) {
+  if (validation.aclValid !== true) {
+    throw bundleValidationError('validation-policy-unavailable')
+  }
+
+  if (!validateTrustedCertificate(paths.certificatePath, expectedThumbprint, deps)) {
     throw bundleValidationError('validation-policy-unavailable')
   }
 
@@ -592,6 +665,7 @@ function provisionBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVo
       },
       deps
     )
+    installTrustedCertificate(paths.certificatePath, deps)
   } finally {
     passwordBytes.fill(0)
   }

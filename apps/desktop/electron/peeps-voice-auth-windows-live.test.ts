@@ -121,6 +121,19 @@ const diagnosticProductSpawnSync = ((command: string, args: readonly string[], o
     } catch {
       console.error('peeps_windows_trust_state=malformed')
     }
+  } else if (PRODUCT_STAGE_BY_SCRIPT.get(args.at(-1) ?? '') === 'validate') {
+    try {
+      const validation = JSON.parse(String(result.stdout || '{}')) as {
+        aclValid?: unknown
+        pfxMatchesPublic?: unknown
+        pfxValid?: unknown
+      }
+      console.error(
+        `peeps_windows_bundle_state=acl:${validation.aclValid === true ? 'valid' : 'invalid'},pfx:${validation.pfxValid === true ? 'valid' : 'invalid'},match:${validation.pfxMatchesPublic === true ? 'yes' : 'no'}`
+      )
+    } catch {
+      console.error('peeps_windows_bundle_state=malformed')
+    }
   }
 
   return result

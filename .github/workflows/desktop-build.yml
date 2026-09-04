@@ -200,8 +200,12 @@ jobs:
             $userSid = (Get-LocalUser -Name $userName -ErrorAction Stop).Sid.Value
             $credential = New-Object Management.Automation.PSCredential(".\$userName", $securePassword)
             $node = (Get-Command node.exe).Source
-            $electron = (Resolve-Path '..\..\node_modules\electron\dist\electron.exe').Path
-            $vitest = (Resolve-Path '..\..\node_modules\vitest\vitest.mjs').Path
+            $electronPackage = (& $node -p "require.resolve('electron/package.json')").Trim()
+            if ($LASTEXITCODE -ne 0 -or -not $electronPackage) { throw 'Could not resolve Electron package' }
+            $electron = Join-Path (Split-Path -Parent $electronPackage) 'dist\electron.exe'
+            $vitestPackage = (& $node -p "require.resolve('vitest/package.json')").Trim()
+            if ($LASTEXITCODE -ne 0 -or -not $vitestPackage) { throw 'Could not resolve Vitest package' }
+            $vitest = Join-Path (Split-Path -Parent $vitestPackage) 'vitest.mjs'
             $childScript = Join-Path $env:RUNNER_TEMP ("peeps-cert-test-$userName.ps1")
             @"
           `$ErrorActionPreference = 'Stop'

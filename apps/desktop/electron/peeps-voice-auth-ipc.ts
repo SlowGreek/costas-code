@@ -9,6 +9,8 @@ const AUTH_PAGE_TIMEOUT_MS_MAX = 300_000
 const AUTH_PAGE_TIMEOUT_MS_MIN = 1_000
 const MAX_AUTH_BODY_BYTES = 16_384
 const PEEPS_TLS_DIRNAME = 'peeps-voice-auth'
+const PEEPS_REDIRECT_ORIGIN = 'https://localhost:8080'
+const PEEPS_REDIRECT_URI = `${PEEPS_REDIRECT_ORIGIN}/`
 
 export interface PeepsVoiceAuthFlow {
   authority: string
@@ -94,15 +96,8 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     }
 
     const redirect = new URL(flow.redirectUri)
-    if (
-      redirect.protocol !== 'https:' ||
-      !['localhost', '127.0.0.1', '::1'].includes(redirect.hostname) ||
-      redirect.port !== '8080' ||
-      redirect.pathname !== '/' ||
-      redirect.search ||
-      redirect.hash
-    ) {
-      throw new Error('Peeps voice authorization requires the configured HTTPS localhost redirect')
+    if (flow.redirectUri !== PEEPS_REDIRECT_URI || redirect.origin !== PEEPS_REDIRECT_ORIGIN) {
+      throw new Error('Peeps voice authorization requires the exact https://localhost:8080/ redirect')
     }
 
     const tls = deps.tlsPaths()
@@ -137,7 +132,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
             .end(script)
           return
         }
-        if (req.method !== 'POST' || req.url !== '/' || req.headers.origin !== redirect.origin) {
+        if (req.method !== 'POST' || req.url !== '/' || req.headers.origin !== PEEPS_REDIRECT_ORIGIN) {
           res.writeHead(req.method === 'POST' ? 400 : 404).end()
           close(id, null)
           return

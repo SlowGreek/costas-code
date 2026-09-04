@@ -5,6 +5,7 @@ from tools import tool_backend_helpers, web_tools
 
 import threading
 import copy
+from pathlib import Path
 
 
 def test_realtime_token_requests_peeps_only_after_key_cmd_auth_failure(monkeypatch):
@@ -46,6 +47,93 @@ def test_peeps_rpc_completes_without_echoing_bearer(monkeypatch):
     finally:
         server._sessions.pop(runtime_id, None)
     assert result == {"ok": True}
+
+
+def test_peeps_rpc_requires_a_live_session(monkeypatch):
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+
+    envelope = server._methods["voice.realtime.peeps.start"]("start", {"session_id": "missing"})
+
+    assert envelope["error"]["code"] == 4001
+
+
+def test_peeps_rpc_binds_profile_to_the_live_session_and_rejects_cross_profile_completion(monkeypatch, tmp_path):
+    from hermes_constants import get_hermes_home
+
+    runtime_a = "runtime-peeps-a"
+    runtime_b = "runtime-peeps-b"
+    profile_a = tmp_path / "profile-a"
+    profile_b = tmp_path / "profile-b"
+    profile_a.mkdir()
+    profile_b.mkdir()
+    server._sessions[runtime_a] = {"session_key": "stored-session-a", "profile_home": str(profile_a)}
+    server._sessions[runtime_b] = {"session_key": "stored-session-b", "profile_home": str(profile_b)}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+
+    captured: list[Path] = []
+    monkeypatch.setattr(server, "_load_cfg", lambda: (captured.append(get_hermes_home().resolve()), cfg)[1])
+
+    start = server._methods["voice.realtime.peeps.start"](
+        "start",
+        {"session_id": runtime_a, "profile": "attacker-profile"},
+    )["result"]
+    from tests.tui_gateway.test_peeps_voice_auth import _jwt
+    bearer = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": 4_000_000_000})
+    try:
+        envelope = server._methods["voice.realtime.peeps.complete"](
+            "complete",
+            {
+                "session_id": runtime_b,
+                "profile": "attacker-profile",
+                "auth_session_id": start["auth_session_id"],
+                "state": start["state"],
+                "peeps_token": bearer,
+            },
+        )
+    finally:
+        server._sessions.pop(runtime_a, None)
+        server._sessions.pop(runtime_b, None)
+
+    assert captured == [profile_a.resolve(), profile_b.resolve()]
+    assert envelope["error"]["code"] == 4613
+
+
+def test_peeps_rpc_rejects_replay(monkeypatch):
+    runtime_id = "runtime-peeps-replay"
+    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    start = server._methods["voice.realtime.peeps.start"]("start", {"session_id": runtime_id})["result"]
+    from tests.tui_gateway.test_peeps_voice_auth import _jwt
+    bearer = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": 4_000_000_000})
+    try:
+        first = server._methods["voice.realtime.peeps.complete"](
+            "complete",
+            {
+                "session_id": runtime_id,
+                "auth_session_id": start["auth_session_id"],
+                "state": start["state"],
+                "peeps_token": bearer,
+            },
+        )
+        replay = server._methods["voice.realtime.peeps.complete"](
+            "complete-replay",
+            {
+                "session_id": runtime_id,
+                "auth_session_id": start["auth_session_id"],
+                "state": start["state"],
+                "peeps_token": bearer,
+            },
+        )
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    assert first["result"] == {"ok": True}
+    assert replay["error"]["code"] == 4613
 
 
 def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch):

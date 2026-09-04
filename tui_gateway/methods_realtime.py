@@ -32,10 +32,7 @@ def _peeps_interaction_payload(config, started: dict) -> dict:
     }
 
 
-def _peeps_profile_key(params: dict, session: dict | None = None) -> str:
-    profile = str(params.get("profile") or "").strip()
-    if profile:
-        return f"profile:{profile}"
+def _peeps_profile_key(session: dict | None = None) -> str:
     profile_home = ""
     if isinstance(session, dict):
         profile_home = str(session.get("profile_home") or "").strip()
@@ -44,6 +41,20 @@ def _peeps_profile_key(params: dict, session: dict | None = None) -> str:
     from hermes_constants import get_hermes_home
 
     return f"home:{get_hermes_home().resolve()}"
+
+
+def _with_session_profile(session: dict | None, fn):
+    from pathlib import Path
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    profile_home = str(session.get("profile_home") or "").strip() if isinstance(session, dict) else ""
+    if not profile_home:
+        return fn()
+    token = set_hermes_home_override(Path(profile_home).expanduser().resolve())
+    try:
+        return fn()
+    finally:
+        reset_hermes_home_override(token)
 
 
 def _coarse_realtime_failure(exc: Exception) -> str:
@@ -115,50 +126,55 @@ def _primary_realtime_api_key(key_cmd: str) -> str:
 
 
 @method("voice.realtime.peeps.start")
-@_profile_scoped
 def _(rid, params: dict) -> dict:
-    cfg = _load_cfg()
-    realtime_cfg = _realtime_cfg(cfg)
-    session = _sessions.get(str(params.get("session_id") or ""))
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
     try:
-        config = _peeps_config(realtime_cfg)
+        config = _with_session_profile(
+            session,
+            lambda: _peeps_config(_realtime_cfg(_load_cfg())),
+        )
         if config is None:
             return _err(rid, 4612, "Peeps voice fallback is disabled")
-        data = _peeps_state()["sessions"].start(_peeps_profile_key(params, session), config)
+        data = _peeps_state()["sessions"].start(_peeps_profile_key(session), config)
         return _ok(rid, _peeps_interaction_payload(config, data))
     except Exception:
         return _err(rid, 4612, "Could not start Peeps voice authorization")
 
 
 @method("voice.realtime.peeps.complete")
-@_profile_scoped
 def _(rid, params: dict) -> dict:
-    cfg = _load_cfg()
-    realtime_cfg = _realtime_cfg(cfg)
-    session = _sessions.get(str(params.get("session_id") or ""))
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
     try:
-        config = _peeps_config(realtime_cfg)
+        config = _with_session_profile(
+            session,
+            lambda: _peeps_config(_realtime_cfg(_load_cfg())),
+        )
         if config is None:
             return _err(rid, 4612, "Peeps voice fallback is disabled")
         token = _peeps_state()["sessions"].complete_browser_auth(
-            _peeps_profile_key(params, session), str(params.get("auth_session_id") or ""),
+            _peeps_profile_key(session), str(params.get("auth_session_id") or ""),
             str(params.get("state") or ""), str(params.get("peeps_token") or ""))
         from tui_gateway.peeps_voice_auth import PeepsCognitiveTokenProvider
 
         provider = PeepsCognitiveTokenProvider(config)
         provider.complete(token)
-        _peeps_state()["providers"][_peeps_profile_key(params, session)] = provider
+        _peeps_state()["providers"][_peeps_profile_key(session)] = provider
         return _ok(rid, {"ok": True})
     except Exception:
         return _err(rid, 4613, "Peeps voice authorization failed")
 
 
 @method("voice.realtime.peeps.cancel")
-@_profile_scoped
 def _(rid, params: dict) -> dict:
-    session = _sessions.get(str(params.get("session_id") or ""))
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
     _peeps_state()["sessions"].cancel(
-        _peeps_profile_key(params, session), str(params.get("auth_session_id") or "")
+        _peeps_profile_key(session), str(params.get("auth_session_id") or "")
     )
     return _ok(rid, {"ok": True})
 
@@ -170,7 +186,7 @@ def _(rid, params: dict) -> dict:
     if err:
         return err
 
-    cfg = _load_cfg()
+    cfg = _with_session_profile(session, _load_cfg)
     realtime_cfg = _realtime_cfg(cfg)
     if realtime_cfg.get("enabled") is False:
         return _err(rid, 4610, "GPT Realtime voice is disabled in config.yaml")
@@ -187,7 +203,7 @@ def _(rid, params: dict) -> dict:
     base_url = str(realtime_cfg.get("base_url") or "").strip()
     key_cmd = str(realtime_cfg.get("key_cmd") or "").strip()
     peeps_config = _peeps_config(realtime_cfg)
-    peeps_profile_key = _peeps_profile_key(params, session)
+    peeps_profile_key = _peeps_profile_key(session)
     provider = _peeps_state()["providers"].get(peeps_profile_key) if peeps_config else None
 
     try:
@@ -585,6 +601,7 @@ def register(server) -> None:
     server._realtime_cfg = _realtime_cfg
     server._peeps_interaction_payload = _peeps_interaction_payload
     server._peeps_profile_key = _peeps_profile_key
+    server._with_session_profile = _with_session_profile
     server._coarse_realtime_failure = _coarse_realtime_failure
     server._peeps_can_retry_interactively = _peeps_can_retry_interactively
     server._decorate_realtime_token = _decorate_realtime_token

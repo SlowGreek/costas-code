@@ -18,10 +18,12 @@ logger = logging.getLogger(__name__)
 
 _CACHE_LEEWAY_SECONDS = 90
 _COGNITIVE_EXCHANGE_TIMEOUT_SECONDS = 15
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 _MAX_PENDING_AUTH_SESSIONS = 32
 _MAX_RESPONSE_BYTES = 128 * 1024
 _TENANT_WILDCARDS = {"common", "consumers", "organizations"}
+_APPROVED_COGNITIVE_TOKEN_URL = (
+    "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken"
+)
 
 
 class PeepsAuthError(RuntimeError):
@@ -189,9 +191,9 @@ class PeepsVoiceAuthConfig:
             )
 
         redirect = urlparse(required["redirect_uri"])
-        if (
+        if required["redirect_uri"] != "https://localhost:8080/" or (
             redirect.scheme != "https"
-            or redirect.hostname not in _LOOPBACK_HOSTS
+            or redirect.hostname != "localhost"
             or redirect.port != 8080
             or redirect.path != "/"
             or redirect.params
@@ -211,9 +213,10 @@ class PeepsVoiceAuthConfig:
             or endpoint.params
             or endpoint.query
             or endpoint.fragment
+            or required["cognitive_token_url"] != _APPROVED_COGNITIVE_TOKEN_URL
         ):
             raise PeepsAuthError(
-                "Peeps Cognitive token endpoint must be an HTTPS URL",
+                "Peeps Cognitive token endpoint must use the approved Seastar URL",
                 code="invalid_cognitive_token_url",
             )
 

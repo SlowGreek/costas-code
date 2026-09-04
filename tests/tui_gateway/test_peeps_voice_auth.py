@@ -313,3 +313,33 @@ def test_cancel_clears_pending_session():
             _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300}),
         )
     assert exc.value.code == "unknown_auth_session"
+
+
+def test_config_rejects_unapproved_cognitive_endpoint_and_non_localhost_redirect():
+    with pytest.raises(PeepsAuthError) as wrong_endpoint:
+        PeepsVoiceAuthConfig.from_dict(
+            {
+                "enabled": True,
+                "client_id": "client",
+                "authority": "https://login.microsoftonline.com/organizations",
+                "scope": "https://peeps.asgprototype.com/api/access-as-user",
+                "redirect_uri": "https://localhost:8080/",
+                "cognitive_token_url": "https://example.com/token",
+                "timeout_seconds": 180,
+            }
+        )
+    assert wrong_endpoint.value.code == "invalid_cognitive_token_url"
+
+    with pytest.raises(PeepsAuthError) as wrong_redirect:
+        PeepsVoiceAuthConfig.from_dict(
+            {
+                "enabled": True,
+                "client_id": "client",
+                "authority": "https://login.microsoftonline.com/organizations",
+                "scope": "https://peeps.asgprototype.com/api/access-as-user",
+                "redirect_uri": "https://127.0.0.1:8080/",
+                "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+                "timeout_seconds": 180,
+            }
+        )
+    assert wrong_redirect.value.code == "invalid_redirect_uri"

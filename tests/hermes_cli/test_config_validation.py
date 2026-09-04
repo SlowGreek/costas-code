@@ -121,7 +121,7 @@ class TestPeepsRealtimeFallbackValidation:
             "client_id": "client-id",
             "authority": "https://login.microsoftonline.com/organizations",
             "scope": "https://peeps.asgprototype.com/api/access-as-user",
-            "redirect_uri": "https://127.0.0.1:8080/",
+            "redirect_uri": "https://localhost:8080/",
             "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
             "timeout_seconds": 180,
         })
@@ -143,15 +143,15 @@ class TestPeepsRealtimeFallbackValidation:
             "client_id": "client-id",
             "authority": "http://login.microsoftonline.com",
             "scope": "scope-one scope-two",
-            "redirect_uri": "https://example.com/callback",
-            "cognitive_token_url": "https://example.com/token?debug=1",
+            "redirect_uri": "https://127.0.0.1:8080/",
+            "cognitive_token_url": "https://example.com/token",
             "timeout_seconds": 0,
         })
         messages = [issue.message for issue in issues]
         assert any("authority must include a tenant path" in message or "authority must be an https URL" in message for message in messages)
         assert any("scope must be a single scope value" in message for message in messages)
-        assert any("redirect_uri must be https://localhost:8080/" in message for message in messages)
-        assert any("cognitive_token_url must not include a query string or fragment" in message for message in messages)
+        assert any("redirect_uri must be exactly https://localhost:8080/" in message for message in messages)
+        assert any("approved Seastar token endpoint" in message for message in messages)
         assert any("timeout_seconds must be between 1 and 300" in message for message in messages)
 
     def test_rejects_non_integer_timeout(self):
@@ -165,6 +165,16 @@ class TestPeepsRealtimeFallbackValidation:
             "timeout_seconds": "180",
         })
         assert any("timeout_seconds must be an integer" in issue.message for issue in issues)
+
+    def test_absent_enabled_matches_runtime_disabled_semantics(self):
+        issues = self._issues({
+            "client_id": "",
+            "authority": "https://example.com/tenant",
+            "scope": "https://example.com/.default",
+            "redirect_uri": "https://127.0.0.1:8080/",
+            "cognitive_token_url": "https://example.com/token",
+        })
+        assert not any(issue.severity == "error" for issue in issues)
 
 
 class TestUnknownTopLevelKeys:

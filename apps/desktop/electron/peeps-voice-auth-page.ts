@@ -1,4 +1,8 @@
-import { InteractionRequiredAuthError, PublicClientApplication } from '@azure/msal-browser'
+import {
+  BrowserCacheLocation,
+  InteractionRequiredAuthError,
+  PublicClientApplication
+} from '@azure/msal-browser'
 
 interface Flow {
   authority: string
@@ -29,6 +33,24 @@ async function postToken(env: Pick<PageEnv, 'closeWindow' | 'fetch'>, flow: Flow
     method: 'POST'
   })
   env.closeWindow()
+}
+
+export function createPeepsVoiceAuthClient(flow: Flow): PublicClientApplication {
+  return new PublicClientApplication(buildPeepsVoiceAuthClientConfig(flow))
+}
+
+export function buildPeepsVoiceAuthClientConfig(flow: Flow) {
+  return {
+    auth: {
+      authority: flow.authority,
+      clientId: flow.clientId,
+      redirectUri: flow.redirectUri
+    },
+    cache: {
+      cacheLocation: BrowserCacheLocation.MemoryStorage,
+      temporaryCacheLocation: BrowserCacheLocation.MemoryStorage
+    }
+  }
 }
 
 export async function runPeepsVoiceAuthPage(env: PageEnv): Promise<void> {
@@ -71,14 +93,7 @@ export async function runPeepsVoiceAuthPage(env: PageEnv): Promise<void> {
 export function defaultPeepsVoiceAuthPageEnv(): PageEnv {
   return {
     closeWindow: () => window.close(),
-    createClient: flow =>
-      new PublicClientApplication({
-        auth: {
-          authority: flow.authority,
-          clientId: flow.clientId,
-          redirectUri: flow.redirectUri
-        }
-      }),
+    createClient: createPeepsVoiceAuthClient,
     document,
     fetch
   }

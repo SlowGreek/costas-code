@@ -154,6 +154,27 @@ test('start serves only the exact auth page paths and relays a valid callback on
   assert.equal(replayRes.status, 404)
 })
 
+test('start rejects non-localhost loopback aliases when the page is authorized only for localhost', async () => {
+  const harness = createHarness()
+
+  await assert.rejects(
+    () =>
+      handlersStart(harness, 'auth-alias', {
+        ...flow,
+        redirectUri: 'https://127.0.0.1:8080/'
+      }),
+    /exact https:\/\/localhost:8080\//
+  )
+  await assert.rejects(
+    () =>
+      handlersStart(harness, 'auth-ipv6', {
+        ...flow,
+        redirectUri: 'https://[::1]:8080/'
+      }),
+    /exact https:\/\/localhost:8080\//
+  )
+})
+
 test('invalid origin state method and oversized body fail closed without echoing tokens', async () => {
   const harness = createHarness()
 

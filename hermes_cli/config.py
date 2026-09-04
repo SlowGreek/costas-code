@@ -2311,6 +2311,7 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
             issues.append(ConfigIssue("error", f"{field} must be an https URL", f"Set {field} to an https endpoint"))
 
     def _validate_peeps_fallback(cfg: dict | None) -> None:
+        approved_cognitive_token_url = "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken"
         realtime_section = _realtime_cfg_dict(cfg)
         if realtime_section is None or "peeps_fallback" not in realtime_section:
             return
@@ -2318,7 +2319,7 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         if not isinstance(peeps, dict):
             issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback must be a mapping", "Set voice.realtime.peeps_fallback to a YAML object with enabled/client_id/authority/scope/redirect_uri/cognitive_token_url"))
             return
-        if peeps.get("enabled") is False:
+        if peeps.get("enabled") is not True:
             return
 
         for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
@@ -2347,15 +2348,17 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         if isinstance(redirect_uri, str) and redirect_uri.strip():
             parsed = urlparse(redirect_uri.strip())
             valid_loopback = (
+                redirect_uri.strip() == "https://localhost:8080/"
+                and
                 parsed.scheme == "https"
-                and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+                and parsed.hostname == "localhost"
                 and parsed.port == 8080
                 and parsed.path == "/"
                 and not parsed.query
                 and not parsed.fragment
             )
             if not valid_loopback:
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.redirect_uri must be https://localhost:8080/ or an equivalent loopback host on port 8080", "Keep the Peeps browser callback on the local HTTPS loopback listener"))
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.redirect_uri must be exactly https://localhost:8080/", "Keep the Peeps browser callback on the exact local HTTPS loopback listener"))
 
         cognitive_token_url = peeps.get("cognitive_token_url")
         if isinstance(cognitive_token_url, str) and cognitive_token_url.strip():
@@ -2363,6 +2366,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
             parsed = urlparse(cognitive_token_url.strip())
             if parsed.query or parsed.fragment:
                 issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.cognitive_token_url must not include a query string or fragment", "Use the exact HTTPS endpoint only"))
+            if cognitive_token_url.strip() != approved_cognitive_token_url:
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.cognitive_token_url must be the approved Seastar token endpoint", f"Set voice.realtime.peeps_fallback.cognitive_token_url to {approved_cognitive_token_url}"))
 
         timeout_seconds = peeps.get("timeout_seconds")
         if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):

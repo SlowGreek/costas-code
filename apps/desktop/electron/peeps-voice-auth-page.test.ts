@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 
-import { InteractionRequiredAuthError } from '@azure/msal-browser'
+import { BrowserCacheLocation, InteractionRequiredAuthError } from '@azure/msal-browser'
 import { test, vi } from 'vitest'
 
-import { runPeepsVoiceAuthPage } from './peeps-voice-auth-page'
+import {
+  buildPeepsVoiceAuthClientConfig,
+  runPeepsVoiceAuthPage
+} from './peeps-voice-auth-page'
 
 interface MockClient {
   acquireTokenRedirect: ReturnType<typeof vi.fn>
@@ -122,4 +125,18 @@ test('non-interaction errors fail closed by closing the window', async () => {
   assert.equal(client.acquireTokenRedirect.mock.calls.length, 0)
   assert.equal(fetchFn.mock.calls.length, 0)
   assert.equal(closeWindow.mock.calls.length, 1)
+})
+
+test('creates the MSAL client with memory-only browser cache', () => {
+  const config = buildPeepsVoiceAuthClientConfig({
+    authority: 'https://login.microsoftonline.com/organizations',
+    clientId: 'client-id',
+    redirectUri: 'https://localhost:8080/',
+    scope: 'https://peeps.asgprototype.com/api/access-as-user',
+    state: 'state-123'
+  })
+  assert.deepEqual(config.cache, {
+    cacheLocation: BrowserCacheLocation.MemoryStorage,
+    temporaryCacheLocation: BrowserCacheLocation.MemoryStorage
+  })
 })

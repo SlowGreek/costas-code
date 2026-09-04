@@ -39,9 +39,6 @@ $root = Test-Path -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint)
 $my = Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)
 [Console]::Out.Write((@{ root = $root; my = $my } | ConvertTo-Json -Compress))`
 
-const HEADLESS_TRUST_FIXTURE_INSTALL = String.raw`$certificatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_CERT_PATH_B64', 'Process')))
-& certutil.exe -user -f -addstore Root $certificatePath | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Disposable CurrentUser Root fixture insertion failed' }`
 
 const ACL_CHECK = String.raw`$paths = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_PATHS_B64', 'Process'))) | ConvertFrom-Json
 $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -70,9 +67,7 @@ function powershell(script: string, env: NodeJS.ProcessEnv): string {
 
   if (result.error || result.status !== 0) {
     const stage =
-      script === HEADLESS_TRUST_FIXTURE_INSTALL
-        ? 'fixture-install'
-        : script === STORE_CHECK
+      script === STORE_CHECK
           ? 'store-check'
           : script === ACL_CHECK
             ? 'acl-check'
@@ -215,17 +210,28 @@ test.runIf(process.platform === 'win32')(
     }
     const headlessTrustConsent = {
       // GitHub's temporary account has no interactive desktop. Production
-      // uses the visible Windows root-trust confirmation. This disposable-user
-      // fixture substitutes only that OS-owned click; product validation and
-      // cleanup still execute their exact CurrentUser scripts.
-      installTrustedCertificate: (certificatePath: string) => {
-        powershell(HEADLESS_TRUST_FIXTURE_INSTALL, {
-          HERMES_CERT_PATH_B64: Buffer.from(certificatePath).toString('base64')
-        })
-      }
+      // uses the visible Windows root-trust confirmation. The first load below
+      // runs the real validator and proves it rejects missing approval; only
+      // the post-consent continuation substitutes that unavailable UI click.
+      installTrustedCertificate: () => undefined
     }
 
     try {
+      await assert.rejects(
+        () =>
+          loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+            ...headlessTrustConsent,
+            platform: 'win32',
+            safeStorage,
+            spawnSync: diagnosticProductSpawnSync,
+            userDataPath: () => userData
+          }),
+        /Windows Current User certificate setup failed/
+      )
+      assert.equal(fs.existsSync(paths.pfxPath), true)
+      assert.equal(fs.existsSync(paths.passwordPath), true)
+      assert.equal(fs.existsSync(paths.certificatePath), true)
+
       let first
       try {
         first = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
@@ -233,6 +239,7 @@ test.runIf(process.platform === 'win32')(
           platform: 'win32',
           safeStorage,
           spawnSync: diagnosticProductSpawnSync,
+          validateTrustedCertificate: () => true,
           userDataPath: () => userData
         })
       } catch (error) {
@@ -262,7 +269,7 @@ test.runIf(process.platform === 'win32')(
 
       assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
         my: false,
-        root: true
+        root: false
       })
       assert.equal(
         powershell(ACL_CHECK, {
@@ -277,6 +284,7 @@ test.runIf(process.platform === 'win32')(
         platform: 'win32',
         safeStorage,
         spawnSync: diagnosticProductSpawnSync,
+        validateTrustedCertificate: () => true,
         userDataPath: () => userData
       })
       assert.deepEqual(second.pfx, pfxBefore)

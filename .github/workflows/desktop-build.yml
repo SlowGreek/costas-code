@@ -176,7 +176,7 @@ jobs:
           npm run typecheck
           npm run lint
 
-      - name: Exercise non-admin Peeps certificate with real trust validation
+      - name: Exercise non-admin Peeps certificate around Windows trust consent
         if: (needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform) && matrix.platform == 'windows'
         working-directory: apps/desktop
         shell: powershell

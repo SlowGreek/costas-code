@@ -226,13 +226,34 @@ test.runIf(process.platform === 'win32')(
     }
 
     try {
-      const first = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
-        ...headlessTrustConsent,
-        platform: 'win32',
-        safeStorage,
-        spawnSync: diagnosticProductSpawnSync,
-        userDataPath: () => userData
-      })
+      let first
+      try {
+        first = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+          ...headlessTrustConsent,
+          platform: 'win32',
+          safeStorage,
+          spawnSync: diagnosticProductSpawnSync,
+          userDataPath: () => userData
+        })
+      } catch (error) {
+        const complete = [paths.pfxPath, paths.passwordPath, paths.certificatePath].every(filePath => fs.existsSync(filePath))
+        const pathsExact =
+          complete &&
+          [paths.pfxPath, paths.passwordPath, paths.certificatePath].every(
+            filePath => path.win32.normalize(fs.realpathSync(filePath)).toLowerCase() === path.win32.normalize(filePath).toLowerCase()
+          )
+        let leafValid = false
+        try {
+          validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(fs.readFileSync(paths.certificatePath)), new Date())
+          leafValid = true
+        } catch {
+          // Report only the policy result, never certificate material.
+        }
+        console.error(
+          `peeps_windows_prevalidate_state=complete:${complete ? 'yes' : 'no'},paths:${pathsExact ? 'exact' : 'invalid'},leaf:${leafValid ? 'valid' : 'invalid'}`
+        )
+        throw error
+      }
       const pfxBefore = Buffer.from(first.pfx)
       const certificateDer = fs.readFileSync(paths.certificatePath)
       const certificate = new X509Certificate(certificateDer)

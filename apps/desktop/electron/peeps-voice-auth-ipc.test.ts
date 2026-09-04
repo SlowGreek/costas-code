@@ -128,6 +128,7 @@ interface FakeServer {
 function createHarness(options: {
   currentUid?: () => null | number
   lstatSync?: (path: string) => {
+    isDirectory: () => boolean
     isFile: () => boolean
     isSymbolicLink: () => boolean
     mode: number
@@ -158,12 +159,23 @@ function createHarness(options: {
 
   const lstatSync =
     options.lstatSync ??
-    vi.fn(() => ({
-      isFile: () => true,
-      isSymbolicLink: () => false,
-      mode: 0o600,
-      uid: 501
-    }))
+    vi.fn((filePath: string) =>
+      filePath.endsWith('.pem')
+        ? {
+            isDirectory: () => false,
+            isFile: () => true,
+            isSymbolicLink: () => false,
+            mode: 0o600,
+            uid: 501
+          }
+        : {
+            isDirectory: () => true,
+            isFile: () => false,
+            isSymbolicLink: () => false,
+            mode: 0o700,
+            uid: 501
+          }
+    )
 
   const tlsPaths =
     options.tlsPaths ??
@@ -401,6 +413,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: (() => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -423,6 +436,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: ((filePath: string) => ({
+          isDirectory: () => false,
           isFile: () => filePath.endsWith('-key.pem'),
           isSymbolicLink: () => filePath.endsWith('-cert.pem'),
           mode: 0o600,
@@ -442,6 +456,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: ((filePath: string) => ({
+          isDirectory: () => false,
           isFile: () => !filePath.endsWith('-cert.pem'),
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -461,6 +476,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: (() => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -480,6 +496,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: ((filePath: string) => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: filePath.endsWith('-key.pem') ? 0o640 : 0o644,
@@ -500,6 +517,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: (() => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -519,6 +537,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: (() => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -539,6 +558,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         appPath: () => '/app',
         currentUid: () => 501,
         lstatSync: (() => ({
+          isDirectory: () => false,
           isFile: () => true,
           isSymbolicLink: () => false,
           mode: 0o600,
@@ -547,6 +567,49 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
         now: () => new Date('2026-09-05T00:00:00.000Z'),
         openExternal: async () => {},
         readFile: filePath => (filePath.endsWith('-cert.pem') ? WRONG_SAN_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+})
+
+test('tls material loader rejects symlinked directory components from userData through peeps-voice-auth', () => {
+  const invalidMessage =
+    /valid pre-provisioned Electron-owned localhost certificate and private key/
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: ((filePath: string) =>
+          filePath === '/user/data'
+            ? {
+                isDirectory: () => true,
+                isFile: () => false,
+                isSymbolicLink: () => false,
+                mode: 0o700,
+                uid: 501
+              }
+            : filePath === '/user/data/peeps-voice-auth'
+              ? {
+                  isDirectory: () => true,
+                  isFile: () => false,
+                  isSymbolicLink: () => true,
+                  mode: 0o700,
+                  uid: 501
+                }
+              : {
+                  isDirectory: () => false,
+                  isFile: () => true,
+                  isSymbolicLink: () => false,
+                  mode: 0o600,
+                  uid: 501
+                }) as never,
+        now: () => new Date('2026-09-05T00:00:00.000Z'),
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
         tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
         userDataPath: () => '/user/data'
       }),

@@ -88,6 +88,28 @@ function resolveExpectedTlsPaths(userDataPath: string) {
   }
 }
 
+function validateOwnedRealDirectory(options: {
+  currentUid: null | number
+  directoryPath: string
+  lstatSync: (filePath: string) => fs.Stats
+}): void {
+  let stats: fs.Stats
+
+  try {
+    stats = options.lstatSync(options.directoryPath)
+  } catch {
+    throw tlsValidationError()
+  }
+
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw tlsValidationError()
+  }
+
+  if (options.currentUid !== null && stats.uid !== options.currentUid) {
+    throw tlsValidationError()
+  }
+}
+
 function validateOwnedRegularFile(options: {
   currentUid: null | number
   expectedPath: string
@@ -118,7 +140,9 @@ function validateOwnedRegularFile(options: {
 
 export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps) {
   const configured = deps.tlsPaths()
-  const expected = resolveExpectedTlsPaths(deps.userDataPath())
+  const userDataPath = path.resolve(deps.userDataPath())
+  const expected = resolveExpectedTlsPaths(userDataPath)
+  const tlsRootPath = path.dirname(expected.certificatePath)
   const certificatePath = path.resolve(String(configured.certificatePath || ''))
   const keyPath = path.resolve(String(configured.keyPath || ''))
 
@@ -134,6 +158,16 @@ export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps)
   const currentUid = deps.currentUid ? deps.currentUid() : typeof process.getuid === 'function' ? process.getuid() : null
   const platform = deps.platform ?? process.platform
 
+  validateOwnedRealDirectory({
+    currentUid,
+    directoryPath: userDataPath,
+    lstatSync
+  })
+  validateOwnedRealDirectory({
+    currentUid,
+    directoryPath: tlsRootPath,
+    lstatSync
+  })
   validateOwnedRegularFile({
     currentUid,
     expectedPath: certificatePath,

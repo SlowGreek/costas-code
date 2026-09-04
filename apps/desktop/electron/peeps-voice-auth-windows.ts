@@ -27,7 +27,7 @@ $certificatePath = Read-HermesValue 'HERMES_PEEPS_CERT_PATH_B64'
 $passwordText = Read-HermesValue 'HERMES_PEEPS_PFX_PASSWORD_B64'
 $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
 $certificate = $null
-$trusted = $null
+$trustedThumbprint = $null
 $keyContainerPath = $null
 try {
   $certificate = New-SelfSignedCertificate -Subject 'CN=localhost' -FriendlyName ('Catalyst Peeps localhost ' + [Guid]::NewGuid().ToString('N')) -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -KeyUsage DigitalSignature,KeyEncipherment -HashAlgorithm SHA256 -NotAfter ([DateTimeOffset]::Now.AddDays(397).DateTime) -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1','2.5.29.19={critical}{text}ca=false','2.5.29.37={text}1.3.6.1.5.5.7.3.1')
@@ -41,10 +41,19 @@ try {
   }
   Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $password -Force | Out-Null
   Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT -Force | Out-Null
-  $trusted = Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root'
-  if ($trusted.Thumbprint -ne $certificate.Thumbprint) { throw 'Trusted certificate thumbprint mismatch' }
+  $trustedCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
+  $rootStore = New-Object Security.Cryptography.X509Certificates.X509Store([Security.Cryptography.X509Certificates.StoreName]::Root, [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+  try {
+    $rootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    $rootStore.Add($trustedCertificate)
+    $trustedThumbprint = $trustedCertificate.Thumbprint
+    if ($trustedThumbprint -ne $certificate.Thumbprint) { throw 'Trusted certificate thumbprint mismatch' }
+  } finally {
+    if ($rootStore) { $rootStore.Close() }
+    if ($trustedCertificate) { $trustedCertificate.Dispose() }
+  }
 } catch {
-  if ($trusted) { Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $trusted.Thumbprint) -Force -ErrorAction SilentlyContinue }
+  if ($trustedThumbprint) { Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $trustedThumbprint) -Force -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath $pfxPath,$certificatePath -Force -ErrorAction SilentlyContinue
   throw
 } finally {

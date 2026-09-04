@@ -53,7 +53,14 @@ function createWindowsHarness(
     existing?: boolean
     decryptThrows?: boolean
     encryptionAvailable?: boolean
-    validation?: Partial<{ aclValid: boolean; certificateDer: Buffer; trusted: boolean; thumbprint: string }>
+    validation?: Partial<{
+      aclValid: boolean
+      certificateDer: Buffer
+      pfxMatchesPublic: boolean
+      pfxValid: boolean
+      trusted: boolean
+      thumbprint: string
+    }>
     failScript?: 'acl' | 'provision' | 'validate'
     invalidPfx?: boolean
     malformedValidationJson?: boolean
@@ -76,6 +83,8 @@ function createWindowsHarness(
   const validation = {
     aclValid: true,
     certificateDer: VALID_CERT_DER,
+    pfxMatchesPublic: true,
+    pfxValid: true,
     trusted: true,
     thumbprint: new X509Certificate(VALID_CERT_DER).fingerprint.replaceAll(':', ''),
     ...options.validation
@@ -102,6 +111,8 @@ function createWindowsHarness(
       return { status: 0, stdout: '', stderr: '' }
     }
 
+    const provisioned = files.get(paths.pfxPath)?.toString() === 'new-pfx'
+
     return {
       status: 0,
       stdout: options.malformedValidationJson
@@ -109,6 +120,8 @@ function createWindowsHarness(
         : JSON.stringify({
             aclValid: validation.aclValid,
             certificateDerBase64: validation.certificateDer.toString('base64'),
+            pfxMatchesPublic: provisioned ? true : validation.pfxMatchesPublic,
+            pfxValid: provisioned ? true : validation.pfxValid,
             trusted: validation.trusted,
             thumbprint: validation.thumbprint
           }),
@@ -300,7 +313,7 @@ test('Windows transient validator failures preserve every complete-bundle artifa
 })
 
 test('Windows proven invalid PFX rotates a complete corrupt bundle', () => {
-  const harness = createWindowsHarness({ existing: true, invalidPfx: true })
+  const harness = createWindowsHarness({ existing: true, validation: { pfxValid: false } })
   const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
   assert.equal(material.pfx.toString(), 'new-pfx')
   assert.ok(

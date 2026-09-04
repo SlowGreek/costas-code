@@ -107,16 +107,22 @@ foreach ($target in $paths) {
   }
 }
 $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
-$certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, $password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+$certificate = $null
+$pfxValid = $true
+try {
+  $certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, $password, [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+} catch {
+  $pfxValid = $false
+}
 $publicCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
-if ($certificate.Thumbprint -ne $publicCertificate.Thumbprint -or $certificate.Thumbprint -ne $expectedThumbprint) { throw 'Certificate thumbprint mismatch' }
+$pfxMatchesPublic = $pfxValid -and $certificate.Thumbprint -eq $publicCertificate.Thumbprint -and $certificate.Thumbprint -eq $expectedThumbprint
 $root = Get-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $expectedThumbprint) -ErrorAction Stop
 $chain = New-Object Security.Cryptography.X509Certificates.X509Chain
 $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Offline
 $chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
 $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::Zero
 $trusted = $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 0 -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint -and $root.Thumbprint -eq $expectedThumbprint
-[Console]::Out.Write((@{ aclValid = $aclValid; certificateDerBase64 = [Convert]::ToBase64String($publicCertificate.RawData); thumbprint = $publicCertificate.Thumbprint; trusted = $trusted } | ConvertTo-Json -Compress))
+[Console]::Out.Write((@{ aclValid = $aclValid; certificateDerBase64 = [Convert]::ToBase64String($publicCertificate.RawData); pfxMatchesPublic = $pfxMatchesPublic; pfxValid = $pfxValid; thumbprint = $publicCertificate.Thumbprint; trusted = $trusted } | ConvertTo-Json -Compress))
 $passwordText = $null`
 
 export const WINDOWS_CLEANUP_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
@@ -488,12 +494,31 @@ function validateExistingBundle(
     throw bundleValidationError('validation-unavailable')
   }
 
-  let validation: { aclValid?: unknown; certificateDerBase64?: unknown; thumbprint?: unknown; trusted?: unknown }
+  let validation: {
+    aclValid?: unknown
+    certificateDerBase64?: unknown
+    pfxMatchesPublic?: unknown
+    pfxValid?: unknown
+    thumbprint?: unknown
+    trusted?: unknown
+  }
 
   try {
     validation = JSON.parse(output)
   } catch {
     throw bundleValidationError('validation-unavailable')
+  }
+
+  if (validation.pfxValid === false) {
+    throw bundleValidationError('pfx-corrupt', true)
+  }
+
+  if (validation.pfxValid !== true) {
+    throw bundleValidationError('validation-unavailable')
+  }
+
+  if (validation.pfxMatchesPublic !== true) {
+    throw bundleValidationError('certificate-corrupt', true)
   }
 
   if (validation.aclValid !== true || validation.trusted !== true) {

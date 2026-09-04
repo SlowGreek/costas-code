@@ -193,9 +193,11 @@ jobs:
           $securePassword = ConvertTo-SecureString $passwordText -AsPlainText -Force
           $testError = $null
           $cleanupErrors = [Collections.Generic.List[string]]::new()
-          New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
-          $userSid = (Get-LocalUser -Name $userName -ErrorAction Stop).Sid.Value
+          $childScript = $null
+          $userSid = $null
           try {
+            New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
+            $userSid = (Get-LocalUser -Name $userName -ErrorAction Stop).Sid.Value
             $credential = New-Object Management.Automation.PSCredential(".\$userName", $securePassword)
             $node = (Get-Command node.exe).Source
             $electron = (Resolve-Path '..\..\node_modules\electron\dist\electron.exe').Path
@@ -220,8 +222,18 @@ jobs:
           } catch {
             $testError = $_
           } finally {
-            if ($childScript) { Remove-Item -LiteralPath $childScript -Force -ErrorAction SilentlyContinue }
-            try { Remove-LocalUser -Name $userName -ErrorAction Stop } catch { $cleanupErrors.Add("local user deletion failed: $($_.Exception.Message)") }
+            if ($childScript) {
+              try {
+                if (Test-Path -LiteralPath $childScript) { Remove-Item -LiteralPath $childScript -Force -ErrorAction Stop }
+              } catch { $cleanupErrors.Add("child script deletion failed: $($_.Exception.Message)") }
+              if (Test-Path -LiteralPath $childScript) { $cleanupErrors.Add('child script still exists') }
+            }
+            try {
+              $temporaryUser = Get-LocalUser -Name $userName -ErrorAction Stop
+              Remove-LocalUser -Name $temporaryUser.Name -ErrorAction Stop
+            } catch [Microsoft.PowerShell.Commands.UserNotFoundException] {
+              # Expected when account creation failed before committing the user.
+            } catch { $cleanupErrors.Add("local user deletion failed: $($_.Exception.Message)") }
             try {
               Get-LocalUser -Name $userName -ErrorAction Stop | Out-Null
               $cleanupErrors.Add('Get-LocalUser still found the temporary account')
@@ -229,9 +241,15 @@ jobs:
               # Expected fail-closed postcondition.
             } catch { $cleanupErrors.Add("Get-LocalUser verification failed: $($_.Exception.Message)") }
             try {
-              @(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or $_.SID -eq $userSid }) | ForEach-Object { Remove-CimInstance -InputObject $_ -ErrorAction Stop }
+              @(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or ($userSid -and $_.SID -eq $userSid) }) | ForEach-Object { Remove-CimInstance -InputObject $_ -ErrorAction Stop }
             } catch { $cleanupErrors.Add("profile deletion failed: $($_.Exception.Message)") }
-            if (Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or $_.SID -eq $userSid }) { $cleanupErrors.Add('temporary profile still exists') }
+            try {
+              if (Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or ($userSid -and $_.SID -eq $userSid) }) { $cleanupErrors.Add('temporary profile row still exists') }
+            } catch { $cleanupErrors.Add("profile verification failed: $($_.Exception.Message)") }
+            try {
+              if (Test-Path -LiteralPath $profilePath) { Remove-Item -LiteralPath $profilePath -Recurse -Force -ErrorAction Stop }
+            } catch { $cleanupErrors.Add("profile directory deletion failed: $($_.Exception.Message)") }
+            if (Test-Path -LiteralPath $profilePath) { $cleanupErrors.Add('temporary profile directory still exists') }
             $passwordText = $null
             $securePassword = $null
           }

@@ -15,6 +15,7 @@ import {
   WINDOWS_ACL_SCRIPT,
   WINDOWS_CLEANUP_SCRIPT,
   WINDOWS_PROVISION_SCRIPT,
+  WINDOWS_TRUST_VALIDATE_SCRIPT,
   WINDOWS_VALIDATE_SCRIPT
 } from './peeps-voice-auth-windows'
 
@@ -36,6 +37,10 @@ $root = Test-Path -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint)
 $my = Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)
 [Console]::Out.Write((@{ root = $root; my = $my } | ConvertTo-Json -Compress))`
 
+const HEADLESS_TRUST_FIXTURE_INSTALL = String.raw`$certificatePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_CERT_PATH_B64', 'Process')))
+& certutil.exe -user -f -addstore Root $certificatePath | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Disposable CurrentUser Root fixture insertion failed' }`
+
 const ACL_CHECK = String.raw`$paths = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_PATHS_B64', 'Process'))) | ConvertFrom-Json
 $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $allowed = @($currentSid, 'S-1-5-18', 'S-1-5-32-544')
@@ -51,14 +56,6 @@ foreach ($target in $paths) {
   }
 }
 [Console]::Out.Write('true')`
-
-const CLEANUP = String.raw`$thumbprint = [Environment]::GetEnvironmentVariable('HERMES_THUMBPRINT', 'Process')
-if ($thumbprint -match '^[0-9A-Fa-f]{40}$') {
-  Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint) -Force -ErrorAction Stop
-  if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)) { Remove-Item -Path ('Cert:\CurrentUser\My\' + $thumbprint) -DeleteKey -Force -ErrorAction Stop }
-  if (Test-Path -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint)) { throw 'Root certificate cleanup failed' }
-  if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)) { throw 'My certificate cleanup failed' }
-}`
 
 function powershell(script: string, env: NodeJS.ProcessEnv): string {
   const result = spawnSync('powershell.exe', [...POWERSHELL_ARGS, Buffer.from(script, 'utf16le').toString('base64')], {
@@ -80,6 +77,7 @@ const PRODUCT_STAGE_BY_SCRIPT = new Map(
     ['acl', WINDOWS_ACL_SCRIPT],
     ['cleanup', WINDOWS_CLEANUP_SCRIPT],
     ['provision', WINDOWS_PROVISION_SCRIPT],
+    ['trust-validate', WINDOWS_TRUST_VALIDATE_SCRIPT],
     ['validate', WINDOWS_VALIDATE_SCRIPT]
   ].map(([name, script]) => [Buffer.from(script, 'utf16le').toString('base64'), name])
 )
@@ -174,15 +172,18 @@ test.runIf(process.platform === 'win32')(
     }
     const headlessTrustConsent = {
       // GitHub's temporary account has no interactive desktop. Production
-      // uses the visible Windows root-trust confirmation; this test replaces
-      // only that OS-owned consent result and keeps every other native path.
-      installTrustedCertificate: () => undefined,
-      removeTrustedCertificate: () => undefined,
-      validateTrustedCertificate: () => true
+      // uses the visible Windows root-trust confirmation. This disposable-user
+      // fixture substitutes only that OS-owned click; product validation and
+      // cleanup still execute their exact CurrentUser scripts.
+      installTrustedCertificate: (certificatePath: string) => {
+        powershell(HEADLESS_TRUST_FIXTURE_INSTALL, {
+          HERMES_CERT_PATH_B64: Buffer.from(certificatePath).toString('base64')
+        })
+      }
     }
 
     try {
-      const first = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+      const first = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
         ...headlessTrustConsent,
         platform: 'win32',
         safeStorage,
@@ -197,7 +198,7 @@ test.runIf(process.platform === 'win32')(
 
       assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
         my: false,
-        root: false
+        root: true
       })
       assert.equal(
         powershell(ACL_CHECK, {
@@ -207,7 +208,7 @@ test.runIf(process.platform === 'win32')(
       )
       await proveHttpsHandshake(first, certificateDer)
 
-      const second = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+      const second = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
         ...headlessTrustConsent,
         platform: 'win32',
         safeStorage,
@@ -220,8 +221,17 @@ test.runIf(process.platform === 'win32')(
         thumbprint
       )
     } finally {
+      if (!thumbprint && fs.existsSync(paths.certificatePath)) {
+        try {
+          thumbprint = new X509Certificate(fs.readFileSync(paths.certificatePath)).fingerprint.replaceAll(':', '')
+        } catch {
+          // No trusted-store identity can be derived from a corrupt public certificate.
+        }
+      }
       if (thumbprint) {
-        powershell(CLEANUP, { HERMES_THUMBPRINT: thumbprint })
+        powershell(WINDOWS_CLEANUP_SCRIPT, {
+          HERMES_PEEPS_THUMBPRINT_B64: Buffer.from(thumbprint).toString('base64')
+        })
         assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
           my: false,
           root: false

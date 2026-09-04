@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { X509Certificate } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import path from 'node:path'
 
 import { test, vi } from 'vitest'
@@ -64,8 +65,10 @@ function createWindowsHarness(
       thumbprint: string
     }>
     failScript?: 'acl' | 'provision' | 'validate'
+    failTrust?: boolean
     invalidPfx?: boolean
     malformedValidationJson?: boolean
+    stallTrust?: boolean
   } = {}
 ) {
   const paths = resolveWindowsPeepsVoiceAuthPaths(USER_DATA)
@@ -97,62 +100,88 @@ function createWindowsHarness(
     thumbprint: new X509Certificate(VALID_CERT_DER).fingerprint.replaceAll(':', ''),
     ...options.validation
   }
+  let trusted = options.existing ? validation.trusted : false
 
   const spawnSync = vi.fn(
     (_command: string, argv: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv; windowsHide?: boolean }) => {
-    const env = spawnOptions.env ?? {}
-    spawnCalls.push({ argv, env, windowsHide: spawnOptions.windowsHide })
-    const encoded = argv.at(-1)
-    const name =
-      encoded === provisionScript
-        ? 'provision'
-        : encoded === trustScript
-          ? 'trust'
-          : encoded === trustValidateScript
-            ? 'trust-validate'
-            : encoded === validateScript
-              ? 'validate'
-              : 'acl'
+      const env = spawnOptions.env ?? {}
+      spawnCalls.push({ argv, env, windowsHide: spawnOptions.windowsHide })
+      const encoded = argv.at(-1)
+      const name =
+        encoded === provisionScript
+          ? 'provision'
+          : encoded === trustScript
+            ? 'trust'
+            : encoded === trustValidateScript
+              ? 'trust-validate'
+              : encoded === validateScript
+                ? 'validate'
+                : 'acl'
 
-    if (options.failScript === name) {
-      return { status: 1, stdout: '', stderr: 'sensitive failure output' }
+      if (options.failScript === name) {
+        return { status: 1, stdout: '', stderr: 'sensitive failure output' }
+      }
+
+      if (name === 'provision') {
+        files.set(paths.pfxPath, Buffer.from('new-pfx'))
+        files.set(paths.certificatePath, VALID_CERT_DER)
+
+        return { status: 0, stdout: JSON.stringify({ thumbprint: validation.thumbprint }), stderr: '' }
+      }
+
+      if (name === 'acl') {
+        return { status: 0, stdout: '', stderr: '' }
+      }
+
+      if (name === 'trust') {
+        return { status: 0, stdout: '', stderr: '' }
+      }
+
+      if (name === 'trust-validate') {
+        return { status: 0, stdout: JSON.stringify({ rootPresent: trusted, trusted }), stderr: '' }
+      }
+
+      const provisioned = files.get(paths.pfxPath)?.toString() === 'new-pfx'
+
+      return {
+        status: 0,
+        stdout: options.malformedValidationJson
+          ? '{'
+          : JSON.stringify({
+              aclValid: validation.aclValid,
+              certificateDerBase64: validation.certificateDer.toString('base64'),
+              pfxMatchesPublic: provisioned ? true : validation.pfxMatchesPublic,
+              pfxValid: provisioned ? true : validation.pfxValid,
+              trusted: validation.trusted,
+              thumbprint: validation.thumbprint
+            }),
+        stderr: ''
+      }
     }
+  )
 
-    if (name === 'provision') {
-      files.set(paths.pfxPath, Buffer.from('new-pfx'))
-      files.set(paths.certificatePath, VALID_CERT_DER)
+  const spawn = vi.fn(
+    (_command: string, argv: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv; windowsHide?: boolean }) => {
+      const child = new EventEmitter() as EventEmitter & {
+        kill: ReturnType<typeof vi.fn>
+        stderr: EventEmitter
+        stdout: EventEmitter
+      }
+      child.kill = vi.fn(() => true)
+      child.stderr = new EventEmitter()
+      child.stdout = new EventEmitter()
+      const env = spawnOptions.env ?? {}
+      spawnCalls.push({ argv, env, windowsHide: spawnOptions.windowsHide })
+      if (!options.stallTrust) {
+        queueMicrotask(() => {
+          if (!options.failTrust) {
+            trusted = true
+          }
+          child.emit('close', options.failTrust ? 1 : 0, null)
+        })
+      }
 
-      return { status: 0, stdout: JSON.stringify({ thumbprint: validation.thumbprint }), stderr: '' }
-    }
-
-    if (name === 'acl') {
-      return { status: 0, stdout: '', stderr: '' }
-    }
-
-    if (name === 'trust') {
-      return { status: 0, stdout: '', stderr: '' }
-    }
-
-    if (name === 'trust-validate') {
-      return { status: 0, stdout: JSON.stringify({ trusted: validation.trusted }), stderr: '' }
-    }
-
-    const provisioned = files.get(paths.pfxPath)?.toString() === 'new-pfx'
-
-    return {
-      status: 0,
-      stdout: options.malformedValidationJson
-        ? '{'
-        : JSON.stringify({
-            aclValid: validation.aclValid,
-            certificateDerBase64: validation.certificateDer.toString('base64'),
-            pfxMatchesPublic: provisioned ? true : validation.pfxMatchesPublic,
-            pfxValid: provisioned ? true : validation.pfxValid,
-            trusted: validation.trusted,
-            thumbprint: validation.thumbprint
-          }),
-      stderr: ''
-    }
+      return child
     }
   )
 
@@ -202,18 +231,94 @@ function createWindowsHarness(
       encryptString: vi.fn(() => Buffer.from('new-ciphertext')),
       isEncryptionAvailable: vi.fn(() => options.encryptionAvailable ?? true)
     },
+    spawn: spawn as never,
     spawnSync: spawnSync as never,
     unlinkSync: filePath => files.delete(filePath),
     userDataPath: () => USER_DATA,
     writeFileSync: (filePath, value) => files.set(filePath, Buffer.from(value))
   }
 
-  return { deps, files, paths, spawnCalls, spawnSync }
+  return { deps, files, paths, spawn, spawnCalls, spawnSync }
 }
 
-test('Windows first use provisions CurrentUser certificate files and returns PFX TLS material', () => {
+test('Windows visible trust is asynchronous and does not block the caller', async () => {
   const harness = createWindowsHarness()
-  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  const pending = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+
+  assert.ok(pending instanceof Promise)
+  assert.equal(harness.spawn.mock.calls.length, 1)
+  assert.equal((await pending).pfx.toString(), 'new-pfx')
+})
+
+test('Windows retries missing exact CurrentUser Root trust without regenerating a complete PFX', async () => {
+  const harness = createWindowsHarness({ existing: true, validation: { trusted: false } })
+  let validationCalls = 0
+  harness.deps.validateTrustedCertificate = () => {
+    validationCalls += 1
+    return validationCalls > 1
+  }
+
+  const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+
+  assert.equal(material.pfx.toString(), 'existing-pfx')
+  assert.equal(validationCalls, 2)
+  assert.equal(harness.spawn.mock.calls.length, 1)
+  assert.equal(
+    harness.spawnCalls.filter(
+      call => call.argv.at(-1) === Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
+    ).length,
+    0
+  )
+})
+
+test('Windows declined trust preserves a complete newly provisioned bundle for retry', async () => {
+  const harness = createWindowsHarness({ failTrust: true })
+
+  await assert.rejects(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+
+  assert.equal(harness.files.has(harness.paths.pfxPath), true)
+  assert.equal(harness.files.has(harness.paths.passwordPath), true)
+  assert.equal(harness.files.has(harness.paths.certificatePath), true)
+})
+
+test('Windows trust consent times out at 120 seconds and kills the child', async () => {
+  vi.useFakeTimers()
+  try {
+    const harness = createWindowsHarness({ stallTrust: true })
+    const pending = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+    const rejection = assert.rejects(() => pending, /setup failed/)
+    const child = harness.spawn.mock.results[0]?.value
+
+    await vi.advanceTimersByTimeAsync(119_999)
+    assert.equal(child.kill.mock.calls.length, 0)
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+    assert.equal(child.kill.mock.calls.length, 1)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('Windows trust consent cancellation and output overflow kill the child', async () => {
+  const cancelled = createWindowsHarness({ stallTrust: true })
+  const controller = new AbortController()
+  const cancelledPending = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(cancelled.deps, controller.signal)
+  const cancelledChild = cancelled.spawn.mock.results[0]?.value
+  controller.abort()
+  await assert.rejects(() => cancelledPending, /setup failed/)
+  assert.equal(cancelledChild.kill.mock.calls.length, 1)
+
+  const overflow = createWindowsHarness({ stallTrust: true })
+  const overflowPending = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(overflow.deps)
+  const overflowChild = overflow.spawn.mock.results[0]?.value
+  overflowChild.stdout.emit('data', Buffer.alloc(64 * 1024 + 1))
+  await assert.rejects(() => overflowPending, /setup failed/)
+  assert.equal(overflowChild.kill.mock.calls.length, 1)
+})
+
+test('Windows first use provisions CurrentUser certificate files and returns PFX TLS material', async () => {
+  const harness = createWindowsHarness()
+  const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
 
   assert.equal(material.kind, 'pfx')
   assert.equal(material.pfx.toString(), 'new-pfx')
@@ -242,6 +347,12 @@ test('Windows first use provisions CurrentUser certificate files and returns PFX
   assert.equal(provision.env.HERMES_PEEPS_PFX_PATH_B64, Buffer.from(harness.paths.pfxPath).toString('base64'))
   assert.ok(harness.spawnCalls.every(call => !call.argv.join(' ').includes(PASSWORD.toString())))
   assert.ok(!WINDOWS_PROVISION_SCRIPT.includes(PASSWORD.toString()))
+  assert.equal(
+    harness.spawnCalls.filter(
+      call => call.argv.at(-1) === Buffer.from(WINDOWS_TRUST_VALIDATE_SCRIPT, 'utf16le').toString('base64')
+    ).length,
+    2
+  )
 })
 
 test('Windows provisioning and validation scripts are fixed CurrentUser-only non-elevating contracts', () => {
@@ -281,9 +392,9 @@ test('Windows provisioning and validation scripts are fixed CurrentUser-only non
   )
 })
 
-test('Windows valid bundle is reused without provisioning or replacement', () => {
+test('Windows valid bundle is reused without provisioning or replacement', async () => {
   const harness = createWindowsHarness({ existing: true })
-  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
 
   assert.equal(material.pfx.toString(), 'existing-pfx')
   assert.equal(
@@ -295,15 +406,15 @@ test('Windows valid bundle is reused without provisioning or replacement', () =>
   assert.equal(vi.mocked(harness.deps.safeStorage.encryptString).mock.calls.length, 0)
 })
 
-test('Windows missing secure storage or failed PowerShell setup fails closed with a coarse setup error and cleans partial files', () => {
+test('Windows missing secure storage or failed PowerShell setup fails closed with a coarse setup error and cleans partial files', async () => {
   const unavailable = createWindowsHarness({ encryptionAvailable: false })
-  assert.throws(
+  await assert.rejects(
     () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(unavailable.deps),
     /Windows Current User certificate setup failed/
   )
 
   const failed = createWindowsHarness({ failScript: 'provision' })
-  assert.throws(
+  await assert.rejects(
     () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(failed.deps),
     /Windows Current User certificate setup failed/
   )
@@ -311,30 +422,30 @@ test('Windows missing secure storage or failed PowerShell setup fails closed wit
   assert.equal(failed.files.has(failed.paths.passwordPath), false)
 })
 
-test('Windows missing DPAPI password blob regenerates the incomplete bundle', () => {
+test('Windows missing DPAPI password blob regenerates the incomplete bundle', async () => {
   const harness = createWindowsHarness({ existing: true })
   harness.files.delete(harness.paths.passwordPath)
 
-  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
 
   assert.equal(material.pfx.toString(), 'new-pfx')
   assert.equal(harness.files.has(harness.paths.passwordPath), true)
 })
 
-test('Windows DPAPI decrypt failure preserves a complete bundle and fails closed', () => {
+test('Windows DPAPI decrypt failure preserves a complete bundle and fails closed', async () => {
   const harness = createWindowsHarness({ decryptThrows: true, existing: true })
   const unlink = vi.spyOn(harness.deps, 'unlinkSync')
-  assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+  await assert.rejects(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
   assert.equal(unlink.mock.calls.length, 0)
   assert.equal(harness.spawnCalls.length, 0)
   assert.equal(harness.files.size, 3)
 })
 
-test('Windows transient validator failures preserve every complete-bundle artifact without cleanup or provisioning', () => {
+test('Windows transient validator failures preserve every complete-bundle artifact without cleanup or provisioning', async () => {
   for (const options of [{ failScript: 'validate' as const }, { malformedValidationJson: true }]) {
     const harness = createWindowsHarness({ existing: true, ...options })
     const unlink = vi.spyOn(harness.deps, 'unlinkSync')
-    assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+    await assert.rejects(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
     assert.equal(unlink.mock.calls.length, 0)
     assert.equal(
       harness.spawnCalls.filter(
@@ -347,22 +458,34 @@ test('Windows transient validator failures preserve every complete-bundle artifa
   }
 })
 
-test('Windows proven invalid PFX rotates a complete corrupt bundle', () => {
+test('Windows proven invalid PFX rotates a complete corrupt bundle', async () => {
   const harness = createWindowsHarness({ existing: true, validation: { pfxValid: false } })
-  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
   assert.equal(material.pfx.toString(), 'new-pfx')
   assert.ok(
     harness.spawnCalls.some(
       call => call.argv.at(-1) === Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
     )
   )
+  const cleanupCall = harness.spawnCalls.find(
+    call => call.argv.at(-1) === Buffer.from(WINDOWS_CLEANUP_SCRIPT, 'utf16le').toString('base64')
+  )
+  assert.ok(cleanupCall)
+  assert.equal(cleanupCall.windowsHide, false)
+  assert.equal(cleanupCall.argv.includes('-NonInteractive'), false)
+  assert.equal(
+    harness.spawnSync.mock.calls.some(
+      call => call[1].at(-1) === Buffer.from(WINDOWS_CLEANUP_SCRIPT, 'utf16le').toString('base64')
+    ),
+    false
+  )
 })
 
-test('Windows ACL or trust policy failure preserves a complete bundle instead of rotating it', () => {
-  for (const validation of [{ aclValid: false }, { trusted: false }]) {
+test('Windows ACL policy failure preserves a complete bundle instead of rotating it', async () => {
+  for (const validation of [{ aclValid: false }]) {
     const harness = createWindowsHarness({ existing: true, validation })
     const unlink = vi.spyOn(harness.deps, 'unlinkSync')
-    assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+    await assert.rejects(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
     assert.equal(unlink.mock.calls.length, 0)
     assert.equal(harness.files.size, 3)
     assert.equal(
@@ -374,17 +497,16 @@ test('Windows ACL or trust policy failure preserves a complete bundle instead of
   }
 })
 
-test('Windows rejects ACL trust thumbprint and certificate policy failures', () => {
+test('Windows rejects ACL thumbprint and certificate policy failures', async () => {
   for (const validation of [
     { aclValid: false },
-    { trusted: false },
     { thumbprint: '00'.repeat(20) },
     { certificateDer: WEAK_CERT_DER },
     { certificateDer: WRONG_EKU_CERT_DER },
     { certificateDer: WRONG_SAN_CERT_DER }
   ]) {
     const harness = createWindowsHarness({ existing: true, validation })
-    assert.throws(
+    await assert.rejects(
       () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps),
       /Windows Current User certificate setup failed/
     )
@@ -392,16 +514,16 @@ test('Windows rejects ACL trust thumbprint and certificate policy failures', () 
 
   const expired = createWindowsHarness({ existing: true })
   expired.deps.now = () => new Date('2028-01-01T00:00:00.000Z')
-  assert.throws(
+  await assert.rejects(
     () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(expired.deps),
     /Windows Current User certificate setup failed/
   )
 })
 
-test('Windows rejects external paths and symlink or reparse-marked bundle components', () => {
+test('Windows rejects external paths and symlink or reparse-marked bundle components', async () => {
   const outside = createWindowsHarness({ existing: true })
   outside.deps.userDataPath = () => 'C:\\Users\\alice\\AppData\\Roaming\\Catalyst\\..\\Outside'
-  assert.throws(
+  await assert.rejects(
     () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(outside.deps),
     /Windows Current User certificate setup failed/
   )
@@ -413,7 +535,7 @@ test('Windows rejects external paths and symlink or reparse-marked bundle compon
       isFile: () => linked.files.has(filePath),
       isSymbolicLink: () => filePath === linked.paths.root
     }) as never
-  assert.throws(
+  await assert.rejects(
     () => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(linked.deps),
     /Windows Current User certificate setup failed/
   )
@@ -440,10 +562,10 @@ test('Windows leaf validator requires exact localhost SANs serverAuth validity C
   )
 })
 
-test('Windows shows only the public-certificate trust mutation', () => {
+test('Windows shows only the public-certificate trust mutation', async () => {
   const harness = createWindowsHarness()
 
-  loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
 
   const trustScript = Buffer.from(WINDOWS_TRUST_SCRIPT, 'utf16le').toString('base64')
   const trustCall = harness.spawnCalls.find(call => call.argv.at(-1) === trustScript)

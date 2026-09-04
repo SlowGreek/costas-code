@@ -137,7 +137,9 @@ function createHarness(
       mode: number
       uid: number
     }
-    loadWindowsTlsMaterial?: () => { kind: 'pfx'; passphrase: string; pfx: Buffer }
+    loadWindowsTlsMaterial?: (
+      signal?: AbortSignal
+    ) => Promise<{ kind: 'pfx'; passphrase: string; pfx: Buffer }> | { kind: 'pfx'; passphrase: string; pfx: Buffer }
     now?: () => Date
     listenError?: Error
     openExternal?: (url: string) => Promise<void>
@@ -476,10 +478,7 @@ test('an abandoned claimed flow cancels backend state on the proved companion so
   })
 
   await vi.waitFor(() => assert.equal(harness.servers.length, 1))
-  assert.equal(
-    harness.handlers.cancel({ authSessionId: 'auth-abandoned', handle: prepared.handle }),
-    true
-  )
+  assert.equal(harness.handlers.cancel({ authSessionId: 'auth-abandoned', handle: prepared.handle }), true)
   await assert.rejects(completion, /cancelled or timed out/)
   assert.deepEqual(
     requestGateway.mock.calls.map(call => call[0]),
@@ -710,6 +709,47 @@ test('Windows listener passes only PFX and passphrase to https.createServer', as
   assert.equal(harness.created[0].key, undefined)
 })
 
+test('cancel aborts pending Windows trust consent before a listener is created', async () => {
+  let trustSignal: AbortSignal | undefined
+  const loadWindowsTlsMaterial = vi.fn((signal?: AbortSignal) => {
+    trustSignal = signal
+    return new Promise<never>((_resolve, reject) =>
+      signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+    )
+  })
+  const request = vi.fn(async (method: string) => {
+    if (method === 'voice.realtime.peeps.claim') {
+      return {
+        auth_session_id: 'trust-pending',
+        public_key: flow.publicKey,
+        state: 'trusted-state',
+        timeout_seconds: 5
+      }
+    }
+    return { ok: true }
+  })
+  const harness = createHarness({
+    connectGateway: async () => ({ close: vi.fn(), request }),
+    loadWindowsTlsMaterial,
+    platform: 'win32'
+  })
+  const prepared = harness.handlers.prepare()
+  const completion = harness.handlers.complete({
+    authSessionId: 'trust-pending',
+    connectionId: null,
+    handle: prepared.handle,
+    profile: 'default',
+    runtimeSessionId: 'runtime'
+  })
+
+  await vi.waitFor(() => assert.ok(trustSignal))
+  harness.handlers.cancel({ authSessionId: 'trust-pending', handle: prepared.handle })
+
+  await assert.rejects(() => completion, /aborted|cancelled/)
+  assert.equal(trustSignal?.aborted, true)
+  assert.equal(harness.servers.length, 0)
+})
+
 test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron userData', () => {
   assert.deepEqual(resolvePeepsVoiceAuthTlsPaths('/Users/test/Library/Application Support/Catalyst'), {
     certificatePath: '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-cert.pem',
@@ -717,12 +757,12 @@ test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron use
   })
 })
 
-test('tls material loader accepts only the Electron-owned localhost certificate and key', () => {
+test('tls material loader accepts only the Electron-owned localhost certificate and key', async () => {
   const harness = createHarness({
     now: () => new Date('2026-09-05T00:00:00.000Z')
   })
 
-  const material = loadValidatedPeepsVoiceAuthTlsMaterial({
+  const material = await loadValidatedPeepsVoiceAuthTlsMaterial({
     currentUid: () => 501,
     lstatSync: harness.lstatSync as never,
     now: () => new Date('2026-09-05T00:00:00.000Z'),
@@ -742,10 +782,10 @@ test('tls material loader accepts only the Electron-owned localhost certificate 
   assert.match(material.keyPem.toString('utf8'), /BEGIN PRIVATE KEY/)
 })
 
-test('tls material loader rejects path escapes symlinks non-files wrong owners weak key perms and invalid certs', () => {
+test('tls material loader rejects path escapes symlinks non-files wrong owners weak key perms and invalid certs', async () => {
   const invalidMessage = /TLS preflight failed/
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -768,7 +808,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -788,7 +828,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -808,7 +848,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -828,7 +868,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -849,7 +889,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -869,7 +909,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -890,7 +930,7 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
     invalidMessage
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       loadValidatedPeepsVoiceAuthTlsMaterial({
         appPath: () => '/app',
@@ -912,11 +952,11 @@ test('tls material loader rejects path escapes symlinks non-files wrong owners w
   )
 })
 
-test('tls material loader rejects symlinked directory components from userData through peeps-voice-auth', () => {
+test('tls material loader rejects symlinked directory components from userData through peeps-voice-auth', async () => {
   const invalidMessage = /TLS preflight failed/
 
   for (const symlinkPath of ['/user/data', '/user/data/peeps-voice-auth']) {
-    assert.throws(
+    await assert.rejects(
       () =>
         loadValidatedPeepsVoiceAuthTlsMaterial({
           appPath: () => '/app',

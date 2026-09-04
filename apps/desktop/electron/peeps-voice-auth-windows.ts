@@ -1,4 +1,10 @@
-import { spawnSync as nodeSpawnSync, type SpawnSyncReturns } from 'node:child_process'
+import {
+  type ChildProcessWithoutNullStreams,
+  spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
+  type SpawnOptionsWithoutStdio,
+  type SpawnSyncReturns
+} from 'node:child_process'
 import { randomBytes as nodeRandomBytes, X509Certificate } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -6,6 +12,8 @@ import tls from 'node:tls'
 
 const SERVER_AUTH_OID = '1.3.6.1.5.5.7.3.1'
 const POWERSHELL = 'powershell.exe'
+const VISIBLE_POWERSHELL_MAX_OUTPUT_BYTES = 64 * 1024
+const VISIBLE_POWERSHELL_TIMEOUT_MS = 120_000
 
 const POWERSHELL_PREFIX = [
   '-NoLogo',
@@ -68,13 +76,14 @@ function Read-HermesValue([string]$Name) {
 $certificatePath = Read-HermesValue 'HERMES_PEEPS_CERT_PATH_B64'
 $expectedThumbprint = Read-HermesValue 'HERMES_PEEPS_THUMBPRINT_B64'
 $publicCertificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificatePath)
-$root = Get-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $expectedThumbprint) -ErrorAction Stop
+$root = Get-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $expectedThumbprint) -ErrorAction SilentlyContinue
 $chain = New-Object Security.Cryptography.X509Certificates.X509Chain
 $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Offline
 $chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
 $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::Zero
-$trusted = $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 0 -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint -and $root.Thumbprint -eq $expectedThumbprint
-[Console]::Out.Write((@{ trusted = $trusted } | ConvertTo-Json -Compress))`
+$rootPresent = $null -ne $root -and $root.Thumbprint -eq $expectedThumbprint
+$trusted = $rootPresent -and $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 0 -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint
+[Console]::Out.Write((@{ rootPresent = $rootPresent; trusted = $trusted } | ConvertTo-Json -Compress))`
 
 export const WINDOWS_ACL_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
 function Read-HermesValue([string]$Name) {
@@ -172,6 +181,11 @@ export interface WindowsPeepsVoiceAuthDeps {
   realpathSync?: (filePath: string) => string
   removeTrustedCertificate?: (thumbprint: string) => void
   safeStorage: SafeStorageApi
+  spawn?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptionsWithoutStdio
+  ) => ChildProcessWithoutNullStreams
   spawnSync?: typeof nodeSpawnSync
   unlinkSync?: (filePath: string) => unknown
   userDataPath: () => string
@@ -201,6 +215,7 @@ type WindowsPeepsBundleValidationCode =
   | 'certificate-corrupt'
   | 'certificate-policy-corrupt'
   | 'pfx-corrupt'
+  | 'trust-missing'
   | 'validation-policy-unavailable'
   | 'validation-unavailable'
 
@@ -424,18 +439,89 @@ function runCheckedPowerShell(
   return result.stdout
 }
 
-function installTrustedCertificate(certificatePath: string, deps: WindowsPeepsVoiceAuthDeps): void {
+async function runVisibleCheckedPowerShell(
+  script: string,
+  env: NodeJS.ProcessEnv,
+  deps: WindowsPeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<void> {
+  const argv = encodedPowerShell(script).filter(argument => argument !== '-NonInteractive')
+
+  return new Promise((resolve, reject) => {
+    let child: ChildProcessWithoutNullStreams | undefined
+    let outputBytes = 0
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+    const finish = (error?: Error) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      if (error) {
+        try {
+          child?.kill()
+        } catch {
+          // The process may already have exited.
+        }
+        reject(setupError())
+      } else {
+        resolve()
+      }
+    }
+    const abort = () => finish(setupError())
+
+    if (signal?.aborted) {
+      finish(setupError())
+      return
+    }
+
+    try {
+      child = (deps.spawn ?? nodeSpawn)(POWERSHELL, argv, {
+        env: { ...process.env, ...env },
+        shell: false,
+        windowsHide: false
+      })
+    } catch {
+      finish(setupError())
+      return
+    }
+
+    timer = setTimeout(() => finish(setupError()), VISIBLE_POWERSHELL_TIMEOUT_MS)
+    const collect = (chunk: Buffer | string) => {
+      outputBytes += Buffer.byteLength(chunk)
+      if (outputBytes > VISIBLE_POWERSHELL_MAX_OUTPUT_BYTES) {
+        finish(setupError())
+      }
+    }
+    child.stdout.on('data', collect)
+    child.stderr.on('data', collect)
+    child.once('error', () => finish(setupError()))
+    child.once('close', code => finish(code === 0 ? undefined : setupError()))
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+    }
+  })
+}
+
+async function installTrustedCertificate(
+  certificatePath: string,
+  deps: WindowsPeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<void> {
   if (deps.installTrustedCertificate) {
-    deps.installTrustedCertificate(certificatePath)
+    await deps.installTrustedCertificate(certificatePath)
 
     return
   }
 
-  runCheckedPowerShell(
+  await runVisibleCheckedPowerShell(
     WINDOWS_TRUST_SCRIPT,
     { HERMES_PEEPS_CERT_PATH_B64: envValue(certificatePath) },
     deps,
-    true
+    signal
   )
 }
 
@@ -443,9 +529,9 @@ function validateTrustedCertificate(
   certificatePath: string,
   thumbprint: string,
   deps: WindowsPeepsVoiceAuthDeps
-): boolean {
+): 'invalid' | 'missing' | 'trusted' {
   if (deps.validateTrustedCertificate) {
-    return deps.validateTrustedCertificate(certificatePath, thumbprint)
+    return deps.validateTrustedCertificate(certificatePath, thumbprint) ? 'trusted' : 'missing'
   }
 
   const output = runCheckedPowerShell(
@@ -458,25 +544,24 @@ function validateTrustedCertificate(
   )
 
   try {
-    return JSON.parse(output).trusted === true
+    const validation = JSON.parse(output) as { rootPresent?: unknown; trusted?: unknown }
+    if (validation.trusted === true) {
+      return 'trusted'
+    }
+    return validation.rootPresent === false ? 'missing' : 'invalid'
   } catch {
-    return false
+    return 'invalid'
   }
 }
 
-function removeTrustedCertificate(thumbprint: string, deps: WindowsPeepsVoiceAuthDeps): void {
+async function removeTrustedCertificate(thumbprint: string, deps: WindowsPeepsVoiceAuthDeps): Promise<void> {
   if (deps.removeTrustedCertificate) {
-    deps.removeTrustedCertificate(thumbprint)
+    await deps.removeTrustedCertificate(thumbprint)
 
     return
   }
 
-  runCheckedPowerShell(
-    WINDOWS_CLEANUP_SCRIPT,
-    { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) },
-    deps,
-    true
-  )
+  await runVisibleCheckedPowerShell(WINDOWS_CLEANUP_SCRIPT, { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) }, deps)
 }
 
 function removeLocalFiles(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): void {
@@ -494,7 +579,7 @@ function removeLocalFiles(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsV
   }
 }
 
-function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): void {
+async function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): Promise<void> {
   let thumbprint = ''
 
   try {
@@ -505,7 +590,7 @@ function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPe
   }
 
   if (thumbprint) {
-    removeTrustedCertificate(thumbprint, deps)
+    await removeTrustedCertificate(thumbprint, deps)
   }
 
   removeLocalFiles(paths, deps)
@@ -603,7 +688,13 @@ function validateExistingBundle(
     throw bundleValidationError('validation-policy-unavailable')
   }
 
-  if (!validateTrustedCertificate(paths.certificatePath, expectedThumbprint, deps)) {
+  const trust = validateTrustedCertificate(paths.certificatePath, expectedThumbprint, deps)
+
+  if (trust === 'missing') {
+    throw bundleValidationError('trust-missing')
+  }
+
+  if (trust !== 'trusted') {
     throw bundleValidationError('validation-policy-unavailable')
   }
 
@@ -665,15 +756,15 @@ function provisionBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVo
       },
       deps
     )
-    installTrustedCertificate(paths.certificatePath, deps)
   } finally {
     passwordBytes.fill(0)
   }
 }
 
-export function loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
-  deps: WindowsPeepsVoiceAuthDeps
-): WindowsPeepsVoiceAuthTlsMaterial {
+export async function loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
+  deps: WindowsPeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<WindowsPeepsVoiceAuthTlsMaterial> {
   if ((deps.platform ?? process.platform) !== 'win32') {
     throw setupError()
   }
@@ -696,27 +787,29 @@ export function loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
       try {
         return validateExistingBundle(paths, deps)
       } catch (error) {
+        if (error instanceof WindowsPeepsBundleValidationError && error.code === 'trust-missing') {
+          await installTrustedCertificate(paths.certificatePath, deps, signal)
+          return validateExistingBundle(paths, deps)
+        }
         if (!isProvenRotatableBundleError(error)) {
           throw error
         }
-        cleanupInvalidBundle(paths, deps)
+        await cleanupInvalidBundle(paths, deps)
       }
     } else if (hasAny) {
-      cleanupInvalidBundle(paths, deps)
+      await cleanupInvalidBundle(paths, deps)
     }
 
+    provisionBundle(paths, deps)
+
     try {
-      provisionBundle(paths, deps)
-
       return validateExistingBundle(paths, deps)
-    } catch {
-      try {
-        cleanupInvalidBundle(paths, deps)
-      } catch {
-        // Keep the public error coarse and never include PowerShell or secret output.
+    } catch (error) {
+      if (error instanceof WindowsPeepsBundleValidationError && error.code === 'trust-missing') {
+        await installTrustedCertificate(paths.certificatePath, deps, signal)
+        return validateExistingBundle(paths, deps)
       }
-
-      throw setupError()
+      throw error
     }
   } catch {
     throw setupError()

@@ -58,6 +58,7 @@ interface Pending {
 
 interface ActiveCompletion {
   cancelled: boolean
+  controller: AbortController
   handle: string
 }
 
@@ -70,7 +71,9 @@ export interface PeepsVoiceAuthDeps {
   currentUid?: () => null | number
   createServer?: typeof https.createServer
   lstatSync?: (filePath: string) => fs.Stats
-  loadWindowsTlsMaterial?: () => WindowsPeepsVoiceAuthTlsMaterial
+  loadWindowsTlsMaterial?: (
+    signal?: AbortSignal
+  ) => Promise<WindowsPeepsVoiceAuthTlsMaterial> | WindowsPeepsVoiceAuthTlsMaterial
   now?: () => Date
   openExternal: (url: string) => Promise<void>
   platform?: NodeJS.Platform
@@ -194,12 +197,15 @@ function statOwnedPath(
   }
 }
 
-export function loadValidatedPeepsVoiceAuthTlsMaterial(deps: PeepsVoiceAuthDeps): PeepsVoiceAuthTlsMaterial {
+export async function loadValidatedPeepsVoiceAuthTlsMaterial(
+  deps: PeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<PeepsVoiceAuthTlsMaterial> {
   const platform = deps.platform ?? process.platform
 
   if (platform === 'win32') {
     if (deps.loadWindowsTlsMaterial) {
-      return deps.loadWindowsTlsMaterial()
+      return deps.loadWindowsTlsMaterial(signal)
     }
 
     throw new Error('Peeps voice authorization Windows Current User certificate setup failed')
@@ -325,7 +331,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     entry.waiters.splice(0).forEach(waiter => waiter(result))
   }
 
-  const start = async (id: string, flow: PeepsVoiceAuthFlow) => {
+  const start = async (id: string, flow: PeepsVoiceAuthFlow, signal?: AbortSignal) => {
     if (activeListenerId && activeListenerId !== id) {
       close(activeListenerId, null)
     }
@@ -338,7 +344,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       throw new Error('Peeps voice authorization flow is invalid')
     }
 
-    const tls = loadValidatedPeepsVoiceAuthTlsMaterial(deps)
+    const tls = await loadValidatedPeepsVoiceAuthTlsMaterial(deps, signal)
     const script = String(deps.readFile(path.join(deps.appPath(), 'dist', 'peeps-voice-auth-page.js'), 'utf8'))
 
     const html = authPage().replace(
@@ -500,7 +506,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       capability.secret.fill(0)
       throw new Error('Too many Peeps voice authorization requests are active')
     }
-    const operation: ActiveCompletion = { cancelled: false, handle }
+    const operation: ActiveCompletion = { cancelled: false, controller: new AbortController(), handle }
     activeCompletions.set(authSessionId, operation)
     let gateway: Awaited<ReturnType<NonNullable<PeepsVoiceAuthDeps['connectGateway']>>> | null = null
     let attemptedClaim = false
@@ -546,7 +552,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
         state
       }
 
-      await start(authSessionId, flow)
+      await start(authSessionId, flow, operation.controller.signal)
       const envelope = await wait(authSessionId, timeoutSeconds * 1000)
 
       if (!envelope) {
@@ -587,6 +593,7 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
       const operation = activeCompletions.get(authSessionId)
       if (operation?.handle === handle) {
         operation.cancelled = true
+        operation.controller.abort()
       }
       destroyCapability(handle)
       if (authSessionId) {
@@ -607,12 +614,15 @@ export function registerPeepsVoiceAuthIpc(connectGateway: NonNullable<PeepsVoice
   const handlers = createPeepsVoiceAuthHandlers({
     appPath: () => app.getAppPath(),
     connectGateway,
-    loadWindowsTlsMaterial: () =>
-      loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
-        platform: process.platform,
-        safeStorage,
-        userDataPath
-      }),
+    loadWindowsTlsMaterial: signal =>
+      loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
+        {
+          platform: process.platform,
+          safeStorage,
+          userDataPath
+        },
+        signal
+      ),
     openExternal: shell.openExternal,
     userDataPath,
     readFile: fs.readFileSync,

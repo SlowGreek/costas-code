@@ -345,6 +345,9 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
     }
 
     const tls = await loadValidatedPeepsVoiceAuthTlsMaterial(deps, signal)
+    if (signal?.aborted) {
+      throw new Error('Peeps voice authorization was cancelled or timed out')
+    }
     const script = String(deps.readFile(path.join(deps.appPath(), 'dist', 'peeps-voice-auth-page.js'), 'utf8'))
 
     const html = authPage().replace(
@@ -429,6 +432,9 @@ export function createPeepsVoiceAuthHandlers(deps: PeepsVoiceAuthDeps) {
         server.once('error', reject)
         server.listen(8080, '127.0.0.1', resolve)
       })
+      if (signal?.aborted) {
+        throw new Error('Peeps voice authorization was cancelled or timed out')
+      }
       pending.set(id, { server, waiters: [] })
       activeListenerId = id
       await deps.openExternal(flow.redirectUri)

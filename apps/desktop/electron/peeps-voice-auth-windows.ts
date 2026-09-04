@@ -554,14 +554,23 @@ function validateTrustedCertificate(
   }
 }
 
-async function removeTrustedCertificate(thumbprint: string, deps: WindowsPeepsVoiceAuthDeps): Promise<void> {
+async function removeTrustedCertificate(
+  thumbprint: string,
+  deps: WindowsPeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<void> {
   if (deps.removeTrustedCertificate) {
     await deps.removeTrustedCertificate(thumbprint)
 
     return
   }
 
-  await runVisibleCheckedPowerShell(WINDOWS_CLEANUP_SCRIPT, { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) }, deps)
+  await runVisibleCheckedPowerShell(
+    WINDOWS_CLEANUP_SCRIPT,
+    { HERMES_PEEPS_THUMBPRINT_B64: envValue(thumbprint) },
+    deps,
+    signal
+  )
 }
 
 function removeLocalFiles(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): void {
@@ -579,7 +588,11 @@ function removeLocalFiles(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsV
   }
 }
 
-async function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVoiceAuthDeps): Promise<void> {
+async function cleanupInvalidBundle(
+  paths: WindowsPeepsVoiceAuthPaths,
+  deps: WindowsPeepsVoiceAuthDeps,
+  signal?: AbortSignal
+): Promise<void> {
   let thumbprint = ''
 
   try {
@@ -590,7 +603,7 @@ async function cleanupInvalidBundle(paths: WindowsPeepsVoiceAuthPaths, deps: Win
   }
 
   if (thumbprint) {
-    await removeTrustedCertificate(thumbprint, deps)
+    await removeTrustedCertificate(thumbprint, deps, signal)
   }
 
   removeLocalFiles(paths, deps)
@@ -794,10 +807,10 @@ export async function loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
         if (!isProvenRotatableBundleError(error)) {
           throw error
         }
-        await cleanupInvalidBundle(paths, deps)
+        await cleanupInvalidBundle(paths, deps, signal)
       }
     } else if (hasAny) {
-      await cleanupInvalidBundle(paths, deps)
+      await cleanupInvalidBundle(paths, deps, signal)
     }
 
     provisionBundle(paths, deps)

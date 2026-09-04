@@ -316,6 +316,22 @@ test('Windows trust consent cancellation and output overflow kill the child', as
   assert.equal(overflowChild.kill.mock.calls.length, 1)
 })
 
+test('Windows cancellation aborts visible cleanup of a corrupt complete bundle', async () => {
+  const harness = createWindowsHarness({ existing: true, stallTrust: true, validation: { pfxValid: false } })
+  const controller = new AbortController()
+  const pending = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps, controller.signal)
+  await vi.waitFor(() => assert.equal(harness.spawn.mock.calls.length, 1))
+  const cleanupChild = harness.spawn.mock.results[0]?.value
+
+  controller.abort()
+  await Promise.resolve()
+  const killsAfterAbort = cleanupChild.kill.mock.calls.length
+  cleanupChild.emit('close', 1, null)
+  await assert.rejects(() => pending, /setup failed/)
+
+  assert.equal(killsAfterAbort, 1)
+})
+
 test('Windows first use provisions CurrentUser certificate files and returns PFX TLS material', async () => {
   const harness = createWindowsHarness()
   const material = await loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)

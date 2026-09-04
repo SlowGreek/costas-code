@@ -142,6 +142,7 @@ function createHarness(
     ) => Promise<{ kind: 'pfx'; passphrase: string; pfx: Buffer }> | { kind: 'pfx'; passphrase: string; pfx: Buffer }
     now?: () => Date
     listenError?: Error
+    listenGate?: Promise<void>
     openExternal?: (url: string) => Promise<void>
     platform?: NodeJS.Platform
     readFile?: (path: string, encoding?: BufferEncoding) => string | Buffer
@@ -217,7 +218,11 @@ function createHarness(
             return server
           }
 
-          resolve()
+          if (harnessOptions.listenGate) {
+            void harnessOptions.listenGate.then(resolve)
+          } else {
+            resolve()
+          }
 
           return server
         }),
@@ -748,6 +753,41 @@ test('cancel aborts pending Windows trust consent before a listener is created',
   await assert.rejects(() => completion, /aborted|cancelled/)
   assert.equal(trustSignal?.aborted, true)
   assert.equal(harness.servers.length, 0)
+})
+
+test('abort after Windows TLS loading but before listen completion prevents browser launch', async () => {
+  let releaseListen!: () => void
+  const listenGate = new Promise<void>(resolve => {
+    releaseListen = resolve
+  })
+  const harness = createHarness({
+    listenGate,
+    loadWindowsTlsMaterial: () => ({
+      kind: 'pfx',
+      passphrase: 'main-only-passphrase',
+      pfx: Buffer.from('validated-pfx')
+    }),
+    platform: 'win32'
+  })
+  const controller = new AbortController()
+  const pendingStart = harness.handlers.start(
+    'listen-cancelled',
+    { ...flow, authSessionId: 'listen-cancelled' },
+    controller.signal
+  )
+
+  await vi.waitFor(() => assert.equal(harness.servers.length, 1))
+  controller.abort()
+  releaseListen()
+  const outcome = await pendingStart.then(
+    () => 'resolved',
+    () => 'rejected'
+  )
+  harness.handlers.cancel('listen-cancelled')
+
+  assert.equal(outcome, 'rejected')
+  assert.equal(vi.mocked(harness.openExternal).mock.calls.length, 0)
+  assert.equal(harness.servers[0].close.mock.calls.length, 1)
 })
 
 test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron userData', () => {

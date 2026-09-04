@@ -6,9 +6,79 @@ import { test, vi } from 'vitest'
 import {
   authPage,
   createPeepsVoiceAuthHandlers,
+  loadValidatedPeepsVoiceAuthTlsMaterial,
   type PeepsVoiceAuthFlow,
   resolvePeepsVoiceAuthTlsPaths
 } from './peeps-voice-auth-ipc'
+
+const VALID_LOCALHOST_CERT = `-----BEGIN CERTIFICATE-----
+MIIDGjCCAgKgAwIBAgIUQ2XfgKQw6kdxURujHC6A/zHs1VIwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDkwNDAxMDgyMFoXDTM2MDkw
+MTAxMDgyMFowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAulc9SleIYC+sYCKbrEXawgXTotgZPBQZndh3OPmcHPEW
+EUqh6A1sLOtEh6//brdu8Qk5Ptu38Vd127pQ8NrF+B/kMbf24HYiWAGBSEoysexY
+nI7LqHUuddT7XOBuzba3aqyD5CJ7mDCQzciLcJN6BZXdKIVMwjJtFdHNW24MFCku
+P2V85AAPtmbbP+F3jJh/00nwUQvuG/PMcv3fGtYKe/8QJiLkHNG7Tiqu6X+vkEfm
+Six1rj+aPec+rLEmviMb3ehnl8VzZDc7XMzMH82Gucs7r1GlHe1t6gcwjtltDWeM
+htQdcgkp1PIcu+PMsz2n+SyBuRfotTIxP4F2muLbIwIDAQABo2QwYjAUBgNVHREE
+DTALgglsb2NhbGhvc3QwCQYDVR0TBAIwADALBgNVHQ8EBAMCBaAwEwYDVR0lBAww
+CgYIKwYBBQUHAwEwHQYDVR0OBBYEFMhG/8rALuUBUCv9FKypehdStevpMA0GCSqG
+SIb3DQEBCwUAA4IBAQAj48GqiTmqHPA/cLY3wxIUYWtOqVlKxalW450H3zGQWDBl
+XYdL/OasB2AAYC9YdAKajrC5TxG2BHbyap6vz5ebFl6cqcEpXKX49kKsKiqYkWFU
+zUQBh2iL4sEwIdWlq7u1tL6mT48dLc8Bmss1e+rOgw4ZcfLmM9omjU6T+zRYC0ns
+z/wYjgtxqYnHDnQ4SwKyLpfHsc5Yy8VVLKRzm469tNqGQtBTZBpDffBGZe1ND006
+pze8FgINj/36OSbmkAXpRYI27ohEBy49GZTYxCEIztn+VjwP9sYnDuOTNXRKpaSd
+LvPhSfwrTQ76gFYlYnZcEdRL8wulkYvMsIUETq53
+-----END CERTIFICATE-----`
+
+const WRONG_SAN_CERT = `-----BEGIN CERTIFICATE-----
+MIIDIDCCAgigAwIBAgIUNrXufb4q22kbsrFzjUdccAKD0sEwDQYJKoZIhvcNAQEL
+BQAwFjEUMBIGA1UEAwwLZXhhbXBsZS5jb20wHhcNMjYwOTA0MDEwODIyWhcNMzYw
+OTAxMDEwODIyWjAWMRQwEgYDVQQDDAtleGFtcGxlLmNvbTCCASIwDQYJKoZIhvcN
+AQEBBQADggEPADCCAQoCggEBAJXwijJdKXeYb4HJOoTbvXJ0ZSm3Mf5u1GpD0+bH
+bXA1ZG9w7NAsGzFvuC/hdlemrkufgzzYjQRGaQCrpnJel4R8+NgjvsXLclSKOl/u
+TZ099teLtrJmTMeUvwQOF5nah39P8n7nn5B0et6vDNxzOj6CuD3e3s4n4nYBWWua
+r4wqEwIrd0tDwbedzuM7MXYVz8kh91wQ0xN1pgFVAVytHTa+96cQEdeUYTBGu+yy
+rnpQGrlvi1WH90kpQtZUrIVY2AGkkQPunRy0kiCf7uN54zqSIVEM3LB58Wg4rRWA
+CAa3ShmmoPDxaujRH4mwPeMfNftmdcxf9oCEjqoPwA8k9ysCAwEAAaNmMGQwFgYD
+VR0RBA8wDYILZXhhbXBsZS5jb20wCQYDVR0TBAIwADALBgNVHQ8EBAMCBaAwEwYD
+VR0lBAwwCgYIKwYBBQUHAwEwHQYDVR0OBBYEFPOnAWKeVuhGZyUO4QjJ3IFQ2gi2
+MA0GCSqGSIb3DQEBCwUAA4IBAQAGLKGo0qJ9uqieHrBQ0CKNcf3wQCA+9/ZRp6w3
+2tHlyZuqoHfNoqMK+XCt1rHSnv+a1xCVExF9swcWIA9M8QpvC1b/I7/CzqGBojQB
+/vYGyrPLWHit1h2Ugj1B52ndy5nw3f1+qwg7sR1fwvBBTzTHwldwCBS0tjNJTHMF
+ZTXAOjEIwHxnRONqiJrefAJo/aqVG4+8L0WeZcHqtzbAmoBAUCrbdMFdDuKfu4fH
+3idc0h30DxNwFxztgVAtzYj6chyOfVUi51xcTnURHBFOlCM5rCfy9n5gPR66Z7Gb
+z256elHH9my3hU0ex5e4Fub9TA42fLqDDavp+/sYRIEM5rVr
+-----END CERTIFICATE-----`
+
+const VALID_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC6Vz1KV4hgL6xg
+IpusRdrCBdOi2Bk8FBmd2Hc4+Zwc8RYRSqHoDWws60SHr/9ut27xCTk+27fxV3Xb
+ulDw2sX4H+Qxt/bgdiJYAYFISjKx7FicjsuodS511Ptc4G7NtrdqrIPkInuYMJDN
+yItwk3oFld0ohUzCMm0V0c1bbgwUKS4/ZXzkAA+2Zts/4XeMmH/TSfBRC+4b88xy
+/d8a1gp7/xAmIuQc0btOKq7pf6+QR+ZKLHWuP5o95z6ssSa+Ixvd6GeXxXNkNztc
+zMwfzYa5yzuvUaUd7W3qBzCO2W0NZ4yG1B1yCSnU8hy748yzPaf5LIG5F+i1MjE/
+gXaa4tsjAgMBAAECggEANi3NXUMsHMNfvCfz2VgKLeWhzjREygoSFKnuqDszH9sd
+DnQDtUPJ0xmouEb83sUo1Z5X7aXWyq4iT3vRsuX5L5aeM7KIbmUKwUnWvB0OtlrA
+vOxr3JQNqSb+2tdKgDeDBtoYEwnPo8VjJOINYPMQRHV5cyGm2sPsoa55pf7ONkHv
+NGVQ7oo+hzWn/kS7ZXwJFBA8OSeAXYhLuMIwr2W2E1P32QCO9aVu+Cs1oxcr9Ckv
+oG99t2NFfcTNza5KecUuljqYB1CvUsBdzp2xnNuxgc23m16YzksN03nxxGL8O5/0
+HwNYpuGuy3wBcbl5fzzeX5VPadD3CCpMLMHyPxnBWQKBgQDzh8ILjwMffZkZNBfw
+9gczwSmRajhDaCOt6sem3kTHgAtnorJ79hx3KX0pVwCT5GMxhptrgI6MwhGfzSdK
+0JxrwFpUx/XCCDYLDCEqDJAXPlnK6OBjr8POT+33p0lBJdnbIfm+KhWsNqPnK2yw
+bp++6WEK4onivl2c9MpCIG+kbwKBgQDD4dSD/q45FguizDerLn7wCogVXiiKdVvx
+99e6EAMnzhknBA7wG8syaikA6b6gkGCGJnjQlcxJYCDA82TUqKaJfCIs2YBrQDLj
+1MEt7/gzecmiamJr1P6QNkSE9FfN4S7R4TZukRleI279uDFr0b6TWuZHtQemiPur
+gaYdqlhWjQKBgHanL4EoNdJTBJQGEKAjjxDFTXZ/NViKVc/38zy3UPWOyn+9Ao9p
+MydP/J52uF5WSYoo1nLDWTD1oValwz4tc/j/6EMkhfX6wDITv9jX9CCPDXrSifmn
++pP716rxQ7zNL18YJ7FimdqlaKhKPROdYpHG7bQ6+gmSzNObZSxg12RbAoGBAIvR
+Fzr8P+mZdcbHU/kJICxAqC/wXKmv6WhGiyJRKZ9w+f0iZXM3s4uRwSDYt2uugmde
+8J+aPQ4m4lo3oUI1+2FpTI+M1KA5W9nJ0/XxMs2zYZxfqU7k4quXQMNSEZZv5FaF
+FbBIO745NpE9t3EJbqmJmZOXgRV684DQ8vx7ycBFAoGADAj2NpfobN6/N0MhtSPt
+mTsoanz+By7lqmuZVhe74HzGMdyN4dTugqQTyIRnHBRmZ8jo2dmDkDutpwLQvhnG
+GcZf6bq+PAPqPJK+QiCYnfnuU7ZW2b78DL6/AG7oisEC5FKmqji4Q1WzY37q3Blv
+z9vhaNGFK3e4CPYGJNZBMgQ=
+-----END PRIVATE KEY-----`
 
 class FakeResponse {
   body = ''
@@ -18,11 +88,13 @@ class FakeResponse {
   writeHead(status: number, headers: Record<string, string> = {}) {
     this.status = status
     this.headers = headers
+
     return this
   }
 
   end(body = '') {
     this.body = body
+
     return this
   }
 }
@@ -54,55 +126,93 @@ interface FakeServer {
 }
 
 function createHarness(options: {
+  currentUid?: () => null | number
+  lstatSync?: (path: string) => {
+    isFile: () => boolean
+    isSymbolicLink: () => boolean
+    mode: number
+    uid: number
+  }
+  now?: () => Date
   openExternal?: (url: string) => Promise<void>
+  platform?: NodeJS.Platform
   readFile?: (path: string, encoding?: BufferEncoding) => string | Buffer
   tlsPaths?: () => { certificatePath?: string; keyPath?: string }
+  userDataPath?: string
 } = {}) {
   const servers: FakeServer[] = []
   const created: Array<{ cert: Buffer | string; key: Buffer | string }> = []
   const openExternal = options.openExternal ?? vi.fn(async () => {})
+  const userDataPath = options.userDataPath ?? '/user/data'
+  const defaultTlsPaths = resolvePeepsVoiceAuthTlsPaths(userDataPath)
+
   const readFile =
     options.readFile ??
     vi.fn((filePath: string) =>
-      filePath.endsWith('.js') ? 'console.log("local-only-script")' : 'pem-data'
+      filePath.endsWith('.js')
+        ? 'console.log("local-only-script")'
+        : filePath.endsWith('-cert.pem')
+          ? VALID_LOCALHOST_CERT
+          : VALID_KEY
     )
+
+  const lstatSync =
+    options.lstatSync ??
+    vi.fn(() => ({
+      isFile: () => true,
+      isSymbolicLink: () => false,
+      mode: 0o600,
+      uid: 501
+    }))
+
   const tlsPaths =
     options.tlsPaths ??
-    (() => ({ certificatePath: '/tls/localhost-cert.pem', keyPath: '/tls/localhost-key.pem' }))
+    (() => defaultTlsPaths)
 
   const handlers = createPeepsVoiceAuthHandlers({
     appPath: () => '/app',
+    currentUid: options.currentUid ?? (() => 501),
     createServer: ((options, onRequest) => {
       created.push({ cert: options.cert, key: options.key })
+
       let errorHandler: ((error: Error) => void) | undefined
+
       const server: FakeServer = {
         close: vi.fn(),
         listen: vi.fn((_port: number, host: string, resolve: () => void) => {
           assert.equal(host, '127.0.0.1')
           resolve()
+
           return server
         }),
         once: vi.fn((event: string, handler: (error: Error) => void) => {
           if (event === 'error') {
             errorHandler = handler
           }
+
           return server
         }),
         onRequest
       }
+
       ;(server as FakeServer & { emitError: (error: Error) => void }).emitError = error => {
         errorHandler?.(error)
       }
+
       servers.push(server)
+
       return server as never
     }) as never,
-    existsSync: () => true,
+    lstatSync: lstatSync as never,
+    now: options.now,
     openExternal,
+    platform: options.platform,
     readFile,
-    tlsPaths
+    tlsPaths,
+    userDataPath: () => userDataPath
   })
 
-  return { created, handlers, openExternal, readFile, servers }
+  return { created, defaultTlsPaths, handlers, lstatSync, openExternal, readFile, servers }
 }
 
 const flow: PeepsVoiceAuthFlow = {
@@ -220,6 +330,7 @@ test('start cleanup is fail-closed for openExternal failure and a newer start ca
     .fn<(_: string) => Promise<void>>()
     .mockRejectedValueOnce(new Error('browser failed'))
     .mockResolvedValue(undefined)
+
   const harness = createHarness({ openExternal })
 
   await assert.rejects(() => handlersStart(harness, 'first'), /browser failed/)
@@ -234,6 +345,7 @@ test('start cleanup is fail-closed for openExternal failure and a newer start ca
 
 test('wait timeout and cancel both close the one-shot listener', async () => {
   vi.useFakeTimers()
+
   try {
     const harness = createHarness()
     await handlersStart(harness, 'timeout')
@@ -257,6 +369,189 @@ test('resolvePeepsVoiceAuthTlsPaths keeps certs machine-local under Electron use
     keyPath:
       '/Users/test/Library/Application Support/Catalyst/peeps-voice-auth/localhost-key.pem'
   })
+})
+
+test('tls material loader accepts only the Electron-owned localhost certificate and key', () => {
+  const harness = createHarness({
+    now: () => new Date('2026-09-05T00:00:00.000Z')
+  })
+
+  const material = loadValidatedPeepsVoiceAuthTlsMaterial({
+    currentUid: () => 501,
+    lstatSync: harness.lstatSync as never,
+    now: () => new Date('2026-09-05T00:00:00.000Z'),
+    openExternal: harness.openExternal,
+    readFile: harness.readFile,
+    tlsPaths: () => harness.defaultTlsPaths,
+    userDataPath: () => '/user/data',
+    appPath: () => '/app'
+  })
+
+  assert.match(material.certificatePem.toString('utf8'), /BEGIN CERTIFICATE/)
+  assert.match(material.keyPem.toString('utf8'), /BEGIN PRIVATE KEY/)
+})
+
+test('tls material loader rejects path escapes symlinks non-files wrong owners weak key perms and invalid certs', () => {
+  const invalidMessage =
+    /valid pre-provisioned Electron-owned localhost certificate and private key/
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: (() => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        openExternal: async () => {},
+        readFile: () => VALID_LOCALHOST_CERT,
+        tlsPaths: () => ({
+          certificatePath: '/user/data/peeps-voice-auth/../outside/localhost-cert.pem',
+          keyPath: '/user/data/peeps-voice-auth/localhost-key.pem'
+        }),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: ((filePath: string) => ({
+          isFile: () => filePath.endsWith('-key.pem'),
+          isSymbolicLink: () => filePath.endsWith('-cert.pem'),
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: ((filePath: string) => ({
+          isFile: () => !filePath.endsWith('-cert.pem'),
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: (() => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 777
+        })) as never,
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: ((filePath: string) => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: filePath.endsWith('-key.pem') ? 0o640 : 0o644,
+          uid: 501
+        })) as never,
+        openExternal: async () => {},
+        platform: 'darwin',
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: (() => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? 'not-a-cert' : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: (() => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        now: () => new Date('2040-01-01T00:00:00.000Z'),
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? VALID_LOCALHOST_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
+
+  assert.throws(
+    () =>
+      loadValidatedPeepsVoiceAuthTlsMaterial({
+        appPath: () => '/app',
+        currentUid: () => 501,
+        lstatSync: (() => ({
+          isFile: () => true,
+          isSymbolicLink: () => false,
+          mode: 0o600,
+          uid: 501
+        })) as never,
+        now: () => new Date('2026-09-05T00:00:00.000Z'),
+        openExternal: async () => {},
+        readFile: filePath => (filePath.endsWith('-cert.pem') ? WRONG_SAN_CERT : VALID_KEY),
+        tlsPaths: () => resolvePeepsVoiceAuthTlsPaths('/user/data'),
+        userDataPath: () => '/user/data'
+      }),
+    invalidMessage
+  )
 })
 
 async function handlersStart(

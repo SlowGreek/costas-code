@@ -111,6 +111,62 @@ class TestVoiceSubmitModeValidation:
         )
 
 
+class TestPeepsRealtimeFallbackValidation:
+    def _issues(self, peeps_fallback):
+        return validate_config_structure({"voice": {"realtime": {"peeps_fallback": peeps_fallback}}})
+
+    def test_valid_loopback_config_is_accepted(self):
+        issues = self._issues({
+            "enabled": True,
+            "client_id": "client-id",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "https://peeps.asgprototype.com/api/access-as-user",
+            "redirect_uri": "https://127.0.0.1:8080/",
+            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+            "timeout_seconds": 180,
+        })
+        assert not any(issue.severity == "error" for issue in issues)
+
+    def test_rejects_non_mapping(self):
+        issues = self._issues(True)
+        assert any("voice.realtime.peeps_fallback must be a mapping" in issue.message for issue in issues)
+
+    def test_rejects_missing_required_fields(self):
+        issues = self._issues({"enabled": True})
+        messages = [issue.message for issue in issues]
+        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
+            assert any(field in message for message in messages)
+
+    def test_rejects_bad_authority_scope_redirect_token_url_and_timeout(self):
+        issues = self._issues({
+            "enabled": True,
+            "client_id": "client-id",
+            "authority": "http://login.microsoftonline.com",
+            "scope": "scope-one scope-two",
+            "redirect_uri": "https://example.com/callback",
+            "cognitive_token_url": "https://example.com/token?debug=1",
+            "timeout_seconds": 0,
+        })
+        messages = [issue.message for issue in issues]
+        assert any("authority must include a tenant path" in message or "authority must be an https URL" in message for message in messages)
+        assert any("scope must be a single scope value" in message for message in messages)
+        assert any("redirect_uri must be https://localhost:8080/" in message for message in messages)
+        assert any("cognitive_token_url must not include a query string or fragment" in message for message in messages)
+        assert any("timeout_seconds must be between 1 and 300" in message for message in messages)
+
+    def test_rejects_non_integer_timeout(self):
+        issues = self._issues({
+            "enabled": True,
+            "client_id": "client-id",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "api://resource/access",
+            "redirect_uri": "https://localhost:8080/",
+            "cognitive_token_url": "https://example.com/token",
+            "timeout_seconds": "180",
+        })
+        assert any("timeout_seconds must be an integer" in issue.message for issue in issues)
+
+
 class TestUnknownTopLevelKeys:
     """Arbitrary top-level keys must NOT warn — they are bridged to os.environ.
 
@@ -140,4 +196,3 @@ class TestUnknownTopLevelKeys:
         ]
         assert any("base_url" in i.message for i in misplaced)
         assert any("api_key" in i.message for i in misplaced)
-

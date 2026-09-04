@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Set
@@ -2292,6 +2293,83 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
 
     issues: List[ConfigIssue] = []
 
+    def _realtime_cfg_dict(cfg: dict | None) -> Optional[Dict[str, Any]]:
+        voice_section = cfg.get("voice") if isinstance(cfg, dict) else None
+        if not isinstance(voice_section, dict):
+            return None
+        realtime_section = voice_section.get("realtime")
+        return realtime_section if isinstance(realtime_section, dict) else None
+
+    def _validate_https_url(field: str, value: Any, *, allow_api_scope: bool = False) -> None:
+        if not isinstance(value, str) or not value.strip():
+            issues.append(ConfigIssue("error", f"{field} must be a non-empty string", f"Set {field} to the expected URL string"))
+            return
+        parsed = urlparse(value.strip())
+        if allow_api_scope and value.startswith("api://"):
+            return
+        if parsed.scheme != "https" or not parsed.netloc:
+            issues.append(ConfigIssue("error", f"{field} must be an https URL", f"Set {field} to an https endpoint"))
+
+    def _validate_peeps_fallback(cfg: dict | None) -> None:
+        realtime_section = _realtime_cfg_dict(cfg)
+        if realtime_section is None or "peeps_fallback" not in realtime_section:
+            return
+        peeps = realtime_section.get("peeps_fallback")
+        if not isinstance(peeps, dict):
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback must be a mapping", "Set voice.realtime.peeps_fallback to a YAML object with enabled/client_id/authority/scope/redirect_uri/cognitive_token_url"))
+            return
+        if peeps.get("enabled") is False:
+            return
+
+        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
+            value = peeps.get(field)
+            if not isinstance(value, str) or not value.strip():
+                issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} must be a non-empty string", f"Set voice.realtime.peeps_fallback.{field} in config.yaml"))
+
+        authority = peeps.get("authority")
+        if isinstance(authority, str) and authority.strip():
+            _validate_https_url("voice.realtime.peeps_fallback.authority", authority)
+            parsed = urlparse(authority.strip())
+            if parsed.path.strip("/") == "":
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.authority must include a tenant path", "Use an Entra authority like https://login.microsoftonline.com/organizations"))
+
+        scope = peeps.get("scope")
+        if isinstance(scope, str) and scope.strip():
+            raw_scope = scope.strip()
+            if " " in raw_scope:
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.scope must be a single scope value", "Set one scope, not a space-delimited list"))
+            elif raw_scope.startswith("api://"):
+                pass
+            else:
+                _validate_https_url("voice.realtime.peeps_fallback.scope", raw_scope)
+
+        redirect_uri = peeps.get("redirect_uri")
+        if isinstance(redirect_uri, str) and redirect_uri.strip():
+            parsed = urlparse(redirect_uri.strip())
+            valid_loopback = (
+                parsed.scheme == "https"
+                and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+                and parsed.port == 8080
+                and parsed.path == "/"
+                and not parsed.query
+                and not parsed.fragment
+            )
+            if not valid_loopback:
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.redirect_uri must be https://localhost:8080/ or an equivalent loopback host on port 8080", "Keep the Peeps browser callback on the local HTTPS loopback listener"))
+
+        cognitive_token_url = peeps.get("cognitive_token_url")
+        if isinstance(cognitive_token_url, str) and cognitive_token_url.strip():
+            _validate_https_url("voice.realtime.peeps_fallback.cognitive_token_url", cognitive_token_url)
+            parsed = urlparse(cognitive_token_url.strip())
+            if parsed.query or parsed.fragment:
+                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.cognitive_token_url must not include a query string or fragment", "Use the exact HTTPS endpoint only"))
+
+        timeout_seconds = peeps.get("timeout_seconds")
+        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be an integer", "Set voice.realtime.peeps_fallback.timeout_seconds to a value between 1 and 300"))
+        elif timeout_seconds < 1 or timeout_seconds > 300:
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be between 1 and 300", "Choose a timeout between 1 and 300 seconds"))
+
     # ── voice.submit_mode: direct | draft ────────────────────────────────
     voice_cfg = config.get("voice")
     if isinstance(voice_cfg, dict) and "submit_mode" in voice_cfg:
@@ -2305,6 +2383,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
                 f"voice.submit_mode must be 'direct' or 'draft', got {submit_mode!r}",
                 "Set voice.submit_mode to direct (submit immediately) or draft (edit before sending)",
             ))
+
+    _validate_peeps_fallback(config)
 
     # ── custom_providers must be a list, not a dict ──────────────────────
     cp = config.get("custom_providers")

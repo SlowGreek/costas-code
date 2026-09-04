@@ -10,6 +10,7 @@ import {
   type RealtimeTurnController,
   type RealtimeTurnToolCall
 } from './realtime-turn-controller'
+import { completeRealtimePeepsAuth, type PeepsInteraction } from './realtime-voice-auth'
 
 export const semanticTurnStopCheckpoint = (input: RealtimeStopInput): RealtimeStopOutcome => {
   if (!input.canContinue) {
@@ -337,6 +338,7 @@ export function boundWorkbenchContext(
 
 interface RealtimeTokenResponse {
   client_secret: string
+  status?: 'interaction_required' | 'ready'
   connection_id?: string
   expires_at?: number
   model: string
@@ -383,6 +385,7 @@ export interface StartRealtimeVoiceOptions {
   fetchFn?: typeof fetch
   instructions?: string
   mediaDevices?: Pick<MediaDevices, 'getUserMedia'>
+  signal?: AbortSignal
   onCameraCommand?: (
     command: RealtimeCameraCommand,
     signal?: AbortSignal
@@ -910,13 +913,33 @@ const sessionUpdateEvent = (instructions: string, webSearchAvailable = false) =>
 export async function startRealtimeVoiceConnection(
   options: StartRealtimeVoiceOptions
 ): Promise<RealtimeVoiceConnection> {
-  const token = (await options.request('voice.realtime.token', {
+  const throwIfCancelled = () => {
+    if (options.signal?.aborted) {
+      throw new Error('Voice start was cancelled')
+    }
+  }
+
+  throwIfCancelled()
+  let token = (await options.request('voice.realtime.token', {
     session_id: options.runtimeSessionId
   })) as RealtimeTokenResponse
+
+  if (token.status === 'interaction_required') {
+    await completeRealtimePeepsAuth(
+      options.request,
+      options.runtimeSessionId,
+      token as RealtimeTokenResponse & PeepsInteraction,
+      { signal: options.signal }
+    )
+    throwIfCancelled()
+    token = (await options.request('voice.realtime.token', { session_id: options.runtimeSessionId })) as RealtimeTokenResponse
+  }
 
   if (!token?.client_secret) {
     throw new Error('Hermes returned no GPT Realtime credential')
   }
+
+  throwIfCancelled()
 
   const mediaDevices = options.mediaDevices ?? navigator.mediaDevices
   const createPeer = options.peerConnectionFactory ?? (() => new RTCPeerConnection())

@@ -278,6 +278,11 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     wait: (id, timeoutMs) => ipcRenderer.invoke('hermes:mcp-oauth:wait', id, timeoutMs),
     cancel: id => ipcRenderer.invoke('hermes:mcp-oauth:cancel', id)
   },
+  peepsVoiceAuth: {
+    start: (id, flow) => ipcRenderer.invoke('hermes:peeps-voice-auth:start', id, flow),
+    wait: (id, timeoutMs) => ipcRenderer.invoke('hermes:peeps-voice-auth:wait', id, timeoutMs),
+    cancel: id => ipcRenderer.invoke('hermes:peeps-voice-auth:cancel', id)
+  },
   openPreviewInBrowser: url => ipcRenderer.invoke('hermes:openPreviewInBrowser', url),
   reachPreviewUrl: url => ipcRenderer.invoke('hermes:preview:reach', url),
   setActiveConnectionRoute: route => ipcRenderer.send('hermes:connection:active-route', route),

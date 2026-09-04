@@ -63,6 +63,19 @@ async function renderConfigSettings() {
   return { importInputRef }
 }
 
+async function renderVoiceConfigSettings() {
+  const { ConfigSettings } = await import('./config-settings')
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ConfigSettings activeSectionId="voice" importInputRef={createRef<HTMLInputElement>()} />
+      </QueryClientProvider>
+    </MemoryRouter>
+  )
+}
+
 describe('ConfigSettings autosave', () => {
   it('sends a later revert instead of diffing it away against the stale page-load baseline', async () => {
     getHermesConfigRecord.mockResolvedValue({ checkpoints: { enabled: false }, other: 'untouched' })
@@ -94,5 +107,57 @@ describe('ConfigSettings autosave', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('renders Peeps fallback labels and hides advanced fields until the toggle is enabled', async () => {
+    getHermesConfigRecord.mockResolvedValue({
+      voice: {
+        realtime: {
+          base_url: 'https://resource.openai.azure.com/openai/v1',
+          key_cmd: 'az account get-access-token --resource https://cognitiveservices.azure.com',
+          peeps_fallback: {
+            enabled: false,
+            client_id: 'client-id',
+            authority: 'https://login.microsoftonline.com/organizations',
+            scope: 'https://peeps.asgprototype.com/api/access-as-user',
+            redirect_uri: 'https://localhost:8080/',
+            cognitive_token_url:
+              'https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken',
+            timeout_seconds: 180
+          }
+        }
+      },
+      tts: { provider: 'edge', edge: {}, openai: {} },
+      stt: { enabled: true, provider: 'local', local: {}, groq: {} }
+    })
+    getHermesConfigSchema.mockResolvedValue({
+      fields: {
+        'voice.realtime.base_url': { type: 'string' },
+        'voice.realtime.key_cmd': { type: 'string' },
+        'voice.realtime.peeps_fallback.enabled': { type: 'boolean' },
+        'voice.realtime.peeps_fallback.client_id': { type: 'string' },
+        'voice.realtime.peeps_fallback.scope': { type: 'string' }
+      }
+    })
+
+    await renderVoiceConfigSettings()
+
+    expect(await screen.findByText('Peeps Auth Fallback')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Azure CLI stays first. Catalyst uses Peeps only if Azure authentication fails for realtime voice.'
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText('Peeps Client ID')).toBeNull()
+
+    const toggle = document
+      .getElementById('setting-field-voice.realtime.peeps_fallback.enabled')
+      ?.querySelector('[role="switch"]') as HTMLButtonElement | null
+    if (!toggle) {
+      throw new Error('Missing Peeps fallback toggle')
+    }
+    toggle.click()
+
+    expect(await screen.findByText('Peeps Client ID')).toBeTruthy()
   })
 })

@@ -8,6 +8,7 @@ const cfg = (over: Record<string, unknown> = {}): HermesConfigRecord =>
   ({
     tts: { provider: 'edge', edge: {}, openai: {} },
     stt: { enabled: true, provider: 'local', local: {}, groq: {} },
+    voice: { realtime: { peeps_fallback: { enabled: false } } },
     ...over
   }) as unknown as HermesConfigRecord
 
@@ -44,5 +45,16 @@ describe('voiceFieldVisible', () => {
   it('tracks a provider switch', () => {
     expect(voiceFieldVisible('tts.openai.voice', cfg({ tts: { provider: 'openai', openai: {} } }))).toBe(true)
     expect(voiceFieldVisible('tts.edge.voice', cfg({ tts: { provider: 'openai', openai: {} } }))).toBe(false)
+  })
+
+  it('shows Peeps fallback details only when the fallback is enabled', () => {
+    expect(voiceFieldVisible('voice.realtime.peeps_fallback.enabled', cfg())).toBe(true)
+    expect(voiceFieldVisible('voice.realtime.peeps_fallback.scope', cfg())).toBe(false)
+    expect(
+      voiceFieldVisible(
+        'voice.realtime.peeps_fallback.scope',
+        cfg({ voice: { realtime: { peeps_fallback: { enabled: true } } } })
+      )
+    ).toBe(true)
   })
 })

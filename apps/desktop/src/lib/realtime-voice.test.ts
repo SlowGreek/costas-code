@@ -2185,6 +2185,113 @@ describe('startRealtimeVoiceConnection', () => {
     expect(getUserMedia).not.toHaveBeenCalled()
   })
 
+  it('completes one interactive Peeps fallback, then retries the realtime token once', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 'interaction_required',
+        auth_session_id: 'auth-session',
+        authority: 'https://login.microsoftonline.com/organizations',
+        client_id: 'client-id',
+        redirect_uri: 'https://localhost:8080/',
+        scope: 'https://peeps.asgprototype.com/api/access-as-user',
+        state: 'state-123',
+        timeout_seconds: 1
+      })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({
+        client_secret: 'ek_short',
+        model: 'gpt-realtime-2.1',
+        voice: 'marin'
+      })
+    const start = vi.fn().mockResolvedValue(true)
+    const wait = vi.fn().mockResolvedValue('peeps-token')
+    vi.stubGlobal('window', {
+      hermesDesktop: { peepsVoiceAuth: { start, wait, cancel: vi.fn().mockResolvedValue(true) } }
+    })
+    const channel = { addEventListener: vi.fn(), close: vi.fn(), send: vi.fn() }
+    const peer = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      createDataChannel: vi.fn(() => channel),
+      createOffer: vi.fn(async () => ({ type: 'offer', sdp: 'offer-sdp' })),
+      ontrack: null,
+      setLocalDescription: vi.fn(async () => undefined),
+      setRemoteDescription: vi.fn(async () => undefined)
+    }
+    const connection = await startRealtimeVoiceConnection({
+      audioFactory: () =>
+        ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
+      fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => 'answer-sdp' })) as never,
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => ({ getTracks: () => [{ enabled: true, stop: vi.fn() }] }))
+      } as never,
+      peerConnectionFactory: () => peer as never,
+      request,
+      runtimeSessionId: 'runtime-session'
+    })
+
+    expect(start).toHaveBeenCalledWith(
+      'auth-session',
+      expect.objectContaining({ redirectUri: 'https://localhost:8080/' })
+    )
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      'voice.realtime.token',
+      'voice.realtime.peeps.complete',
+      'voice.realtime.token'
+    ])
+    connection.close()
+  })
+
+  it('cancels an interactive auth start before microphone access when the caller aborts', async () => {
+    const getUserMedia = vi.fn()
+    const controller = new AbortController()
+    let releaseWait: ((value: null | string) => void) | undefined
+    const cancel = vi.fn().mockResolvedValue(true)
+    const request = vi.fn().mockResolvedValue({
+      status: 'interaction_required',
+      auth_session_id: 'auth-session',
+      authority: 'https://login.microsoftonline.com/organizations',
+      client_id: 'client-id',
+      redirect_uri: 'https://localhost:8080/',
+      scope: 'https://peeps.asgprototype.com/api/access-as-user',
+      state: 'state-123',
+      timeout_seconds: 1
+    })
+
+    vi.stubGlobal('window', {
+      hermesDesktop: {
+        peepsVoiceAuth: {
+          cancel,
+          start: vi.fn().mockResolvedValue(true),
+          wait: vi.fn(
+            () =>
+              new Promise<null | string>(resolve => {
+                releaseWait = resolve
+              })
+          )
+        }
+      }
+    })
+
+    const pending = startRealtimeVoiceConnection({
+      mediaDevices: { getUserMedia } as never,
+      request,
+      runtimeSessionId: 'runtime-session',
+      signal: controller.signal
+    })
+    controller.abort()
+    releaseWait?.(null)
+
+    await expect(pending).rejects.toThrow(/cancelled/i)
+    expect(cancel).toHaveBeenCalledWith('auth-session')
+    expect(getUserMedia).not.toHaveBeenCalled()
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      'voice.realtime.token',
+      'voice.realtime.peeps.cancel'
+    ])
+  })
+
   it('appends context WITHOUT making the model speak', async () => {
     // The whole idea rests on this: `conversation.item.create` mutates context
     // and `response.create` runs the model, and they are independent. If an

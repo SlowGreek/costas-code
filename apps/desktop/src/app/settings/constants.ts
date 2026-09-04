@@ -437,7 +437,20 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
   voice: {
     recordKey: 'Voice Shortcut',
     maxRecordingSeconds: 'Max Recording Length',
-    autoTts: 'Read Responses Aloud'
+    autoTts: 'Read Responses Aloud',
+    realtime: {
+      baseUrl: 'Realtime Voice Base URL',
+      keyCmd: 'Realtime Voice Key Command',
+      peepsFallback: {
+        authority: 'Peeps Authority',
+        clientId: 'Peeps Client ID',
+        cognitiveTokenUrl: 'Peeps Cognitive Token URL',
+        enabled: 'Peeps Auth Fallback',
+        redirectUri: 'Peeps Redirect URI',
+        scope: 'Peeps Scope',
+        timeoutSeconds: 'Peeps Auth Timeout'
+      }
+    }
   },
   stt: {
     enabled: 'Speech To Text',
@@ -598,7 +611,23 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
     enabled: 'Summarize older context when conversations get large.'
   },
   voice: {
-    autoTts: 'Automatically speak assistant responses.'
+    autoTts: 'Automatically speak assistant responses.',
+    realtime: {
+      baseUrl: 'Azure/OpenAI Realtime endpoint. Leave blank to use OpenAI directly.',
+      keyCmd:
+        'Azure CLI stays first. This command prints the bearer used to mint the browser-safe Realtime secret.',
+      peepsFallback: {
+        authority: 'Microsoft Entra authority for the Peeps browser sign-in.',
+        clientId: 'Public client ID used only for the one-shot browser sign-in.',
+        cognitiveTokenUrl:
+          'Exact HTTPS endpoint that exchanges the Peeps bearer for a Cognitive Services bearer.',
+        enabled:
+          'Azure CLI stays first. Catalyst uses Peeps only if Azure authentication fails for realtime voice.',
+        redirectUri: 'HTTPS loopback callback handled by this desktop app on the current machine.',
+        scope: 'Single Peeps scope requested during the browser sign-in.',
+        timeoutSeconds: 'How long Catalyst waits for the one-shot browser sign-in to finish.'
+      }
+    }
   },
   tts: {
     xai: {
@@ -709,6 +738,15 @@ export const SECTIONS: DesktopConfigSection[] = [
       'stt.echo_transcripts',
       'stt.provider',
       'voice.auto_tts',
+      'voice.realtime.base_url',
+      'voice.realtime.key_cmd',
+      'voice.realtime.peeps_fallback.enabled',
+      'voice.realtime.peeps_fallback.client_id',
+      'voice.realtime.peeps_fallback.authority',
+      'voice.realtime.peeps_fallback.scope',
+      'voice.realtime.peeps_fallback.redirect_uri',
+      'voice.realtime.peeps_fallback.cognitive_token_url',
+      'voice.realtime.peeps_fallback.timeout_seconds',
       'tts.edge.voice',
       'tts.openai.model',
       'tts.openai.voice',

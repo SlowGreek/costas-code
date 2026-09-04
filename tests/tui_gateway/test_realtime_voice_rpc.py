@@ -4,6 +4,48 @@ from tui_gateway import realtime_voice, server
 from tools import tool_backend_helpers, web_tools
 
 import threading
+import copy
+
+
+def test_realtime_token_requests_peeps_only_after_key_cmd_auth_failure(monkeypatch):
+    from agent.command_token_source import CommandTokenError
+
+    runtime_id = "runtime-peeps"
+    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["base_url"] = "https://res.openai.azure.com/openai/v1"
+    cfg["voice"]["realtime"]["key_cmd"] = "false"
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    monkeypatch.setattr("agent.command_token_source.build_command_token_provider", lambda *_: lambda: (_ for _ in ()).throw(CommandTokenError("no")))
+    try:
+        result = server._methods["voice.realtime.token"]("token", {"session_id": runtime_id})["result"]
+    finally:
+        server._sessions.pop(runtime_id, None)
+
+    assert result["status"] == "interaction_required"
+    assert result["provider"] == "peeps"
+    assert "peeps_token" not in result
+    assert "voice.realtime.peeps.start" in server._LONG_HANDLERS
+
+
+def test_peeps_rpc_completes_without_echoing_bearer(monkeypatch):
+    runtime_id = "runtime-peeps-rpc"
+    server._sessions[runtime_id] = {"session_key": "stored-session", "profile_home": None}
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["voice"]["realtime"]["peeps_fallback"]["enabled"] = True
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    start = server._methods["voice.realtime.peeps.start"]("start", {"session_id": runtime_id})["result"]
+    from tests.tui_gateway.test_peeps_voice_auth import _jwt
+    bearer = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": 4_000_000_000})
+    try:
+        result = server._methods["voice.realtime.peeps.complete"]("complete", {
+            "session_id": runtime_id, "auth_session_id": start["auth_session_id"],
+            "state": start["state"], "peeps_token": bearer,
+        })["result"]
+    finally:
+        server._sessions.pop(runtime_id, None)
+    assert result == {"ok": True}
 
 
 def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch):
@@ -39,6 +81,7 @@ def test_realtime_token_rpc_is_profile_scoped_and_uses_voice_config(monkeypatch)
         "client_secret": "ek_short",
         "expires_at": 1234,
         "model": "gpt-realtime-2.1",
+        "status": "ready",
         "voice": "marin",
         "voice_capabilities": {"web_search": True},
     }

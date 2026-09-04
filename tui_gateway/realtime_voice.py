@@ -15,6 +15,11 @@ _MAX_RESPONSE_BYTES = 128 * 1024
 class RealtimeCredentialError(RuntimeError):
     """The backend could not mint a short-lived browser credential."""
 
+    def __init__(self, message: str, *, kind: str = "credential", status: int | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+
 
 def create_realtime_client_secret(
     *,
@@ -75,10 +80,12 @@ def create_realtime_client_secret(
                 raise RealtimeCredentialError("OpenAI Realtime credential response was too large")
     except urllib.error.HTTPError as exc:
         raise RealtimeCredentialError(
-            f"OpenAI Realtime rejected the credential request (HTTP {exc.code})"
+            f"OpenAI Realtime rejected the credential request (HTTP {exc.code})",
+            kind="auth_rejected" if exc.code in (401, 403) else "http",
+            status=exc.code,
         ) from exc
     except urllib.error.URLError as exc:
-        raise RealtimeCredentialError("Could not reach OpenAI Realtime") from exc
+        raise RealtimeCredentialError("Could not reach OpenAI Realtime", kind="connectivity") from exc
 
     try:
         payload = json.loads(raw.decode("utf-8"))

@@ -1,10 +1,166 @@
 """GPT Realtime JSON-RPC handlers."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 from .method_ctx import HandlerRegistry
 
 _registry = HandlerRegistry()
 method = _registry.method
 _profile_scoped = _registry.profile_scoped
+
+
+def _realtime_cfg(cfg: dict | None) -> dict:
+    voice_cfg = cfg.get("voice") if isinstance(cfg, dict) else {}
+    voice_cfg = voice_cfg if isinstance(voice_cfg, dict) else {}
+    realtime_cfg = voice_cfg.get("realtime")
+    return realtime_cfg if isinstance(realtime_cfg, dict) else {}
+
+
+def _peeps_interaction_payload(config, started: dict) -> dict:
+    return {
+        "authority": config.authority,
+        "auth_session_id": started["auth_session_id"],
+        "client_id": config.client_id,
+        "provider": "peeps",
+        "redirect_uri": config.redirect_uri,
+        "scope": config.scope,
+        "state": started["state"],
+        "status": "interaction_required",
+        "timeout_seconds": config.timeout_seconds,
+    }
+
+
+def _peeps_profile_key(params: dict, session: dict | None = None) -> str:
+    profile = str(params.get("profile") or "").strip()
+    if profile:
+        return f"profile:{profile}"
+    profile_home = ""
+    if isinstance(session, dict):
+        profile_home = str(session.get("profile_home") or "").strip()
+    if profile_home:
+        return f"home:{Path(profile_home).expanduser().resolve()}"
+    from hermes_constants import get_hermes_home
+
+    return f"home:{get_hermes_home().resolve()}"
+
+
+def _coarse_realtime_failure(exc: Exception) -> str:
+    from agent.command_token_source import CommandTokenError
+    from tui_gateway.peeps_voice_auth import PeepsAuthError
+    from tui_gateway.realtime_voice import RealtimeCredentialError
+
+    if isinstance(exc, CommandTokenError):
+        return "azure_cli_unavailable"
+    if isinstance(exc, PeepsAuthError):
+        return exc.code
+    if isinstance(exc, RealtimeCredentialError):
+        if exc.kind == "auth_rejected":
+            return f"azure_realtime_auth_{exc.status or 'rejected'}"
+        if exc.kind == "connectivity":
+            return "azure_realtime_unreachable"
+        if exc.kind == "http":
+            return f"azure_realtime_http_{exc.status or 'error'}"
+        return "azure_realtime_invalid_response"
+    return "realtime_unknown_error"
+
+
+def _peeps_can_retry_interactively(exc: Exception) -> bool:
+    from tui_gateway.peeps_voice_auth import PeepsAuthError
+
+    return isinstance(exc, PeepsAuthError) and exc.code in {
+        "authorization_required",
+        "expired_peeps_token",
+    }
+
+
+def _decorate_realtime_token(session: dict, token: dict) -> dict:
+    from tools.web_tools import check_web_api_key
+    import uuid
+
+    token = {**token, "status": "ready"}
+    token["voice_capabilities"] = {"web_search": bool(check_web_api_key())}
+    connection_id = uuid.uuid4().hex
+    connections = session.setdefault("_realtime_connections", set())
+    if not isinstance(connections, set):
+        connections = set()
+        session["_realtime_connections"] = connections
+    connections.add(connection_id)
+    token["connection_id"] = connection_id
+    return token
+
+
+def _mint_realtime_secret(*, api_key: str, model: str, voice: str, transcription_model: str, base_url: str) -> dict:
+    from tui_gateway.realtime_voice import create_realtime_client_secret
+
+    return create_realtime_client_secret(
+        api_key=api_key,
+        model=model,
+        voice=voice,
+        transcription_model=transcription_model,
+        base_url=base_url,
+    )
+
+
+def _primary_realtime_api_key(key_cmd: str) -> str:
+    if key_cmd:
+        from agent.command_token_source import build_command_token_provider
+
+        token_provider = build_command_token_provider(key_cmd, "voice.realtime")
+        return token_provider() if token_provider else ""
+    from tools.tool_backend_helpers import resolve_openai_audio_api_key
+
+    return resolve_openai_audio_api_key()
+
+
+@method("voice.realtime.peeps.start")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    cfg = _load_cfg()
+    realtime_cfg = _realtime_cfg(cfg)
+    session = _sessions.get(str(params.get("session_id") or ""))
+    try:
+        config = _peeps_config(realtime_cfg)
+        if config is None:
+            return _err(rid, 4612, "Peeps voice fallback is disabled")
+        data = _peeps_state()["sessions"].start(_peeps_profile_key(params, session), config)
+        return _ok(rid, _peeps_interaction_payload(config, data))
+    except Exception:
+        return _err(rid, 4612, "Could not start Peeps voice authorization")
+
+
+@method("voice.realtime.peeps.complete")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    cfg = _load_cfg()
+    realtime_cfg = _realtime_cfg(cfg)
+    session = _sessions.get(str(params.get("session_id") or ""))
+    try:
+        config = _peeps_config(realtime_cfg)
+        if config is None:
+            return _err(rid, 4612, "Peeps voice fallback is disabled")
+        token = _peeps_state()["sessions"].complete_browser_auth(
+            _peeps_profile_key(params, session), str(params.get("auth_session_id") or ""),
+            str(params.get("state") or ""), str(params.get("peeps_token") or ""))
+        from tui_gateway.peeps_voice_auth import PeepsCognitiveTokenProvider
+
+        provider = PeepsCognitiveTokenProvider(config)
+        provider.complete(token)
+        _peeps_state()["providers"][_peeps_profile_key(params, session)] = provider
+        return _ok(rid, {"ok": True})
+    except Exception:
+        return _err(rid, 4613, "Peeps voice authorization failed")
+
+
+@method("voice.realtime.peeps.cancel")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    session = _sessions.get(str(params.get("session_id") or ""))
+    _peeps_state()["sessions"].cancel(
+        _peeps_profile_key(params, session), str(params.get("auth_session_id") or "")
+    )
+    return _ok(rid, {"ok": True})
 
 
 @method("voice.realtime.token")
@@ -15,10 +171,7 @@ def _(rid, params: dict) -> dict:
         return err
 
     cfg = _load_cfg()
-    voice_cfg = cfg.get("voice") if isinstance(cfg, dict) else {}
-    voice_cfg = voice_cfg if isinstance(voice_cfg, dict) else {}
-    realtime_cfg = voice_cfg.get("realtime")
-    realtime_cfg = realtime_cfg if isinstance(realtime_cfg, dict) else {}
+    realtime_cfg = _realtime_cfg(cfg)
     if realtime_cfg.get("enabled") is False:
         return _err(rid, 4610, "GPT Realtime voice is disabled in config.yaml")
 
@@ -33,45 +186,96 @@ def _(rid, params: dict) -> dict:
     # so the token is minted fresh and cached until just before expiry.
     base_url = str(realtime_cfg.get("base_url") or "").strip()
     key_cmd = str(realtime_cfg.get("key_cmd") or "").strip()
+    peeps_config = _peeps_config(realtime_cfg)
+    peeps_profile_key = _peeps_profile_key(params, session)
+    provider = _peeps_state()["providers"].get(peeps_profile_key) if peeps_config else None
 
     try:
-        from tui_gateway.realtime_voice import create_realtime_client_secret
-
-        if key_cmd:
-            from agent.command_token_source import build_command_token_provider
-
-            token_provider = build_command_token_provider(key_cmd, "voice.realtime")
-            api_key = token_provider() if token_provider else ""
-        else:
-            from tools.tool_backend_helpers import resolve_openai_audio_api_key
-
-            api_key = resolve_openai_audio_api_key()
-
-        token = create_realtime_client_secret(
-            api_key=api_key,
+        primary_key = _primary_realtime_api_key(key_cmd)
+        token = _mint_realtime_secret(
+            api_key=primary_key,
             model=model,
             voice=voice,
             transcription_model=transcription_model,
             base_url=base_url,
         )
-        from tools.web_tools import check_web_api_key
+        return _ok(rid, _decorate_realtime_token(session, token))
+    except Exception as primary_exc:
+        from agent.command_token_source import CommandTokenError
+        from tui_gateway.peeps_voice_auth import PeepsAuthError
+        from tui_gateway.realtime_voice import RealtimeCredentialError
 
-        token["voice_capabilities"] = {"web_search": bool(check_web_api_key())}
-        # Connection identity protects transcript/close RPCs from delayed events
-        # after reconnect. It conveys no redraw authority: the Realtime voice
-        # model is always the sole component that decides when to visualize.
-        import uuid
+        peeps_enabled = bool(peeps_config is not None and base_url and key_cmd)
+        primary_code = _coarse_realtime_failure(primary_exc)
+        fallback_eligible = isinstance(primary_exc, CommandTokenError) or (
+            isinstance(primary_exc, RealtimeCredentialError)
+            and primary_exc.kind == "auth_rejected"
+        )
 
-        connection_id = uuid.uuid4().hex
-        connections = session.setdefault("_realtime_connections", set())
-        if not isinstance(connections, set):
-            connections = set()
-            session["_realtime_connections"] = connections
-        connections.add(connection_id)
-        token["connection_id"] = connection_id
-        return _ok(rid, token)
-    except Exception as exc:
-        return _err(rid, 4611, str(exc))
+        if not peeps_enabled or not fallback_eligible:
+            return _err(rid, 4611, f"Could not obtain a Realtime voice credential ({primary_code})")
+
+        if provider is None:
+            started = _peeps_state()["sessions"].start(peeps_profile_key, peeps_config)
+            return _ok(rid, _peeps_interaction_payload(peeps_config, started))
+
+        try:
+            cognitive_token = provider.token()
+        except Exception as fallback_exc:
+            if _peeps_can_retry_interactively(fallback_exc):
+                started = _peeps_state()["sessions"].start(peeps_profile_key, peeps_config)
+                return _ok(rid, _peeps_interaction_payload(peeps_config, started))
+            return _err(
+                rid,
+                4611,
+                f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
+            )
+
+        try:
+            token = _mint_realtime_secret(
+                api_key=cognitive_token,
+                model=model,
+                voice=voice,
+                transcription_model=transcription_model,
+                base_url=base_url,
+            )
+            return _ok(rid, _decorate_realtime_token(session, token))
+        except RealtimeCredentialError as fallback_exc:
+            if fallback_exc.kind != "auth_rejected":
+                return _err(
+                    rid,
+                    4611,
+                    f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
+                )
+            provider.invalidate()
+            try:
+                reminted = provider.token()
+                token = _mint_realtime_secret(
+                    api_key=reminted,
+                    model=model,
+                    voice=voice,
+                    transcription_model=transcription_model,
+                    base_url=base_url,
+                )
+                return _ok(rid, _decorate_realtime_token(session, token))
+            except Exception as remint_exc:
+                return _err(
+                    rid,
+                    4611,
+                    f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(remint_exc)})",
+                )
+        except PeepsAuthError as fallback_exc:
+            return _err(
+                rid,
+                4611,
+                f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
+            )
+        except Exception:
+            return _err(
+                rid,
+                4611,
+                f"Realtime voice authentication failed ({primary_code}; peeps_fallback_failed)",
+            )
 
 
 @method("voice.realtime.web_search")
@@ -378,4 +582,12 @@ def _(rid, params: dict) -> dict:
 
 
 def register(server) -> None:
+    server._realtime_cfg = _realtime_cfg
+    server._peeps_interaction_payload = _peeps_interaction_payload
+    server._peeps_profile_key = _peeps_profile_key
+    server._coarse_realtime_failure = _coarse_realtime_failure
+    server._peeps_can_retry_interactively = _peeps_can_retry_interactively
+    server._decorate_realtime_token = _decorate_realtime_token
+    server._mint_realtime_secret = _mint_realtime_secret
+    server._primary_realtime_api_key = _primary_realtime_api_key
     _registry.install(server)

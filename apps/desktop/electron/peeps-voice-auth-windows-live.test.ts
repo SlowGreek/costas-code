@@ -67,6 +67,23 @@ function powershell(script: string, env: NodeJS.ProcessEnv): string {
   })
 
   if (result.error || result.status !== 0) {
+    const stage =
+      script === HEADLESS_TRUST_FIXTURE_INSTALL
+        ? 'fixture-install'
+        : script === STORE_CHECK
+          ? 'store-check'
+          : script === ACL_CHECK
+            ? 'acl-check'
+            : script === PROTECT
+              ? 'dpapi-protect'
+              : script === UNPROTECT
+                ? 'dpapi-unprotect'
+                : 'helper'
+    const detail = String(result.error?.message || result.stderr || '')
+      .replace(/[A-Za-z0-9+/_-]{64,}={0,2}/g, '[redacted]')
+      .replace(/[\r\n]+/g, ' ')
+      .slice(0, 1500)
+    console.error(`peeps_windows_helper_stage=${stage} status=${result.status ?? 'spawn-error'} detail=${detail}`)
     throw new Error('Windows live certificate helper failed')
   }
 

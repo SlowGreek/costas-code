@@ -11,7 +11,11 @@ import { test } from 'vitest'
 import {
   loadOrCreateWindowsPeepsVoiceAuthTlsMaterial,
   resolveWindowsPeepsVoiceAuthPaths,
-  validateWindowsPeepsVoiceAuthLeaf
+  validateWindowsPeepsVoiceAuthLeaf,
+  WINDOWS_ACL_SCRIPT,
+  WINDOWS_CLEANUP_SCRIPT,
+  WINDOWS_PROVISION_SCRIPT,
+  WINDOWS_VALIDATE_SCRIPT
 } from './peeps-voice-auth-windows'
 
 const POWERSHELL_ARGS = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand']
@@ -70,6 +74,26 @@ function powershell(script: string, env: NodeJS.ProcessEnv): string {
 
   return result.stdout
 }
+
+const PRODUCT_STAGE_BY_SCRIPT = new Map(
+  [
+    ['acl', WINDOWS_ACL_SCRIPT],
+    ['cleanup', WINDOWS_CLEANUP_SCRIPT],
+    ['provision', WINDOWS_PROVISION_SCRIPT],
+    ['validate', WINDOWS_VALIDATE_SCRIPT]
+  ].map(([name, script]) => [Buffer.from(script, 'utf16le').toString('base64'), name])
+)
+
+const diagnosticProductSpawnSync = ((command: string, args: readonly string[], options: object) => {
+  const result = spawnSync(command, [...args], options)
+
+  if (result.error || result.status !== 0) {
+    const stage = PRODUCT_STAGE_BY_SCRIPT.get(args.at(-1) ?? '') ?? 'unknown'
+    console.error(`peeps_windows_stage=${stage} status=${result.status ?? 'spawn-error'}`)
+  }
+
+  return result
+}) as typeof spawnSync
 
 function proveElectronSafeStorage(userData: string): void {
   const electronPath = process.env.HERMES_ELECTRON_PATH
@@ -149,6 +173,7 @@ test.runIf(process.platform === 'win32')(
       const first = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
         platform: 'win32',
         safeStorage,
+        spawnSync: diagnosticProductSpawnSync,
         userDataPath: () => userData
       })
       const pfxBefore = Buffer.from(first.pfx)
@@ -172,6 +197,7 @@ test.runIf(process.platform === 'win32')(
       const second = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
         platform: 'win32',
         safeStorage,
+        spawnSync: diagnosticProductSpawnSync,
         userDataPath: () => userData
       })
       assert.deepEqual(second.pfx, pfxBefore)

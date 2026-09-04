@@ -28,21 +28,32 @@ $passwordText = Read-HermesValue 'HERMES_PEEPS_PFX_PASSWORD_B64'
 $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
 $certificate = $null
 $trusted = $null
+$keyContainerPath = $null
 try {
   $certificate = New-SelfSignedCertificate -Subject 'CN=localhost' -FriendlyName ('Catalyst Peeps localhost ' + [Guid]::NewGuid().ToString('N')) -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -KeyUsage DigitalSignature,KeyEncipherment -HashAlgorithm SHA256 -NotAfter ([DateTimeOffset]::Now.AddDays(397).DateTime) -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1','2.5.29.19={critical}{text}ca=false','2.5.29.37={text}1.3.6.1.5.5.7.3.1')
+  $rsa = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($certificate)
+  try {
+    if ($rsa -is [Security.Cryptography.RSACng]) {
+      $keyContainerPath = Join-Path $env:APPDATA ('Microsoft\Crypto\Keys\' + $rsa.Key.UniqueName)
+    }
+  } finally {
+    if ($rsa) { $rsa.Dispose() }
+  }
   Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $password -Force | Out-Null
   Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT -Force | Out-Null
   $trusted = Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root'
   if ($trusted.Thumbprint -ne $certificate.Thumbprint) { throw 'Trusted certificate thumbprint mismatch' }
-  [Console]::Out.Write((@{ thumbprint = $certificate.Thumbprint } | ConvertTo-Json -Compress))
 } catch {
   if ($trusted) { Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $trusted.Thumbprint) -Force -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath $pfxPath,$certificatePath -Force -ErrorAction SilentlyContinue
   throw
 } finally {
   $passwordText = $null
-  if ($certificate) { Remove-Item -LiteralPath ('Cert:\CurrentUser\My\' + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue }
-}`
+  if ($certificate) { Remove-Item -Path ('Cert:\CurrentUser\My\' + $certificate.Thumbprint) -DeleteKey -Force -ErrorAction SilentlyContinue }
+}
+if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $certificate.Thumbprint)) { throw 'Generated certificate remained in CurrentUser My' }
+if ($keyContainerPath -and (Test-Path -LiteralPath $keyContainerPath)) { throw 'Generated private key container remained accessible' }
+[Console]::Out.Write((@{ thumbprint = $certificate.Thumbprint } | ConvertTo-Json -Compress))`
 
 export const WINDOWS_ACL_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
 function Read-HermesValue([string]$Name) {
@@ -108,11 +119,17 @@ $trusted = $chain.Build($publicCertificate) -and $chain.ChainElements.Count -gt 
 [Console]::Out.Write((@{ aclValid = $aclValid; certificateDerBase64 = [Convert]::ToBase64String($publicCertificate.RawData); thumbprint = $publicCertificate.Thumbprint; trusted = $trusted } | ConvertTo-Json -Compress))
 $passwordText = $null`
 
-const WINDOWS_CLEANUP_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
+export const WINDOWS_CLEANUP_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'
 $value = [Environment]::GetEnvironmentVariable('HERMES_PEEPS_THUMBPRINT_B64', 'Process')
 if (-not [string]::IsNullOrWhiteSpace($value)) {
   $thumbprint = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value))
-  if ($thumbprint -match '^[0-9A-Fa-f]{40,64}$') { Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint) -Force -ErrorAction SilentlyContinue }
+  if ($thumbprint -match '^[0-9A-Fa-f]{40,64}$') {
+    $rootPath = 'Cert:\CurrentUser\Root\' + $thumbprint
+    $myPath = 'Cert:\CurrentUser\My\' + $thumbprint
+    if (Test-Path -LiteralPath $rootPath) { Remove-Item -LiteralPath $rootPath -Force -ErrorAction Stop }
+    if (Test-Path -LiteralPath $myPath) { Remove-Item -Path $myPath -DeleteKey -Force -ErrorAction Stop }
+    if ((Test-Path -LiteralPath $rootPath) -or (Test-Path -LiteralPath $myPath)) { throw 'Certificate cleanup postcondition failed' }
+  }
 }`
 
 interface SafeStorageApi {
@@ -155,6 +172,89 @@ function setupError(): Error {
   return new Error('Peeps voice authorization Windows Current User certificate setup failed')
 }
 
+type WindowsPeepsBundleValidationCode =
+  | 'bundle-path-policy'
+  | 'certificate-corrupt'
+  | 'certificate-policy-corrupt'
+  | 'pfx-corrupt'
+  | 'validation-policy-unavailable'
+  | 'validation-unavailable'
+
+class WindowsPeepsBundleValidationError extends Error {
+  constructor(
+    readonly code: WindowsPeepsBundleValidationCode,
+    readonly permitsRotation: boolean
+  ) {
+    super(code)
+    this.name = 'WindowsPeepsBundleValidationError'
+  }
+}
+
+function bundleValidationError(code: WindowsPeepsBundleValidationCode, permitsRotation = false): Error {
+  return new WindowsPeepsBundleValidationError(code, permitsRotation)
+}
+
+function isProvenRotatableBundleError(error: unknown): boolean {
+  return error instanceof WindowsPeepsBundleValidationError && error.permitsRotation
+}
+
+function hasSha256RsaSignature(certificate: X509Certificate): boolean {
+  const raw = certificate.raw
+
+  function element(offset: number): { content: number; end: number; tag: number } | undefined {
+    if (offset + 2 > raw.length) {
+      return undefined
+    }
+    const tag = raw[offset]
+    const firstLength = raw[offset + 1]
+
+    if (tag === undefined || firstLength === undefined) {
+      return undefined
+    }
+    let content = offset + 2
+    let length = firstLength
+
+    if ((firstLength & 0x80) !== 0) {
+      const bytes = firstLength & 0x7f
+
+      if (bytes === 0 || bytes > 4 || content + bytes > raw.length) {
+        return undefined
+      }
+      length = 0
+
+      for (let index = 0; index < bytes; index += 1) {
+        length = length * 256 + (raw[content + index] ?? 0)
+      }
+      content += bytes
+    }
+
+    const end = content + length
+
+    return end <= raw.length ? { content, end, tag } : undefined
+  }
+
+  const certificateSequence = element(0)
+
+  if (!certificateSequence || certificateSequence.tag !== 0x30 || certificateSequence.end !== raw.length) {
+    return false
+  }
+  const tbsCertificate = element(certificateSequence.content)
+
+  if (!tbsCertificate || tbsCertificate.tag !== 0x30) {
+    return false
+  }
+  const signatureAlgorithm = element(tbsCertificate.end)
+
+  if (!signatureAlgorithm || signatureAlgorithm.tag !== 0x30) {
+    return false
+  }
+  const oid = element(signatureAlgorithm.content)
+
+  return Boolean(
+    oid && oid.tag === 0x06 && raw.subarray(oid.content, oid.end).equals(Buffer.from('2a864886f70d01010b', 'hex'))
+  )
+}
+
 function encodedPowerShell(script: string): string[] {
   return [...POWERSHELL_PREFIX, Buffer.from(script, 'utf16le').toString('base64')]
 }
@@ -186,11 +286,19 @@ export function validateWindowsPeepsVoiceAuthLeaf(certificate: X509Certificate, 
 
   const expectedSans = ['DNS:localhost', 'IP Address:127.0.0.1'].sort()
   const details = certificate.publicKey.asymmetricKeyDetails
+  const validFrom = certificate.validFromDate.getTime()
+  const validTo = certificate.validToDate.getTime()
+  const maximumLifetimeMs = 397 * 24 * 60 * 60 * 1000
 
   if (
     certificate.ca ||
-    now.getTime() < Date.parse(certificate.validFrom) ||
-    now.getTime() > Date.parse(certificate.validTo) ||
+    !Number.isFinite(validFrom) ||
+    !Number.isFinite(validTo) ||
+    validTo <= validFrom ||
+    validTo - validFrom > maximumLifetimeMs ||
+    now.getTime() < validFrom ||
+    now.getTime() > validTo ||
+    !hasSha256RsaSignature(certificate) ||
     sans.length !== expectedSans.length ||
     sans.some((value, index) => value !== expectedSans[index]) ||
     certificate.checkHost('localhost') !== 'localhost' ||
@@ -202,7 +310,7 @@ export function validateWindowsPeepsVoiceAuthLeaf(certificate: X509Certificate, 
     typeof details.modulusLength !== 'number' ||
     details.modulusLength < 2048
   ) {
-    throw setupError()
+    throw bundleValidationError('certificate-policy-corrupt', true)
   }
 }
 
@@ -247,13 +355,13 @@ function assertBundleFilePaths(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsP
     const stat = lstatSync(filePath)
 
     if (stat.isSymbolicLink() || !stat.isFile()) {
-      throw setupError()
+      throw bundleValidationError('bundle-path-policy')
     }
 
     const real = (deps.realpathSync ?? fs.realpathSync)(filePath)
 
     if (path.win32.normalize(real).toLowerCase() !== path.win32.normalize(filePath).toLowerCase()) {
-      throw setupError()
+      throw bundleValidationError('bundle-path-policy')
     }
   }
 }
@@ -322,59 +430,98 @@ function validateExistingBundle(
   paths: WindowsPeepsVoiceAuthPaths,
   deps: WindowsPeepsVoiceAuthDeps
 ): WindowsPeepsVoiceAuthTlsMaterial {
-  assertBundleFilePaths(paths, deps)
-  const readFileSync = deps.readFileSync ?? fs.readFileSync
-  const pfx = Buffer.from(readFileSync(paths.pfxPath))
-  const encryptedPassword = Buffer.from(readFileSync(paths.passwordPath))
-  const publicDer = Buffer.from(readFileSync(paths.certificatePath))
-  const passphrase = deps.safeStorage.decryptString(encryptedPassword)
-
-  if (!passphrase) {
-    throw setupError()
+  try {
+    assertBundleFilePaths(paths, deps)
+  } catch (error) {
+    if (error instanceof WindowsPeepsBundleValidationError) {
+      throw error
+    }
+    throw bundleValidationError('validation-unavailable')
   }
 
-  const publicCertificate = new X509Certificate(publicDer)
+  const readFileSync = deps.readFileSync ?? fs.readFileSync
+  let pfx: Buffer
+  let encryptedPassword: Buffer
+  let publicDer: Buffer
+  let passphrase: string
+
+  try {
+    pfx = Buffer.from(readFileSync(paths.pfxPath))
+    encryptedPassword = Buffer.from(readFileSync(paths.passwordPath))
+    publicDer = Buffer.from(readFileSync(paths.certificatePath))
+    passphrase = deps.safeStorage.decryptString(encryptedPassword)
+  } catch {
+    throw bundleValidationError('validation-unavailable')
+  }
+
+  if (!passphrase) {
+    throw bundleValidationError('certificate-corrupt', true)
+  }
+
+  let publicCertificate: X509Certificate
+
+  try {
+    publicCertificate = new X509Certificate(publicDer)
+  } catch {
+    throw bundleValidationError('certificate-corrupt', true)
+  }
+
   validateWindowsPeepsVoiceAuthLeaf(publicCertificate, deps.now?.() ?? new Date())
   const expectedThumbprint = normalizeThumbprint(publicCertificate.fingerprint)
   const aclPaths = JSON.stringify([paths.root, paths.pfxPath, paths.passwordPath, paths.certificatePath])
 
-  const output = runCheckedPowerShell(
-    WINDOWS_VALIDATE_SCRIPT,
-    {
-      HERMES_PEEPS_ACL_PATHS_B64: envValue(aclPaths),
-      HERMES_PEEPS_CERT_PATH_B64: envValue(paths.certificatePath),
-      HERMES_PEEPS_PFX_PASSWORD_B64: envValue(passphrase),
-      HERMES_PEEPS_PFX_PATH_B64: envValue(paths.pfxPath),
-      HERMES_PEEPS_THUMBPRINT_B64: envValue(expectedThumbprint)
-    },
-    deps
-  )
+  let output: string
+
+  try {
+    output = runCheckedPowerShell(
+      WINDOWS_VALIDATE_SCRIPT,
+      {
+        HERMES_PEEPS_ACL_PATHS_B64: envValue(aclPaths),
+        HERMES_PEEPS_CERT_PATH_B64: envValue(paths.certificatePath),
+        HERMES_PEEPS_PFX_PASSWORD_B64: envValue(passphrase),
+        HERMES_PEEPS_PFX_PATH_B64: envValue(paths.pfxPath),
+        HERMES_PEEPS_THUMBPRINT_B64: envValue(expectedThumbprint)
+      },
+      deps
+    )
+  } catch {
+    throw bundleValidationError('validation-unavailable')
+  }
 
   let validation: { aclValid?: unknown; certificateDerBase64?: unknown; thumbprint?: unknown; trusted?: unknown }
 
   try {
     validation = JSON.parse(output)
   } catch {
-    throw setupError()
+    throw bundleValidationError('validation-unavailable')
+  }
+
+  if (validation.aclValid !== true || validation.trusted !== true) {
+    throw bundleValidationError('validation-policy-unavailable')
   }
 
   const validatedDer = Buffer.from(String(validation.certificateDerBase64 || ''), 'base64')
 
   if (
-    validation.aclValid !== true ||
-    validation.trusted !== true ||
     normalizeThumbprint(String(validation.thumbprint || '')) !== expectedThumbprint ||
     !validatedDer.equals(publicDer)
   ) {
-    throw setupError()
+    throw bundleValidationError('certificate-corrupt', true)
   }
 
-  validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(validatedDer), deps.now?.() ?? new Date())
+  try {
+    validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(validatedDer), deps.now?.() ?? new Date())
+  } catch (error) {
+    if (error instanceof WindowsPeepsBundleValidationError) {
+      throw error
+    }
+    throw bundleValidationError('certificate-corrupt', true)
+  }
 
   try {
     ;(deps.createSecureContext ?? tls.createSecureContext)({ passphrase, pfx })
   } catch {
-    throw setupError()
+    throw bundleValidationError('pfx-corrupt', true)
   }
 
   return { kind: 'pfx', passphrase, pfx }
@@ -384,11 +531,7 @@ function provisionBundle(paths: WindowsPeepsVoiceAuthPaths, deps: WindowsPeepsVo
   const mkdirSync = deps.mkdirSync ?? fs.mkdirSync
   mkdirSync(paths.root, { mode: 0o700, recursive: true })
   assertSafeWindowsRoot(path.win32.dirname(paths.root), paths, deps)
-  runCheckedPowerShell(
-    WINDOWS_ACL_SCRIPT,
-    { HERMES_PEEPS_ACL_PATHS_B64: envValue(JSON.stringify([paths.root])) },
-    deps
-  )
+  runCheckedPowerShell(WINDOWS_ACL_SCRIPT, { HERMES_PEEPS_ACL_PATHS_B64: envValue(JSON.stringify([paths.root])) }, deps)
   const passwordBytes = (deps.randomBytes ?? nodeRandomBytes)(48)
   const passphrase = passwordBytes.toString('base64url')
 
@@ -437,29 +580,37 @@ export function loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(
   try {
     assertSafeWindowsRoot(userData, paths, deps)
     const existsSync = deps.existsSync ?? fs.existsSync
-    const hasAny = [paths.pfxPath, paths.passwordPath, paths.certificatePath].some(filePath => existsSync(filePath))
-    const hasAll = [paths.pfxPath, paths.passwordPath, paths.certificatePath].every(filePath => existsSync(filePath))
+    const bundleFiles = [paths.pfxPath, paths.passwordPath, paths.certificatePath]
+    const hasAny = bundleFiles.some(filePath => existsSync(filePath))
+    const hasAll = bundleFiles.every(filePath => existsSync(filePath))
 
     if (hasAll) {
       try {
         return validateExistingBundle(paths, deps)
-      } catch {
+      } catch (error) {
+        if (!isProvenRotatableBundleError(error)) {
+          throw error
+        }
         cleanupInvalidBundle(paths, deps)
       }
     } else if (hasAny) {
       cleanupInvalidBundle(paths, deps)
     }
 
-    provisionBundle(paths, deps)
-
-    return validateExistingBundle(paths, deps)
-  } catch {
     try {
-      cleanupInvalidBundle(paths, deps)
-    } catch {
-      // Keep the public error coarse and never include PowerShell or secret output.
-    }
+      provisionBundle(paths, deps)
 
+      return validateExistingBundle(paths, deps)
+    } catch {
+      try {
+        cleanupInvalidBundle(paths, deps)
+      } catch {
+        // Keep the public error coarse and never include PowerShell or secret output.
+      }
+
+      throw setupError()
+    }
+  } catch {
     throw setupError()
   }
 }

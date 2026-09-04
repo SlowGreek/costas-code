@@ -183,21 +183,60 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $userName = 'PeepsCert' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-          $passwordText = [Convert]::ToBase64String([byte[]](1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+          $profilePath = "C:\Users\$userName"
+          $userData = Join-Path $profilePath 'AppData\Roaming\Catalyst'
+          $passwordBytes = New-Object byte[] 32
+          $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+          try { $rng.GetBytes($passwordBytes) } finally { $rng.Dispose() }
+          $passwordText = [Convert]::ToBase64String($passwordBytes)
+          [Array]::Clear($passwordBytes, 0, $passwordBytes.Length)
           $securePassword = ConvertTo-SecureString $passwordText -AsPlainText -Force
+          $testError = $null
+          $cleanupErrors = [Collections.Generic.List[string]]::new()
           New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
+          $userSid = (Get-LocalUser -Name $userName -ErrorAction Stop).Sid.Value
           try {
             $credential = New-Object Management.Automation.PSCredential(".\$userName", $securePassword)
             $node = (Get-Command node.exe).Source
+            $electron = (Resolve-Path '..\..\node_modules\electron\dist\electron.exe').Path
             $vitest = (Resolve-Path '..\..\node_modules\vitest\vitest.mjs').Path
-            $arguments = @("`"$vitest`"", 'run', '--project', 'electron', 'electron/peeps-voice-auth-windows-live.test.ts')
-            $process = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory (Get-Location).Path -Credential $credential -LoadUserProfile -Wait -PassThru
+            $childScript = Join-Path $env:RUNNER_TEMP ("peeps-cert-test-$userName.ps1")
+            @"
+          `$ErrorActionPreference = 'Stop'
+          `$env:USERPROFILE = '$profilePath'
+          `$env:APPDATA = '$profilePath\AppData\Roaming'
+          `$env:LOCALAPPDATA = '$profilePath\AppData\Local'
+          `$env:TEMP = '$profilePath\AppData\Local\Temp'
+          `$env:TMP = `$env:TEMP
+          `$env:HERMES_PEEPS_TEST_USER_DATA = '$userData'
+          `$env:HERMES_ELECTRON_PATH = '$electron'
+          New-Item -ItemType Directory -Force -Path `$env:APPDATA,`$env:LOCALAPPDATA,`$env:TEMP | Out-Null
+          & '$node' '$vitest' run --project electron electron/peeps-voice-auth-windows-live.test.ts --reporter=verbose
+          exit `$LASTEXITCODE
+          "@ | Set-Content -LiteralPath $childScript -Encoding UTF8
+            $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$childScript`"")
+            $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WorkingDirectory (Get-Location).Path -Credential $credential -LoadUserProfile -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "Non-admin Peeps certificate test failed with exit code $($process.ExitCode)" }
+          } catch {
+            $testError = $_
           } finally {
-            Remove-LocalUser -Name $userName -ErrorAction SilentlyContinue
-            Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -eq "C:\Users\$userName" } | Remove-CimInstance -ErrorAction SilentlyContinue
+            if ($childScript) { Remove-Item -LiteralPath $childScript -Force -ErrorAction SilentlyContinue }
+            try { Remove-LocalUser -Name $userName -ErrorAction Stop } catch { $cleanupErrors.Add("local user deletion failed: $($_.Exception.Message)") }
+            try {
+              Get-LocalUser -Name $userName -ErrorAction Stop | Out-Null
+              $cleanupErrors.Add('Get-LocalUser still found the temporary account')
+            } catch [Microsoft.PowerShell.Commands.UserNotFoundException] {
+              # Expected fail-closed postcondition.
+            } catch { $cleanupErrors.Add("Get-LocalUser verification failed: $($_.Exception.Message)") }
+            try {
+              @(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or $_.SID -eq $userSid }) | ForEach-Object { Remove-CimInstance -InputObject $_ -ErrorAction Stop }
+            } catch { $cleanupErrors.Add("profile deletion failed: $($_.Exception.Message)") }
+            if (Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { $_.LocalPath -eq $profilePath -or $_.SID -eq $userSid }) { $cleanupErrors.Add('temporary profile still exists') }
             $passwordText = $null
+            $securePassword = $null
           }
+          if ($cleanupErrors.Count -gt 0) { throw ($cleanupErrors -join '; ') }
+          if ($testError) { throw $testError }
 
       - name: Build (${{ matrix.script }})
         if: needs.gate.outputs.platforms == 'both' || needs.gate.outputs.platforms == matrix.platform

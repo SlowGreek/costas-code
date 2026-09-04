@@ -2,14 +2,16 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { X509Certificate } from 'node:crypto'
 import fs from 'node:fs'
-import os from 'node:os'
+import https from 'node:https'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { test } from 'vitest'
 
 import {
   loadOrCreateWindowsPeepsVoiceAuthTlsMaterial,
-  resolveWindowsPeepsVoiceAuthPaths
+  resolveWindowsPeepsVoiceAuthPaths,
+  validateWindowsPeepsVoiceAuthLeaf
 } from './peeps-voice-auth-windows'
 
 const POWERSHELL_ARGS = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand']
@@ -30,10 +32,28 @@ $root = Test-Path -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint)
 $my = Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)
 [Console]::Out.Write((@{ root = $root; my = $my } | ConvertTo-Json -Compress))`
 
+const ACL_CHECK = String.raw`$paths = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Environment]::GetEnvironmentVariable('HERMES_PATHS_B64', 'Process'))) | ConvertFrom-Json
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$allowed = @($currentSid, 'S-1-5-18', 'S-1-5-32-544')
+foreach ($target in $paths) {
+  $acl = Get-Acl -LiteralPath $target
+  if (-not $acl.AreAccessRulesProtected) { throw 'ACL inheritance is not protected' }
+  foreach ($rule in $acl.Access) {
+    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($rule.AccessControlType -ne 'Allow' -or $allowed -notcontains $sid) { throw 'Unexpected ACL entry' }
+  }
+  foreach ($sid in $allowed) {
+    if (-not ($acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq $sid -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'Missing full-control ACL entry' }
+  }
+}
+[Console]::Out.Write('true')`
+
 const CLEANUP = String.raw`$thumbprint = [Environment]::GetEnvironmentVariable('HERMES_THUMBPRINT', 'Process')
 if ($thumbprint -match '^[0-9A-Fa-f]{40}$') {
-  Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint) -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint) -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint) -Force -ErrorAction Stop
+  if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)) { Remove-Item -Path ('Cert:\CurrentUser\My\' + $thumbprint) -DeleteKey -Force -ErrorAction Stop }
+  if (Test-Path -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint)) { throw 'Root certificate cleanup failed' }
+  if (Test-Path -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint)) { throw 'My certificate cleanup failed' }
 }`
 
 function powershell(script: string, env: NodeJS.ProcessEnv): string {
@@ -51,49 +71,125 @@ function powershell(script: string, env: NodeJS.ProcessEnv): string {
   return result.stdout
 }
 
-test.runIf(process.platform === 'win32')(
-  'provisions a non-elevated CurrentUser localhost certificate and removes the test trust entry',
-  () => {
-    assert.equal(powershell(ADMIN_CHECK, {}), 'false')
+function proveElectronSafeStorage(userData: string): void {
+  const electronPath = process.env.HERMES_ELECTRON_PATH
+  assert.ok(electronPath, 'HERMES_ELECTRON_PATH is required')
+  const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), 'peeps-voice-auth-windows-native-fixture.cjs')
 
-    const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'catalyst-peeps-auth-'))
+  const result = spawnSync(electronPath, [fixture], {
+    encoding: 'utf8',
+    env: { ...process.env, HERMES_PEEPS_TEST_USER_DATA: userData },
+    shell: false,
+    windowsHide: true
+  })
+
+  assert.equal(result.status, 0, 'Electron safeStorage fixture failed')
+  assert.deepEqual(JSON.parse(result.stdout), {
+    available: true,
+    ciphertextDistinct: true,
+    roundTrip: true,
+    userData
+  })
+}
+
+async function proveHttpsHandshake(material: { passphrase: string; pfx: Buffer }, certificate: Buffer): Promise<void> {
+  const server = https.createServer(material, (_request, response) => response.end('ok'))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  assert.ok(address && typeof address !== 'string')
+
+  try {
+    const body = await new Promise<string>((resolve, reject) => {
+      https
+        .get({ ca: certificate, host: '127.0.0.1', port: address.port, rejectUnauthorized: true }, response => {
+          let value = ''
+          response.setEncoding('utf8')
+          response.on('data', chunk => (value += chunk))
+          response.on('end', () => resolve(value))
+        })
+        .once('error', reject)
+    })
+
+    assert.equal(body, 'ok')
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => (error ? reject(error) : resolve())))
+  }
+}
+
+test.runIf(process.platform === 'win32')(
+  'provisions and reuses a non-admin CurrentUser localhost certificate with native security postconditions',
+  async () => {
+    assert.equal(powershell(ADMIN_CHECK, {}), 'false')
+    const userData = process.env.HERMES_PEEPS_TEST_USER_DATA
+    assert.ok(userData && path.win32.isAbsolute(userData), 'explicit temporary-user userData is required')
+    assert.ok(userData.startsWith(process.env.USERPROFILE ?? ''), 'userData must be under the temporary user profile')
+    fs.mkdirSync(userData, { recursive: true })
+    proveElectronSafeStorage(userData)
+
     const paths = resolveWindowsPeepsVoiceAuthPaths(userData)
     let thumbprint = ''
 
+    const safeStorage = {
+      // Vitest runs in node.exe, not Electron main. The Electron fixture above
+      // proves the real non-admin safeStorage API; these wrappers inject the
+      // same CurrentUser DPAPI boundary into the product module under test.
+      decryptString: (encrypted: Buffer) =>
+        Buffer.from(powershell(UNPROTECT, { HERMES_SECRET_B64: encrypted.toString('base64') }), 'base64').toString(
+          'utf8'
+        ),
+      encryptString: (value: string) =>
+        Buffer.from(powershell(PROTECT, { HERMES_SECRET_B64: Buffer.from(value).toString('base64') }), 'base64'),
+      isEncryptionAvailable: () => true
+    }
+
     try {
-      const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+      const first = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
         platform: 'win32',
-        safeStorage: {
-          decryptString: encrypted =>
-            Buffer.from(powershell(UNPROTECT, { HERMES_SECRET_B64: encrypted.toString('base64') }), 'base64').toString(
-              'utf8'
-            ),
-          encryptString: value =>
-            Buffer.from(powershell(PROTECT, { HERMES_SECRET_B64: Buffer.from(value).toString('base64') }), 'base64'),
-          isEncryptionAvailable: () => true
-        },
+        safeStorage,
         userDataPath: () => userData
       })
-
-      assert.equal(material.kind, 'pfx')
-      assert.equal(fs.existsSync(paths.pfxPath), true)
-      assert.equal(fs.existsSync(paths.passwordPath), true)
-      const certificate = new X509Certificate(fs.readFileSync(paths.certificatePath))
+      const pfxBefore = Buffer.from(first.pfx)
+      const certificateDer = fs.readFileSync(paths.certificatePath)
+      const certificate = new X509Certificate(certificateDer)
+      validateWindowsPeepsVoiceAuthLeaf(certificate, new Date())
       thumbprint = certificate.fingerprint.replaceAll(':', '')
 
-      const stores = JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })) as {
-        my: boolean
-        root: boolean
-      }
+      assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
+        my: false,
+        root: true
+      })
+      assert.equal(
+        powershell(ACL_CHECK, {
+          HERMES_PATHS_B64: Buffer.from(JSON.stringify(Object.values(paths))).toString('base64')
+        }),
+        'true'
+      )
+      await proveHttpsHandshake(first, certificateDer)
 
-      assert.deepEqual(stores, { my: false, root: true })
+      const second = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial({
+        platform: 'win32',
+        safeStorage,
+        userDataPath: () => userData
+      })
+      assert.deepEqual(second.pfx, pfxBefore)
+      assert.equal(
+        new X509Certificate(fs.readFileSync(paths.certificatePath)).fingerprint.replaceAll(':', ''),
+        thumbprint
+      )
     } finally {
       if (thumbprint) {
         powershell(CLEANUP, { HERMES_THUMBPRINT: thumbprint })
+        assert.deepEqual(JSON.parse(powershell(STORE_CHECK, { HERMES_THUMBPRINT: thumbprint })), {
+          my: false,
+          root: false
+        })
       }
 
       fs.rmSync(userData, { force: true, recursive: true })
     }
   },
-  60_000
+  120_000
 )

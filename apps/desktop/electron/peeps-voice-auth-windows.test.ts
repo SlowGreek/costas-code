@@ -9,6 +9,7 @@ import {
   resolveWindowsPeepsVoiceAuthPaths,
   validateWindowsPeepsVoiceAuthLeaf,
   WINDOWS_ACL_SCRIPT,
+  WINDOWS_CLEANUP_SCRIPT,
   WINDOWS_PROVISION_SCRIPT,
   WINDOWS_VALIDATE_SCRIPT,
   type WindowsPeepsVoiceAuthDeps
@@ -34,6 +35,16 @@ const WRONG_SAN_CERT_DER = Buffer.from(
   'base64'
 )
 
+const SHA1_CERT_DER = Buffer.from(
+  'MIIC7DCCAdSgAwIBAgIJAI3KZtp01+COMA0GCSqGSIb3DQEBBQUAMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDAeFw0yNjA5MDQxNjM5MjVaFw0yNzEwMDYxNjM5MjVaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALNBa6CRZqq9HlOCVXzCgr/m5RFQFmF/9k8OC41CW2Oc/z0sDcE62jTzQ4Xqe7KCxw3AWuD8UXbIkHgF/6gmFrJRIpjqh2ErOJHApg/qBFd22pVRj0KqVmYt+M3XNcaiCrD9YGHdszXosTM2nToO8ssjjgMKaB7Ml7jEpwZTQDAnTL9onIElb0RFctUykk4bIWUYtmmiK0RDc5N2HnhDclJY878qtrLJPRbOkzW2DSLXO6RtXrhCzmAWobLGg0wF7r3z+digeU8SeDddyvxtU/r3t3wEn4/beHgB2KqI2bP1IjpInd1Q6OorUPvuLcNyrCEiTockhO5k68bSfXC/2XcCAwEAAaNBMD8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/AAABMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDQYJKoZIhvcNAQEFBQADggEBAKY8eHKq8DdTWsyuUVqHsZTDMP7dwN566K1LlZ3r1N7SZ20fE/1CpW06BVyyOeDoelaK3eUALiWzF7NHANQY/nzkvar1dajt2FIeI+uZHQsbiLfWW6j5HmzBPawBaOI7JCWNP/vRIx6jh/H4JRhufuljMslTBgzdeaQVY+DIXikvTm3CZUpnzUvtrWd/bbo9mq7ehIbMAsS+YA+WSiHY7UgKZhymbBanBFHqN0E6qlhSuWvYCDaTL8LoFN+bBqS4kWYnu8p2FLl4+HzxeB0n+vdMMTk9LpGuRqjO0eZUpTBAPFgl14IM4rpQnGGDb97Sk+5UKi72vP15AeNrn4z781M=',
+  'base64'
+)
+
+const LONG_LIVED_CERT_DER = Buffer.from(
+  'MIIC7DCCAdSgAwIBAgIJAOGs9wTylNojMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDAeFw0yNjA5MDQxNjM5MjVaFw0yNzEwMDcxNjM5MjVaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMvx3Q9ns7QAoIDpTPGQYkjwKmoDzpLEpeXivYyiOSEOQsn5UVYZgR1mtIpUfbVttdCQv8IQx3sSanPwEcZxJvCwCqVgzXUmkvA5LfT8LCINtRG2p8n8k49r3/NcyyGyhy7ckKUralEX75adN46ounZVRbFRvEQRvrEMYfusUvdpu1Ze/9vjAOM44zGx/pYmGMDJIUEMMZveUK78tgCy3uqTy3x0eSAhkVDg+s8ZCNiQdQatRCtqliymKf8ycI2AtG7xFj5IMwJuFX0vnAMBLanh+L3vbAyDcFQZgzOaA7ZNNREkTZUYEblXfAAsSS3Kl1QfiE2S+cmLsT5cSmvusP0CAwEAAaNBMD8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/AAABMAwGA1UdEwEB/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDQYJKoZIhvcNAQELBQADggEBAFMlWcWMG/cWDLJb28sDR88D1F4Uu0/FbD2xDPro2kGu8FC1SWBMY++uJ/cbLB+jxeRfyAHgIM4iNV0E3vQTGSFTdoWTK8hqenrXjnmP89fuoqFZlX1YJI41PlzO6TY7PM0OObRQa4rKRyTobCw14Nq+coq+xKfT1vHq8wzkUkiycY5EZ/J5TBXrIzMtIm6LBPBZ1e6BZ1HOpSNHben5PmN+4Q9a4nuR/V2f7M/zPYICHp5WHQDMyB2g34dHiAOZSQAeljDiy9+VLwJdtLY1yfw3pbZUx3eMGnBllhPbB80882To+Pwd9ISEIT3u0cICspNKztNT5Sl1bMcJ3m2Y2yI=',
+  'base64'
+)
+
 const USER_DATA = 'C:\\Users\\alice\\AppData\\Roaming\\Catalyst'
 const PASSWORD = Buffer.from('unit-test-password-with-entropy-0123456789')
 
@@ -44,6 +55,8 @@ function createWindowsHarness(
     encryptionAvailable?: boolean
     validation?: Partial<{ aclValid: boolean; certificateDer: Buffer; trusted: boolean; thumbprint: string }>
     failScript?: 'acl' | 'provision' | 'validate'
+    invalidPfx?: boolean
+    malformedValidationJson?: boolean
   } = {}
 ) {
   const paths = resolveWindowsPeepsVoiceAuthPaths(USER_DATA)
@@ -91,18 +104,32 @@ function createWindowsHarness(
 
     return {
       status: 0,
-      stdout: JSON.stringify({
-        aclValid: validation.aclValid,
-        certificateDerBase64: validation.certificateDer.toString('base64'),
-        trusted: validation.trusted,
-        thumbprint: validation.thumbprint
-      }),
+      stdout: options.malformedValidationJson
+        ? '{'
+        : JSON.stringify({
+            aclValid: validation.aclValid,
+            certificateDerBase64: validation.certificateDer.toString('base64'),
+            trusted: validation.trusted,
+            thumbprint: validation.thumbprint
+          }),
       stderr: ''
     }
   })
 
   const deps: WindowsPeepsVoiceAuthDeps = {
-    createSecureContext: vi.fn(),
+    createSecureContext: vi.fn(
+      (secureContextOptions?: Parameters<NonNullable<WindowsPeepsVoiceAuthDeps['createSecureContext']>>[0]) => {
+        if (
+          options.invalidPfx &&
+          Buffer.isBuffer(secureContextOptions?.pfx) &&
+          secureContextOptions.pfx.toString() === 'existing-pfx'
+        ) {
+          throw new Error('bad pfx')
+        }
+
+        return {} as never
+      }
+    ),
     existsSync: filePath => filePath === USER_DATA || filePath === paths.root || files.has(filePath),
     lstatSync: filePath =>
       ({
@@ -188,7 +215,11 @@ test('Windows provisioning and validation scripts are fixed CurrentUser-only non
   assert.match(WINDOWS_PROVISION_SCRIPT, /SHA256/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /AddDays\(397\)/)
   assert.match(WINDOWS_PROVISION_SCRIPT, /Export-PfxCertificate/)
-  assert.match(WINDOWS_PROVISION_SCRIPT, /Remove-Item.*Cert:\\CurrentUser\\My/)
+  assert.match(WINDOWS_PROVISION_SCRIPT, /Remove-Item -Path .*Cert:\\CurrentUser\\My.*-DeleteKey/)
+  assert.match(WINDOWS_PROVISION_SCRIPT, /Test-Path.*Cert:\\CurrentUser\\My/s)
+  assert.match(WINDOWS_PROVISION_SCRIPT, /keyContainerPath.*Test-Path/s)
+  assert.match(WINDOWS_CLEANUP_SCRIPT, /Remove-Item -Path \$myPath -DeleteKey/)
+  assert.match(WINDOWS_CLEANUP_SCRIPT, /Certificate cleanup postcondition failed/)
   assert.match(WINDOWS_ACL_SCRIPT, /SetAccessRuleProtection\(\$true, \$false\)/)
   assert.match(WINDOWS_ACL_SCRIPT, /SetOwner\(\$currentSid\)/)
   assert.match(WINDOWS_VALIDATE_SCRIPT, /\.Owner.*currentSid|currentSid.*\.Owner/s)
@@ -242,17 +273,57 @@ test('Windows missing DPAPI password blob regenerates the incomplete bundle', ()
   assert.equal(harness.files.has(harness.paths.passwordPath), true)
 })
 
-test('Windows corrupt DPAPI password regenerates the invalid bundle and never logs secret output', () => {
+test('Windows DPAPI decrypt failure preserves a complete bundle and fails closed', () => {
   const harness = createWindowsHarness({ decryptThrows: true, existing: true })
-  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
+  const unlink = vi.spyOn(harness.deps, 'unlinkSync')
+  assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+  assert.equal(unlink.mock.calls.length, 0)
+  assert.equal(harness.spawnCalls.length, 0)
+  assert.equal(harness.files.size, 3)
+})
 
+test('Windows transient validator failures preserve every complete-bundle artifact without cleanup or provisioning', () => {
+  for (const options of [{ failScript: 'validate' as const }, { malformedValidationJson: true }]) {
+    const harness = createWindowsHarness({ existing: true, ...options })
+    const unlink = vi.spyOn(harness.deps, 'unlinkSync')
+    assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+    assert.equal(unlink.mock.calls.length, 0)
+    assert.equal(
+      harness.spawnCalls.filter(
+        call => call.argv.at(-1) === Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
+      ).length,
+      0
+    )
+    assert.equal(harness.spawnCalls.length, 1)
+    assert.equal(harness.files.size, 3)
+  }
+})
+
+test('Windows proven invalid PFX rotates a complete corrupt bundle', () => {
+  const harness = createWindowsHarness({ existing: true, invalidPfx: true })
+  const material = loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps)
   assert.equal(material.pfx.toString(), 'new-pfx')
-  assert.equal(
-    harness.spawnCalls.filter(
+  assert.ok(
+    harness.spawnCalls.some(
       call => call.argv.at(-1) === Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
-    ).length,
-    1
+    )
   )
+})
+
+test('Windows ACL or trust policy failure preserves a complete bundle instead of rotating it', () => {
+  for (const validation of [{ aclValid: false }, { trusted: false }]) {
+    const harness = createWindowsHarness({ existing: true, validation })
+    const unlink = vi.spyOn(harness.deps, 'unlinkSync')
+    assert.throws(() => loadOrCreateWindowsPeepsVoiceAuthTlsMaterial(harness.deps), /setup failed/)
+    assert.equal(unlink.mock.calls.length, 0)
+    assert.equal(harness.files.size, 3)
+    assert.equal(
+      harness.spawnCalls.filter(
+        call => call.argv.at(-1) === Buffer.from(WINDOWS_PROVISION_SCRIPT, 'utf16le').toString('base64')
+      ).length,
+      0
+    )
+  }
 })
 
 test('Windows rejects ACL trust thumbprint and certificate policy failures', () => {
@@ -313,6 +384,12 @@ test('Windows leaf validator requires exact localhost SANs serverAuth validity C
     validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(WRONG_SAN_CERT_DER), new Date('2026-09-05T00:00:00.000Z'))
   )
   assert.throws(() => validateWindowsPeepsVoiceAuthLeaf(valid, new Date('2028-01-01T00:00:00.000Z')))
+  assert.throws(() =>
+    validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(SHA1_CERT_DER), new Date('2026-09-05T00:00:00.000Z'))
+  )
+  assert.throws(() =>
+    validateWindowsPeepsVoiceAuthLeaf(new X509Certificate(LONG_LIVED_CERT_DER), new Date('2026-09-05T00:00:00.000Z'))
+  )
 })
 
 test('Windows bundle paths are fixed beneath Electron userData', () => {

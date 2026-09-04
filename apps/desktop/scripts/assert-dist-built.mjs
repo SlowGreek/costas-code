@@ -40,6 +40,19 @@ export function checkDistBuilt(distDir) {
     return { ok: false, error: `dist/index.html is empty at ${indexHtml}` }
   }
 
+  const peepsAuthAsset = join(distDir, "peeps-voice-auth-page.js")
+  if (!existsSync(peepsAuthAsset) || !statSync(peepsAuthAsset).isFile()) {
+    return { ok: false, error: `standalone Peeps MSAL asset is missing at ${peepsAuthAsset}` }
+  }
+  const peepsAuthSource = readFileSync(peepsAuthAsset, "utf8")
+  if (
+    peepsAuthSource.length === 0 ||
+    /https?:\/\/[^"']*(?:cdn|unpkg|jsdelivr)/i.test(peepsAuthSource) ||
+    /(?:require|import)\(["']@azure\/msal-browser["']\)/.test(peepsAuthSource)
+  ) {
+    return { ok: false, error: "standalone Peeps MSAL asset has a runtime dependency" }
+  }
+
   // index.html alone isn't enough — vite emits hashed JS into dist/assets.
   // An index.html with no script bundle still blank-pages.
   const assetsDir = join(distDir, "assets")

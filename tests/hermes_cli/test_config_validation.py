@@ -115,14 +115,9 @@ class TestPeepsRealtimeFallbackValidation:
     def _issues(self, peeps_fallback):
         return validate_config_structure({"voice": {"realtime": {"peeps_fallback": peeps_fallback}}})
 
-    def test_valid_loopback_config_is_accepted(self):
+    def test_enabled_and_timeout_only_are_accepted(self):
         issues = self._issues({
             "enabled": True,
-            "client_id": "client-id",
-            "authority": "https://login.microsoftonline.com/organizations",
-            "scope": "https://peeps.asgprototype.com/api/access-as-user",
-            "redirect_uri": "https://localhost:8080/",
-            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
             "timeout_seconds": 180,
         })
         assert not any(issue.severity == "error" for issue in issues)
@@ -131,11 +126,9 @@ class TestPeepsRealtimeFallbackValidation:
         issues = self._issues(True)
         assert any("voice.realtime.peeps_fallback must be a mapping" in issue.message for issue in issues)
 
-    def test_rejects_missing_required_fields(self):
+    def test_fixed_fields_need_not_be_exposed(self):
         issues = self._issues({"enabled": True})
-        messages = [issue.message for issue in issues]
-        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
-            assert any(field in message for message in messages)
+        assert not any(issue.severity == "error" for issue in issues)
 
     def test_rejects_bad_authority_scope_redirect_token_url_and_timeout(self):
         issues = self._issues({
@@ -148,10 +141,8 @@ class TestPeepsRealtimeFallbackValidation:
             "timeout_seconds": 0,
         })
         messages = [issue.message for issue in issues]
-        assert any("authority must include a tenant path" in message or "authority must be an https URL" in message for message in messages)
-        assert any("scope must be a single scope value" in message for message in messages)
-        assert any("redirect_uri must be exactly https://localhost:8080/" in message for message in messages)
-        assert any("approved Seastar token endpoint" in message for message in messages)
+        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
+            assert any(f"{field} must be exactly" in message for message in messages)
         assert any("timeout_seconds must be between 1 and 300" in message for message in messages)
 
     def test_rejects_non_integer_timeout(self):
@@ -166,7 +157,7 @@ class TestPeepsRealtimeFallbackValidation:
         })
         assert any("timeout_seconds must be an integer" in issue.message for issue in issues)
 
-    def test_absent_enabled_matches_runtime_disabled_semantics(self):
+    def test_changed_fixed_fields_are_rejected_even_when_disabled(self):
         issues = self._issues({
             "client_id": "",
             "authority": "https://example.com/tenant",
@@ -174,7 +165,7 @@ class TestPeepsRealtimeFallbackValidation:
             "redirect_uri": "https://127.0.0.1:8080/",
             "cognitive_token_url": "https://example.com/token",
         })
-        assert not any(issue.severity == "error" for issue in issues)
+        assert any(issue.severity == "error" for issue in issues)
 
 
 class TestUnknownTopLevelKeys:

@@ -2311,67 +2311,29 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
             issues.append(ConfigIssue("error", f"{field} must be an https URL", f"Set {field} to an https endpoint"))
 
     def _validate_peeps_fallback(cfg: dict | None) -> None:
-        approved_cognitive_token_url = "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken"
         realtime_section = _realtime_cfg_dict(cfg)
         if realtime_section is None or "peeps_fallback" not in realtime_section:
             return
         peeps = realtime_section.get("peeps_fallback")
         if not isinstance(peeps, dict):
-            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback must be a mapping", "Set voice.realtime.peeps_fallback to a YAML object with enabled/client_id/authority/scope/redirect_uri/cognitive_token_url"))
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback must be a mapping", "Use enabled and timeout_seconds only"))
             return
-        if peeps.get("enabled") is not True:
-            return
-
-        for field in ("client_id", "authority", "scope", "redirect_uri", "cognitive_token_url"):
-            value = peeps.get(field)
-            if not isinstance(value, str) or not value.strip():
-                issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} must be a non-empty string", f"Set voice.realtime.peeps_fallback.{field} in config.yaml"))
-
-        authority = peeps.get("authority")
-        if isinstance(authority, str) and authority.strip():
-            _validate_https_url("voice.realtime.peeps_fallback.authority", authority)
-            parsed = urlparse(authority.strip())
-            if parsed.path.strip("/") == "":
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.authority must include a tenant path", "Use an Entra authority like https://login.microsoftonline.com/organizations"))
-
-        scope = peeps.get("scope")
-        if isinstance(scope, str) and scope.strip():
-            raw_scope = scope.strip()
-            if " " in raw_scope:
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.scope must be a single scope value", "Set one scope, not a space-delimited list"))
-            elif raw_scope.startswith("api://"):
-                pass
-            else:
-                _validate_https_url("voice.realtime.peeps_fallback.scope", raw_scope)
-
-        redirect_uri = peeps.get("redirect_uri")
-        if isinstance(redirect_uri, str) and redirect_uri.strip():
-            parsed = urlparse(redirect_uri.strip())
-            valid_loopback = (
-                redirect_uri.strip() == "https://localhost:8080/"
-                and
-                parsed.scheme == "https"
-                and parsed.hostname == "localhost"
-                and parsed.port == 8080
-                and parsed.path == "/"
-                and not parsed.query
-                and not parsed.fragment
-            )
-            if not valid_loopback:
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.redirect_uri must be exactly https://localhost:8080/", "Keep the Peeps browser callback on the exact local HTTPS loopback listener"))
-
-        cognitive_token_url = peeps.get("cognitive_token_url")
-        if isinstance(cognitive_token_url, str) and cognitive_token_url.strip():
-            _validate_https_url("voice.realtime.peeps_fallback.cognitive_token_url", cognitive_token_url)
-            parsed = urlparse(cognitive_token_url.strip())
-            if parsed.query or parsed.fragment:
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.cognitive_token_url must not include a query string or fragment", "Use the exact HTTPS endpoint only"))
-            if cognitive_token_url.strip() != approved_cognitive_token_url:
-                issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.cognitive_token_url must be the approved Seastar token endpoint", f"Set voice.realtime.peeps_fallback.cognitive_token_url to {approved_cognitive_token_url}"))
-
-        timeout_seconds = peeps.get("timeout_seconds")
+        pinned = {
+            "client_id": "b6ca153a-37a1-4f59-ad95-c4e30313c64b",
+            "authority": "https://login.microsoftonline.com/organizations",
+            "scope": "https://peeps.asgprototype.com/api/access-as-user",
+            "redirect_uri": "https://localhost:8080/",
+            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
+        }
+        unknown = set(peeps) - {"enabled", "timeout_seconds", *pinned}
+        for field in sorted(unknown):
+            issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} is unsupported", "Use enabled and timeout_seconds only"))
+        for field, expected in pinned.items():
+            if field in peeps and peeps[field] != expected:
+                issues.append(ConfigIssue("error", f"voice.realtime.peeps_fallback.{field} must be exactly {expected}", "Remove the override or restore the pinned value"))
+        timeout_seconds = peeps.get("timeout_seconds", 180)
         if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
-            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be an integer", "Set voice.realtime.peeps_fallback.timeout_seconds to a value between 1 and 300"))
+            issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be an integer", "Set a value between 1 and 300"))
         elif timeout_seconds < 1 or timeout_seconds > 300:
             issues.append(ConfigIssue("error", "voice.realtime.peeps_fallback.timeout_seconds must be between 1 and 300", "Choose a timeout between 1 and 300 seconds"))
 

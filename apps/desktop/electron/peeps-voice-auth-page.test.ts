@@ -11,6 +11,7 @@ import {
 interface MockClient {
   acquireTokenRedirect: ReturnType<typeof vi.fn>
   acquireTokenSilent: ReturnType<typeof vi.fn>
+  clearCache: ReturnType<typeof vi.fn>
   getAllAccounts: ReturnType<typeof vi.fn>
   handleRedirectPromise: ReturnType<typeof vi.fn>
   initialize: ReturnType<typeof vi.fn>
@@ -19,8 +20,10 @@ interface MockClient {
 function flowScript() {
   return {
     textContent: JSON.stringify({
+      authSessionId: 'auth-123',
       authority: 'https://login.microsoftonline.com/organizations',
       clientId: 'client-id',
+      publicKey: 'public-key',
       redirectUri: 'https://localhost:8080/',
       scope: 'https://peeps.asgprototype.com/api/access-as-user',
       state: 'state-123'
@@ -32,6 +35,7 @@ function createMockClient(overrides: Partial<MockClient> = {}) {
   return {
     acquireTokenRedirect: vi.fn(async () => undefined),
     acquireTokenSilent: vi.fn(async () => ({ accessToken: 'silent-token' })),
+    clearCache: vi.fn(async () => undefined),
     getAllAccounts: vi.fn(() => [{ id: 'account' }]),
     handleRedirectPromise: vi.fn(async () => null),
     initialize: vi.fn(async () => undefined),
@@ -42,9 +46,10 @@ function createMockClient(overrides: Partial<MockClient> = {}) {
 test('posts redirect results and closes without trying a silent refresh', async () => {
   const fetchFn = vi.fn(async () => new Response(null, { status: 204 }))
   const closeWindow = vi.fn()
+
   const client = createMockClient({
     acquireTokenSilent: vi.fn(),
-    handleRedirectPromise: vi.fn(async () => ({ accessToken: 'redirected' }))
+    handleRedirectPromise: vi.fn(async () => ({ accessToken: 'redirected', state: 'state-123' }))
   })
 
   await runPeepsVoiceAuthPage({
@@ -95,6 +100,7 @@ test('uses acquireTokenSilent before redirect and redirects only on InteractionR
   const [redirectCall] = client.acquireTokenRedirect.mock.calls as Array<
     [{ scopes: string[]; state: string }]
   >
+
   const [redirectRequest] = redirectCall ?? []
 
   assert.equal(client.acquireTokenRedirect.mock.calls.length, 1)
@@ -109,6 +115,7 @@ test('uses acquireTokenSilent before redirect and redirects only on InteractionR
 test('non-interaction errors fail closed by closing the window', async () => {
   const closeWindow = vi.fn()
   const fetchFn = vi.fn()
+
   const client = createMockClient({
     acquireTokenSilent: vi.fn(async () => {
       throw new Error('boom')
@@ -127,16 +134,39 @@ test('non-interaction errors fail closed by closing the window', async () => {
   assert.equal(closeWindow.mock.calls.length, 1)
 })
 
-test('creates the MSAL client with memory-only browser cache', () => {
+test('rejects a redirected token whose returned state does not match the flow', async () => {
+  const fetchFn = vi.fn()
+  const closeWindow = vi.fn()
+
+  const client = createMockClient({
+    handleRedirectPromise: vi.fn(async () => ({ accessToken: 'bearer-sentinel', state: 'wrong' }))
+  })
+
+  await runPeepsVoiceAuthPage({
+    closeWindow,
+    createClient: () => client as never,
+    document: { querySelector: () => flowScript() } as unknown as Document,
+    fetch: fetchFn as never
+  })
+  assert.equal(fetchFn.mock.calls.length, 0)
+  assert.equal(client.clearCache.mock.calls.length, 1)
+  assert.equal(closeWindow.mock.calls.length, 1)
+})
+
+test('uses memory token cache and session-only redirect protocol state', () => {
   const config = buildPeepsVoiceAuthClientConfig({
+    authSessionId: 'auth-123',
     authority: 'https://login.microsoftonline.com/organizations',
     clientId: 'client-id',
+    publicKey: 'public-key',
     redirectUri: 'https://localhost:8080/',
     scope: 'https://peeps.asgprototype.com/api/access-as-user',
     state: 'state-123'
   })
+
   assert.deepEqual(config.cache, {
     cacheLocation: BrowserCacheLocation.MemoryStorage,
-    temporaryCacheLocation: BrowserCacheLocation.MemoryStorage
+    temporaryCacheLocation: BrowserCacheLocation.SessionStorage
   })
+  assert.equal(config.auth.navigateToLoginRequestUrl, false)
 })

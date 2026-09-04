@@ -337,6 +337,7 @@ export function boundWorkbenchContext(
 }
 
 interface RealtimeTokenResponse {
+  auth_session_id?: string
   client_secret: string
   status?: 'interaction_required' | 'ready'
   connection_id?: string
@@ -920,6 +921,7 @@ export async function startRealtimeVoiceConnection(
   }
 
   throwIfCancelled()
+
   let token = (await options.request('voice.realtime.token', {
     session_id: options.runtimeSessionId
   })) as RealtimeTokenResponse
@@ -932,7 +934,10 @@ export async function startRealtimeVoiceConnection(
       { signal: options.signal }
     )
     throwIfCancelled()
-    token = (await options.request('voice.realtime.token', { session_id: options.runtimeSessionId })) as RealtimeTokenResponse
+    token = (await options.request('voice.realtime.token', {
+      session_id: options.runtimeSessionId,
+      peeps_auth_session_id: token.auth_session_id
+    })) as RealtimeTokenResponse
   }
 
   if (!token?.client_secret) {

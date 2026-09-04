@@ -24,6 +24,7 @@ def _peeps_interaction_payload(config, started: dict) -> dict:
         "auth_session_id": started["auth_session_id"],
         "client_id": config.client_id,
         "provider": "peeps",
+        "public_key": started["public_key"],
         "redirect_uri": config.redirect_uri,
         "scope": config.scope,
         "state": started["state"],
@@ -41,6 +42,23 @@ def _peeps_profile_key(session: dict | None = None) -> str:
     from hermes_constants import get_hermes_home
 
     return f"home:{get_hermes_home().resolve()}"
+
+
+def _peeps_binding(params: dict, session: dict):
+    from tui_gateway import server as gateway_server
+
+    runtime_session_id = str(params.get("session_id") or "")
+    transport, authoritative_session = gateway_server._current_session_steer_authority(runtime_session_id)
+    if transport is None or authoritative_session is not session:
+        return None
+    from tui_gateway.peeps_voice_auth import PeepsAuthBinding
+
+    return PeepsAuthBinding.create(
+        _peeps_profile_key(session).removeprefix("home:"),
+        session,
+        runtime_session_id,
+        transport,
+    )
 
 
 def _with_session_profile(session: dict | None, fn):
@@ -76,14 +94,6 @@ def _coarse_realtime_failure(exc: Exception) -> str:
         return "azure_realtime_invalid_response"
     return "realtime_unknown_error"
 
-
-def _peeps_can_retry_interactively(exc: Exception) -> bool:
-    from tui_gateway.peeps_voice_auth import PeepsAuthError
-
-    return isinstance(exc, PeepsAuthError) and exc.code in {
-        "authorization_required",
-        "expired_peeps_token",
-    }
 
 
 def _decorate_realtime_token(session: dict, token: dict) -> dict:
@@ -125,24 +135,6 @@ def _primary_realtime_api_key(key_cmd: str) -> str:
     return resolve_openai_audio_api_key()
 
 
-@method("voice.realtime.peeps.start")
-def _(rid, params: dict) -> dict:
-    session, err = _sess_nowait(params, rid)
-    if err:
-        return err
-    try:
-        config = _with_session_profile(
-            session,
-            lambda: _peeps_config(_realtime_cfg(_load_cfg())),
-        )
-        if config is None:
-            return _err(rid, 4612, "Peeps voice fallback is disabled")
-        data = _peeps_state()["sessions"].start(_peeps_profile_key(session), config)
-        return _ok(rid, _peeps_interaction_payload(config, data))
-    except Exception:
-        return _err(rid, 4612, "Could not start Peeps voice authorization")
-
-
 @method("voice.realtime.peeps.complete")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
@@ -155,14 +147,17 @@ def _(rid, params: dict) -> dict:
         )
         if config is None:
             return _err(rid, 4612, "Peeps voice fallback is disabled")
-        token = _peeps_state()["sessions"].complete_browser_auth(
-            _peeps_profile_key(session), str(params.get("auth_session_id") or ""),
-            str(params.get("state") or ""), str(params.get("peeps_token") or ""))
-        from tui_gateway.peeps_voice_auth import PeepsCognitiveTokenProvider
-
-        provider = PeepsCognitiveTokenProvider(config)
-        provider.complete(token)
-        _peeps_state()["providers"][_peeps_profile_key(session)] = provider
+        binding = _peeps_binding(params, session)
+        envelope = params.get("envelope")
+        if binding is None or not isinstance(envelope, dict):
+            return _err(rid, 4613, "Peeps voice authorization failed")
+        _peeps_state()["sessions"].complete(
+            binding,
+            str(params.get("auth_session_id") or ""),
+            str(params.get("state") or ""),
+            envelope,
+            config,
+        )
         return _ok(rid, {"ok": True})
     except Exception:
         return _err(rid, 4613, "Peeps voice authorization failed")
@@ -173,10 +168,13 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
-    _peeps_state()["sessions"].cancel(
-        _peeps_profile_key(session), str(params.get("auth_session_id") or "")
+    binding = _peeps_binding(params, session)
+    if binding is None:
+        return _err(rid, 4613, "Peeps voice authorization failed")
+    cancelled = _peeps_state()["sessions"].cancel(
+        binding, str(params.get("auth_session_id") or "")
     )
-    return _ok(rid, {"ok": True})
+    return _ok(rid, {"ok": cancelled})
 
 
 @method("voice.realtime.token")
@@ -203,8 +201,7 @@ def _(rid, params: dict) -> dict:
     base_url = str(realtime_cfg.get("base_url") or "").strip()
     key_cmd = str(realtime_cfg.get("key_cmd") or "").strip()
     peeps_config = _peeps_config(realtime_cfg)
-    peeps_profile_key = _peeps_profile_key(session)
-    provider = _peeps_state()["providers"].get(peeps_profile_key) if peeps_config else None
+    binding = _peeps_binding(params, session) if peeps_config else None
 
     try:
         primary_key = _primary_realtime_api_key(key_cmd)
@@ -226,28 +223,23 @@ def _(rid, params: dict) -> dict:
         fallback_eligible = isinstance(primary_exc, CommandTokenError) or (
             isinstance(primary_exc, RealtimeCredentialError)
             and primary_exc.kind == "auth_rejected"
+            and primary_exc.status in {401, 403}
         )
 
-        if not peeps_enabled or not fallback_eligible:
+        if not peeps_enabled or not fallback_eligible or binding is None:
             return _err(rid, 4611, f"Could not obtain a Realtime voice credential ({primary_code})")
 
-        if provider is None:
-            started = _peeps_state()["sessions"].start(peeps_profile_key, peeps_config)
+        auth_session_id = str(params.get("peeps_auth_session_id") or "")
+        if not auth_session_id:
+            started = _peeps_state()["sessions"].start(binding, peeps_config)
             return _ok(rid, _peeps_interaction_payload(peeps_config, started))
+
+        provider = _peeps_state()["sessions"].consume_ready(binding, auth_session_id)
+        if provider is None:
+            return _err(rid, 4613, "Peeps voice authorization is invalid or expired")
 
         try:
             cognitive_token = provider.token()
-        except Exception as fallback_exc:
-            if _peeps_can_retry_interactively(fallback_exc):
-                started = _peeps_state()["sessions"].start(peeps_profile_key, peeps_config)
-                return _ok(rid, _peeps_interaction_payload(peeps_config, started))
-            return _err(
-                rid,
-                4611,
-                f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
-            )
-
-        try:
             token = _mint_realtime_secret(
                 api_key=cognitive_token,
                 model=model,
@@ -257,29 +249,11 @@ def _(rid, params: dict) -> dict:
             )
             return _ok(rid, _decorate_realtime_token(session, token))
         except RealtimeCredentialError as fallback_exc:
-            if fallback_exc.kind != "auth_rejected":
-                return _err(
-                    rid,
-                    4611,
-                    f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
-                )
-            provider.invalidate()
-            try:
-                reminted = provider.token()
-                token = _mint_realtime_secret(
-                    api_key=reminted,
-                    model=model,
-                    voice=voice,
-                    transcription_model=transcription_model,
-                    base_url=base_url,
-                )
-                return _ok(rid, _decorate_realtime_token(session, token))
-            except Exception as remint_exc:
-                return _err(
-                    rid,
-                    4611,
-                    f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(remint_exc)})",
-                )
+            return _err(
+                rid,
+                4611,
+                f"Realtime voice authentication failed ({primary_code}; {_coarse_realtime_failure(fallback_exc)})",
+            )
         except PeepsAuthError as fallback_exc:
             return _err(
                 rid,
@@ -601,9 +575,10 @@ def register(server) -> None:
     server._realtime_cfg = _realtime_cfg
     server._peeps_interaction_payload = _peeps_interaction_payload
     server._peeps_profile_key = _peeps_profile_key
+    server._peeps_binding = _peeps_binding
     server._with_session_profile = _with_session_profile
     server._coarse_realtime_failure = _coarse_realtime_failure
-    server._peeps_can_retry_interactively = _peeps_can_retry_interactively
+
     server._decorate_realtime_token = _decorate_realtime_token
     server._mint_realtime_secret = _mint_realtime_secret
     server._primary_realtime_api_key = _primary_realtime_api_key

@@ -11,6 +11,7 @@ function makeDist(extra) {
   const distDir = path.join(tempRoot, 'dist')
   fs.mkdirSync(distDir, { recursive: true })
   if (extra) extra(distDir)
+  fs.writeFileSync(path.join(distDir, 'peeps-voice-auth-page.js'), '/* bundled msal */', 'utf8')
   return { tempRoot, distDir }
 }
 
@@ -63,6 +64,22 @@ test('checkDistBuilt fails when index.html is missing', () => {
     const result = checkDistBuilt(distDir)
     assert.equal(result.ok, false)
     assert.match(result.error, /index\.html is missing/)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('checkDistBuilt rejects a missing or CDN-backed Peeps auth asset', () => {
+  const { tempRoot, distDir } = makeDist(d => {
+    fs.writeFileSync(path.join(d, 'index.html'), '<!doctype html>', 'utf8')
+    fs.mkdirSync(path.join(d, 'assets'))
+    fs.writeFileSync(path.join(d, 'assets', 'index.js'), 'local', 'utf8')
+  })
+  try {
+    fs.rmSync(path.join(distDir, 'peeps-voice-auth-page.js'))
+    assert.match(checkDistBuilt(distDir).error, /Peeps MSAL asset is missing/)
+    fs.writeFileSync(path.join(distDir, 'peeps-voice-auth-page.js'), 'https://cdn.example/msal.js')
+    assert.match(checkDistBuilt(distDir).error, /runtime dependency/)
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }

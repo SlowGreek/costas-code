@@ -313,8 +313,8 @@ declare global {
         cancel: (id: string) => Promise<boolean>
       }
       peepsVoiceAuth?: {
-        start: (id: string, flow: { authority: string; clientId: string; redirectUri: string; scope: string; state: string }) => Promise<boolean>
-        wait: (id: string, timeoutMs: number) => Promise<string | null>
+        start: (id: string, flow: { authSessionId: string; authority: string; clientId: string; publicKey: string; redirectUri: string; scope: string; state: string }) => Promise<boolean>
+        wait: (id: string, timeoutMs: number) => Promise<{ version: 1; ephemeral_public_key: string; nonce: string; ciphertext: string; tag: string } | null>
         cancel: (id: string) => Promise<boolean>
       }
       openPreviewInBrowser?: (url: string) => Promise<void>

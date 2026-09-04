@@ -245,7 +245,6 @@ _LONG_HANDLERS = frozenset(
         "billing.step_up",
         "browser.manage",
         "voice.realtime.token",
-        "voice.realtime.peeps.start",
         "voice.realtime.peeps.complete",
         "cli.exec",
         # Completion RPCs run inline on the reader thread by default, but both
@@ -395,7 +394,7 @@ def _peeps_state():
     except NameError:
         from tui_gateway.peeps_voice_auth import PeepsVoiceAuthSessionStore
 
-        _realtime_peeps_auth = {"sessions": PeepsVoiceAuthSessionStore(), "providers": {}}
+        _realtime_peeps_auth = {"sessions": PeepsVoiceAuthSessionStore()}
         return _realtime_peeps_auth
 
 try:

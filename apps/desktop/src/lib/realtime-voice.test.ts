@@ -2193,6 +2193,7 @@ describe('startRealtimeVoiceConnection', () => {
         auth_session_id: 'auth-session',
         authority: 'https://login.microsoftonline.com/organizations',
         client_id: 'client-id',
+        public_key: 'backend-public-key',
         redirect_uri: 'https://localhost:8080/',
         scope: 'https://peeps.asgprototype.com/api/access-as-user',
         state: 'state-123',
@@ -2204,12 +2205,22 @@ describe('startRealtimeVoiceConnection', () => {
         model: 'gpt-realtime-2.1',
         voice: 'marin'
       })
+
     const start = vi.fn().mockResolvedValue(true)
-    const wait = vi.fn().mockResolvedValue('peeps-token')
+
+    const wait = vi.fn().mockResolvedValue({
+      version: 1,
+      ephemeral_public_key: 'ephemeral',
+      nonce: 'nonce',
+      ciphertext: 'ciphertext',
+      tag: 'tag'
+    })
+
     vi.stubGlobal('window', {
       hermesDesktop: { peepsVoiceAuth: { start, wait, cancel: vi.fn().mockResolvedValue(true) } }
     })
     const channel = { addEventListener: vi.fn(), close: vi.fn(), send: vi.fn() }
+
     const peer = {
       addTrack: vi.fn(),
       close: vi.fn(),
@@ -2219,6 +2230,7 @@ describe('startRealtimeVoiceConnection', () => {
       setLocalDescription: vi.fn(async () => undefined),
       setRemoteDescription: vi.fn(async () => undefined)
     }
+
     const connection = await startRealtimeVoiceConnection({
       audioFactory: () =>
         ({ autoplay: false, pause: vi.fn(), remove: vi.fn(), srcObject: null }) as never,
@@ -2240,6 +2252,12 @@ describe('startRealtimeVoiceConnection', () => {
       'voice.realtime.peeps.complete',
       'voice.realtime.token'
     ])
+    expect(request.mock.calls[2]?.[1]).toEqual({
+      session_id: 'runtime-session',
+      peeps_auth_session_id: 'auth-session'
+    })
+    expect(JSON.stringify(request.mock.calls)).not.toContain('peeps-token')
+    expect(JSON.stringify(request.mock.calls)).not.toContain('peeps_token')
     connection.close()
   })
 
@@ -2248,11 +2266,13 @@ describe('startRealtimeVoiceConnection', () => {
     const controller = new AbortController()
     let releaseWait: ((value: null | string) => void) | undefined
     const cancel = vi.fn().mockResolvedValue(true)
+
     const request = vi.fn().mockResolvedValue({
       status: 'interaction_required',
       auth_session_id: 'auth-session',
       authority: 'https://login.microsoftonline.com/organizations',
       client_id: 'client-id',
+      public_key: 'backend-public-key',
       redirect_uri: 'https://localhost:8080/',
       scope: 'https://peeps.asgprototype.com/api/access-as-user',
       state: 'state-123',
@@ -2280,6 +2300,7 @@ describe('startRealtimeVoiceConnection', () => {
       runtimeSessionId: 'runtime-session',
       signal: controller.signal
     })
+
     controller.abort()
     releaseWait?.(null)
 

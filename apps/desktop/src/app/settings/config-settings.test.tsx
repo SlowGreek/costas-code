@@ -109,7 +109,7 @@ describe('ConfigSettings autosave', () => {
     }
   })
 
-  it('renders Peeps fallback labels and hides advanced fields until the toggle is enabled', async () => {
+  it('exposes only the Peeps enable switch and timeout', async () => {
     getHermesConfigRecord.mockResolvedValue({
       voice: {
         realtime: {
@@ -135,8 +135,7 @@ describe('ConfigSettings autosave', () => {
         'voice.realtime.base_url': { type: 'string' },
         'voice.realtime.key_cmd': { type: 'string' },
         'voice.realtime.peeps_fallback.enabled': { type: 'boolean' },
-        'voice.realtime.peeps_fallback.client_id': { type: 'string' },
-        'voice.realtime.peeps_fallback.scope': { type: 'string' }
+        'voice.realtime.peeps_fallback.timeout_seconds': { type: 'integer' }
       }
     })
 
@@ -153,11 +152,14 @@ describe('ConfigSettings autosave', () => {
     const toggle = document
       .getElementById('setting-field-voice.realtime.peeps_fallback.enabled')
       ?.querySelector('[role="switch"]') as HTMLButtonElement | null
+
     if (!toggle) {
       throw new Error('Missing Peeps fallback toggle')
     }
+
     toggle.click()
 
-    expect(await screen.findByText('Peeps Client ID')).toBeTruthy()
+    expect(await screen.findByText('Peeps Auth Timeout')).toBeTruthy()
+    expect(screen.queryByText('Peeps Client ID')).toBeNull()
   })
 })

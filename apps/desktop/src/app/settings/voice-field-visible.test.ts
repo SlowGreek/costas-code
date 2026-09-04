@@ -47,14 +47,20 @@ describe('voiceFieldVisible', () => {
     expect(voiceFieldVisible('tts.edge.voice', cfg({ tts: { provider: 'openai', openai: {} } }))).toBe(false)
   })
 
-  it('shows Peeps fallback details only when the fallback is enabled', () => {
+  it('shows only the timeout when Peeps fallback is enabled', () => {
     expect(voiceFieldVisible('voice.realtime.peeps_fallback.enabled', cfg())).toBe(true)
     expect(voiceFieldVisible('voice.realtime.peeps_fallback.scope', cfg())).toBe(false)
+    expect(
+      voiceFieldVisible(
+        'voice.realtime.peeps_fallback.timeout_seconds',
+        cfg({ voice: { realtime: { peeps_fallback: { enabled: true } } } })
+      )
+    ).toBe(true)
     expect(
       voiceFieldVisible(
         'voice.realtime.peeps_fallback.scope',
         cfg({ voice: { realtime: { peeps_fallback: { enabled: true } } } })
       )
-    ).toBe(true)
+    ).toBe(false)
   })
 })

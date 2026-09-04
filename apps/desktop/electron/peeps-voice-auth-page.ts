@@ -5,18 +5,26 @@ import {
 } from '@azure/msal-browser'
 
 interface Flow {
+  authSessionId: string
   authority: string
   clientId: string
+  publicKey: string
   redirectUri: string
   scope: string
   state: string
 }
 
 interface PageEnv {
+  clearSessionState?: () => void
   closeWindow: () => void
   createClient: (flow: Flow) => Pick<
     PublicClientApplication,
-    'acquireTokenRedirect' | 'acquireTokenSilent' | 'getAllAccounts' | 'handleRedirectPromise' | 'initialize'
+    | 'acquireTokenRedirect'
+    | 'acquireTokenSilent'
+    | 'clearCache'
+    | 'getAllAccounts'
+    | 'handleRedirectPromise'
+    | 'initialize'
   >
   document: Document
   fetch: typeof fetch
@@ -26,12 +34,19 @@ function readFlow(document: Document): Flow {
   return JSON.parse(document.querySelector<HTMLScriptElement>('#peeps-flow')?.textContent || '{}') as Flow
 }
 
-async function postToken(env: Pick<PageEnv, 'closeWindow' | 'fetch'>, flow: Flow, token: string) {
-  await env.fetch(flow.redirectUri, {
-    body: JSON.stringify({ state: flow.state, token }),
-    headers: { 'Content-Type': 'application/json' },
-    method: 'POST'
-  })
+async function postToken(env: PageEnv, client: Pick<PublicClientApplication, 'clearCache'>, flow: Flow, token: string) {
+  try {
+    await env.fetch(flow.redirectUri, {
+      body: JSON.stringify({ state: flow.state, token }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST'
+    })
+  } finally {
+    token = ''
+    await client.clearCache().catch(() => undefined)
+    env.clearSessionState?.()
+  }
+
   env.closeWindow()
 }
 
@@ -44,11 +59,12 @@ export function buildPeepsVoiceAuthClientConfig(flow: Flow) {
     auth: {
       authority: flow.authority,
       clientId: flow.clientId,
-      redirectUri: flow.redirectUri
+      redirectUri: flow.redirectUri,
+      navigateToLoginRequestUrl: false
     },
     cache: {
       cacheLocation: BrowserCacheLocation.MemoryStorage,
-      temporaryCacheLocation: BrowserCacheLocation.MemoryStorage
+      temporaryCacheLocation: BrowserCacheLocation.SessionStorage
     }
   }
 }
@@ -60,23 +76,27 @@ export async function runPeepsVoiceAuthPage(env: PageEnv): Promise<void> {
   try {
     await client.initialize()
     const redirected = await client.handleRedirectPromise()
+
     if (redirected?.accessToken) {
-      await postToken(env, flow, redirected.accessToken)
+      if (redirected.state !== flow.state) {
+        throw new Error('Peeps redirect state mismatch')
+      }
+
+      await postToken(env, client, flow, redirected.accessToken)
+
       return
     }
 
     const account = client.getAllAccounts()[0]
-    if (!account) {
-      throw new InteractionRequiredAuthError('login_required')
-    }
 
-    try {
-      const silent = await client.acquireTokenSilent({ account, scopes: [flow.scope] })
-      await postToken(env, flow, silent.accessToken)
-      return
-    } catch (error) {
-      if (!(error instanceof InteractionRequiredAuthError)) {
-        throw error
+    if (account) {
+      try {
+        const silent = await client.acquireTokenSilent({ account, scopes: [flow.scope] })
+        await postToken(env, client, flow, silent.accessToken)
+
+        return
+      } catch (error) {
+        if (!(error instanceof InteractionRequiredAuthError)) {throw error}
       }
     }
 
@@ -84,14 +104,19 @@ export async function runPeepsVoiceAuthPage(env: PageEnv): Promise<void> {
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
       await client.acquireTokenRedirect({ scopes: [flow.scope], state: flow.state })
+
       return
     }
+
+    await client.clearCache().catch(() => undefined)
+    env.clearSessionState?.()
     env.closeWindow()
   }
 }
 
 export function defaultPeepsVoiceAuthPageEnv(): PageEnv {
   return {
+    clearSessionState: () => sessionStorage.clear(),
     closeWindow: () => window.close(),
     createClient: createPeepsVoiceAuthClient,
     document,

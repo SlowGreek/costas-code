@@ -1,12 +1,18 @@
 import base64
 import json
-import threading
 import time
 import urllib.error
 
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from tui_gateway.peeps_voice_auth import (
+    COGNITIVE_AUDIENCE,
+    PEEPS_CLIENT_ID,
+    PeepsAuthBinding,
     PeepsAuthError,
     PeepsCognitiveTokenProvider,
     PeepsVoiceAuthConfig,
@@ -20,23 +26,12 @@ def _jwt(payload):
 
 
 def _config(**overrides):
-    return PeepsVoiceAuthConfig.from_dict(
-        {
-            "enabled": True,
-            "client_id": "client",
-            "authority": "https://login.microsoftonline.com/organizations",
-            "scope": "https://peeps.asgprototype.com/api/access-as-user",
-            "redirect_uri": "https://localhost:8080/",
-            "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
-            "timeout_seconds": 180,
-            **overrides,
-        }
-    )
+    return PeepsVoiceAuthConfig.from_dict({"enabled": True, **overrides})
 
 
 class _Response:
     def __init__(self, payload):
-        self._payload = payload
+        self.payload = payload
 
     def __enter__(self):
         return self
@@ -45,301 +40,137 @@ class _Response:
         return False
 
     def read(self, _limit=-1):
-        return self._payload
+        return self.payload
 
 
-def test_auth_session_rejects_replay_wrong_state_wrong_profile_and_expiry():
-    now = {"value": 100.0}
-    store = PeepsVoiceAuthSessionStore(monotonic=lambda: now["value"])
-    session = store.start("profile-a", _config(timeout_seconds=3))
-    token = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
-
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as wrong_state:
-        store.complete_browser_auth(
-            "profile-a", session["auth_session_id"], "wrong-state", token
-        )
-    assert wrong_state.value.code == "wrong_state"
-
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as wrong_profile:
-        store.complete_browser_auth(
-            "profile-b", session["auth_session_id"], session["state"], token
-        )
-    assert wrong_profile.value.code == "wrong_profile"
-
-    now["value"] += 4
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as expired:
-        store.complete_browser_auth(
-            "profile-a", session["auth_session_id"], session["state"], token
-        )
-    assert expired.value.code == "unknown_auth_session"
-
-    fresh = store.start("profile-a", _config())
-    assert (
-        store.complete_browser_auth(
-            "profile-a", fresh["auth_session_id"], fresh["state"], token
-        )
-        == token
-    )
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as replayed:
-        store.complete_browser_auth(
-            "profile-a", fresh["auth_session_id"], fresh["state"], token
-        )
-    assert replayed.value.code == "unknown_auth_session"
+def _binding(profile="/tmp/profile", session=None, session_id="runtime", transport=None):
+    return PeepsAuthBinding.create(profile, session or object(), session_id, transport or object())
 
 
-def test_start_replaces_prior_pending_session_for_profile():
-    store = PeepsVoiceAuthSessionStore()
-    first = store.start("profile-a", _config())
-    second = store.start("profile-a", _config())
-    token = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
-
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as superseded:
-        store.complete_browser_auth(
-            "profile-a", first["auth_session_id"], first["state"], token
-        )
-    assert superseded.value.code == "unknown_auth_session"
-    assert (
-        store.complete_browser_auth(
-            "profile-a", second["auth_session_id"], second["state"], token
-        )
-        == token
-    )
-
-
-@pytest.mark.parametrize(
-    ("payload", "expected_key"),
-    [
-        ({"token": "jwt-token"}, "token"),
-        ({"accessToken": "jwt-token"}, "accessToken"),
-        ({"access_token": "jwt-token"}, "access_token"),
-    ],
-)
-def test_cognitive_exchange_uses_only_configured_endpoint_and_parses_json_object_shapes(
-    payload, expected_key
-):
-    peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
-    cognitive = _jwt(
-        {"aud": "https://cognitiveservices.azure.com", "exp": time.time() + 300}
-    )
-    payload = {
-        expected_key: cognitive,
-        **({} if expected_key == "token" else {"ignored": "value"}),
+def _seal(started, token):
+    remote = X25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(started["public_key"] + "=="))
+    ephemeral = X25519PrivateKey.generate()
+    aad = f'{started["auth_session_id"]}:{started["state"]}'.encode()
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=aad, info=b"hermes-peeps-voice-auth-v1").derive(ephemeral.exchange(remote))
+    nonce = b"n" * 12
+    encrypted = AESGCM(key).encrypt(nonce, token.encode(), aad)
+    encode = lambda value: base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+    return {
+        "version": 1,
+        "ephemeral_public_key": encode(ephemeral.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)),
+        "nonce": encode(nonce),
+        "ciphertext": encode(encrypted[:-16]),
+        "tag": encode(encrypted[-16:]),
     }
+
+
+def test_config_pins_every_identity_value_and_allows_only_timeout():
+    config = _config(timeout_seconds=12)
+    assert config.client_id == PEEPS_CLIENT_ID
+    assert config.timeout_seconds == 12
+    for field, value in {
+        "client_id": "attacker",
+        "authority": "https://login.microsoftonline.com/common",
+        "scope": "https://example.com/access",
+        "redirect_uri": "https://localhost:8081/",
+        "cognitive_token_url": "https://example.com/token",
+        "extra": "no",
+    }.items():
+        with pytest.raises(PeepsAuthError):
+            _config(**{field: value})
+
+
+def test_pending_generation_is_bound_by_object_identity_and_supersedes_only_same_binding():
+    store = PeepsVoiceAuthSessionStore()
+    session, transport = object(), object()
+    binding = _binding(session=session, transport=transport)
+    first = store.start(binding, _config())
+    other_transport = store.start(_binding(session=session, transport=object()), _config())
+    second = store.start(binding, _config())
+    assert first["auth_session_id"] != second["auth_session_id"]
+    assert other_transport["auth_session_id"]
+    assert store.cancel(_binding(session=session, transport=transport), first["auth_session_id"]) is False
+    assert store.cancel(binding, second["auth_session_id"]) is True
+
+
+def test_envelope_decrypts_once_exchanges_immediately_and_ready_provider_is_one_use():
+    store = PeepsVoiceAuthSessionStore()
+    binding = _binding()
+    started = store.start(binding, _config())
+    peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
+    cognitive = _jwt({"aud": COGNITIVE_AUDIENCE, "exp": time.time() + 300})
     calls = []
 
     def opener(request, timeout):
-        calls.append((request.full_url, request.get_header("Authorization"), timeout))
-        return _Response(json.dumps(payload).encode())
+        calls.append((request.get_header("Authorization"), timeout))
+        return _Response(json.dumps({"accessToken": cognitive}).encode())
 
-    provider = PeepsCognitiveTokenProvider(_config(), opener=opener)
-    provider.complete(peeps)
-
+    envelope = _seal(started, peeps)
+    store.complete(binding, started["auth_session_id"], started["state"], envelope, _config(), opener=opener)
+    assert calls == [(f"Bearer {peeps}", 15)]
+    provider = store.consume_ready(binding, started["auth_session_id"])
+    assert provider is not None
     assert provider.token() == cognitive
-    assert calls == [
-        (
-            "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
-            f"Bearer {peeps}",
-            15,
-        )
-    ]
+    with pytest.raises(PeepsAuthError, match="already consumed"):
+        provider.token()
+    assert store.consume_ready(binding, started["auth_session_id"]) is None
+    with pytest.raises(PeepsAuthError):
+        store.complete(binding, started["auth_session_id"], started["state"], envelope, _config(), opener=opener)
 
 
-def test_cognitive_exchange_parses_json_string_and_bare_token_and_caches_until_leeway():
-    current = {"value": 10_000.0}
-    peeps = _jwt(
-        {"aud": "https://peeps.asgprototype.com/api", "exp": current["value"] + 1_000}
-    )
-    first = _jwt(
-        {
-            "aud": "https://cognitiveservices.azure.com",
-            "exp": current["value"] + 400,
-        }
-    )
-    second = _jwt(
-        {
-            "aud": "https://cognitiveservices.azure.com",
-            "exp": current["value"] + 500,
-        }
-    )
-    payloads = iter([json.dumps(first).encode(), second.encode()])
-    calls = []
-
-    def opener(_request, _timeout):
-        calls.append("mint")
-        return _Response(next(payloads))
-
-    provider = PeepsCognitiveTokenProvider(_config(), opener=opener, clock=lambda: current["value"])
-    provider.complete(peeps)
-
-    assert provider.token() == first
-    assert provider.token() == first
-    current["value"] += 311
-    assert provider.token() == second
-    assert calls == ["mint", "mint"]
+def test_cross_transport_session_profile_and_rebound_session_cannot_complete_or_consume():
+    store = PeepsVoiceAuthSessionStore()
+    session, transport = object(), object()
+    binding = _binding(session=session, transport=transport)
+    started = store.start(binding, _config())
+    token = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
+    for wrong in (
+        _binding(profile="/tmp/other", session=session, transport=transport),
+        _binding(session=object(), transport=transport),
+        _binding(session=session, session_id="other", transport=transport),
+        _binding(session=session, transport=object()),
+    ):
+        with pytest.raises(PeepsAuthError):
+            store.complete(wrong, started["auth_session_id"], started["state"], _seal(started, token), _config())
+    assert store.cancel(binding, started["auth_session_id"])
 
 
-@pytest.mark.parametrize(
-    ("payload", "code"),
-    [
-        (b"", "empty_cognitive_response"),
-        (b"not-a-jwt", "invalid_jwt_shape"),
-        (json.dumps({"token": "a", "accessToken": "b"}).encode(), "invalid_cognitive_response_shape"),
-        (json.dumps({"token": _jwt({"aud": "https://example.com", "exp": time.time() + 300})}).encode(), "unexpected_cognitive_audience"),
-        (json.dumps({"token": _jwt({"aud": "https://cognitiveservices.azure.com", "exp": time.time() - 1})}).encode(), "expired_cognitive_token"),
-    ],
-)
-def test_cognitive_exchange_rejects_invalid_responses(payload, code):
+def test_exact_audiences_and_sanitized_exchange_failures(caplog):
+    sentinel = "bearer-sentinel"
+    wrong = _jwt({"aud": "https://peeps.asgprototype.com/api/", "exp": time.time() + 300})
+    with pytest.raises(PeepsAuthError) as audience:
+        PeepsCognitiveTokenProvider.exchange(_config(), wrong, opener=lambda *_: None)
+    assert audience.value.code == "unexpected_peeps_audience"
+
     peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
-    provider = PeepsCognitiveTokenProvider(
-        _config(), opener=lambda *_args, **_kwargs: _Response(payload)
-    )
-    provider.complete(peeps)
-
-    with pytest.raises(PeepsAuthError, match="Peeps") as exc:
-        provider.token()
-    assert exc.value.code == code
-
-
-def test_cognitive_exchange_rejects_oversized_connectivity_and_http_failures_without_leaking_tokens(
-    caplog,
-):
-    sentinel = "secret-must-not-leak"
-    peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
-
-    too_large = _jwt(
-        {"aud": "https://cognitiveservices.azure.com", "exp": time.time() + 300}
-    ).encode() + b"x" * (128 * 1024)
-    provider = PeepsCognitiveTokenProvider(
-        _config(), opener=lambda *_args, **_kwargs: _Response(too_large)
-    )
-    provider.complete(peeps)
-    with pytest.raises(PeepsAuthError) as oversized:
-        provider.token()
-    assert oversized.value.code == "oversized_cognitive_response"
-
-    def offline(_request, _timeout):
-        raise urllib.error.URLError("offline")
-
-    provider = PeepsCognitiveTokenProvider(_config(), opener=offline)
-    provider.complete(peeps)
-    with pytest.raises(PeepsAuthError) as connectivity:
-        provider.token()
-    assert connectivity.value.code == "cognitive_connectivity"
 
     def denied(request, _timeout):
         raise urllib.error.HTTPError(request.full_url, 401, sentinel, {}, None)
 
-    provider = PeepsCognitiveTokenProvider(_config(), opener=denied)
-    provider.complete(peeps)
-    with pytest.raises(PeepsAuthError) as denied_exc:
-        provider.token()
-
-    assert denied_exc.value.code == "cognitive_http_error"
-    assert sentinel not in str(denied_exc.value)
-    assert peeps not in str(denied_exc.value)
-    assert sentinel not in caplog.text
+    with pytest.raises(PeepsAuthError) as denied_error:
+        PeepsCognitiveTokenProvider.exchange(_config(), peeps, opener=denied)
+    assert denied_error.value.status == 401
+    assert sentinel not in str(denied_error.value)
+    assert peeps not in caplog.text
 
 
-def test_provider_rejects_wrong_audience_and_tenant_before_exchange():
-    wrong_audience = _jwt({"aud": "https://example.com/api", "exp": time.time() + 300})
-    provider = PeepsCognitiveTokenProvider(_config())
-    with pytest.raises(PeepsAuthError) as audience:
-        provider.complete(wrong_audience)
-    assert audience.value.code == "unexpected_peeps_audience"
+def test_default_exchange_opener_installs_no_redirect_handler(monkeypatch):
+    import tui_gateway.peeps_voice_auth as module
 
-    strict = PeepsCognitiveTokenProvider(
-        _config(authority="https://login.microsoftonline.com/tenant-1234")
-    )
-    wrong_tenant = _jwt(
-        {
-            "aud": "https://peeps.asgprototype.com/api",
-            "exp": time.time() + 300,
-            "tid": "tenant-9999",
-        }
-    )
-    with pytest.raises(PeepsAuthError) as tenant:
-        strict.complete(wrong_tenant)
-    assert tenant.value.code == "unexpected_tenant"
+    captured = {}
 
+    class Opener:
+        def open(self, _request, timeout):
+            captured["timeout"] = timeout
+            raise urllib.error.HTTPError("url", 302, "redirect", {"Location": "https://evil"}, None)
 
-def test_concurrent_callers_share_one_mint():
-    current = {"value": 10_000.0}
-    peeps = _jwt(
-        {"aud": "https://peeps.asgprototype.com/api", "exp": current["value"] + 1_000}
-    )
-    cognitive = _jwt(
-        {
-            "aud": "https://cognitiveservices.azure.com",
-            "exp": current["value"] + 1_000,
-        }
-    )
-    calls = []
-    gate = threading.Event()
+    def build(*handlers):
+        captured["handlers"] = handlers
+        return Opener()
 
-    def opener(_request, _timeout):
-        calls.append("mint")
-        gate.wait(timeout=2.0)
-        return _Response(json.dumps({"accessToken": cognitive}).encode())
-
-    provider = PeepsCognitiveTokenProvider(_config(), opener=opener, clock=lambda: current["value"])
-    provider.complete(peeps)
-
-    results = []
-
-    def worker():
-        results.append(provider.token())
-
-    threads = [threading.Thread(target=worker) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    gate.set()
-    for thread in threads:
-        thread.join(timeout=2.0)
-
-    assert results == [cognitive, cognitive]
-    assert calls == ["mint"]
-
-
-def test_cancel_clears_pending_session():
-    store = PeepsVoiceAuthSessionStore()
-    session = store.start("profile-a", _config())
-    assert store.cancel("profile-a", session["auth_session_id"]) is True
-
-    with pytest.raises(PeepsAuthError, match="invalid or expired") as exc:
-        store.complete_browser_auth(
-            "profile-a",
-            session["auth_session_id"],
-            session["state"],
-            _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300}),
-        )
-    assert exc.value.code == "unknown_auth_session"
-
-
-def test_config_rejects_unapproved_cognitive_endpoint_and_non_localhost_redirect():
-    with pytest.raises(PeepsAuthError) as wrong_endpoint:
-        PeepsVoiceAuthConfig.from_dict(
-            {
-                "enabled": True,
-                "client_id": "client",
-                "authority": "https://login.microsoftonline.com/organizations",
-                "scope": "https://peeps.asgprototype.com/api/access-as-user",
-                "redirect_uri": "https://localhost:8080/",
-                "cognitive_token_url": "https://example.com/token",
-                "timeout_seconds": 180,
-            }
-        )
-    assert wrong_endpoint.value.code == "invalid_cognitive_token_url"
-
-    with pytest.raises(PeepsAuthError) as wrong_redirect:
-        PeepsVoiceAuthConfig.from_dict(
-            {
-                "enabled": True,
-                "client_id": "client",
-                "authority": "https://login.microsoftonline.com/organizations",
-                "scope": "https://peeps.asgprototype.com/api/access-as-user",
-                "redirect_uri": "https://127.0.0.1:8080/",
-                "cognitive_token_url": "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken",
-                "timeout_seconds": 180,
-            }
-        )
-    assert wrong_redirect.value.code == "invalid_redirect_uri"
+    monkeypatch.setattr(module.urllib.request, "build_opener", build)
+    peeps = _jwt({"aud": "https://peeps.asgprototype.com/api", "exp": time.time() + 300})
+    with pytest.raises(PeepsAuthError) as exc:
+        PeepsCognitiveTokenProvider.exchange(_config(), peeps)
+    assert exc.value.status == 302
+    assert any(isinstance(handler, module._NoRedirect) for handler in captured["handlers"])

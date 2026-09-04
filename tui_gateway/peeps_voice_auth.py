@@ -1,4 +1,4 @@
-"""Memory-only Peeps bearer exchange for Azure Realtime voice."""
+"""One-use, session-bound Peeps fallback for Azure Realtime voice."""
 
 from __future__ import annotations
 
@@ -11,433 +11,194 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlparse
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 logger = logging.getLogger(__name__)
 
-_CACHE_LEEWAY_SECONDS = 90
-_COGNITIVE_EXCHANGE_TIMEOUT_SECONDS = 15
-_MAX_PENDING_AUTH_SESSIONS = 32
+PEEPS_CLIENT_ID = "b6ca153a-37a1-4f59-ad95-c4e30313c64b"
+PEEPS_AUTHORITY = "https://login.microsoftonline.com/organizations"
+PEEPS_SCOPE = "https://peeps.asgprototype.com/api/access-as-user"
+PEEPS_AUDIENCE = "https://peeps.asgprototype.com/api"
+PEEPS_REDIRECT_URI = "https://localhost:8080/"
+COGNITIVE_TOKEN_URL = "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken"
+COGNITIVE_AUDIENCE = "https://cognitiveservices.azure.com"
+
+_EXCHANGE_TIMEOUT_SECONDS = 15
+_MAX_PENDING = 32
 _MAX_RESPONSE_BYTES = 128 * 1024
-_TENANT_WILDCARDS = {"common", "consumers", "organizations"}
-_APPROVED_COGNITIVE_TOKEN_URL = (
-    "https://seastarserviceapp-develop.azurewebsites.net/token/getCognitiveServicesToken"
-)
+_MAX_ENVELOPE_FIELD = 16 * 1024
 
 
 class PeepsAuthError(RuntimeError):
     """A sanitized Peeps authentication failure."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str = "peeps_auth_failed",
-        status: int | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, code: str = "peeps_auth_failed", status: int | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.status = status
 
 
+def _b64url_decode(value: str, *, code: str) -> bytes:
+    if not isinstance(value, str) or not value or len(value) > _MAX_ENVELOPE_FIELD:
+        raise PeepsAuthError("Peeps authorization envelope is invalid", code=code)
+    try:
+        return base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+    except (ValueError, TypeError) as exc:
+        raise PeepsAuthError("Peeps authorization envelope is invalid", code=code) from exc
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
 def _decode_jwt_payload(token: str) -> dict[str, Any]:
     parts = token.split(".")
     if len(parts) != 3:
-        raise PeepsAuthError(
-            "Peeps returned an invalid token", code="invalid_jwt_shape"
-        )
+        raise PeepsAuthError("Peeps returned an invalid token", code="invalid_jwt_shape")
     try:
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
-        data = json.loads(decoded.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise PeepsAuthError(
-            "Peeps returned an invalid token", code="invalid_jwt_payload"
-        ) from exc
+        data = json.loads(_b64url_decode(parts[1], code="invalid_jwt_payload").decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PeepsAuthError("Peeps returned an invalid token", code="invalid_jwt_payload") from exc
     if not isinstance(data, dict):
-        raise PeepsAuthError(
-            "Peeps returned an invalid token", code="invalid_jwt_payload"
-        )
+        raise PeepsAuthError("Peeps returned an invalid token", code="invalid_jwt_payload")
     return data
 
 
-def _coerce_audiences(value: Any) -> set[str]:
-    if isinstance(value, str):
-        return {value.strip()} if value.strip() else set()
-    if isinstance(value, list):
-        return {str(item).strip() for item in value if str(item).strip()}
-    return set()
-
-
-def _normalize_audience(value: str) -> str:
-    return value.rstrip("/")
-
-
-def _expected_scope_audiences(scope: str) -> set[str]:
-    scope_value = str(scope or "").strip().split()[0]
-    if not scope_value:
-        return set()
-    expected = {_normalize_audience(scope_value)}
-    if scope_value.endswith("/.default"):
-        expected.add(_normalize_audience(scope_value[: -len("/.default")]))
-    for suffix in ("/access-as-user", "/access_as_user"):
-        if scope_value.endswith(suffix):
-            expected.add(_normalize_audience(scope_value[: -len(suffix)]))
-    return {value for value in expected if value}
-
-
-def _expected_tenant(authority: str) -> str | None:
-    path = urlparse(authority).path.strip("/")
-    tenant = path.split("/")[-1].strip() if path else ""
-    return None if not tenant or tenant.lower() in _TENANT_WILDCARDS else tenant
-
-
-def _expiry_from_claims(
-    claims: dict[str, Any], *, code: str, now: float | None = None
-) -> float:
+def _validate_token(token: str, *, audience: str, expired_code: str, now: float) -> float:
+    claims = _decode_jwt_payload(token)
     try:
         expiry = float(claims["exp"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise PeepsAuthError("Peeps returned an invalid token", code=code) from exc
-    if expiry <= (time.time() if now is None else now):
-        raise PeepsAuthError("Peeps returned an expired token", code=code)
-    return expiry
-
-
-def _validate_token_claims(
-    token: str,
-    *,
-    expected_audiences: set[str],
-    expected_tenant: str | None,
-    audience_code: str,
-    expired_code: str,
-    now: float | None = None,
-) -> tuple[dict[str, Any], float]:
-    claims = _decode_jwt_payload(token)
-    expiry = _expiry_from_claims(claims, code=expired_code, now=now)
-    audiences = {
-        _normalize_audience(candidate)
-        for candidate in _coerce_audiences(claims.get("aud"))
-    }
-    if not audiences or not audiences.intersection(expected_audiences):
+        raise PeepsAuthError("Peeps returned an invalid token", code=expired_code) from exc
+    if expiry <= now:
+        raise PeepsAuthError("Peeps returned an expired token", code=expired_code)
+    if claims.get("aud") != audience:
         raise PeepsAuthError(
             "Peeps returned a token for an unexpected audience",
-            code=audience_code,
+            code="unexpected_peeps_audience" if audience == PEEPS_AUDIENCE else "unexpected_cognitive_audience",
         )
-    if expected_tenant is not None:
-        tenant_id = str(claims.get("tid") or "").strip()
-        if tenant_id != expected_tenant:
-            raise PeepsAuthError(
-                "Peeps returned a token for an unexpected tenant",
-                code="unexpected_tenant",
-            )
-    return claims, expiry
+    return expiry
 
 
 @dataclass(frozen=True)
 class PeepsVoiceAuthConfig:
-    client_id: str
-    authority: str
-    scope: str
-    redirect_uri: str
-    cognitive_token_url: str
+    client_id: str = PEEPS_CLIENT_ID
+    authority: str = PEEPS_AUTHORITY
+    scope: str = PEEPS_SCOPE
+    redirect_uri: str = PEEPS_REDIRECT_URI
+    cognitive_token_url: str = COGNITIVE_TOKEN_URL
     timeout_seconds: int = 180
 
     @property
     def expected_peeps_audiences(self) -> set[str]:
-        return _expected_scope_audiences(self.scope)
+        return {PEEPS_AUDIENCE}
 
     @property
-    def expected_tenant(self) -> str | None:
-        return _expected_tenant(self.authority)
+    def expected_tenant(self) -> None:
+        return None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any] | None) -> "PeepsVoiceAuthConfig | None":
         value = value if isinstance(value, dict) else {}
         if not value.get("enabled"):
             return None
-
-        required = {
-            key: str(value.get(key) or "").strip()
-            for key in (
-                "client_id",
-                "authority",
-                "scope",
-                "redirect_uri",
-                "cognitive_token_url",
-            )
+        pinned = {
+            "client_id": PEEPS_CLIENT_ID,
+            "authority": PEEPS_AUTHORITY,
+            "scope": PEEPS_SCOPE,
+            "redirect_uri": PEEPS_REDIRECT_URI,
+            "cognitive_token_url": COGNITIVE_TOKEN_URL,
         }
-        if not all(required.values()):
-            raise PeepsAuthError(
-                "Peeps voice fallback configuration is incomplete",
-                code="config_incomplete",
-            )
-
-        authority = urlparse(required["authority"])
-        if authority.scheme != "https" or not authority.netloc or not authority.path.strip("/"):
-            raise PeepsAuthError(
-                "Peeps authority must be an HTTPS tenant URL",
-                code="invalid_authority",
-            )
-
-        scope = required["scope"].split()
-        if len(scope) != 1 or not (
-            scope[0].startswith("https://") or scope[0].startswith("api://")
-        ):
-            raise PeepsAuthError(
-                "Peeps scope must be one HTTPS or api:// scope",
-                code="invalid_scope",
-            )
-
-        redirect = urlparse(required["redirect_uri"])
-        if required["redirect_uri"] != "https://localhost:8080/" or (
-            redirect.scheme != "https"
-            or redirect.hostname != "localhost"
-            or redirect.port != 8080
-            or redirect.path != "/"
-            or redirect.params
-            or redirect.query
-            or redirect.fragment
-        ):
-            raise PeepsAuthError(
-                "Peeps redirect must be https://localhost:8080/",
-                code="invalid_redirect_uri",
-            )
-
-        endpoint = urlparse(required["cognitive_token_url"])
-        if (
-            endpoint.scheme != "https"
-            or not endpoint.netloc
-            or not endpoint.path
-            or endpoint.params
-            or endpoint.query
-            or endpoint.fragment
-            or required["cognitive_token_url"] != _APPROVED_COGNITIVE_TOKEN_URL
-        ):
-            raise PeepsAuthError(
-                "Peeps Cognitive token endpoint must use the approved Seastar URL",
-                code="invalid_cognitive_token_url",
-            )
-
-        try:
-            timeout_seconds = int(value.get("timeout_seconds", 180))
-        except (TypeError, ValueError) as exc:
-            raise PeepsAuthError(
-                "Peeps timeout must be an integer number of seconds",
-                code="invalid_timeout_seconds",
-            ) from exc
-        if timeout_seconds < 1 or timeout_seconds > 300:
-            raise PeepsAuthError(
-                "Peeps timeout must be between 1 and 300 seconds",
-                code="invalid_timeout_seconds",
-            )
-
-        return cls(
-            client_id=required["client_id"],
-            authority=required["authority"],
-            scope=scope[0],
-            redirect_uri=required["redirect_uri"],
-            cognitive_token_url=required["cognitive_token_url"],
-            timeout_seconds=timeout_seconds,
-        )
+        for key, expected in pinned.items():
+            if key in value and value[key] != expected:
+                raise PeepsAuthError(f"Peeps {key} is fixed", code=f"invalid_{key}")
+        unknown = set(value) - {"enabled", "timeout_seconds", *pinned}
+        if unknown:
+            raise PeepsAuthError("Peeps voice fallback configuration contains unsupported fields", code="invalid_config")
+        timeout = value.get("timeout_seconds", 180)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
+            raise PeepsAuthError("Peeps timeout must be between 1 and 300 seconds", code="invalid_timeout_seconds")
+        return cls(timeout_seconds=timeout)
 
 
 @dataclass(frozen=True)
-class _PendingAuthSession:
-    expires_monotonic: float
-    profile_key: str
+class PeepsAuthBinding:
+    profile_home: str
+    runtime_session: object
+    runtime_session_id: str
+    transport: object
+
+    @classmethod
+    def create(cls, profile_home: str | Path, runtime_session: object, runtime_session_id: str, transport: object) -> "PeepsAuthBinding":
+        return cls(str(Path(profile_home).expanduser().resolve()), runtime_session, runtime_session_id, transport)
+
+
+def _same_binding(left: PeepsAuthBinding, right: PeepsAuthBinding) -> bool:
+    return (
+        left.profile_home == right.profile_home
+        and left.runtime_session is right.runtime_session
+        and left.runtime_session_id == right.runtime_session_id
+        and left.transport is right.transport
+    )
+
+
+@dataclass
+class _Pending:
+    binding: PeepsAuthBinding
+    expires: float
     state: str
+    private_key: X25519PrivateKey | None
 
 
-class PeepsVoiceAuthSessionStore:
-    def __init__(
-        self,
-        *,
-        max_pending: int = _MAX_PENDING_AUTH_SESSIONS,
-        monotonic: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self._active_by_profile: dict[str, str] = {}
-        self._lock = threading.Lock()
-        self._max_pending = max_pending
-        self._monotonic = monotonic
-        self._sessions: dict[str, _PendingAuthSession] = {}
+@dataclass
+class _Ready:
+    binding: PeepsAuthBinding
+    expires: float
+    provider: "PeepsCognitiveTokenProvider"
 
-    def _prune_locked(self, now: float) -> None:
-        expired = [
-            auth_session_id
-            for auth_session_id, session in self._sessions.items()
-            if session.expires_monotonic <= now
-        ]
-        for auth_session_id in expired:
-            session = self._sessions.pop(auth_session_id, None)
-            if (
-                session is not None
-                and self._active_by_profile.get(session.profile_key) == auth_session_id
-            ):
-                self._active_by_profile.pop(session.profile_key, None)
 
-    def start(self, profile_key: str, config: PeepsVoiceAuthConfig) -> dict[str, Any]:
-        now = self._monotonic()
-        auth_session_id = secrets.token_urlsafe(24)
-        state = secrets.token_urlsafe(24)
-        with self._lock:
-            self._prune_locked(now)
-            previous = self._active_by_profile.get(profile_key)
-            if previous:
-                self._sessions.pop(previous, None)
-            if len(self._sessions) >= self._max_pending:
-                raise PeepsAuthError(
-                    "Too many Peeps authorization sessions are pending",
-                    code="too_many_pending_sessions",
-                )
-            self._sessions[auth_session_id] = _PendingAuthSession(
-                expires_monotonic=now + config.timeout_seconds,
-                profile_key=profile_key,
-                state=state,
-            )
-            self._active_by_profile[profile_key] = auth_session_id
-        return {"auth_session_id": auth_session_id, "state": state}
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        return None
 
-    def complete_browser_auth(
-        self, profile_key: str, auth_session_id: str, state: str, peeps_token: str
-    ) -> str:
-        now = self._monotonic()
-        with self._lock:
-            self._prune_locked(now)
-            pending = self._sessions.get(auth_session_id)
-            if pending is None:
-                raise PeepsAuthError(
-                    "Peeps authorization session is invalid or expired",
-                    code="unknown_auth_session",
-                )
-            if pending.profile_key != profile_key:
-                raise PeepsAuthError(
-                    "Peeps authorization session is invalid or expired",
-                    code="wrong_profile",
-                )
-            if self._active_by_profile.get(profile_key) != auth_session_id:
-                raise PeepsAuthError(
-                    "Peeps authorization session is invalid or expired",
-                    code="superseded_auth_session",
-                )
-            if pending.state != state:
-                raise PeepsAuthError(
-                    "Peeps authorization session is invalid or expired",
-                    code="wrong_state",
-                )
-            self._sessions.pop(auth_session_id, None)
-            self._active_by_profile.pop(profile_key, None)
 
-        token = str(peeps_token or "").strip()
-        if not token:
-            raise PeepsAuthError(
-                "Peeps authorization did not return a token",
-                code="missing_peeps_token",
-            )
-        return token
-
-    def complete(self, profile_key: str, auth_session_id: str, state: str, token: str) -> str:
-        return self.complete_browser_auth(profile_key, auth_session_id, state, token)
-
-    def cancel(self, profile_key: str, auth_session_id: str) -> bool:
-        with self._lock:
-            pending = self._sessions.get(auth_session_id)
-            if pending is None or pending.profile_key != profile_key:
-                return False
-            self._sessions.pop(auth_session_id, None)
-            if self._active_by_profile.get(profile_key) == auth_session_id:
-                self._active_by_profile.pop(profile_key, None)
-            return True
+def _default_open(request: urllib.request.Request, timeout: int):
+    return urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
 class PeepsCognitiveTokenProvider:
-    def __init__(
-        self,
+    """A one-use Cognitive Services token. It never retains a Peeps bearer."""
+
+    def __init__(self, cognitive_token: str, *, expiry: float, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock
+        self._expiry = expiry
+        self._lock = threading.Lock()
+        self._token = cognitive_token
+
+    @classmethod
+    def exchange(
+        cls,
         config: PeepsVoiceAuthConfig,
+        peeps_token: str,
         *,
         opener: Callable[..., Any] | None = None,
         clock: Callable[[], float] = time.time,
-    ) -> None:
-        self.config = config
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._opener = opener or urllib.request.urlopen
-        self._peeps_expiry = 0.0
-        self._peeps_token = ""
-        self._cognitive_expiry = 0.0
-        self._cognitive_token = ""
-
-    def complete(self, peeps_token: str) -> None:
-        now = self._clock()
-        _validate_token_claims(
-            str(peeps_token or "").strip(),
-            expected_audiences={
-                _normalize_audience(value)
-                for value in self.config.expected_peeps_audiences
-            },
-            expected_tenant=self.config.expected_tenant,
-            audience_code="unexpected_peeps_audience",
-            expired_code="expired_peeps_token",
-            now=now,
-        )
-        claims = _decode_jwt_payload(peeps_token)
-        expiry = _expiry_from_claims(claims, code="expired_peeps_token", now=now)
-        with self._lock:
-            self._peeps_token = str(peeps_token or "").strip()
-            self._peeps_expiry = expiry
-            self._cognitive_token = ""
-            self._cognitive_expiry = 0.0
-
-    def invalidate(self) -> None:
-        with self._lock:
-            self._cognitive_token = ""
-            self._cognitive_expiry = 0.0
-
-    def token(self) -> str:
-        with self._lock:
-            now = self._clock()
-            if self._cognitive_token and self._cognitive_expiry - _CACHE_LEEWAY_SECONDS > now:
-                return self._cognitive_token
-            if not self._peeps_token:
-                raise PeepsAuthError(
-                    "Peeps authorization has not completed",
-                    code="authorization_required",
-                )
-            if self._peeps_expiry - _CACHE_LEEWAY_SECONDS <= now:
-                raise PeepsAuthError(
-                    "Peeps authorization has expired",
-                    code="expired_peeps_token",
-                )
-            token = self._peeps_token
-            cognitive_token = self._exchange_cognitive_token(token)
-            _, expiry = _validate_token_claims(
-                cognitive_token,
-                expected_audiences={
-                    "https://cognitiveservices.azure.com",
-                    "https://cognitiveservices.azure.com/",
-                },
-                expected_tenant=self.config.expected_tenant,
-                audience_code="unexpected_cognitive_audience",
-                expired_code="expired_cognitive_token",
-                now=now,
-            )
-            self._cognitive_token = cognitive_token
-            self._cognitive_expiry = expiry
-            logger.debug(
-                "Peeps minted Cognitive Services token exp=%s status=ok",
-                int(expiry),
-            )
-            return cognitive_token
-
-    def _exchange_cognitive_token(self, peeps_token: str) -> str:
+    ) -> "PeepsCognitiveTokenProvider":
+        now = clock()
+        _validate_token(peeps_token, audience=PEEPS_AUDIENCE, expired_code="expired_peeps_token", now=now)
         request = urllib.request.Request(
-            self.config.cognitive_token_url,
+            config.cognitive_token_url,
             headers={"Authorization": f"Bearer {peeps_token}"},
             method="GET",
         )
         try:
-            with self._opener(request, _COGNITIVE_EXCHANGE_TIMEOUT_SECONDS) as response:
+            with (opener or _default_open)(request, _EXCHANGE_TIMEOUT_SECONDS) as response:
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             raise PeepsAuthError(
@@ -446,60 +207,153 @@ class PeepsCognitiveTokenProvider:
                 status=exc.code,
             ) from exc
         except urllib.error.URLError as exc:
-            raise PeepsAuthError(
-                "Peeps could not reach the Cognitive Services token endpoint",
-                code="cognitive_connectivity",
-            ) from exc
+            raise PeepsAuthError("Peeps could not reach the Cognitive Services token endpoint", code="cognitive_connectivity") from exc
+        except PeepsAuthError:
+            raise
         except Exception as exc:
-            raise PeepsAuthError(
-                "Peeps could not obtain a Cognitive Services credential",
-                code="cognitive_exchange_failed",
-            ) from exc
-
+            raise PeepsAuthError("Peeps could not obtain a Cognitive Services credential", code="cognitive_exchange_failed") from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
-            raise PeepsAuthError(
-                "Peeps returned an oversized Cognitive Services credential",
-                code="oversized_cognitive_response",
-            )
-        return self._parse_token(raw)
+            raise PeepsAuthError("Peeps returned an oversized Cognitive Services credential", code="oversized_cognitive_response")
+        cognitive = cls._parse_token(raw)
+        expiry = _validate_token(cognitive, audience=COGNITIVE_AUDIENCE, expired_code="expired_cognitive_token", now=now)
+        logger.debug("Peeps Cognitive Services exchange status=ok")
+        return cls(cognitive, expiry=expiry, clock=clock)
+
+    def token(self) -> str:
+        with self._lock:
+            token, self._token = self._token, ""
+            if not token:
+                raise PeepsAuthError("Peeps credential was already consumed", code="credential_consumed")
+            if self._expiry <= self._clock():
+                raise PeepsAuthError("Peeps credential expired", code="expired_cognitive_token")
+            return token
 
     @staticmethod
     def _parse_token(raw: bytes) -> str:
-        decoded = raw.decode("utf-8", errors="strict").strip()
+        try:
+            decoded = raw.decode("utf-8", errors="strict").strip()
+        except UnicodeDecodeError as exc:
+            raise PeepsAuthError("Peeps returned an invalid Cognitive Services credential", code="invalid_cognitive_response_shape") from exc
         if not decoded:
-            raise PeepsAuthError(
-                "Peeps returned an invalid Cognitive Services credential",
-                code="empty_cognitive_response",
-            )
+            raise PeepsAuthError("Peeps returned an invalid Cognitive Services credential", code="empty_cognitive_response")
         try:
             parsed = json.loads(decoded)
         except json.JSONDecodeError:
             parsed = decoded
-
-        token = ""
         if isinstance(parsed, dict):
-            found = [
-                str(parsed[key]).strip()
-                for key in ("token", "accessToken", "access_token")
-                if str(parsed.get(key) or "").strip()
-            ]
-            if len(found) != 1:
-                raise PeepsAuthError(
-                    "Peeps returned an invalid Cognitive Services credential",
-                    code="invalid_cognitive_response_shape",
-                )
-            token = found[0]
+            values = [str(parsed[key]).strip() for key in ("token", "accessToken", "access_token") if parsed.get(key)]
+            if len(values) != 1:
+                raise PeepsAuthError("Peeps returned an invalid Cognitive Services credential", code="invalid_cognitive_response_shape")
+            token = values[0]
         elif isinstance(parsed, str):
             token = parsed.strip()
         else:
-            raise PeepsAuthError(
-                "Peeps returned an invalid Cognitive Services credential",
-                code="invalid_cognitive_response_shape",
-            )
-
-        if not token or any(character.isspace() for character in token):
-            raise PeepsAuthError(
-                "Peeps returned an invalid Cognitive Services credential",
-                code="invalid_cognitive_response_shape",
-            )
+            token = ""
+        if not token or any(char.isspace() for char in token):
+            raise PeepsAuthError("Peeps returned an invalid Cognitive Services credential", code="invalid_cognitive_response_shape")
         return token
+
+
+class PeepsVoiceAuthSessionStore:
+    def __init__(self, *, max_pending: int = _MAX_PENDING, monotonic: Callable[[], float] = time.monotonic) -> None:
+        self._lock = threading.Lock()
+        self._max_pending = max_pending
+        self._monotonic = monotonic
+        self._pending: dict[str, _Pending] = {}
+        self._ready: dict[str, _Ready] = {}
+
+    def _prune_locked(self, now: float) -> None:
+        for table in (self._pending, self._ready):
+            for key in [key for key, value in table.items() if value.expires <= now]:
+                removed = table.pop(key)
+                if isinstance(removed, _Pending):
+                    removed.private_key = None
+
+    def start(self, binding: PeepsAuthBinding, config: PeepsVoiceAuthConfig) -> dict[str, Any]:
+        now = self._monotonic()
+        private = X25519PrivateKey.generate()
+        auth_id, state = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+        with self._lock:
+            self._prune_locked(now)
+            for key, value in list(self._pending.items()):
+                if _same_binding(value.binding, binding):
+                    value.private_key = None
+                    self._pending.pop(key)
+            for key, value in list(self._ready.items()):
+                if _same_binding(value.binding, binding):
+                    self._ready.pop(key)
+            if len(self._pending) >= self._max_pending:
+                raise PeepsAuthError("Too many Peeps authorization sessions are pending", code="too_many_pending_sessions")
+            self._pending[auth_id] = _Pending(binding, now + config.timeout_seconds, state, private)
+        public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        return {"auth_session_id": auth_id, "state": state, "public_key": _b64url_encode(public)}
+
+    def _take_pending(self, binding: PeepsAuthBinding, auth_id: str, state: str) -> _Pending:
+        with self._lock:
+            self._prune_locked(self._monotonic())
+            pending = self._pending.get(auth_id)
+            if pending is None or pending.state != state or not _same_binding(pending.binding, binding):
+                raise PeepsAuthError("Peeps authorization session is invalid or expired", code="invalid_auth_session")
+            self._pending.pop(auth_id)
+            return pending
+
+    def complete(
+        self,
+        binding: PeepsAuthBinding,
+        auth_id: str,
+        state: str,
+        envelope: dict[str, Any],
+        config: PeepsVoiceAuthConfig,
+        *,
+        opener: Callable[..., Any] | None = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        pending = self._take_pending(binding, auth_id, state)
+        private, pending.private_key = pending.private_key, None
+        try:
+            if private is None or set(envelope) != {"version", "ephemeral_public_key", "nonce", "ciphertext", "tag"} or envelope.get("version") != 1:
+                raise PeepsAuthError("Peeps authorization envelope is invalid", code="invalid_envelope")
+            ephemeral = _b64url_decode(envelope["ephemeral_public_key"], code="invalid_envelope")
+            nonce = _b64url_decode(envelope["nonce"], code="invalid_envelope")
+            ciphertext = _b64url_decode(envelope["ciphertext"], code="invalid_envelope")
+            tag = _b64url_decode(envelope["tag"], code="invalid_envelope")
+            if len(ephemeral) != 32 or len(nonce) != 12 or len(tag) != 16 or not ciphertext:
+                raise PeepsAuthError("Peeps authorization envelope is invalid", code="invalid_envelope")
+            shared = private.exchange(X25519PublicKey.from_public_bytes(ephemeral))
+            aad = f"{auth_id}:{state}".encode()
+            key = HKDF(algorithm=hashes.SHA256(), length=32, salt=aad, info=b"hermes-peeps-voice-auth-v1").derive(shared)
+            plaintext = bytearray(AESGCM(key).decrypt(nonce, ciphertext + tag, aad))
+            try:
+                peeps_token = plaintext.decode("utf-8")
+                provider = PeepsCognitiveTokenProvider.exchange(config, peeps_token, opener=opener, clock=clock)
+            finally:
+                plaintext[:] = b"\0" * len(plaintext)
+                peeps_token = ""
+        except PeepsAuthError:
+            raise
+        except Exception as exc:
+            raise PeepsAuthError("Peeps authorization envelope is invalid", code="invalid_envelope") from exc
+        with self._lock:
+            self._ready[auth_id] = _Ready(binding, pending.expires, provider)
+
+    def consume_ready(self, binding: PeepsAuthBinding, auth_id: str) -> PeepsCognitiveTokenProvider | None:
+        with self._lock:
+            self._prune_locked(self._monotonic())
+            ready = self._ready.get(auth_id)
+            if ready is None or not _same_binding(ready.binding, binding):
+                return None
+            self._ready.pop(auth_id)
+            return ready.provider
+
+    def cancel(self, binding: PeepsAuthBinding, auth_id: str) -> bool:
+        with self._lock:
+            pending = self._pending.get(auth_id)
+            ready = self._ready.get(auth_id)
+            target = pending or ready
+            if target is None or not _same_binding(target.binding, binding):
+                return False
+            self._pending.pop(auth_id, None)
+            self._ready.pop(auth_id, None)
+            if pending is not None:
+                pending.private_key = None
+            return True

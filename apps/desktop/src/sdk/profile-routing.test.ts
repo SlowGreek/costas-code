@@ -28,6 +28,7 @@ vi.mock('@/store/session', async () => {
     $cronSessions: atom([]),
     $currentCwd: atom(''),
     $currentModel: atom(''),
+    $erroredSessionIds: atom([]),
     $gatewayState: atom('open'),
     $messages: atom([]),
     $messagingSessions: atom([]),

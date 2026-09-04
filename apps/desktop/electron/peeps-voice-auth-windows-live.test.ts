@@ -168,7 +168,7 @@ async function proveHttpsHandshake(material: { passphrase: string; pfx: Buffer }
   try {
     const body = await new Promise<string>((resolve, reject) => {
       https
-        .get({ ca: certificate, host: '127.0.0.1', port: address.port, rejectUnauthorized: true }, response => {
+        .get({ ca: new X509Certificate(certificate).toString(), host: '127.0.0.1', port: address.port, rejectUnauthorized: true }, response => {
           let value = ''
           response.setEncoding('utf8')
           response.on('data', chunk => (value += chunk))

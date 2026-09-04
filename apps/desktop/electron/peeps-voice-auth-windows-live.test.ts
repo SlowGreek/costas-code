@@ -62,6 +62,7 @@ function powershell(script: string, env: NodeJS.ProcessEnv): string {
     encoding: 'utf8',
     env: { ...process.env, ...env },
     shell: false,
+    timeout: 30_000,
     windowsHide: true
   })
 
@@ -106,6 +107,7 @@ function proveElectronSafeStorage(userData: string): void {
     encoding: 'utf8',
     env: { ...process.env, HERMES_PEEPS_TEST_USER_DATA: userData },
     shell: false,
+    timeout: 30_000,
     windowsHide: true
   })
 

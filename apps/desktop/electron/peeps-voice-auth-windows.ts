@@ -96,7 +96,11 @@ $adminsSid = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
 foreach ($target in $paths) {
   $item = Get-Item -LiteralPath $target -Force
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse points are forbidden' }
-  $acl = Get-Acl -LiteralPath $target
+  $acl = if ($item.PSIsContainer) {
+    [IO.Directory]::GetAccessControl($target, [Security.AccessControl.AccessControlSections]::Access)
+  } else {
+    [IO.File]::GetAccessControl($target, [Security.AccessControl.AccessControlSections]::Access)
+  }
   $acl.SetAccessRuleProtection($true, $false)
   foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
   $inheritance = if ($item.PSIsContainer) { [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' } else { [Security.AccessControl.InheritanceFlags]::None }
@@ -104,7 +108,11 @@ foreach ($target in $paths) {
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
     [void]$acl.AddAccessRule($rule)
   }
-  Set-Acl -LiteralPath $target -AclObject $acl
+  if ($item.PSIsContainer) {
+    [IO.Directory]::SetAccessControl($target, $acl)
+  } else {
+    [IO.File]::SetAccessControl($target, $acl)
+  }
 }`
 
 export const WINDOWS_VALIDATE_SCRIPT = String.raw`$ErrorActionPreference = 'Stop'

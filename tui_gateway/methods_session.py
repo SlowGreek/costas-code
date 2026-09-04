@@ -3682,6 +3682,92 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, payload)
 
 
+@method("session.input.status")
+def _(rid, params: dict) -> dict:
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    from tui_gateway.server import _route_user_input_to_compute_host
+    forwarded = _route_user_input_to_compute_host(rid, params, session, "session.input.status")
+    if forwarded is not None:
+        return forwarded
+    from tui_gateway.server import _session_user_input_inbox
+    with session["history_lock"]:
+        inbox = _session_user_input_inbox(session)
+        if inbox is None:
+            return _ok(rid, {"status": "unsupported", "turn_id": None})
+        mid = params.get("message_id")
+        if "message_id" in params and (not isinstance(mid, str) or not mid or len(mid) > 128):
+            return _err(rid, 4002, "valid message_id required")
+        if mid:
+            return _ok(rid, inbox.status(mid))
+        return _ok(rid, {"turn_id": inbox.turn_id if inbox.accepting else None,
+                         "status": "active" if inbox.accepting else "idle",
+                         "user_inputs": inbox.snapshot()})
+
+
+@method("session.input")
+def _(rid, params: dict) -> dict:
+    """Steer v2: identified pending input, never approval or next-turn queue."""
+    from tui_gateway.server import _redirect_payload_with_images
+    text = params.get("text", "")
+    images = params.get("images", [])
+    mid, tid = params.get("message_id"), params.get("turn_id")
+    if (not isinstance(text, str) or not isinstance(images, list) or len(images) > 32
+            or not all(isinstance(p, str) for p in images)
+            or not isinstance(mid, str) or not mid or len(mid) > 128
+            or not isinstance(tid, str) or not tid or len(tid) > 256):
+        return _err(rid, 4002, "valid text, images, message_id and turn_id required")
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    from tui_gateway.server import _route_user_input_to_compute_host
+    forwarded = _route_user_input_to_compute_host(rid, params, session, "session.input")
+    if forwarded is not None:
+        return forwarded
+    with session["history_lock"]:
+        inbox = session.get("user_input_inbox")
+        if inbox is None:
+            return _ok(rid, {"status": "unsupported", "message_id": mid, "turn_id": tid})
+        # Check the ID before touching staged attachments, including retries
+        # whose original RPC response was lost. Never retarget a new turn.
+        request_key = json.dumps([text, images], ensure_ascii=True)
+        prior = inbox.retry_receipt(mid, tid, request_key)
+        if prior is not None:
+            return _ok(rid, prior)
+        if not session.get("running") or not inbox.accepting or inbox.turn_id != tid or session.get("_turn_cancel_requested"):
+            return _ok(rid, {"status": "stale", "message_id": mid, "turn_id": tid})
+        paths = list(dict.fromkeys(images + list(session.get("attached_images") or [])))
+        agent = session.get("agent")
+        if paths and agent is None:
+            # Staging remains intact. Client can queue this exact payload.
+            return _ok(rid, {"status": "unsupported", "message_id": mid, "turn_id": tid})
+        if not text.strip() and not paths:
+            return _err(rid, 4002, "text or images required")
+    # Image enrichment may involve auxiliary inference. Never hold the session
+    # state lock across it: Stop and concurrent uploads must remain responsive.
+    from pathlib import Path
+    if any(not Path(path).is_file() for path in paths):
+        return _err(rid, 4002, "An attached image is unavailable; draft and staging are retained")
+    try:
+        payload = _redirect_payload_with_images(agent, text, paths, strict=True) if paths else text.strip()
+    except Exception:
+        return _err(rid, 4002, "An attached image could not be read; draft and staging are retained")
+    with session["history_lock"]:
+        prior = inbox.retry_receipt(mid, tid, request_key)
+        if prior is not None:
+            return _ok(rid, prior)
+        if (session.get("user_input_inbox") is not inbox or not session.get("running")
+                or inbox.turn_id != tid or not inbox.accepting or session.get("_turn_cancel_requested")):
+            return _ok(rid, {"status": "stale", "message_id": mid, "turn_id": tid})
+        native = agent.redirect if getattr(agent, "api_mode", None) == "codex_app_server" else None
+        receipt = inbox.submit(payload, message_id=mid, turn_id=tid, request_key=request_key, native=native)
+        if receipt["status"] in ("pending", "accepted"):
+            session["attached_images"] = [p for p in (session.get("attached_images") or []) if p not in paths]
+            session["last_active"] = time.time()
+        return _ok(rid, receipt)
+
+
 @method("session.steer")
 def _(rid, params: dict) -> dict:
     """Inject a user message into the next tool result without interrupting.

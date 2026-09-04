@@ -202,6 +202,9 @@ def test_direct_session_db_flushes_share_marker_claim(agent):
                 assert self.release.wait(timeout=5)
             self.rows.append(kwargs["content"])
 
+        def flush_token_counts(self):
+            pass
+
         def append_messages_batch(self, session_id, messages, **kwargs):
             with self._lock:
                 self.calls += 1
@@ -4003,7 +4006,7 @@ class TestRunConversation:
             if len(requests) == 1:
                 agent._fire_reasoning_delta("I should implement this with SQLite.")
                 assert agent.redirect("No, use Postgres instead.") is True
-                raise InterruptedError("redirect cancelled the first request")
+                return _mock_response(content="Original answer.", finish_reason="stop")
             return final
 
         with (
@@ -4036,10 +4039,8 @@ class TestRunConversation:
         placeholder = replay[-2]["content"]
         correction = replay[-1]["content"]
         assert "interrupted by a user correction" not in (placeholder or "")
-        assert "interrupted by a user correction" in correction
-        assert "original user request remains active" in correction
-        assert "continue fulfilling the original user request" in correction
-        assert "do not stop after only acknowledging this correction" in correction
+        assert placeholder == "Original answer."
+        assert correction == "No, use Postgres instead."
         assert correction.endswith("No, use Postgres instead.")
         assert replay[-3]["content"] == "Choose a database and implement it."
         # Displayed chain-of-thought must NOT be replayed: an assistant turn
@@ -4072,7 +4073,7 @@ class TestRunConversation:
             requests.append(api_kwargs)
             if len(requests) == 1:
                 assert agent.redirect(correction_parts) is True
-                raise InterruptedError("redirect cancelled the first request")
+                return _mock_response(content="Original answer.", finish_reason="stop")
             return final
 
         with (
@@ -4090,9 +4091,8 @@ class TestRunConversation:
         assert replay[-3]["content"] == "Compare our architecture to Codex."
         wire_correction = replay[-1]["content"]
         assert isinstance(wire_correction, list)
-        assert "continue fulfilling the original user request" in wire_correction[0]["text"]
-        assert "Use this diagram as the correction." in wire_correction[1]["text"]
-        assert wire_correction[2] == correction_parts[1]
+        assert wire_correction == correction_parts
+        assert replay[-2]["content"] == "Original answer."
 
     def test_assistant_list_api_content_is_not_projected_to_provider(self, agent):
         """Structured replay sidecars are user-only; assistant images are invalid."""
@@ -4158,16 +4158,17 @@ class TestRunConversation:
 
         assert calls == 2
         assert result["final_response"] == "Using Postgres."
-        assert all(
-            message.get("content") != "Using SQLite."
+        assert any(
+            message.get("content") == "Using SQLite."
             for message in result["messages"]
         )
 
-    def test_redirect_from_input_thread_cancels_live_model_request(self, agent):
+    def test_redirect_from_input_thread_preserves_live_model_request(self, agent):
         """Exercise the real cross-thread path used by CLI and gateways."""
         self._setup_agent(agent)
         agent.reasoning_callback = lambda _text: None
         entered = threading.Event()
+        release_response = threading.Event()
         results = {}
         calls = 0
         final = _mock_response(content="Corrected answer.", finish_reason="stop")
@@ -4178,10 +4179,9 @@ class TestRunConversation:
             if calls == 1:
                 agent._fire_reasoning_delta("Following the original approach.")
                 entered.set()
-                deadline = time.time() + 2
-                while not agent._interrupt_requested and time.time() < deadline:
-                    time.sleep(0.01)
-                raise InterruptedError("request cancelled by redirect")
+                assert release_response.wait(timeout=5)
+                assert not agent._interrupt_requested
+                return _mock_response(content="Original completed answer.", finish_reason="stop")
             return final
 
         with (
@@ -4198,6 +4198,7 @@ class TestRunConversation:
             worker.start()
             assert entered.wait(timeout=2)
             assert agent.redirect("Use the corrected approach.") is True
+            release_response.set()
             worker.join(timeout=5)
 
         assert worker.is_alive() is False
@@ -4210,9 +4211,8 @@ class TestRunConversation:
         assert "interrupted by a user correction" not in (
             placeholder.get("content") or ""
         )
-        assert "interrupted by a user correction" in (
-            correction.get("api_content") or ""
-        )
+        assert placeholder["content"] == "Original completed answer."
+        assert not correction.get("api_content")
         # Displayed reasoning is display-only — replaying it as assistant
         # content trips Anthropic's output classifier (July 2026 brickings).
         assert "Following the original approach." not in (

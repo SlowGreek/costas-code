@@ -2,6 +2,7 @@ import type { ThreadMessageLike } from '@assistant-ui/react'
 import { type BillingBlock } from '@hermes/shared'
 
 import type { ErrorSurface } from '@/lib/error-surface'
+import type { SteeringReceipt } from '@/lib/steering-input'
 import type { MessageReaction, SessionMessage, UsageStats } from '@/types/hermes'
 
 export interface TimelinePartMetadata {
@@ -21,6 +22,7 @@ export type ChatMessage = {
   timestamp?: number
   completedAt?: number
   pending?: boolean
+  steering?: SteeringReceipt
   error?: string
   /** Structured layer descriptor for a failed turn (parsed error_surface).
    *  Drives the error card's layer label + actions; absent on older

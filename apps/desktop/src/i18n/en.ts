@@ -3,6 +3,14 @@ import { FIELD_DESCRIPTIONS, FIELD_LABELS } from '@/app/settings/constants'
 import type { Translations } from './types'
 
 export const en: Translations = {
+  steering: {
+    pending: 'Pending · next model request',
+    committed: 'In model context',
+    accepted: 'Accepted by native runtime',
+    cancelled: 'Cancelled',
+    recoverable: 'Not sent · retained for recovery',
+    unknown: 'Delivery unknown · draft retained'
+  },
   common: {
     apply: 'Apply',
     back: 'Back',
@@ -156,8 +164,7 @@ export const en: Translations = {
       elevenLabsRejectedKey: 'ElevenLabs rejected the API key (401).',
       diskFull: 'Disk full — free some space, then try again.',
       gatewayAuthFailed: 'Gateway authentication failed — check your API_SERVER_KEY.',
-      methodNotAllowed:
-        'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Catalyst.',
+      methodNotAllowed: 'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Catalyst.',
       microphonePermission: 'Microphone permission was denied.',
       openaiRejectedApiKey: 'OpenAI rejected the API key.',
       openaiRejectedApiKeyWithStatus: status => `OpenAI rejected the API key (${status} invalid_api_key).`,
@@ -974,8 +981,7 @@ export const en: Translations = {
         'The host key has CHANGED since you last connected. Verify this is expected, then run ssh-keygen -R <host> and reconnect.',
       sshErrNotInstalled:
         'Catalyst is not installed on the remote host. Install it there (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh) or set the Catalyst path.',
-      sshErrPlatform:
-        'Unsupported remote platform. Catalyst SSH mode supports Linux, macOS, and Windows remote hosts.',
+      sshErrPlatform: 'Unsupported remote platform. Catalyst SSH mode supports Linux, macOS, and Windows remote hosts.',
       sshErrTimeout: 'SSH connection timed out. The host may be unreachable or asleep.',
       sshErrUpdateRequired: 'Update Catalyst on the remote host before connecting with Desktop SSH.',
       sshErrUnknown: 'SSH connection failed.'
@@ -1873,7 +1879,8 @@ export const en: Translations = {
       menuItem: 'Connect to a remote host…',
       badge: (host: string) => `Runs on ${host}`,
       title: (profile: string) => `Connect ${profile} to a remote host`,
-      description: 'Sessions in this profile will run on the remote Catalyst you point it at, instead of this computer.',
+      description:
+        'Sessions in this profile will run on the remote Catalyst you point it at, instead of this computer.',
       urlLabel: 'Remote address',
       urlPlaceholder: 'https://hermes.example.com',
       urlInvalid: 'Enter a full address starting with http:// or https://',
@@ -2614,7 +2621,8 @@ export const en: Translations = {
     maybeLater: 'Maybe later',
     moreChanges: count => `+ ${count} more change${count === 1 ? '' : 's'} included.`,
     manualTitle: 'Update from your terminal',
-    manualBody: 'You installed Catalyst from the command line, so updates run there too. Paste this into your terminal:',
+    manualBody:
+      'You installed Catalyst from the command line, so updates run there too. Paste this into your terminal:',
     manualPickedUp: 'Catalyst will pick up the new version next time you launch it.',
     guiSkewTitle: 'Update the desktop app',
     guiSkewBody:
@@ -2764,7 +2772,8 @@ export const en: Translations = {
       xai: { short: 'Grok models', description: 'Direct access to xAI Grok models.' },
       local: {
         short: 'self-hosted',
-        description: 'Point Catalyst at a local or self-hosted OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama, etc).'
+        description:
+          'Point Catalyst at a local or self-hosted OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama, etc).'
       }
     },
     backToSignIn: 'Back to sign in',

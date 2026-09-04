@@ -2756,6 +2756,30 @@ def _is_real_user_message(message: Any) -> bool:
     return not ContextCompressor._is_synthetic_compression_user_turn(message)
 
 
+def _message_contains_busy_steer(message: Any) -> bool:
+    return _extract_steer_text_from_message(message) is not None
+
+
+def _extract_steer_text_from_message(message: Any) -> Optional[str]:
+    """Read historical Hermes steer markers, never lookalike tool prose."""
+    from agent.prompt_builder import STEER_MARKER_OPEN, STEER_MARKER_CLOSE
+    text = _message_text(message)
+    start = text.rfind(STEER_MARKER_OPEN)
+    if start < 0:
+        return None
+    start += len(STEER_MARKER_OPEN)
+    end = text.find(STEER_MARKER_CLOSE, start)
+    return text[start:end].strip() or None if end >= 0 else None
+
+
+def _compressed_has_busy_steer(messages: list) -> bool:
+    """Whether *messages* already carries a steer marker in a ``role=tool`` row.
+    Only tool rows count, so a summary merely quoting the marker text is not mistaken for live intent."""
+    return any(
+        isinstance(msg, dict) and msg.get("role") == "tool" and _message_contains_busy_steer(msg) for msg in messages
+    )
+
+
 def _strip_stale_todo_snapshot(content: Any) -> Any:
     """Remove a previously merged todo-snapshot block from message content.
 
@@ -2952,34 +2976,32 @@ def _insert_real_user_anchor(messages: list, anchor: dict) -> CompressedUserTurn
     return "merged"
 
 
-def _ensure_compressed_has_user_turn(
-    original_messages: list, compressed: list
-) -> CompressedUserTurnOutcome:
+def _ensure_compressed_has_user_turn(original_messages: list, compressed: list) -> CompressedUserTurnOutcome:
     """Preserve human intent, not merely a synthetic user-role placeholder."""
-    if any(_is_real_user_message(message) for message in compressed):
+    if any(_is_real_user_message(message) for message in compressed) or _compressed_has_busy_steer(compressed):
         return "already_present"
     from agent.context_compressor import (
-        COMPRESSION_CONTINUATION_USER_CONTENT,
-        _fresh_compaction_message_copy,
+        _INFLIGHT_REPLAY_MERGED_KEY, COMPRESSION_CONTINUATION_USER_CONTENT, _fresh_compaction_message_copy,
     )
-
+    if any(isinstance(message, dict) and message.get(_INFLIGHT_REPLAY_MERGED_KEY) for message in compressed):
+        # The in-flight request was restated onto the summary carrier (#100818); an anchor would duplicate it.
+        return "already_present"
+    # One reversed scan over BOTH kinds: scanning steer then user would let an older
+    # consumed steer outrank a newer real user request and replay it.
+    # One reversed positional scan: the anchor is whichever intent-bearing row is LAST in the original
+    # transcript — a real ``role=user`` turn or a steer marker riding inside a ``role=tool`` result. See
+    # #100053.
     for message in reversed(original_messages):
         if _is_real_user_message(message):
-            return _insert_real_user_anchor(
-                compressed,
-                _fresh_compaction_message_copy(message),
-            )
+            return _insert_real_user_anchor(compressed, _fresh_compaction_message_copy(message))
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            continue
+        steer_text = _extract_steer_text_from_message(message)
+        if steer_text:
+            return _insert_real_user_anchor(compressed, {"role": "user", "content": steer_text})
     from agent.message_metadata import append_message
-
-    append_message(
-        compressed,
-        {
-            "role": "user",
-            "content": COMPRESSION_CONTINUATION_USER_CONTENT,
-        },
-    )
+    append_message(compressed, {"role": "user", "content": COMPRESSION_CONTINUATION_USER_CONTENT})
     return "placeholder_appended"
-
 
 def _messages_match_scoped_identity(left: Any, right: Any) -> bool:
     """Compare the live turn identity we care about for rotation stamping."""

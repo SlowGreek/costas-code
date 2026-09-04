@@ -184,7 +184,18 @@ class WorkflowRun:
             pass
 
     def wait(self, timeout: Optional[float] = None) -> bool:
-        return self._done.wait(timeout)
+        """Yield a wait to user input without stopping the workflow/children."""
+        from agent.pending_user_input import has_pending_user_input
+        import time
+        deadline = None if timeout is None else time.monotonic() + max(0, timeout)
+        while not self._done.is_set():
+            if has_pending_user_input():
+                return False
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            self._done.wait(min(1.0, remaining) if remaining is not None else 1.0)
+        return True
 
     @property
     def finished(self) -> bool:

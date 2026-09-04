@@ -2416,7 +2416,53 @@ describe('usePromptActions submit / queue drain semantics', () => {
   })
 })
 
+function mockSteeringGateway() {
+  return vi.fn(
+    async (method: string, params: Record<string, unknown> = {}) =>
+      (method === 'session.input.status'
+        ? { status: 'active', turn_id: 'test-turn' }
+        : { status: 'pending', turn_id: 'test-turn', message_id: params.message_id }) as never
+  )
+}
+
 describe('usePromptActions redirectPrompt', () => {
+  it('uses identified non-aborting pending input and reconciles a lost receipt', async () => {
+    let statusReads = 0
+
+    const requestGateway = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+      if (method === 'session.input.status') {
+        return (
+          ++statusReads === 1
+            ? { status: 'active', turn_id: 'active-turn' }
+            : { status: 'committed', turn_id: 'active-turn', message_id: params.message_id }
+        ) as never
+      }
+
+      if (method === 'session.input') {
+        throw new Error('RPC timeout after acceptance')
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+    const states: Record<string, unknown>[] = []
+    await actRender(
+      <Harness
+        onReady={h => (handle = h)}
+        onSeedState={s => states.push(s)}
+        refreshSessions={async () => undefined}
+        requestGateway={requestGateway}
+      />
+    )
+    expect(await handle!.redirectPrompt('Correction')).toBe(true)
+    expect(requestGateway).not.toHaveBeenCalledWith('session.redirect', expect.anything())
+    expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything())
+    expect((states.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
+      steering: { status: 'committed', turn_id: 'active-turn' }
+    })
+  })
+
   afterEach(() => {
     cleanup()
     $composerAttachments.set([])
@@ -2424,7 +2470,7 @@ describe('usePromptActions redirectPrompt', () => {
   })
 
   it('redirects the live turn with trimmed correction text', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
 
     let handle: HarnessHandle | null = null
     const capturedStates: Record<string, unknown>[] = []
@@ -2440,8 +2486,10 @@ describe('usePromptActions redirectPrompt', () => {
     const accepted = await handle!.redirectPrompt('  nudge the run  ')
 
     expect(accepted).toBe(true)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.input', {
       session_id: RUNTIME_SESSION_ID,
+      message_id: expect.any(String),
+      turn_id: 'test-turn',
       text: 'nudge the run'
     })
     expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything())
@@ -2461,7 +2509,15 @@ describe('usePromptActions redirectPrompt', () => {
       path: '/tmp/screen.png'
     }
 
-    const requestGateway = vi.fn(async (method: string) => {
+    const requestGateway = vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+      if (method === 'session.input.status') {
+        return { status: 'active', turn_id: 'test-turn' } as never
+      }
+
+      if (method === 'session.input') {
+        return { status: 'pending', turn_id: 'test-turn', message_id: params.message_id } as never
+      }
+
       if (method === 'image.attach') {
         return { attached: true, path: '/gateway/screen.png' } as never
       }
@@ -2471,17 +2527,15 @@ describe('usePromptActions redirectPrompt', () => {
 
     let handle: HarnessHandle | null = null
     await actRender(
-      <Harness
-        onReady={h => (handle = h)}
-        refreshSessions={async () => undefined}
-        requestGateway={requestGateway}
-      />
+      <Harness onReady={h => (handle = h)} refreshSessions={async () => undefined} requestGateway={requestGateway} />
     )
 
     expect(await handle!.redirectPrompt('look at this', [image])).toBe(true)
     expect(requestGateway.mock.calls.filter(([method]) => method === 'image.attach')).toHaveLength(1)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.input', {
       session_id: RUNTIME_SESSION_ID,
+      message_id: expect.any(String),
+      turn_id: 'test-turn',
       text: 'look at this',
       images: ['/gateway/screen.png']
     })
@@ -2495,7 +2549,7 @@ describe('usePromptActions redirectPrompt', () => {
   // stale (#83151)"). The correction now lands last and the next delta seeds a
   // fresh bubble below it, so the expected order is assistant-then-user.
   it('appends a steering correction after sealing the active assistant reply', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
     const capturedStates: Record<string, unknown>[] = []
     let handle: HarnessHandle | null = null
 
@@ -2517,7 +2571,7 @@ describe('usePromptActions redirectPrompt', () => {
   })
 
   it('keeps a steering correction after the current user prompt when the assistant row has not started', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
     const capturedStates: Record<string, unknown>[] = []
     let handle: HarnessHandle | null = null
 
@@ -2560,7 +2614,7 @@ describe('usePromptActions redirectPrompt', () => {
     expect(await handle!.redirectPrompt('too late')).toBe(false)
   })
 
-  it('reports rejection without throwing when the redirect RPC errors', async () => {
+  it('preserves an unknown RPC outcome for draft recovery, not automatic queue', async () => {
     const requestGateway = vi.fn(async () => {
       throw new Error('agent does not support redirect')
     })
@@ -2570,11 +2624,11 @@ describe('usePromptActions redirectPrompt', () => {
       <Harness onReady={h => (handle = h)} refreshSessions={async () => undefined} requestGateway={requestGateway} />
     )
 
-    expect(await handle!.redirectPrompt('boom')).toBe(false)
+    await expect(handle!.redirectPrompt('boom')).rejects.toThrow('agent does not support redirect')
   })
 
   it('skips the RPC entirely for empty text', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
 
     let handle: HarnessHandle | null = null
     await actRender(
@@ -2586,7 +2640,7 @@ describe('usePromptActions redirectPrompt', () => {
   })
 
   it('records the correction AFTER the assistant output that predates it (#73793, #83151)', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
 
     let handle: HarnessHandle | null = null
     const capturedStates: Record<string, unknown>[] = []
@@ -2626,7 +2680,7 @@ describe('usePromptActions redirectPrompt', () => {
   })
 
   it('appends at the tail — never mid-thread — when the stream id is stale (#83151)', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never)
+    const requestGateway = mockSteeringGateway()
 
     let handle: HarnessHandle | null = null
     const capturedStates: Record<string, unknown>[] = []
@@ -2664,7 +2718,7 @@ describe('usePromptActions redirectPrompt', () => {
   it('accepts a queued redirect during the agent-build window and records the correction', async () => {
     // running=True but the agent is still building: the gateway queues the
     // correction instead of rejecting, so the composer must NOT re-queue it.
-    const requestGateway = vi.fn(async () => ({ status: 'queued' }) as never)
+    const requestGateway = mockSteeringGateway()
 
     let handle: HarnessHandle | null = null
     const capturedStates: Record<string, unknown>[] = []
@@ -2678,8 +2732,10 @@ describe('usePromptActions redirectPrompt', () => {
     )
 
     expect(await handle!.redirectPrompt('build-window nudge')).toBe(true)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.input', {
       session_id: RUNTIME_SESSION_ID,
+      message_id: expect.any(String),
+      turn_id: 'test-turn',
       text: 'build-window nudge'
     })
     expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything())
@@ -2689,30 +2745,9 @@ describe('usePromptActions redirectPrompt', () => {
     })
   })
 
-  it('resumes the stored session and retries once when session.redirect reports "session not found"', async () => {
-    const STORED_SESSION_ID = 'stored-db-xyz789'
-    const RECOVERED_SESSION_ID = 'rt-recovered-456'
-    const calls: { method: string; params?: Record<string, unknown> }[] = []
-    let redirectAttempts = 0
-
-    const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
-      calls.push({ method, params })
-
-      if (method === 'session.redirect') {
-        redirectAttempts += 1
-
-        if (redirectAttempts === 1) {
-          throw new Error('session not found')
-        }
-
-        return { status: 'redirected' } as never
-      }
-
-      if (method === 'session.resume') {
-        return { session_id: RECOVERED_SESSION_ID } as never
-      }
-
-      return {} as never
+  it('does not retarget a stale runtime after reconnect', async () => {
+    const requestGateway = vi.fn(async () => {
+      throw new Error('session not found')
     })
 
     let handle: HarnessHandle | null = null
@@ -2721,17 +2756,12 @@ describe('usePromptActions redirectPrompt', () => {
         onReady={h => (handle = h)}
         refreshSessions={async () => undefined}
         requestGateway={requestGateway}
-        storedSessionId={STORED_SESSION_ID}
+        storedSessionId="stored"
       />
     )
-    await waitFor(() => expect(handle).not.toBeNull())
-
-    expect(await handle!.redirectPrompt('reconnect nudge')).toBe(true)
-    expect(calls.map(c => c.method)).toEqual(['session.redirect', 'session.resume', 'session.redirect'])
-    expect(calls[0]?.params).toEqual({ session_id: RUNTIME_SESSION_ID, text: 'reconnect nudge' })
-    expect(calls[1]?.params).toEqual({ session_id: STORED_SESSION_ID, source: 'desktop', omit_messages: true })
-    expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID, text: 'reconnect nudge' })
-    expect(handle!.activeSessionIdRef.current).toBe(RECOVERED_SESSION_ID)
+    await expect(handle!.redirectPrompt('reconnect nudge')).rejects.toThrow('session not found')
+    expect(requestGateway).toHaveBeenCalledOnce()
+    expect(requestGateway).toHaveBeenCalledWith('session.input.status', { session_id: RUNTIME_SESSION_ID })
   })
 })
 
@@ -5660,7 +5690,7 @@ describe('usePromptActions stale-closure session routing', () => {
   }
 
   it('redirects the live turn into the CURRENT session, not the stale closure session', async () => {
-    const requestGateway = vi.fn(async () => ({ status: 'redirected' }) as never) as unknown as GatewayMock
+    const requestGateway = mockSteeringGateway() as unknown as GatewayMock
     const { handle } = await renderWithStaleClosure(requestGateway)
 
     await handle.redirectPrompt('actually use Postgres')
@@ -5668,12 +5698,14 @@ describe('usePromptActions stale-closure session routing', () => {
     // A redirect reaches the model mid-turn. Sent to the stale session, the
     // correction lands in a conversation the user is no longer looking at —
     // this is the observed "session suddenly working on another chat's task".
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.input', {
       session_id: RUNTIME_SESSION_B,
+      message_id: expect.any(String),
+      turn_id: 'test-turn',
       text: 'actually use Postgres'
     })
     expect(requestGateway).not.toHaveBeenCalledWith(
-      'session.redirect',
+      'session.input',
       expect.objectContaining({ session_id: RUNTIME_SESSION_ID })
     )
   })
@@ -5790,8 +5822,7 @@ describe('usePromptActions stale-closure session routing', () => {
     )
 
     const submitted = requestGateway.mock.calls.find(call => call[0] === 'prompt.submit')?.[1] as
-      | Record<string, unknown>
-      | undefined
+      Record<string, unknown> | undefined
 
     expect(submitted).not.toHaveProperty('truncate_before_user_ordinal')
   })

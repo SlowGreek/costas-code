@@ -51,6 +51,14 @@ interface AuxTaskCopy {
 }
 
 export interface Translations {
+  steering: {
+    pending: string
+    committed: string
+    accepted: string
+    cancelled: string
+    recoverable: string
+    unknown: string
+  }
   common: {
     apply: string
     back: string

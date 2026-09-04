@@ -16,6 +16,13 @@ import { useI18n } from '@/i18n'
 import { textPart } from '@/lib/chat-messages'
 import { SLASH_COMMAND_RE } from '@/lib/chat-runtime'
 import { triggerHaptic } from '@/lib/haptics'
+import {
+  forgetSteeringAttempt,
+  mergeSteeringReceipt,
+  readSteeringAttempt,
+  rememberSteeringAttempt,
+  sendSteeringInput
+} from '@/lib/steering-input'
 import { clearClarifyRequest } from '@/store/clarify'
 import type { ComposerAttachment } from '@/store/composer'
 import { resetSessionBackground } from '@/store/composer-status'
@@ -367,84 +374,77 @@ export function useSessionTileActions({ requestGateway, runtimeId, scope, stored
   }, [bindRecoveredRuntime, copy.stopFailed, requestSessionGateway, update])
 
   const steerPrompt = useCallback(
-    async (rawText: string): Promise<boolean> => {
+    async (rawText: string, attachments?: ComposerAttachment[]): Promise<boolean> => {
       const text = rawText.trim()
       const sessionId = runtimeIdRef.current
 
-      if (!text || !sessionId) {
+      if ((!text && !attachments?.length) || !sessionId || attachments?.some(a => a.kind !== 'image')) {
         return false
       }
 
-      const messageId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const key = JSON.stringify([sessionId, text, (attachments ?? []).map(a => [a.kind, a.path])])
+      const previous = readSteeringAttempt(key)
+      const messageId = previous?.message_id ?? crypto.randomUUID()
+      const attempt = previous ?? { session_id: sessionId, message_id: messageId, text }
+      rememberSteeringAttempt(key, attempt)
 
       const mutate = (updater: (state: ClientSessionState) => ClientSessionState) =>
         sessionTileDelegate()?.updateSession(sessionId, updater)
 
-      // Match the primary composer: record the correction in arrival order —
-      // sealed already-streamed output above, correction below, post-redirect
-      // deltas below that — before awaiting the redirect RPC, whose completion
-      // can race us. The old insert-before-the-active-reply splice put the
-      // bubble above output the user had already read (#73793), and its
-      // last-assistant fallback could land it mid-thread when the stream id
-      // was missing or stale (#83151).
-      mutate(state =>
-        appendMidTurnUserMessage(state, {
-          id: messageId,
-          role: 'user' as const,
-          parts: [textPart(text)]
-        })
-      )
-
-      const discardOptimisticMessage = () =>
-        mutate(state => ({
-          ...state,
-          messages: state.messages.filter(message => message.id !== messageId)
-        }))
-
-      const moveOptimisticMessageToEnd = () =>
-        mutate(state => {
-          const message = state.messages.find(candidate => candidate.id === messageId)
-
-          return message
-            ? { ...state, messages: [...state.messages.filter(candidate => candidate.id !== messageId), message] }
-            : state
-        })
-
-      try {
-        const { result } = await withSessionNotFoundResume(
-          sessionId,
-          storedIdRef.current,
-          liveId => requestSessionGateway<{ status?: string }>('session.redirect', { session_id: liveId, text }),
-          {
-            requestGateway: requestSessionGateway,
-            onRecovered: bindRecoveredRuntime
-          }
+      if (!previous) {
+        mutate(state =>
+          appendMidTurnUserMessage(state, {
+            id: messageId,
+            role: 'user',
+            parts: [textPart(text || (attachments ?? []).map(a => a.label).join(', '))],
+            steering: { message_id: messageId, status: 'unknown' }
+          })
         )
-
-        if (result?.status === 'redirected') {
-          triggerHaptic('submit')
-
-          return true
-        }
-
-        if (result?.status === 'queued') {
-          moveOptimisticMessageToEnd()
-          triggerHaptic('submit')
-
-          return true
-        }
-      } catch {
-        discardOptimisticMessage()
-        // Swallow — the caller queues the text so nothing is lost.
-
-        return false
       }
 
-      discardOptimisticMessage()
+      const receipt = await sendSteeringInput(
+        requestSessionGateway,
+        attempt,
+        async () => {
+          if (!attachments?.length) {
+            return []
+          }
+
+          const synced = await syncAttachmentsForSubmit(sessionId, attachments, { updateComposerAttachments: false })
+
+          if (synced.sessionId !== sessionId) {
+            throw new Error('Attachment staging changed the target session')
+          }
+
+          const paths = synced.attachments.map(a => a.path).filter((p): p is string => Boolean(p))
+
+          if (paths.length !== attachments.length) {
+            throw new Error('Attachment staging incomplete')
+          }
+
+          return paths
+        },
+        prepared => rememberSteeringAttempt(key, prepared)
+      )
+
+      forgetSteeringAttempt(key)
+
+      if (['pending', 'committed', 'accepted', 'cancelled', 'recoverable'].includes(receipt.status)) {
+        mutate(state => ({
+          ...state,
+          messages: state.messages.map(m =>
+            m.id === messageId ? { ...m, steering: mergeSteeringReceipt(m.steering, receipt) } : m
+          )
+        }))
+
+        return true
+      }
+
+      mutate(state => ({ ...state, messages: state.messages.filter(m => m.id !== messageId) }))
 
       return false
     },
-    [bindRecoveredRuntime, requestSessionGateway]
+    [requestSessionGateway, syncAttachmentsForSubmit]
   )
 
   // Rewind primitive (interrupt-first for live turns, busy-retry) — shared with

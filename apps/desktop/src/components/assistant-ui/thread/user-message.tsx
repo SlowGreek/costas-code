@@ -13,10 +13,13 @@ import { useResizeObserver } from '@/hooks/use-resize-observer'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { StopFilled } from '@/lib/icons'
+import type { SteeringReceipt } from '@/lib/steering-input'
 import { cn } from '@/lib/utils'
 import { $gateway } from '@/store/gateway'
 import { notifyThreadEditOpen } from '@/store/thread-scroll'
 import { isWatchWindow } from '@/store/windows'
+
+import { SteeringStatus } from './steering-status'
 
 /** True when the user has a live text highlight (drag-select / triple-click). */
 export function hasTextSelection(): boolean {
@@ -267,6 +270,7 @@ export const UserMessage: FC<{
   const { t } = useI18n()
   const copy = t.assistant.thread
   const messageId = useAuiState(s => s.message.id)
+  const steering = useAuiState(s => s.message.metadata?.custom?.steering) as SteeringReceipt | undefined
   const content = useAuiState(s => s.message.content)
   const messageText = messageContentText(content)
   const threadRunning = useAuiState(s => s.thread.isRunning)
@@ -443,6 +447,7 @@ export const UserMessage: FC<{
         }
         messageId={messageId}
       >
+        <SteeringStatus status={steering?.status} />
         <ActionBarPrimitive.Root className="relative w-full max-w-full" data-slot="aui_user-bubble-actions">
           <div className="human-message-with-todos-wrapper flex w-full flex-col gap-0">
             <ReactionPicker

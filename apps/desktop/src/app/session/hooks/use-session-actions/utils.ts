@@ -1,6 +1,6 @@
 import { textWithoutReferenceLines } from '@/components/assistant-ui/reference-kinds'
 import { getSession } from '@/hermes'
-import { assistantTextPart, type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages'
+import { assistantTextPart, type ChatMessage, chatMessageText, textPart, toChatMessages } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
 import { parseErrorSurface } from '@/lib/error-surface'
@@ -39,7 +39,13 @@ import type { SessionProfileRoute } from '@/store/session-request-router'
 export { sessionMatchesStoredId }
 import { sessionOwnerRouteFromRow, type SessionOwnerScope } from '@/store/session-request-router'
 import { reportBackendContract, reportInstallMethodWarning } from '@/store/updates'
-import type { SessionCreateResponse, SessionInfo, SessionResumeResponse, SessionRuntimeInfo } from '@/types/hermes'
+import type {
+  SessionCreateResponse,
+  SessionInfo,
+  SessionMessage,
+  SessionResumeResponse,
+  SessionRuntimeInfo
+} from '@/types/hermes'
 
 import type { ClientSessionState } from '../../../types'
 
@@ -149,6 +155,7 @@ const _chatMessageFieldsExhaustive: {
 } = {}
 
 const COMPARED_FIELDS = [
+  'steering',
   'id',
   'role',
   'pending',
@@ -328,9 +335,7 @@ function persistedUserMatchesOptimistic(authoritative: ChatMessage, optimistic: 
   // sides to their visible text first. (Upstream renamed the fork's
   // textWithoutImageRefs to textWithoutReferenceLines — same job, and it now
   // strips every reference-line kind rather than only images.)
-  if (
-    textWithoutReferenceLines(authoritativeText).trim() === textWithoutReferenceLines(optimisticText).trim()
-  ) {
+  if (textWithoutReferenceLines(authoritativeText).trim() === textWithoutReferenceLines(optimisticText).trim()) {
     return true
   }
 
@@ -715,9 +720,9 @@ export function preserveLocalPendingTurnMessages(
         continue
       }
 
-        if (persistedUserMatchesOptimistic(authoritative, message)) {
-          continue
-        }
+      if (persistedUserMatchesOptimistic(authoritative, message)) {
+        continue
+      }
 
       if (
         textWithoutReferenceLines(chatMessageText(authoritative)) ===
@@ -843,7 +848,8 @@ export function appendLiveSessionProjection(messages: ChatMessage[], projection:
     !inflightStreaming &&
     !inflightError &&
     !queuedUser &&
-    !inflightCorrections.length
+    !inflightCorrections.length &&
+    !projection.inflight?.user_inputs?.length
   ) {
     return messages
   }
@@ -1015,7 +1021,27 @@ export function appendLiveSessionProjection(messages: ChatMessage[], projection:
     })
   }
 
-  return projected.length ? [...messages, ...projected] : messages
+  let combined = projected.length ? [...messages, ...projected] : messages
+
+  for (const input of projection.inflight?.user_inputs ?? []) {
+    if (!input.message_id) {
+      continue
+    }
+    const existing = combined.find(m => m.id === input.message_id || m.steering?.message_id === input.message_id)
+
+    if (existing) {
+      combined = combined.map(m => (m === existing ? { ...m, steering: input } : m))
+    } else {
+      combined = [
+        ...combined,
+        ...toChatMessages([
+          { role: 'user', content: input.content as SessionMessage['content'], display_metadata: { steering: input } }
+        ])
+      ]
+    }
+  }
+
+  return combined
 }
 
 function normalizedMessageText(message: ChatMessage): string {
@@ -1606,7 +1632,16 @@ export async function resolveSessionOwner(storedSessionId: null | string): Promi
 type SessionRuntimeStatePatch = Partial<
   Pick<
     ClientSessionState,
-    'branch' | 'cwd' | 'fast' | 'model' | 'personality' | 'provider' | 'reasoningEffort' | 'serviceTier' | 'usage' | 'yolo'
+    | 'branch'
+    | 'cwd'
+    | 'fast'
+    | 'model'
+    | 'personality'
+    | 'provider'
+    | 'reasoningEffort'
+    | 'serviceTier'
+    | 'usage'
+    | 'yolo'
   >
 >
 
@@ -1745,13 +1780,13 @@ export function applyRuntimeInfo(
       setCurrentUsage(current => ({ ...current, ...info.usage }))
     }
 
-      // Also seed the per-session twin. Callers spread the returned sessionState
-      // into updateSessionState, and the statusbar reads THAT for focused tiles —
-      // setting only the global mirror left a resumed/branched session's tile
-      // reading 0 tokens until its first turn completed.
-      if (info.usage) {
-        sessionState.usage = { calls: 0, input: 0, output: 0, total: 0, ...info.usage }
-      }
+    // Also seed the per-session twin. Callers spread the returned sessionState
+    // into updateSessionState, and the statusbar reads THAT for focused tiles —
+    // setting only the global mirror left a resumed/branched session's tile
+    // reading 0 tokens until its first turn completed.
+    if (info.usage) {
+      sessionState.usage = { calls: 0, input: 0, output: 0, total: 0, ...info.usage }
+    }
   }
 
   return sessionState

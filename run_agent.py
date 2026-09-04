@@ -3528,6 +3528,10 @@ class AIAgent:
                 _admit_hard_cancel()
             self._pending_redirect = None
 
+        inbox = getattr(self, "_user_input_inbox", None)
+        if inbox is not None:
+            inbox.close(cancelled=True)
+
         # Codex app-server owns its model/tool loop and watches a private
         # interrupt event rather than Hermes' per-thread flag.
         if getattr(self, "api_mode", None) == "codex_app_server":
@@ -3683,60 +3687,69 @@ class AIAgent:
                 self._pending_steer = None
         return True
 
-    def steer(self, text: str) -> bool:
+    def submit_user_input(self, content: Any, *, message_id: str, turn_id: str) -> dict:
+        """Accept identified user input for exactly one active generation."""
+        cleaned = _normalize_redirect_payload(content)
+        if not cleaned or not isinstance(message_id, str) or not message_id or len(message_id) > 128 or not isinstance(turn_id, str) or not turn_id or len(turn_id) > 256:
+            return {"message_id": message_id, "turn_id": turn_id, "status": "invalid"}
+        inbox = self._user_input_inbox
+        with inbox.lock:
+            if self._interrupt_requested:
+                inbox.close(cancelled=True)
+            native = self.redirect if getattr(self, "api_mode", None) == "codex_app_server" else None
+            return inbox.submit(cleaned, message_id=message_id, turn_id=turn_id, native=native)
+
+    def user_input_status(self, message_id: str) -> dict:
+        return self._user_input_inbox.status(message_id)
+
+    def _commit_pending_user_input(self, messages: list) -> list:
+        inbox = getattr(self, "_user_input_inbox", None)
+        receipts = inbox.commit(messages) if inbox else []
+        callback = getattr(self, "user_input_callback", None)
+        if receipts and callable(callback):
+            for receipt in receipts:
+                try:
+                    callback(receipt)
+                except Exception:
+                    logger.debug("User input receipt callback failed", exc_info=True)
+        return receipts
+
+    def steer(self, text: Any) -> bool:
+        """Add pending user input without cancelling the active response/tools.
+
+        Real turns use identified, turn-scoped input. Legacy bare-agent callers
+        retain the payload drain ABI. New UI clients use submit_user_input so
+        they can distinguish acceptance from commitment to model context.
         """
-        Inject a user message into the next tool result without interrupting.
-
-        Unlike interrupt(), this does NOT stop the current tool call. The
-        text is stashed and the agent loop appends it to the LAST tool
-        result's content once the current tool batch finishes. The model
-        sees the steer as part of the tool output on its next iteration.
-
-        Thread-safe: callable from gateway/CLI/TUI threads. Multiple calls
-        before the drain point concatenate with newlines.
-
-        Args:
-            text: The user text to inject. Empty strings are ignored.
-
-        Returns:
-            True if the steer was accepted, False if the text was empty.
-        """
-        if not text or not text.strip():
+        cleaned = _normalize_redirect_payload(text)
+        if not cleaned or getattr(self, "_interrupt_requested", False):
             return False
-        cleaned = text.strip()
+        if getattr(self, "api_mode", None) == "codex_app_server":
+            return self.redirect(cleaned)
+        inbox = getattr(self, "_user_input_inbox", None)
+        if inbox is not None and inbox.turn_id:
+            return self.submit_user_input(cleaned, message_id=uuid.uuid4().hex, turn_id=inbox.turn_id)["status"] == "pending"
         _lock = getattr(self, "_pending_steer_lock", None)
         if _lock is None:
             # Test stubs that built AIAgent via object.__new__ skip __init__.
             # Fall back to direct attribute set; no concurrent callers expected
             # in those stubs.
             existing = getattr(self, "_pending_steer", None)
-            self._pending_steer = (existing + "\n" + cleaned) if existing else cleaned
+            self._pending_steer = (existing + "\n" + cleaned) if isinstance(existing, str) and isinstance(cleaned, str) else _merge_redirect_payloads(existing, cleaned)
             return True
         with _lock:
             if self._pending_steer:
-                self._pending_steer = self._pending_steer + "\n" + cleaned
+                self._pending_steer = (self._pending_steer + "\n" + cleaned) if isinstance(self._pending_steer, str) and isinstance(cleaned, str) else _merge_redirect_payloads(self._pending_steer, cleaned)
             else:
                 self._pending_steer = cleaned
         return True
 
     def redirect(self, text: Any) -> bool:
-        """Redirect the active turn without converting it into a new task.
+        """Accept input for the active turn, preserving ongoing work.
 
-        During a normal Hermes model request this cancels only that request;
-        the conversation loop retains completed messages/tool results, records
-        the displayed partial reasoning as plain assistant context, appends the
-        correction as a real user message, and retries. During tool execution
-        it degrades to ``steer()`` so the tool can finish at a safe boundary.
-        Codex app-server has a native ``turn/steer`` operation and uses it
-        directly instead of cancelling.
-
-        ``text`` is normally a string, but may also be an OpenAI-style content
-        parts list (``[{"type": "text", ...}, {"type": "image_url", ...}]``) so
-        a correction can carry images. Parts survive to the conversation loop
-        intact; the adapters translate them per provider.
-
-        Returns ``False`` when there is no live turn or the correction is
-        empty, so surfaces can fall back to their existing next-turn queue.
+        Strings and OpenAI-style image content parts remain user content at
+        the next request boundary. Native Codex uses its own turn/steer
+        protocol. False means there is no accepting turn; it is not a Stop.
         """
         cleaned = _normalize_redirect_payload(text)
         if not cleaned:
@@ -3760,54 +3773,20 @@ class AIAgent:
                 except Exception:
                     logger.debug("Codex app-server turn/steer failed", exc_info=True)
                     return False
+            return False
 
-        # Never kill a tool merely to deliver conversational guidance. The
-        # existing steer drain puts it on the final tool result before the next
-        # model decision, including delegate_task children.
-        if getattr(self, "_executing_tools", False):
+        # Steer is pending input, not cancellation. The active response and
+        # every running tool finish normally before the next request boundary.
+        inbox = getattr(self, "_user_input_inbox", None)
+        if inbox is not None and inbox.turn_id:
             return self.steer(cleaned)
-
-        _model_active = getattr(self, "_model_request_active", None)
-        _redirect_lock = getattr(self, "_pending_redirect_lock", None)
-        if _redirect_lock is None:
-            if _model_active is None or not _model_active.is_set():
-                return False
-            existing = getattr(self, "_pending_redirect", None)
-            if self._interrupt_requested and not existing:
-                return False
-            self._pending_redirect = _merge_redirect_payloads(existing, cleaned)
-            self._interrupt_requested = True
-            self._interrupt_message = None
-        else:
-            with _redirect_lock:
-                if _model_active is None or not _model_active.is_set():
-                    # The response completed before we acquired the state lock.
-                    # Reject so the surface queues a new turn.
-                    return False
-                if self._interrupt_requested and not self._pending_redirect:
-                    return False
-                self._pending_redirect = _merge_redirect_payloads(
-                    self._pending_redirect, cleaned
-                )
-                self._interrupt_requested = True
-                self._interrupt_message = None
-
-        # Interrupt only the model request. Do not fan out to tool workers or
-        # child agents as interrupt() does.
-        _execution_thread_id = getattr(self, "_execution_thread_id", None)
-        if _execution_thread_id is not None:
-            _set_interrupt(True, _execution_thread_id)
-            self._interrupt_thread_signal_pending = False
-        else:
-            self._interrupt_thread_signal_pending = True
-        _abort_active_request = getattr(self, "_active_request_abort", None)
-        if callable(_abort_active_request):
-            try:
-                _abort_active_request("redirect_abort")
-            except Exception:
-                logger.debug("Failed to abort request for redirect", exc_info=True)
-        return True
-
+        active = getattr(self, "_model_request_active", None)
+        if self._interrupt_requested or not (
+            getattr(self, "_executing_tools", False)
+            or (active is not None and active.is_set())
+        ):
+            return False
+        return self.steer(cleaned)
     def _has_pending_redirect(self) -> bool:
         """Return whether an active-turn redirect is waiting to be applied."""
         _redirect_lock = getattr(self, "_pending_redirect_lock", None)
@@ -9003,7 +8982,7 @@ class AIAgent:
             "task_id": effective_task_id,
             "platform": getattr(self, "platform", None) or "",
         }
-        relay_turn_id = (
+        relay_turn_id = str(getattr(self, "_relay_pending_turn_id", None) or "") or (
             f"{session_id or 'session'}:{effective_task_id}:{uuid.uuid4().hex[:8]}"
         )
         self._relay_pending_turn_id = relay_turn_id

@@ -57,7 +57,6 @@ export function useComposerSubmit({
   activeQueueSessionKeyRef,
   attachments,
   busy,
-  compacting,
   clearDraft,
   disabled,
   draftRef,
@@ -202,12 +201,7 @@ export function useComposerSubmit({
         triggerHaptic('submit')
         clearDraft()
         dispatchSubmit(text)
-      } else if (
-        !compacting &&
-        !blockingPrompt &&
-        attachments.every(a => a.kind === 'image') &&
-        (text.trim() || attachments.length)
-      ) {
+      } else if (!blockingPrompt && attachments.every(a => a.kind === 'image') && (text.trim() || attachments.length)) {
         // Cursor-style stop-and-correct: interrupt the live turn and redirect
         // it with this text. redirect() preserves the shown reasoning/work; if
         // the turn already ended, steerDraft re-queues so nothing is lost.
@@ -253,7 +247,7 @@ export function useComposerSubmit({
     // because those are resolved by the turn-setup path a redirect bypasses.
     const steerable = attachments.every(a => a.kind === 'image')
 
-    if (!onSteer || !text || !steerable || SLASH_COMMAND_RE.test(text)) {
+    if (!onSteer || (!text && !attachments.length) || !steerable || SLASH_COMMAND_RE.test(text)) {
       return
     }
 
@@ -266,13 +260,21 @@ export function useComposerSubmit({
     // same screenshot can be submitted again as the next turn.
     scope.attachments.clear()
 
-    void Promise.resolve(onSteer(text, sent)).then(accepted => {
-      if (!accepted && activeQueueSessionKey) {
-        // Rejected (no live turn) — the words AND the images fall through to
-        // the next-turn queue rather than being dropped.
-        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: sent })
-      }
-    })
+    const submittedScope = activeQueueSessionKeyRef.current
+    void Promise.resolve(onSteer(text, sent))
+      .then(accepted => {
+        if (!accepted && submittedScope) {
+          enqueueQueuedPrompt(submittedScope, { text, attachments: sent })
+        }
+      })
+      .catch(() => {
+        // A timed-out write is uncertain, not a rejection. Never auto-queue it.
+        stashAt(submittedScope, text, sent)
+
+        if (activeQueueSessionKeyRef.current === submittedScope) {
+          loadIntoComposer(text, sent)
+        }
+      })
   }
 
   const queueDraft = () => {

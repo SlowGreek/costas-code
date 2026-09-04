@@ -3,6 +3,14 @@ import { defineFieldCopy } from '@/app/settings/field-copy'
 import type { Translations } from './types'
 
 export const zh: Translations = {
+  steering: {
+    pending: '等待中 · 下次模型请求时发送',
+    committed: '已加入模型上下文',
+    accepted: '原生运行时已接受',
+    cancelled: '已取消',
+    recoverable: '未发送 · 已保留以供恢复',
+    unknown: '发送状态未知 · 草稿已保留'
+  },
   common: {
     apply: '应用',
     back: '返回',

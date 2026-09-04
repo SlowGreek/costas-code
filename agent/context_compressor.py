@@ -501,6 +501,13 @@ _SUMMARY_END_MARKER = (
 _MERGED_PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
 _MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
 
+_INFLIGHT_REPLAY_MERGED_KEY = "_inflight_replay_merged"
+_INFLIGHT_TASK_REPLAY_HEADER = (
+    "[STILL IN PROGRESS — this is the active request, restated after the "
+    "compaction boundary because it was not finished yet. Continue it; do not "
+    "start over.]"
+)
+
 _SALVAGE_SUMMARY_MAX_CHARS = 8_000
 _SALVAGE_KEEP_RECENT_TOOLS = 2
 
@@ -6692,6 +6699,189 @@ This compaction should PRIORITISE preserving all information related to the focu
             return max(pair_end, head_end + 1)
         return adjusted
 
+    @classmethod
+    def _find_inflight_user_task(
+        cls, messages: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Return the user turn that is still awaiting completion, or ``None``.
+
+        Scans the WHOLE transcript, not just the compressible region: a cron
+        run's only user turn is the job prompt sitting in the protected head
+        (``protect_first_n`` keeps system + first user), which is exactly the
+        turn ``_find_last_user_message_idx`` cannot see (#100818).
+
+        A turn is in-flight when the transcript does not already end with a
+        completed assistant reply — i.e. a text-bearing assistant message with
+        no pending ``tool_calls``.  A trailing ``tool`` result or an assistant
+        message that still has ``tool_calls`` outstanding means the run was
+        interrupted mid-task and the instruction is still owed an answer.
+
+        Handoff carriers and synthetic scaffolding rows are excluded via the
+        same filter pair as ``_find_last_user_message_idx``, so an idle session
+        whose only user-role row is an inherited summary yields ``None`` and is
+        never re-animated (#80622).
+        """
+        from agent.conversation_compression import _is_real_user_message
+
+        last_user_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            # _is_real_user_message also rejects metadata-flagged scaffolding
+            # (_todo_snapshot_synthetic, recovery nudges, ...) that
+            # _is_actionable_user_turn cannot see.
+            if cls._is_actionable_user_turn(msg) and _is_real_user_message(msg):
+                last_user_idx = i
+                break
+            if isinstance(msg, dict) and msg.get(_INFLIGHT_REPLAY_MERGED_KEY):
+                # A previous cycle merged the live request onto this summary
+                # carrier; it is the only copy left, so it is still the task.
+                last_user_idx = i
+                break
+        if last_user_idx < 0:
+            return None
+
+        for msg in reversed(messages[last_user_idx + 1:]):
+            if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                # Trailing tool result (or anything else): still mid-task.
+                break
+            if msg.get("tool_calls"):
+                break
+            if _content_text_for_contains(msg.get("content")).strip():
+                # Final answer already delivered — replaying the ask would
+                # hand the model finished work as a fresh instruction.
+                return None
+            # Empty assistant row (a bare reasoning/stub turn): keep looking.
+        return messages[last_user_idx]
+
+    def _reappend_inflight_user_task(
+        self,
+        compressed: List[Dict[str, Any]],
+        inflight: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Restate an unfinished user task after the compaction handoff.
+
+        ``SUMMARY_PREFIX`` instructs the model to act only on a user message
+        that appears AFTER the summary, and to do nothing when none does.  When
+        the single in-flight instruction lived in the protected head, the
+        assembled transcript orders it before the handoff and the run ends in a
+        ``[SILENT]`` no-op that the scheduler records as success (#100818).
+
+        Re-append a copy of that turn after the surviving tail so the prefix's
+        "latest user message" pointer resolves to it again.  If the transcript
+        already ends on a template-visible user row, appending a second one
+        would break user/assistant alternation, so the restatement is merged
+        onto the handoff carrier instead — after ``_SUMMARY_END_MARKER``, which
+        is the boundary the prefix's rule is written against.
+        """
+        if inflight is None or not compressed:
+            return compressed
+
+        carrier_idx = -1
+        for idx in range(len(compressed) - 1, -1, -1):
+            if self._is_context_summary_message(compressed[idx]):
+                carrier_idx = idx
+                break
+        if carrier_idx < 0:
+            # No handoff was emitted — nothing reordered the instruction.
+            return compressed
+
+        for msg in compressed[carrier_idx + 1:]:
+            if self._is_actionable_user_turn(
+                msg
+            ) and not self._is_synthetic_compression_user_turn(msg):
+                # A real request already follows the summary.
+                return compressed
+
+        carrier = compressed[carrier_idx]
+        carrier_text = _content_text_for_contains(carrier.get("content"))
+        if _SUMMARY_END_MARKER not in carrier_text:
+            return compressed
+        if carrier_text.split(_SUMMARY_END_MARKER, 1)[1].strip():
+            # The _force_user_leading layout keeps the live request on the
+            # carrier itself, after the marker. Already actionable.
+            return compressed
+
+        task_text = _content_text_for_contains(inflight.get("content")).strip()
+        if _INFLIGHT_TASK_REPLAY_HEADER in task_text:
+            # Already a restatement from an earlier compaction (standalone row
+            # or merged onto a carrier): take the text after the header so a
+            # task that survives >1 cycle never stacks headers or drags the
+            # old summary along.
+            task_text = task_text.rsplit(_INFLIGHT_TASK_REPLAY_HEADER, 1)[1].strip()
+        if not task_text:
+            return compressed
+
+        if not self.quiet_mode:
+            logger.info(
+                "Re-appending the in-flight user task after the compaction "
+                "handoff so it stays actionable (#100818)"
+            )
+
+        last_visible_role = next(
+            (_template_visible_role(m) for m in reversed(compressed)
+             if _template_visible_role(m) is not None), None
+        )
+        if inflight.get(_INFLIGHT_REPLAY_MERGED_KEY):
+            # Only the restated intent, not the old summary, crosses again.
+            replay: Dict[str, Any] = {"role": "user", "content": task_text}
+        else:
+            replay = _fresh_compaction_message_copy(inflight)
+        # Strip a previous header in structured content without flattening the
+        # image parts that follow it. Text-only extraction loses those pixels.
+        content = inflight.get("content")
+        if isinstance(content, list):
+            parts = copy.deepcopy(content)
+            for idx in range(len(parts) - 1, -1, -1):
+                part = parts[idx]
+                text = part.get("text", "") if isinstance(part, dict) else ""
+                if _INFLIGHT_TASK_REPLAY_HEADER in text:
+                    suffix = text.rsplit(_INFLIGHT_TASK_REPLAY_HEADER, 1)[1].strip()
+                    parts = ([{"type": "text", "text": suffix}] if suffix else []) + parts[idx + 1:]
+                    break
+            replay["content"] = parts
+        metadata = inflight.get("display_metadata")
+        steering = metadata.get("steering") if isinstance(metadata, dict) else None
+        if steering:
+            replay["display_metadata"] = {"steering": copy.deepcopy(steering)}
+        replay.pop(_COMPACTION_TAIL_MARKER, None)
+        if isinstance(replay.get("content"), str):
+            # Plain text: rebuild from the header-stripped task text so a
+            # task surviving several compactions never stacks headers.
+            replay["content"] = _INFLIGHT_TASK_REPLAY_HEADER + "\n" + task_text
+        else:
+            # Multimodal parts: keep them, prepend the header text part.
+            replay["content"] = _append_text_to_content(
+                replay.get("content"),
+                _INFLIGHT_TASK_REPLAY_HEADER + "\n",
+                prepend=True,
+            )
+        drop_stale_api_content(replay)
+
+        if last_visible_role == "user":
+            # Alternation is judged on template-visible rows only (tool_calls /
+            # tool rows are exempt), so a user-pinned summary followed by a
+            # tool tail still "ends on user": a standalone user row would break
+            # the Mistral-style pre-flight check (#58753). Merge onto the
+            # carrier instead and flag it — the carrier's own metadata marks it
+            # synthetic, and without the flag _ensure_compressed_has_user_turn
+            # would insert a second copy of the same request.
+            if isinstance(replay["content"], list):
+                prior = carrier.get("content") or ""
+                prior_parts = copy.deepcopy(prior) if isinstance(prior, list) else [{"type": "text", "text": prior}]
+                carrier["content"] = prior_parts + replay["content"]
+            else:
+                carrier["content"] = _append_text_to_content(
+                    carrier.get("content"), "\n\n" + replay["content"],
+                )
+            if steering:
+                carrier["display_metadata"] = {**(carrier.get("display_metadata") or {}), "steering": copy.deepcopy(steering)}
+            carrier[_INFLIGHT_REPLAY_MERGED_KEY] = True
+            drop_stale_api_content(carrier)
+            return compressed
+
+        compressed.append(replay)
+        return compressed
+
     def _ensure_last_n_user_messages_in_tail(
         self,
         messages: List[Dict[str, Any]],
@@ -8522,9 +8712,11 @@ This compaction should PRIORITISE preserving all information related to the focu
                 _merge_summary_into_tail = False
             compressed.append(msg)
 
-        self.compression_count += 1
-
         compressed = self._sanitize_tool_pairs(compressed)
+        compressed = self._reappend_inflight_user_task(
+            compressed, self._find_inflight_user_task(messages)
+        )
+        self.compression_count += 1
 
         # Replace image parts in all compressed messages before the newest
         # image-bearing user turn with a short text placeholder. Without

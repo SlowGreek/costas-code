@@ -134,40 +134,21 @@ describe('useSessionTileActions sleep/wake session recovery', () => {
     expect($sessionTiles.get()[0]?.runtimeId).toBe(RECOVERED_SESSION_ID)
   })
 
-  it('resumes the stored session and retries once when session.redirect (steer) reports "session not found"', async () => {
-    const calls: { method: string; params?: Record<string, unknown> }[] = []
-    let redirectAttempts = 0
-
+  it('uses identified steer receipts and never retargets an uncertain write', async () => {
+    const calls: string[] = []
     requestGatewayMock.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
-      calls.push({ method, params })
+      calls.push(method)
 
-      if (method === 'session.redirect') {
-        redirectAttempts += 1
-
-        if (redirectAttempts === 1) {
-          throw new Error('session not found')
-        }
-
-        return { status: 'redirected' }
+      if (method === 'session.input.status' && !params?.message_id) {
+        return { status: 'active', turn_id: 'tile-turn' }
       }
-
-      if (method === 'session.resume') {
-        return { session_id: RECOVERED_SESSION_ID }
-      }
-
-      return {}
+      throw new Error('disconnected')
     })
-
     const { result } = renderTileActions()
-
-    const ok = await act(async () => result.current.steerPrompt('actually use Postgres'))
-
-    expect(ok).toBe(true)
-    expect(calls.map(c => c.method)).toEqual(['session.redirect', 'session.resume', 'session.redirect'])
-    expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID, text: 'actually use Postgres' })
-    expect($sessionTiles.get()[0]?.runtimeId).toBe(RECOVERED_SESSION_ID)
+    await expect(act(async () => result.current.steerPrompt('actually use Postgres'))).rejects.toThrow('disconnected')
+    expect(calls).toEqual(['session.input.status', 'session.input', 'session.input.status'])
+    expect($sessionTiles.get()[0]?.runtimeId).toBe(RUNTIME_SESSION_ID)
   })
-
   it('rebinds prompt.submit recovery to the tile without changing the foreground session', async () => {
     const calls: { method: string; params?: Record<string, unknown> }[] = []
     let submitAttempts = 0

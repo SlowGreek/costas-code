@@ -2286,6 +2286,14 @@ class ProcessRegistry:
                     result["timeout_note"] = timeout_note
                 return result
 
+            from agent.pending_user_input import has_pending_user_input
+            if has_pending_user_input():
+                return {
+                    "status": "steering_pending", "process_running": True,
+                    "command": session.command,
+                    "output": strip_ansi(session.output_buffer[-1000:]),
+                    "note": "User input is pending. Wait ended; the process is still running and was not cancelled.",
+                }
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break

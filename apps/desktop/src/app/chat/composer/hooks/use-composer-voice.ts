@@ -28,6 +28,7 @@ interface UseComposerVoiceArgs {
   focusInput: () => void
   insertText: (text: string) => void
   maxRecordingSeconds: number
+  onEnsureSession: ChatBarProps['onEnsureSession']
   /** Interrupt the in-flight agent turn (Stop-button seam) — fired when the
    *  user speaks over the model while it is still generating. */
   onInterrupt?: () => Promise<void> | void
@@ -50,6 +51,7 @@ export function useComposerVoice({
   focusInput,
   insertText,
   maxRecordingSeconds,
+  onEnsureSession,
   onTranscribeAudio,
   sessionId,
   target
@@ -113,6 +115,7 @@ export function useComposerVoice({
   const conversation = useRealtimeVoiceConversation({
     beforeConnect: () => wakePauseBarrierRef.current ?? undefined,
     enabled: voiceConversationActive,
+    ensureRuntimeSession: onEnsureSession,
     onFatalError: () => setVoiceConversationActive(false),
     runtimeSessionId: sessionId
   })

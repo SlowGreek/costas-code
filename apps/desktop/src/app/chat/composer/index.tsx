@@ -108,6 +108,7 @@ export function ChatBar({
   onPickFolders,
   onPickImages,
   onRemoveAttachment,
+  onEnsureSession,
   onSteer,
   onSubmit: onSubmitProp,
   onTranscribeAudio
@@ -985,6 +986,7 @@ export function ChatBar({
     focusInput,
     insertText,
     maxRecordingSeconds,
+    onEnsureSession,
     // Voice barge-in mid-generation halts the run like the Stop button.
     onInterrupt: haltRun,
     onSubmit,

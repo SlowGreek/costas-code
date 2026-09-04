@@ -20,6 +20,7 @@ function makeChatActions(): ChatActions {
     onPickFiles: vi.fn(),
     onPickFolders: vi.fn(),
     onPickImages: vi.fn(),
+    onEnsureSession: vi.fn(),
     onReload: vi.fn(),
     onRemoveAttachment: vi.fn(),
     onRestoreToMessage: vi.fn(),
@@ -88,12 +89,14 @@ describe('latestActions adapters', () => {
   it('leaves absent optional handlers undefined instead of always-truthy wrappers', () => {
     const chat = makeChatActions()
     chat.onDismissError = undefined
+    chat.onEnsureSession = undefined
     chat.onRestoreToMessage = undefined
     chat.onTranscribeAudio = undefined
 
     const adaptedChat = latestChatActions(chat)
 
     expect(adaptedChat.onDismissError).toBeUndefined()
+    expect(adaptedChat.onEnsureSession).toBeUndefined()
     expect(adaptedChat.onRestoreToMessage).toBeUndefined()
     expect(adaptedChat.onTranscribeAudio).toBeUndefined()
 
@@ -118,5 +121,21 @@ describe('latestActions adapters', () => {
     expect(adapted.onTranscribeAudio).toBeTypeOf('function')
     await expect(adapted.onTranscribeAudio!(new Blob())).resolves.toBe('latest')
     expect(staleTranscribe).not.toHaveBeenCalled()
+  })
+
+  it('forwards the latest session initializer to a brand-new chat', async () => {
+    const staleEnsure = vi.fn(async () => 'stale-session')
+    const latestEnsure = vi.fn(async () => 'voice-session')
+    const actions = makeChatActions()
+    actions.onEnsureSession = staleEnsure
+
+    const adapted = latestChatActions(actions)
+
+    actions.onEnsureSession = latestEnsure
+
+    expect(adapted.onEnsureSession).toBeTypeOf('function')
+    await expect(adapted.onEnsureSession!()).resolves.toBe('voice-session')
+    expect(staleEnsure).not.toHaveBeenCalled()
+    expect(latestEnsure).toHaveBeenCalledOnce()
   })
 })

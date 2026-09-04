@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emitGatewayEvent } from '@/contrib/events'
 import { startRealtimeVoiceConnection } from '@/lib/realtime-voice'
 import { $gateway } from '@/store/gateway'
+import { notifyError } from '@/store/notifications'
 import { $realtimeMissions } from '@/store/realtime-mission'
 import { setGatewayState } from '@/store/session'
 import { setWorkbenchArtifact, setWorkbenchLayout, setWorkbenchSelection } from '@/store/workbench'
@@ -472,6 +473,51 @@ describe('useRealtimeVoiceConversation', () => {
     act(() => hook.result.current.end())
     expect(close).toHaveBeenCalledOnce()
     expect(hook.result.current.status).toBe('idle')
+  })
+
+  it('creates a runtime session when voice starts from a brand-new chat', async () => {
+    const ensureRuntimeSession = vi.fn(async () => 'runtime-created-for-voice')
+
+    const hook = renderHook(
+      ({ enabled }) =>
+        useRealtimeVoiceConversation({
+          enabled,
+          ensureRuntimeSession,
+          runtimeSessionId: null
+        }),
+      { initialProps: { enabled: false } }
+    )
+
+    hook.rerender({ enabled: true })
+
+    await waitFor(() => expect(ensureRuntimeSession).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(startRealtimeVoiceConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ runtimeSessionId: 'runtime-created-for-voice' })
+      )
+    )
+    expect(hook.result.current.status).toBe('listening')
+  })
+
+  it('surfaces session creation failure and turns voice mode back off', async () => {
+    const onFatalError = vi.fn()
+    const createError = new Error('session create failed')
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        enabled: false,
+        ensureRuntimeSession: async () => {
+          throw createError
+        },
+        onFatalError,
+        runtimeSessionId: null
+      })
+    )
+
+    await expect(hook.result.current.start()).resolves.toBeUndefined()
+    expect(notifyError).toHaveBeenCalledWith(createError, 'Could not start voice session')
+    expect(onFatalError).toHaveBeenCalledOnce()
+    expect(startRealtimeVoiceConnection).not.toHaveBeenCalled()
   })
 
   it('retries durable transcript writes before surfacing failure', async () => {

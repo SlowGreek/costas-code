@@ -45,6 +45,7 @@ import { voiceStartReadiness } from './voice-start-readiness'
 interface RealtimeVoiceConversationOptions {
   beforeConnect?: () => Promise<void> | void
   enabled: boolean
+  ensureRuntimeSession?: () => Promise<string | null>
   onFatalError?: () => void
   onTranscript?: (entry: RealtimeTranscript) => void
   runtimeSessionId: null | string | undefined
@@ -88,6 +89,7 @@ const persistTranscriptWithRetry = async (
 export function useRealtimeVoiceConversation({
   beforeConnect,
   enabled,
+  ensureRuntimeSession,
   onFatalError,
   onTranscript,
   runtimeSessionId
@@ -166,18 +168,40 @@ export function useRealtimeVoiceConversation({
   const start = useCallback(async () => {
     const gateway = $gateway.get()
     const readiness = voiceStartReadiness({ hasGateway: !!gateway, sessionId: runtimeSessionId })
+    let targetSessionId = runtimeSessionId
 
     if (readiness.kind === 'wait-for-session') {
-      // A brand-new chat has no runtime session until its first message
-      // creates one. Park the intent instead of discarding it: the effect
-      // below starts as soon as the session lands, so the user does not have
-      // to press the button a second time.
-      pendingStartRef.current = true
+      if (!ensureRuntimeSession) {
+        pendingStartRef.current = true
 
-      return
+        return
+      }
+
+      const generation = startGenerationRef.current
+
+      try {
+        targetSessionId = await ensureRuntimeSession()
+      } catch (error) {
+        if (generation === startGenerationRef.current) {
+          notifyError(error, t.notifications.voice.couldNotStartSession)
+          onFatalError?.()
+        }
+
+        return
+      }
+
+      if (generation !== startGenerationRef.current) {
+        return
+      }
+
+      if (!targetSessionId) {
+        onFatalError?.()
+
+        return
+      }
     }
 
-    if (readiness.kind === 'fail' || !gateway || !runtimeSessionId) {
+    if (readiness.kind === 'fail' || !gateway || !targetSessionId) {
       const error = new Error(readiness.kind === 'fail' ? readiness.reason : 'Voice is unavailable')
       notifyError(error, t.notifications.voice.couldNotStartSession)
       onFatalError?.()
@@ -219,7 +243,7 @@ export function useRealtimeVoiceConversation({
 
             await persistTranscriptWithRetry(
               (method, params) => gateway.request(method, params),
-              runtimeSessionId,
+              targetSessionId,
               entry
             )
             failedTranscriptsRef.current.shift()
@@ -266,7 +290,7 @@ export function useRealtimeVoiceConversation({
             .then(() =>
               persistTranscriptWithRetry(
                 (method, params) => gateway.request(method, params),
-                runtimeSessionId,
+                targetSessionId,
                 entry
               )
             )
@@ -283,7 +307,7 @@ export function useRealtimeVoiceConversation({
         onUserSpeechStarted: missionRuntime.userSpeechStarted,
         profile: $activeGatewayProfile.get(),
         request: (method, params) => gateway.request(method, params),
-        runtimeSessionId,
+        runtimeSessionId: targetSessionId,
         signal: startAbort.signal
       })
 
@@ -295,7 +319,7 @@ export function useRealtimeVoiceConversation({
 
       startAbortRef.current = null
       connectionRef.current = connection
-      missionRuntime.focusSession(runtimeSessionId)
+      missionRuntime.focusSession(targetSessionId)
       missionRuntime.connectionOpened()
       pendingTranscriptionRef.current = () => connection.awaitPendingTranscription()
 
@@ -307,7 +331,7 @@ export function useRealtimeVoiceConversation({
       try {
         const history = await gateway.request<{ messages?: SessionMessage[] }>(
           'session.history',
-          { session_id: runtimeSessionId }
+          { session_id: targetSessionId }
         )
 
         const turns = recentRealtimeSeedTurns(history.messages ?? [], HISTORY_SEED_TURNS)
@@ -346,6 +370,7 @@ export function useRealtimeVoiceConversation({
   }, [
     beforeConnect,
     end,
+    ensureRuntimeSession,
     missionRuntime,
     onFatalError,
     onTranscript,

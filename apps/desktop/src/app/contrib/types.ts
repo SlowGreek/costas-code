@@ -43,6 +43,7 @@ export type ChatActions = Pick<
   | 'onPickImages'
   | 'onReload'
   | 'onRemoveAttachment'
+  | 'onEnsureSession'
   | 'onRestoreToMessage'
   | 'onRetryResume'
   | 'onSteer'

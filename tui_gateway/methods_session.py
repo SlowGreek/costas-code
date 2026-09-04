@@ -3723,36 +3723,17 @@ def _(rid, params: dict) -> dict:
 def _(rid, params: dict) -> dict:
     """Redirect the active model turn while preserving valid work/context."""
     text = (params.get("text") or "").strip()
-    images = [str(p) for p in (params.get("images") or []) if str(p).strip()]
-    if not text and not images:
+    if not text:
         return _err(rid, 4002, "text is required")
     session, err = _sess_nowait(params, rid)
     if err:
         return err
-    # Fork: drain images staged on the session by an earlier paste so a
-    # correction carries them too, de-duped against params["images"].
-    from tui_gateway.server import (
-        _enrich_with_attached_images,
-        _redirect_payload_with_images,
-    )
-
-    with session["history_lock"]:
-        for path in list(session.get("attached_images", []) or []):
-            if path not in images:
-                images.append(path)
-        if images:
-            session["attached_images"] = []
     agent = session.get("agent")
     # Turn-build window: a fresh turn flips running=True and kicks off an async
-    # agent build, so session["agent"] is briefly None. That is not an
-    # unsupported runtime — queue the correction server-side so it reaches the
-    # model as the next turn, instead of a misleading 4010 the client silently
-    # swallows into a lost follow-up.
+    # agent build, so session["agent"] is briefly None. Queue the correction as
+    # the next turn instead of rejecting a valid busy submission.
     if agent is None and session.get("running"):
-        # No agent yet, so no routing decision is possible — fall back to the
-        # same text enrichment a normal turn uses when native images are off.
-        queued = _enrich_with_attached_images(text, images) if images else text
-        _enqueue_prompt(session, queued, current_transport() or _stdio_transport)
+        _enqueue_prompt(session, text, current_transport() or _stdio_transport)
         session["last_active"] = time.time()
         return _ok(rid, {"status": "queued", "text": text})
     if (
@@ -3761,16 +3742,13 @@ def _(rid, params: dict) -> dict:
         or not hasattr(agent, "redirect")
     ):
         return _err(rid, 4010, "agent does not support active-turn redirect")
-    payload = _redirect_payload_with_images(agent, text, images) if images else text
     try:
-        accepted = agent.redirect(payload)
+        accepted = agent.redirect(text)
     except Exception as exc:
         return _err(rid, 5000, f"redirect failed: {exc}")
     if accepted:
         with session["history_lock"]:
             _record_inflight_correction(session, text)
-            # #84417: purge server-queue self-duplicates of the live original
-            # so post-turn drain cannot restart the pre-correction prompt.
             _drop_queued_duplicates_of_inflight_user(session)
             session["last_active"] = time.time()
     return _ok(

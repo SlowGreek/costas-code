@@ -4688,14 +4688,14 @@ class TestLoneSurrogatePersistence:
 
 
 class TestApiContentPersistence:
-    """Structured provider-replay sidecars survive SQLite round trips."""
+    """Match upstream: provider replay sidecars are text-only."""
 
     PARTS = [
         {"type": "text", "text": "Continue the original request."},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
     ]
 
-    def test_append_message_round_trips_structured_api_content(self, db):
+    def test_append_message_ignores_structured_api_content(self, db):
         db.create_session("s1", source="cli")
         db.append_message(
             "s1",
@@ -4704,10 +4704,10 @@ class TestApiContentPersistence:
             api_content=self.PARTS,
         )
 
-        assert db.get_messages("s1")[0]["api_content"] == self.PARTS
-        assert db.get_messages_as_conversation("s1")[0]["api_content"] == self.PARTS
+        assert db.get_messages("s1")[0]["api_content"] is None
+        assert "api_content" not in db.get_messages_as_conversation("s1")[0]
 
-    def test_batch_append_round_trips_structured_api_content(self, db):
+    def test_batch_append_ignores_structured_api_content(self, db):
         db.create_session("s1", source="cli")
         db.append_messages_batch(
             "s1",
@@ -4720,7 +4720,19 @@ class TestApiContentPersistence:
             ],
         )
 
-        assert db.get_messages_as_conversation("s1")[0]["api_content"] == self.PARTS
+        assert "api_content" not in db.get_messages_as_conversation("s1")[0]
+
+    def test_legacy_structured_api_content_is_dropped_on_read(self, db):
+        db.create_session("s1", source="cli")
+        db.append_message("s1", "user", "clean transcript")
+        legacy_value = db._encode_content(self.PARTS)
+        db._conn.execute(
+            "UPDATE messages SET api_content = ? WHERE session_id = ?",
+            (legacy_value, "s1"),
+        )
+
+        assert db.get_messages("s1")[0]["api_content"] is None
+        assert "api_content" not in db.get_messages_as_conversation("s1")[0]
 
 
 class TestDisplayMetadataPersistence:

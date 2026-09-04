@@ -281,7 +281,7 @@ describe('useComposerSubmit busy-turn routing', () => {
       hook.result.current.submitDraft()
     })
 
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course', []))
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course'))
     expect(queueCurrentDraft).not.toHaveBeenCalled()
     expect(onCancel).not.toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
@@ -342,10 +342,7 @@ describe('useComposerSubmit busy-turn routing', () => {
     expect(onCancel).not.toHaveBeenCalled()
   })
 
-  it('steers an image-bearing follow-up instead of queueing it', async () => {
-    // Images CAN ride a correction: session.redirect converts them to content
-    // parts. Queueing them (the old behaviour) delivered the screenshot after
-    // the work it was meant to correct.
+  it('queues an image-bearing follow-up while busy', () => {
     const image: ComposerAttachment = { id: 'shot', kind: 'image', label: 'screen.png', path: '/tmp/screen.png' }
 
     const { hook, onSteer, queueCurrentDraft } = renderSubmitHook({
@@ -358,26 +355,8 @@ describe('useComposerSubmit busy-turn routing', () => {
       hook.result.current.submitDraft()
     })
 
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('look at this', [image]))
-    expect(queueCurrentDraft).not.toHaveBeenCalled()
-  })
-
-  it('consumes a steered image so it cannot send again after the turn settles', async () => {
-    const image: ComposerAttachment = { id: 'shot', kind: 'image', label: 'screen.png', path: '/tmp/screen.png' }
-    $composerAttachments.set([image])
-
-    const { hook, onSteer } = renderSubmitHook({
-      attachments: [image],
-      busy: true,
-      text: 'look at this'
-    })
-
-    act(() => {
-      hook.result.current.submitDraft()
-    })
-
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('look at this', [image]))
-    expect($composerAttachments.get()).toEqual([])
+    expect(queueCurrentDraft).toHaveBeenCalledTimes(1)
+    expect(onSteer).not.toHaveBeenCalled()
   })
 
   it('queues a mixed image + file follow-up rather than steering', () => {
@@ -497,7 +476,7 @@ describe('useComposerSubmit with a clarify parked on the session', () => {
       hook.result.current.submitDraft()
     })
 
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course', []))
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course'))
     expect(gatewayRequest).toHaveBeenCalledWith('clarify.respond', { request_id: 'req-runtime-session', answer: '' })
   })
 
@@ -605,10 +584,7 @@ describe('useComposerSubmit with a blocking prompt parked on the session', () =>
       hook.result.current.submitDraft()
     })
 
-    // Fork: onSteer carries an images array (empty when the correction is
-    // text-only) so a redirect can ride image attachments; upstream's steer
-    // takes text alone.
-    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course', []))
+    await waitFor(() => expect(onSteer).toHaveBeenCalledWith('change course'))
     expect(queueCurrentDraft).not.toHaveBeenCalled()
   })
 

@@ -201,10 +201,8 @@ class TestFailoverRestartsPreflight:
     def test_every_fallback_activation_restarts_preflight(self):
         from agent import conversation_loop
 
-        # Upstream split run_conversation into a thin wrapper +
-        # _run_conversation_inner; the retry loop and the restart handler
-        # both live in the inner function now.
-        tree = ast.parse(textwrap.dedent(inspect.getsource(conversation_loop._run_conversation_inner)))
+        # The retry loop and restart handler live in the public conversation entry point.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(conversation_loop.run_conversation)))
 
         # Parent map so each site can be bound to its nearest enclosing loop.
         parents = {}
@@ -284,10 +282,8 @@ class TestFailoverRestartsPreflight:
         fresh preflight against the fallback's context window (#84733)."""
         from agent import conversation_loop
 
-        # Upstream split run_conversation into a thin wrapper +
-        # _run_conversation_inner; the retry loop and the restart handler
-        # both live in the inner function now.
-        tree = ast.parse(textwrap.dedent(inspect.getsource(conversation_loop._run_conversation_inner)))
+        # The retry loop and restart handler live in the public conversation entry point.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(conversation_loop.run_conversation)))
         handlers = [
             node
             for node in ast.walk(tree)

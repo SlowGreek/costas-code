@@ -14617,67 +14617,6 @@ def _enrich_with_attached_images(user_text: str, image_paths: list[str]) -> str:
     return text or "What do you see in this image?"
 
 
-def _redirect_payload_with_images(agent: Any, text: str, images: list[str]) -> Any:
-    """Build a redirect correction that carries images.
-
-    Mirrors the decision a normal turn makes (see the image-routing block in
-    the prompt runner) so a correction reaches the model the same way a fresh
-    message would:
-
-      native → OpenAI-style content parts; adapters translate per provider
-      text   → vision_analyze pre-pass, prepended as plain text
-
-    Every failure path degrades to the text form rather than raising: losing
-    the pixels is recoverable, but dropping the user's correction mid-turn is
-    not.
-    """
-    try:
-        from agent.image_routing import (
-            build_native_content_parts,
-            decide_image_input_mode,
-        )
-        from hermes_cli.config import load_config as _load_cfg_for_images
-
-        provider, model = _active_image_routing_identity(agent)
-        mode = decide_image_input_mode(
-            provider,
-            model,
-            _load_cfg_for_images(),
-            requested_provider=getattr(agent, "requested_provider", ""),
-        )
-        # Codex owns its own turn loop and takes steering as plain text.
-        if getattr(agent, "api_mode", "") == "codex_app_server":
-            mode = "text"
-    except Exception as exc:
-        print(
-            f"[tui_gateway] redirect image routing failed, using text: {exc}",
-            file=sys.stderr,
-        )
-        return _enrich_with_attached_images(text, images)
-
-    if mode != "native":
-        return _enrich_with_attached_images(text, images)
-
-    try:
-        parts, skipped = build_native_content_parts(text, images)
-        if skipped:
-            print(
-                f"[tui_gateway] redirect skipped {len(skipped)} unreadable image(s)",
-                file=sys.stderr,
-            )
-        # No image part survived (all unreadable) — the parts list would carry
-        # no pixels, so the text form is strictly more informative.
-        if any(p.get("type") == "image_url" for p in parts):
-            return parts
-    except Exception as exc:
-        print(
-            f"[tui_gateway] redirect native attach failed, using text: {exc}",
-            file=sys.stderr,
-        )
-
-    return _enrich_with_attached_images(text, images)
-
-
 def _clear_goal_continuation(session: dict | None) -> None:
     """Drop the goal-continuation marker once that turn is over.
 

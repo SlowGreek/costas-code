@@ -202,18 +202,10 @@ export function useComposerSubmit({
         triggerHaptic('submit')
         clearDraft()
         dispatchSubmit(text)
-      } else if (
-        !compacting &&
-        !blockingPrompt &&
-        attachments.every(a => a.kind === 'image') &&
-        (text.trim() || attachments.length)
-      ) {
+      } else if (!compacting && !blockingPrompt && !attachments.length && text.trim()) {
         // Cursor-style stop-and-correct: interrupt the live turn and redirect
         // it with this text. redirect() preserves the shown reasoning/work; if
         // the turn already ended, steerDraft re-queues so nothing is lost.
-        // Images ride along as content parts; a @file/@folder/terminal ref
-        // cannot, because it's resolved by the turn-setup path a redirect
-        // bypasses — those fall through to the queue below.
         steerDraft()
       } else if (payloadPresent) {
         // Attachments can't ride a redirect (no tool-result image carriage) —
@@ -249,28 +241,16 @@ export function useComposerSubmit({
 
     // Guard on live editor state, not the render-lagged `canSteer`: a redirect
     // fired on a fast Enter must not be dropped because state hasn't synced.
-    // Images can ride a correction; a @file/@folder/terminal ref cannot,
-    // because those are resolved by the turn-setup path a redirect bypasses.
-    const steerable = attachments.every(a => a.kind === 'image')
-
-    if (!onSteer || !text || !steerable || SLASH_COMMAND_RE.test(text)) {
+    if (!onSteer || !text || attachments.length > 0 || SLASH_COMMAND_RE.test(text)) {
       return
     }
 
-    const sent = cloneAttachments(attachments)
-
     triggerHaptic('submit')
     clearDraft()
-    // The correction owns these images now. Leaving their chips in the live
-    // composer makes the settled turn look like it still has a payload and the
-    // same screenshot can be submitted again as the next turn.
-    scope.attachments.clear()
 
-    void Promise.resolve(onSteer(text, sent)).then(accepted => {
+    void Promise.resolve(onSteer(text)).then(accepted => {
       if (!accepted && activeQueueSessionKey) {
-        // Rejected (no live turn) — the words AND the images fall through to
-        // the next-turn queue rather than being dropped.
-        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: sent })
+        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: [] })
       }
     })
   }

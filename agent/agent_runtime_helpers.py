@@ -4944,41 +4944,6 @@ def apply_pending_steer_to_tool_results(agent, messages: list, num_tool_msgs: in
 
 
 
-def take_steer_followup(agent) -> Optional[str]:
-    """Return pending /steer text that must reopen the turn, else ``None``.
-
-    Called at the turn-end boundary, where the model answered with no tool
-    calls. Appending to a tool result is impossible there, so the caller
-    records the text as a real user message and issues one more request
-    rather than stranding the steer until some later turn.
-    """
-    return agent._drain_pending_steer()
-
-
-def apply_steer_followup(messages: list, final_msg: dict, steer_text: str) -> None:
-    """Commit the model's answer, then queue ``steer_text`` as a user message.
-
-    Codex's turn loop reopens a turn when input is pending instead of ending
-    it: the finished assistant answer stays in history as ordinary context
-    and the user's text is appended as a real ``user`` item, so the next
-    request is a pure prefix-preserving append and prompt caching holds.
-
-    The normal tail here is the just-built assistant answer, so
-    assistant→user preserves strict alternation. If a transport already
-    committed an assistant item, the answer is folded into the correction
-    instead of creating assistant→assistant.
-    """
-    if messages and isinstance(messages[-1], dict) and messages[-1].get("role") == "assistant":
-        answer = final_msg.get("content") or ""
-        prefix = f"[Context from the assistant response]\n{answer}" if answer else ""
-        content = f"{prefix}\n\n{steer_text}" if prefix else steer_text
-        messages.append({"role": "user", "content": content})
-        return
-
-    messages.append(final_msg)
-    messages.append({"role": "user", "content": steer_text})
-
-
 def force_close_tcp_sockets(client: Any) -> int:
     """Abort in-flight TCP I/O by shutting down sockets WITHOUT closing FDs.
 

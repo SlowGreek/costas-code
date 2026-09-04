@@ -99,7 +99,7 @@ interface HarnessHandle {
   editMessage: (edited: Parameters<ReturnType<typeof usePromptActions>['editMessage']>[0]) => Promise<void>
   reloadFromMessage: (parentId: null | string) => Promise<void>
   restoreToMessage: (messageId: string, target?: { text?: string; userOrdinal?: number | null }) => Promise<void>
-  redirectPrompt: (text: string, attachments?: ComposerAttachment[]) => Promise<boolean>
+  redirectPrompt: (text: string) => Promise<boolean>
   /** @deprecated Use `redirectPrompt`. */
   steerPrompt: (text: string) => Promise<boolean>
   submitTextRaw: (text: string, options?: SubmitTextOptions) => Promise<boolean>
@@ -2448,42 +2448,6 @@ describe('usePromptActions redirectPrompt', () => {
     expect((capturedStates.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
       role: 'user',
       parts: [{ type: 'text', text: 'nudge the run' }]
-    })
-  })
-
-  it('stages each redirected image once before sending the correction', async () => {
-    $connection.set({ mode: 'local' } as never)
-
-    const image: ComposerAttachment = {
-      id: 'shot',
-      kind: 'image',
-      label: 'screen.png',
-      path: '/tmp/screen.png'
-    }
-
-    const requestGateway = vi.fn(async (method: string) => {
-      if (method === 'image.attach') {
-        return { attached: true, path: '/gateway/screen.png' } as never
-      }
-
-      return { status: 'redirected' } as never
-    })
-
-    let handle: HarnessHandle | null = null
-    await actRender(
-      <Harness
-        onReady={h => (handle = h)}
-        refreshSessions={async () => undefined}
-        requestGateway={requestGateway}
-      />
-    )
-
-    expect(await handle!.redirectPrompt('look at this', [image])).toBe(true)
-    expect(requestGateway.mock.calls.filter(([method]) => method === 'image.attach')).toHaveLength(1)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
-      session_id: RUNTIME_SESSION_ID,
-      text: 'look at this',
-      images: ['/gateway/screen.png']
     })
   })
 

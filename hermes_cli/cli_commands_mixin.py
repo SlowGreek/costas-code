@@ -3126,35 +3126,6 @@ class CLICommandsMixin:
             self._handle_goal_draft(objective)
             return
 
-        # /goal steer <text> — durable mid-loop course correction. Mirrors the
-        # gateway handler in tui_gateway/methods_tools.py so both drivers run
-        # the same goal lifecycle (the wake-parity bug came from exactly this
-        # kind of one-driver-only wiring).
-        if lower == "steer" or lower.startswith("steer "):
-            steer_arg = arg[len("steer"):].strip()
-            if not mgr.has_goal():
-                _cprint(f"  {_DIM}No active goal to steer. Set one with /goal <text>.{_RST}")
-                return
-            if not steer_arg or steer_arg.lower() == "show":
-                _cprint(f"  {mgr.render_steers()}")
-                return
-            if steer_arg.lower() == "clear":
-                prev = mgr.clear_steers()
-                _cprint(
-                    f"  ✓ Cleared {prev} steer{'s' if prev != 1 else ''}."
-                    if prev
-                    else f"  {_DIM}No steers to clear.{_RST}"
-                )
-                return
-            try:
-                added = mgr.add_steer(steer_arg)
-            except (RuntimeError, ValueError) as exc:
-                _cprint(f"  {_DIM}Could not steer: {exc}{_RST}")
-                return
-            _cprint(f"  ↪ Steering the goal: {added}")
-            _cprint(f"  {_DIM}Applied from the next step on.{_RST}")
-            return
-
         if lower == "pause":
             state = mgr.pause(reason="user-paused")
             if state is None:

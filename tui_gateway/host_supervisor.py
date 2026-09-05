@@ -49,6 +49,7 @@ MUTATOR_ROUTE_TABLE: dict[str, str] = {
 _REGISTRY_NAME = "dashboard-compute-host.json"
 _RESPAWN_WINDOW_SECS = 300.0
 _SHUTDOWN_TIMEOUT_SECS = 10.0
+_LOG_APPEND_LOCK = threading.Lock()
 
 
 def append_log_record(path: str | Path, record: str) -> None:
@@ -57,11 +58,14 @@ def append_log_record(path: str | Path, record: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     text = record if record.endswith("\n") else f"{record}\n"
     data = text.encode("utf-8", errors="replace")
-    fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        os.write(fd, data)
-    finally:
-        os.close(fd)
+    # Windows CRT O_APPEND is a seek followed by a write, not an atomic
+    # append across independent handles. Serialize this supervisor's writers.
+    with _LOG_APPEND_LOCK:
+        fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
 
 
 def _repo_root() -> Path:

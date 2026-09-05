@@ -222,9 +222,11 @@ class ComputeHost:
         """
         self._closed.set()
         budget = max(0.0, wait)
-        deadline = time.monotonic() + budget - min(_FLUSH_RESERVE_SECS, budget / 2.0)
+        # Python 3.11's Windows monotonic clock has coarse tick resolution.
+        # Use the high-resolution monotonic counter for subsecond reserves.
+        deadline = time.perf_counter() + budget - min(_FLUSH_RESERVE_SECS, budget / 2.0)
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 break
             with self._turn_futures_lock:

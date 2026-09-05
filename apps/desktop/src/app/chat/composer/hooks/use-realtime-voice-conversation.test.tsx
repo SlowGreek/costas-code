@@ -1,11 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { emitGatewayEvent } from '@/contrib/events'
 import { startRealtimeVoiceConnection } from '@/lib/realtime-voice'
 import { $gateway } from '@/store/gateway'
+import { notifyError } from '@/store/notifications'
+import { $activeGatewayProfile } from '@/store/profile'
 import { $realtimeMissions } from '@/store/realtime-mission'
-import { setGatewayState } from '@/store/session'
+import { $connection, setGatewayState } from '@/store/session'
 import { setWorkbenchArtifact, setWorkbenchLayout, setWorkbenchSelection } from '@/store/workbench'
 
 import { useRealtimeVoiceConversation } from './use-realtime-voice-conversation'
@@ -39,6 +41,11 @@ vi.mock('@/store/notifications', () => ({
 }))
 
 describe('useRealtimeVoiceConversation', () => {
+  afterEach(() => {
+    $activeGatewayProfile.set('default')
+    $connection.set(null)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     awaitPendingTranscription.mockImplementation(async () => {})
@@ -472,6 +479,186 @@ describe('useRealtimeVoiceConversation', () => {
     act(() => hook.result.current.end())
     expect(close).toHaveBeenCalledOnce()
     expect(hook.result.current.status).toBe('idle')
+  })
+
+  it('creates a runtime session when voice starts from a brand-new chat', async () => {
+    const ensureRuntimeSession = vi.fn(async () => 'runtime-created-for-voice')
+
+    const hook = renderHook(
+      ({ enabled }) =>
+        useRealtimeVoiceConversation({
+          enabled,
+          ensureRuntimeSession,
+          runtimeSessionId: null
+        }),
+      { initialProps: { enabled: false } }
+    )
+
+    hook.rerender({ enabled: true })
+
+    await waitFor(() => expect(ensureRuntimeSession).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(startRealtimeVoiceConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ runtimeSessionId: 'runtime-created-for-voice' })
+      )
+    )
+    expect(hook.result.current.status).toBe('listening')
+  })
+
+  it('keeps the created session owner for requests, history, and transcript writes', async () => {
+    const oldRequest = vi.fn(async () => ({}))
+    const ownerRequest = vi.fn(async () => ({}))
+    $gateway.set({ request: oldRequest } as never)
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        enabled: false,
+        ensureRuntimeSession: async () => {
+          // Session creation activates the selected agent before returning.
+          $gateway.set({ request: ownerRequest } as never)
+          $activeGatewayProfile.set('voice-owner')
+          $connection.set({ connectionId: 'owner-connection' } as never)
+
+          return 'runtime-on-owner'
+        },
+        runtimeSessionId: null
+      })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    const options = vi.mocked(startRealtimeVoiceConnection).mock.calls[0][0]
+    expect(options).toMatchObject({
+      connectionId: 'owner-connection',
+      profile: 'voice-owner',
+      runtimeSessionId: 'runtime-on-owner'
+    })
+    expect(ownerRequest).toHaveBeenCalledWith('session.history', { session_id: 'runtime-on-owner' })
+
+    // Later foreground changes must not redirect this connection's writes.
+    $gateway.set({ request: oldRequest } as never)
+    await options.request('voice.realtime.session', { session_id: 'runtime-on-owner' })
+    options.onTranscript?.({ id: 'voice-turn', role: 'user', text: 'Keep this on the owner.' })
+    await options.beforeToolCall?.()
+
+    expect(ownerRequest).toHaveBeenCalledWith('voice.realtime.session', { session_id: 'runtime-on-owner' })
+    expect(ownerRequest).toHaveBeenCalledWith('voice.realtime.transcript', {
+      session_id: 'runtime-on-owner',
+      item_id: 'voice-turn',
+      role: 'user',
+      text: 'Keep this on the owner.'
+    })
+    expect(oldRequest).not.toHaveBeenCalled()
+  })
+
+  it('keeps connection identity with its socket while waiting for microphone release', async () => {
+    const ownerRequest = vi.fn(async () => ({}))
+    const otherRequest = vi.fn(async () => ({}))
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        beforeConnect: async () => {
+          $gateway.set({ request: otherRequest } as never)
+          $activeGatewayProfile.set('other-profile')
+          $connection.set({ connectionId: 'other-connection' } as never)
+        },
+        enabled: false,
+        ensureRuntimeSession: async () => {
+          $gateway.set({ request: ownerRequest } as never)
+          $activeGatewayProfile.set('voice-owner')
+          $connection.set({ connectionId: 'owner-connection' } as never)
+
+          return 'runtime-on-owner'
+        },
+        runtimeSessionId: null
+      })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    expect(startRealtimeVoiceConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'owner-connection',
+        profile: 'voice-owner',
+        runtimeSessionId: 'runtime-on-owner'
+      })
+    )
+    expect(ownerRequest).toHaveBeenCalledWith('session.history', { session_id: 'runtime-on-owner' })
+    expect(otherRequest).not.toHaveBeenCalled()
+  })
+
+  it('fails without opening voice if session creation loses the gateway', async () => {
+    const onFatalError = vi.fn()
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        enabled: false,
+        ensureRuntimeSession: async () => {
+          $gateway.set(null)
+
+          return 'runtime-without-gateway'
+        },
+        onFatalError,
+        runtimeSessionId: null
+      })
+    )
+
+    await act(async () => {
+      await hook.result.current.start()
+    })
+
+    expect(onFatalError).toHaveBeenCalledOnce()
+    expect(notifyError).toHaveBeenCalledWith(expect.any(Error), 'Could not start voice session')
+    expect(startRealtimeVoiceConnection).not.toHaveBeenCalled()
+  })
+
+  it('does not open voice after cancellation during session creation', async () => {
+    let resolveSession!: (id: string) => void
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        enabled: false,
+        ensureRuntimeSession: () => new Promise<string>(resolve => (resolveSession = resolve)),
+        runtimeSessionId: null
+      })
+    )
+
+    let pending!: Promise<void>
+    act(() => {
+      pending = hook.result.current.start()
+    })
+    act(() => hook.result.current.end())
+    await act(async () => {
+      resolveSession('cancelled-runtime')
+      await pending
+    })
+
+    expect(startRealtimeVoiceConnection).not.toHaveBeenCalled()
+  })
+
+  it('surfaces session creation failure and turns voice mode back off', async () => {
+    const onFatalError = vi.fn()
+    const createError = new Error('session create failed')
+
+    const hook = renderHook(() =>
+      useRealtimeVoiceConversation({
+        enabled: false,
+        ensureRuntimeSession: async () => {
+          throw createError
+        },
+        onFatalError,
+        runtimeSessionId: null
+      })
+    )
+
+    await expect(hook.result.current.start()).resolves.toBeUndefined()
+    expect(notifyError).toHaveBeenCalledWith(createError, 'Could not start voice session')
+    expect(onFatalError).toHaveBeenCalledOnce()
+    expect(startRealtimeVoiceConnection).not.toHaveBeenCalled()
   })
 
   it('retries durable transcript writes before surfacing failure', async () => {

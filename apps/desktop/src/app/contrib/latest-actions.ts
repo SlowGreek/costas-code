@@ -10,12 +10,11 @@ import type { ChatActions, SidebarActions } from './types'
  * OPTIONAL handlers must stay optional. Several children gate on a handler's
  * *presence*, not just call it — `onDismissError` renders the dismiss button
  * only when it exists (assistant-message.tsx), `onRestoreToMessage` gates the
- * restore-confirm flow (thread/index.tsx), and `onTranscribeAudio` gates voice
- * recording/conversation (use-voice-recorder, use-voice-conversation). An
- * unconditional arrow wrapper is always truthy, which would render a dead
- * dismiss button and let voice recording proceed with no transcription backend.
- * So wrap an optional field only when it is currently present, and re-read the
- * latest value inside the wrapper for the stale-closure fix.
+ * restore-confirm flow (thread/index.tsx), and the voice handlers gate their
+ * respective recording/session paths. An unconditional arrow wrapper is always
+ * truthy, which would render a dead control or let voice proceed without its
+ * backend seam. So wrap an optional field only when it is currently present,
+ * and re-read the latest value inside the wrapper for the stale-closure fix.
  */
 function latestOptional<A extends unknown[], R>(
   read: () => ((...args: A) => R) | undefined
@@ -43,6 +42,7 @@ export function latestChatActions(actions: ChatActions): ChatActions {
     onPickFiles: (...args) => actions.onPickFiles(...args),
     onPickFolders: (...args) => actions.onPickFolders(...args),
     onPickImages: (...args) => actions.onPickImages(...args),
+    onEnsureSession: latestOptional(() => actions.onEnsureSession),
     onReload: (...args) => actions.onReload(...args),
     onRemoveAttachment: (...args) => actions.onRemoveAttachment(...args),
     onRestoreToMessage: latestOptional(() => actions.onRestoreToMessage),

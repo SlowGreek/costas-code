@@ -39,13 +39,14 @@ class PendingUserInput:
 class UserInputInbox:
     """Bounded, process-local receipts; committed IDs also live in history."""
 
-    def __init__(self, *, journal_path=None, history=()):
+    def __init__(self, *, journal_path=None, history=(), read_only=False):
         self.lock = threading.RLock()
         self.wakeup = threading.Event()
         self.turn_id: str | None = None
         self.accepting = False
         self.items: dict[str, PendingUserInput] = {}
         self.journal_path = journal_path
+        self.read_only = read_only
         if journal_path is not None:
             from pathlib import Path
             import json
@@ -69,7 +70,7 @@ class UserInputInbox:
                     self.items[item.message_id] = item
 
     def _save(self) -> None:
-        if self.journal_path is None:
+        if self.journal_path is None or self.read_only:
             return
         import json
         import os
@@ -118,7 +119,7 @@ class UserInputInbox:
                 if prior.turn_id != turn_id or prior.content != content:
                     return dict(receipt, status='conflict')
                 return prior.receipt()
-            if not self.accepting or turn_id != self.turn_id:
+            if self.read_only or not self.accepting or turn_id != self.turn_id:
                 return dict(receipt, status='stale')
             if len(self.items) >= 512:
                 return dict(receipt, status='full')

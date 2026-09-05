@@ -27,6 +27,21 @@ def test_journal_follows_only_compaction_lineage_not_explicit_branches(tmp_path,
     assert server._session_user_input_inbox(session('branch')).status('m')['status'] == 'unknown'
 
 
+def test_compute_parent_cold_resume_reads_child_receipts_without_writing(tmp_path, monkeypatch):
+    from tui_gateway import server
+    child = {'session_key':'same', 'profile_home':str(tmp_path), 'history':[]}
+    parent = dict(child)
+    monkeypatch.setattr(server, '_session_uses_compute_host', lambda s: s is parent)
+    server._start_inflight_turn(child, 'Original')
+    inbox = child['user_input_inbox']
+    inbox.submit('Keep correction', message_id='m', turn_id=inbox.turn_id)
+    before = inbox.journal_path.read_bytes()
+    projected = server._attach_todo_state({}, parent)
+    assert projected['inflight']['user_inputs'][0]['content'] == 'Keep correction'
+    server._start_inflight_turn(parent, 'Another')
+    assert inbox.journal_path.read_bytes() == before
+
+
 def test_resume_projects_recoverable_input_without_replaying_it(tmp_path):
     from tui_gateway import server
     session = {'session_key': 'durable', 'profile_home': str(tmp_path), 'history': [],

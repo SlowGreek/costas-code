@@ -9958,14 +9958,10 @@ def _session_user_input_inbox(session: dict):
     from agent.pending_user_input import UserInputInbox
     import hashlib
     inbox = session.get("user_input_inbox")
-    if _session_uses_compute_host(session):
-        # The child owns acceptance and the journal. The parent is only a
-        # projection/router; never let its stale snapshot replace child data.
-        if inbox is None or inbox.journal_path is not None:
-            inbox = UserInputInbox()
-            session["user_input_inbox"] = inbox
-        return inbox
-    if inbox is not None:
+    read_only = _session_uses_compute_host(session)
+    # The parent may project the child's durable receipts after cold resume,
+    # but only the process owning the active turn may mutate the journal.
+    if inbox is not None and inbox.read_only == read_only:
         return inbox
     key = str(session.get("session_key") or "")
     if not key:
@@ -9997,7 +9993,7 @@ def _session_user_input_inbox(session: dict):
                 key = parent_id
     filename = hashlib.sha256(key.encode("utf-8")).hexdigest() + ".json"
     inbox = UserInputInbox(journal_path=home / "pending-input" / filename,
-                           history=session.get("history") or [])
+                           history=session.get("history") or [], read_only=read_only)
     session["user_input_inbox"] = inbox
     return inbox
 

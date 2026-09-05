@@ -210,7 +210,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("queue", "Queue a prompt for the next turn (doesn't interrupt)", "Session",
                aliases=("q",), args_hint="<prompt>",
                busy_policy="dispatch", busy_handler="queue"),
-    CommandDef("steer", "Inject a message into the running turn (for a standing goal use /goal steer)", "Session",
+    CommandDef("steer", "Add pending input to the current turn (for a standing goal use /goal steer)", "Session",
                args_hint="<prompt>", busy_policy="dispatch", busy_handler="steer"),
     CommandDef("goal", "Set a standing goal Hermes works on across turns until achieved", "Session",
                args_hint="[text | draft <text> | steer <text> | show | gate add <cmd> | pause | resume | clear | status | wait <pid> | unwait]",

@@ -11,6 +11,14 @@ import { pathLabel, SLASH_COMMAND_RE } from '@/lib/chat-runtime'
 import { sanitizeComposerInput } from '@/lib/composer-input-sanitize'
 import { triggerHaptic } from '@/lib/haptics'
 import { setMutableRef } from '@/lib/mutable-ref'
+import {
+  forgetSteeringAttempt,
+  mergeSteeringReceipt,
+  readSteeringAttempt,
+  rememberSteeringAttempt,
+  sendSteeringInput,
+  type SteeringReceipt
+} from '@/lib/steering-input'
 import { normalize } from '@/lib/text'
 import { transcribeAudioClientDirect } from '@/lib/voice-client-direct'
 import { clearClarifyRequest } from '@/store/clarify'
@@ -50,8 +58,7 @@ import type {
   HandoffFailResponse,
   HandoffRequestResponse,
   HandoffStateResponse,
-  ImageAttachResponse,
-  SessionRedirectResponse
+  ImageAttachResponse
 } from '../../../types'
 
 import {
@@ -762,135 +769,90 @@ export function usePromptActions({
     }
   }, [activeSessionIdRef, busyRef, copy.stopFailed, requestGateway, selectedStoredSessionIdRef, updateSessionState])
 
-  // The desktop steering action is an immediate correction: the core cancels
-  // model generation and rebuilds the live turn with displayed reasoning and
-  // completed work intact. During a tool it waits for the safe result boundary.
-  // Returns false when the turn raced to completion so the composer can queue.
+  // Steer accepts pending input for the captured turn, without cancelling it.
   const redirectPrompt = useCallback(
     async (rawText: string, attachments?: ComposerAttachment[]): Promise<boolean> => {
       const text = sanitizeComposerInput(rawText).trim()
-      // Ref, not the closure-captured prop — see cancelRun above. A redirect
-      // reaches the live model mid-turn, so a stale target delivers the user's
-      // correction into a conversation they are no longer looking at.
       const sessionId = activeSessionIdRef.current
 
-      // Only images ride a correction. A @file/@folder/terminal ref is resolved
-      // by the turn-setup path a redirect bypasses, so the composer keeps those
-      // on the queue path and they must never reach here.
-      const imageAttachments = (attachments ?? []).filter(a => a?.kind === 'image')
-
-      if (!text || !sessionId) {
+      if ((!text && !attachments?.length) || !sessionId) {
         return false
       }
 
-      // Accepted whether the live turn was redirected in place or queued for
-      // the next turn (the build window, before the agent is wired) — either
-      // way the correction reaches the model, so record it once as a real user
-      // message after the interrupted checkpoint, matching the durable core
-      // transcript rather than a system note that changes role after reload.
-      const send = async (id: string): Promise<boolean> => {
-        // Redirect aborts the model request, so the completion event can race
-        // its RPC response. Record the correction *before* awaiting the
-        // gateway, in arrival order: sealed already-streamed output above,
-        // correction bubble below it, post-redirect deltas below that
-        // (#73793, #83151).
-        const messageId = appendSessionTextMessage(id, 'user', text, undefined, { appendAfterActiveReply: true })
-
-        const discardOptimisticMessage = () =>
-          updateSessionState(id, state => ({
-            ...state,
-            messages: state.messages.filter(message => message.id !== messageId)
-          }))
-
-        const moveOptimisticMessageToEnd = () =>
-          updateSessionState(id, state => {
-            const message = state.messages.find(candidate => candidate.id === messageId)
-
-            return message
-              ? { ...state, messages: [...state.messages.filter(candidate => candidate.id !== messageId), message] }
-              : state
-          })
-
-        try {
-          // Stage the images into the session workspace first — the gateway
-          // reads them off disk to build the content parts, so an unstaged
-          // local path (or a remote-mode path the backend can't see) would
-          // silently yield a text-only correction.
-          let images: string[] = []
-
-          if (imageAttachments.length) {
-            try {
-              const synced = await syncAttachmentsForSubmit(id, imageAttachments, {
-                updateComposerAttachments: false
-              })
-
-              // Upstream changed the return shape to { attachments, sessionId };
-              // the fork's call read the old bare array.
-              images = synced.attachments.map(a => a.path).filter((p): p is string => Boolean(p))
-            } catch (uploadErr) {
-              // Staging failed — send the words anyway. Losing the pixels is
-              // recoverable; dropping the correction mid-turn is not.
-              console.warn('[redirect] image staging failed, sending text only', uploadErr)
-            }
-          }
-
-          const result = await requestGateway<SessionRedirectResponse>('session.redirect', {
-            session_id: id,
-            text,
-            ...(images.length ? { images } : {})
-          })
-
-          if (result?.status === 'redirected') {
-            triggerHaptic('submit')
-
-            return true
-          }
-
-          if (result?.status === 'queued') {
-            // Build-window redirects become the next turn, not part of the
-            // active reply, so retain the optimistic row at the tail.
-            moveOptimisticMessageToEnd()
-            triggerHaptic('submit')
-
-            return true
-          }
-        } catch (err) {
-          discardOptimisticMessage()
-          throw err
-        }
-
-        discardOptimisticMessage()
-
+      if (attachments?.some(a => a.kind !== 'image')) {
         return false
       }
+
+      const displayText = text || (attachments ?? []).map(a => a.label).join(', ')
+      const key = JSON.stringify([sessionId, text, (attachments ?? []).map(a => [a.kind, a.path])])
+      const previous = readSteeringAttempt(key)
+
+      const messageId =
+        previous?.message_id ??
+        appendSessionTextMessage(sessionId, 'user', displayText, undefined, { appendAfterActiveReply: true })
+
+      if (!messageId) {
+        return false
+      }
+
+      const attempt = previous ?? { session_id: sessionId, message_id: messageId, text }
+      rememberSteeringAttempt(key, attempt)
+
+      const setReceipt = (steering: SteeringReceipt) =>
+        updateSessionState(sessionId, state => ({
+          ...state,
+          messages: state.messages.map(message =>
+            message.id === messageId
+              ? { ...message, steering: mergeSteeringReceipt(message.steering, steering) }
+              : message
+          )
+        }))
+
+      setReceipt({ message_id: messageId, status: 'unknown' })
 
       try {
-        // A stale runtime id after reconnect 404s ("session not found"): the
-        // shared resolver resumes the stored session and retries once, so a
-        // correction right after a reconnect isn't lost to the race.
-        const { result } = await withSessionNotFoundResume(sessionId, selectedStoredSessionIdRef.current, send, {
+        const receipt = await sendSteeringInput(
           requestGateway,
-          onRecovered: recoveredId => {
-            activeSessionIdRef.current = recoveredId
-            setActiveSessionId(recoveredId)
-          }
-        })
+          attempt,
+          async () => {
+            if (!attachments?.length) {
+              return []
+            }
 
-        return result
-      } catch {
-        // Swallow — caller queues the text so nothing is lost.
+            const synced = await syncAttachmentsForSubmit(sessionId, attachments, { updateComposerAttachments: false })
+
+            if (synced.sessionId !== sessionId) {
+              throw new Error('Attachment staging changed the target session')
+            }
+
+            const paths = synced.attachments.map(a => a.path).filter((p): p is string => Boolean(p))
+
+            if (paths.length !== attachments.length) {
+              throw new Error('Attachment staging incomplete')
+            }
+
+            return paths
+          },
+          prepared => rememberSteeringAttempt(key, prepared)
+        )
+
+        setReceipt(receipt)
+        forgetSteeringAttempt(key)
+
+        if (['pending', 'committed', 'accepted', 'cancelled', 'recoverable'].includes(receipt.status)) {
+          return true
+        }
+
+        updateSessionState(sessionId, state => ({ ...state, messages: state.messages.filter(m => m.id !== messageId) }))
+
+        return false // Confirmed rejection only. Composer queues the intact payload.
+      } catch (error) {
+        // Unknown delivery must not turn into an automatic duplicate next turn.
+        setReceipt({ message_id: messageId, turn_id: attempt.turn_id, status: 'unknown' })
+        throw error // Composer restores the draft; the row never says accepted.
       }
-
-      return false
     },
-    [
-      activeSessionIdRef,
-      appendSessionTextMessage,
-      requestGateway,
-      selectedStoredSessionIdRef,
-      syncAttachmentsForSubmit,
-      updateSessionState
-    ]
+    [activeSessionIdRef, appendSessionTextMessage, requestGateway, syncAttachmentsForSubmit, updateSessionState]
   )
 
   // After a durable rewind the surviving bubbles' cached rowIds are stale (the

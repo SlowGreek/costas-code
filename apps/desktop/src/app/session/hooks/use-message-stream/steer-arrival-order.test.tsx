@@ -36,8 +36,12 @@ let redirect: ((text: string) => Promise<boolean>) | null = null
 let states: Map<string, ClientSessionState>
 
 /** The gateway accepts every redirect — these suites pin CLIENT ordering. */
-const requestGatewayMock = vi.fn(async (method: string): Promise<unknown> =>
-  method === 'session.redirect' ? { status: 'redirected' } : {}
+const requestGatewayMock = vi.fn(async (method: string, params?: Record<string, unknown>): Promise<unknown> =>
+  method === 'session.input.status'
+    ? { status: 'active', turn_id: 'turn' }
+    : method === 'session.input'
+      ? { status: 'pending', turn_id: 'turn', message_id: params?.message_id }
+      : {}
 )
 
 const requestGateway = requestGatewayMock as unknown as <T>(
@@ -142,6 +146,20 @@ describe('steer mid-turn keeps arrival order (user bubble never above prior outp
     cleanup()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('changes only the identified user row from pending to committed', async () => {
+    await mountHarness()
+    emit({ payload: {}, session_id: SID, type: 'message.start' })
+    await steer('Correction')
+    const user = states.get(SID)!.messages.find(m => m.role === 'user')!
+    expect(user.steering?.status).toBe('pending')
+    emit({
+      payload: { message_id: user.id, turn_id: 'turn', status: 'committed' },
+      session_id: SID,
+      type: 'message.input'
+    })
+    expect(states.get(SID)!.messages.find(m => m.id === user.id)?.steering?.status).toBe('committed')
   })
 
   it('orders pre-steer output → steer → post-steer output → settled reply', async () => {

@@ -88,6 +88,8 @@ def test_mutator_route_table_matches_prd_inventory():
         "session.interrupt": "turn-path",
         "reload.mcp": "run-concurrent",
         "session.save": "run-concurrent",
+        "session.input": "run-concurrent",
+        "session.input.status": "run-concurrent",
         "session.compress": "idle-gated",
         "prompt.submit.truncate": "idle-gated",
         "slash.model": "idle-gated",

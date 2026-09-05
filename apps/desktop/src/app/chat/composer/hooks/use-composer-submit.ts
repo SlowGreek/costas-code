@@ -3,6 +3,7 @@ import { type RefObject, useLayoutEffect, useRef } from 'react'
 import { usePaneVisible } from '@/components/pane-shell/pane-visibility'
 import { SLASH_COMMAND_RE } from '@/lib/chat-runtime'
 import { triggerHaptic } from '@/lib/haptics'
+import { readSteeringAttempt } from '@/lib/steering-input'
 import { hasClarifyRequest, skipClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, type ComposerAttachment } from '@/store/composer'
 import { resetBrowseState } from '@/store/composer-input-history'
@@ -57,7 +58,6 @@ export function useComposerSubmit({
   activeQueueSessionKeyRef,
   attachments,
   busy,
-  compacting,
   clearDraft,
   disabled,
   draftRef,
@@ -190,6 +190,15 @@ export function useComposerSubmit({
 
     if (queueEdit) {
       exitQueuedEdit('save')
+    } else if (
+      payloadPresent &&
+      sessionId &&
+      attachments.every(a => a.kind === 'image') &&
+      readSteeringAttempt(JSON.stringify([sessionId, text.trim(), attachments.map(a => [a.kind, a.path])]))
+    ) {
+      // A lost steering acknowledgement cannot become a new ordinary turn
+      // merely because the original turn settled before the user retried.
+      steerDraft()
     } else if (busy) {
       // Slash commands should execute immediately even while the agent is
       // busy — they're client-side operations (/yolo, /skin, /new, /help,
@@ -202,15 +211,9 @@ export function useComposerSubmit({
         triggerHaptic('submit')
         clearDraft()
         dispatchSubmit(text)
-      } else if (
-        !compacting &&
-        !blockingPrompt &&
-        attachments.every(a => a.kind === 'image') &&
-        (text.trim() || attachments.length)
-      ) {
-        // Cursor-style stop-and-correct: interrupt the live turn and redirect
-        // it with this text. redirect() preserves the shown reasoning/work; if
-        // the turn already ended, steerDraft re-queues so nothing is lost.
+      } else if (!blockingPrompt && attachments.every(a => a.kind === 'image') && (text.trim() || attachments.length)) {
+        // Soft steering preserves the current response. Confirmed stale
+        // input falls back to Queue; uncertain delivery retains its identity.
         // Images ride along as content parts; a @file/@folder/terminal ref
         // cannot, because it's resolved by the turn-setup path a redirect
         // bypasses — those fall through to the queue below.
@@ -241,9 +244,8 @@ export function useComposerSubmit({
     focusInput()
   }
 
-  // Redirect the live turn with a correction. The gateway either restarts the
-  // active model request with its displayed context or waits for the current
-  // tool boundary. If the turn already ended, queue the words instead.
+  // Submit identified input for the next safe request boundary. Never abort
+  // generation. Only confirmed rejection may fall back to a queued turn.
   const steerDraft = () => {
     const text = draftRef.current.trim()
 
@@ -253,7 +255,7 @@ export function useComposerSubmit({
     // because those are resolved by the turn-setup path a redirect bypasses.
     const steerable = attachments.every(a => a.kind === 'image')
 
-    if (!onSteer || !text || !steerable || SLASH_COMMAND_RE.test(text)) {
+    if (!onSteer || (!text && !attachments.length) || !steerable || SLASH_COMMAND_RE.test(text)) {
       return
     }
 
@@ -266,13 +268,21 @@ export function useComposerSubmit({
     // same screenshot can be submitted again as the next turn.
     scope.attachments.clear()
 
-    void Promise.resolve(onSteer(text, sent)).then(accepted => {
-      if (!accepted && activeQueueSessionKey) {
-        // Rejected (no live turn) — the words AND the images fall through to
-        // the next-turn queue rather than being dropped.
-        enqueueQueuedPrompt(activeQueueSessionKey, { text, attachments: sent })
-      }
-    })
+    const submittedScope = activeQueueSessionKeyRef.current
+    void Promise.resolve(onSteer(text, sent))
+      .then(accepted => {
+        if (!accepted && submittedScope) {
+          enqueueQueuedPrompt(submittedScope, { text, attachments: sent })
+        }
+      })
+      .catch(() => {
+        // A timed-out write is uncertain, not a rejection. Never auto-queue it.
+        stashAt(submittedScope, text, sent)
+
+        if (activeQueueSessionKeyRef.current === submittedScope) {
+          loadIntoComposer(text, sent)
+        }
+      })
   }
 
   const queueDraft = () => {

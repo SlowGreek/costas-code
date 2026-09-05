@@ -1,0 +1,86 @@
+name: Steering v2 contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [users/costaspanay/steering-v2, costas-code]
+  pull_request:
+    paths:
+      - 'agent/**'
+      - 'run_agent.py'
+      - 'tui_gateway/**'
+      - 'tools/process_registry.py'
+      - 'apps/desktop/src/**'
+      - 'tests/agent/**steer**'
+      - 'tests/tui_gateway/**steer**'
+      - '.github/workflows/steering-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steering-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: '0.9.28'
+      - run: uv sync --locked --python 3.11 --extra dev --extra anthropic --extra messaging
+      - name: Real loop, gateway, images, Goals, stop and compaction
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: >-
+          scripts/run_tests.sh -j 1
+          tests/agent/test_steering_v2.py
+          tests/agent/test_pending_user_input.py
+          tests/agent/test_user_input_recovery.py
+          tests/agent/test_steering_v2_review.py
+          tests/agent/test_steering_v2_compaction_images.py
+          tests/agent/test_steer_followup_failure.py
+          tests/agent/test_compression_busy_steer_anchor.py
+          tests/agent/test_cron_inflight_prompt_reappend_100818.py
+          tests/agent/test_redirect_with_images.py
+          tests/run_agent/test_steer.py
+          tests/tui_gateway/test_steering_v2_protocol.py
+          tests/tui_gateway/test_steering_v2_recovery.py
+          tests/tui_gateway/test_compute_host_phase1.py
+          tests/tui_gateway/test_redirect_images_rpc.py
+          tests/tui_gateway/test_goal_wake_and_steer.py
+          tests/hermes_cli/test_goal_steer_parity.py
+          -q --tb=short
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Composer, receipt, reconnect, and queue/stop contracts
+        run: >-
+          npm exec --workspace apps/desktop -- vitest run
+          src/lib/steering-input.test.ts
+          src/lib/steering-attempt-storage.test.ts
+          src/components/assistant-ui/thread/steering-status.test.tsx
+          src/app/chat/composer/hooks/use-composer-submit.test.tsx
+          src/app/chat/session-tile-actions.test.ts
+          src/app/session/hooks/use-prompt-actions/index.test.tsx
+          src/app/session/hooks/use-message-stream/steer-arrival-order.test.tsx
+      - run: npm exec --workspace apps/desktop -- tsc -p . --noEmit
+      - name: Build desktop and exercise real steering UI
+        working-directory: apps/desktop
+        run: |
+          node -e "require(require('node:path').join(require('node:path').dirname(require.resolve('electron/package.json')), 'install.js'))"
+          npm run build
+          npm exec -- playwright test e2e/steering-v2.spec.ts --workers=1 --reporter=line

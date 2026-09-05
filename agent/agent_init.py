@@ -906,6 +906,8 @@ def init_agent(
     agent._client_lock = threading.RLock()
     agent._model_request_active = threading.Event()
     agent._supports_active_turn_redirect = True
+    from agent.pending_user_input import UserInputInbox
+    agent._user_input_inbox = UserInputInbox()
 
     # /steer mechanism — inject a user note into the next tool result
     # without interrupting the agent. Unlike interrupt(), steer() does

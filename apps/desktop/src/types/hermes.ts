@@ -1,3 +1,4 @@
+import type { SteeringReceipt } from '@/lib/steering-input'
 export interface ConfigFieldSchema {
   category?: string
   description?: string
@@ -546,6 +547,7 @@ export interface SessionInfo {
 }
 
 export type TimelineDisplayMetadata =
+  | { steering: SteeringReceipt }
   | { model: string; provider?: string }
   | {
       delegation_id: string
@@ -628,6 +630,8 @@ export interface SessionResumeResponse {
   }
   hydrating?: boolean
   inflight?: null | {
+    turn_id?: string
+    user_inputs?: Array<SteeringReceipt & { content: string | Array<Record<string, unknown>> }>
     assistant?: string
     /** Mid-turn redirect corrections, oldest first. The turn's original prompt
      *  stays in `user`; these are the follow-ups typed while it ran. */

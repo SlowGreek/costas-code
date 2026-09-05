@@ -1293,6 +1293,9 @@ def _interrupt_session_turn(
 
     with session["history_lock"]:
         session["_turn_cancel_requested"] = True
+        inbox = session.get("user_input_inbox")
+        if inbox is not None:
+            inbox.close(cancelled=True)
         session["queued_prompt"] = None
         session.pop("queued_prompts", None)
         session["_queued_prompt_generation"] = int(
@@ -1310,6 +1313,10 @@ def _interrupt_session_turn(
                     session["running"] = False
                     _clear_inflight_turn(session)
 
+    if inbox is not None:
+        for item in inbox.snapshot():
+            if item["status"] == "cancelled":
+                _emit("message.input", sid, {k: item[k] for k in ("message_id", "turn_id", "status")})
     _clear_pending(sid)
     try:
         from tools.approval import resolve_gateway_approval
@@ -2710,6 +2717,20 @@ def _relay_compute_host_rpc(message: dict) -> bool:
                 pending = session.get("_compute_host_pending_clarify")
                 if isinstance(pending, dict) and pending.get("request_id") == request_id:
                     session.pop("_compute_host_pending_clarify", None)
+    if isinstance(params, dict) and params.get("type") == "message.input":
+        session = _sessions.get(str(params.get("session_id") or ""))
+        receipt = params.get("payload")
+        if session is not None and isinstance(receipt, dict):
+            with session["history_lock"]:
+                if receipt.get("status") in ("committed", "cancelled", "recoverable") and receipt.get("message_id"):
+                    terminal = session.setdefault("_host_input_receipts", {})
+                    terminal[receipt["message_id"]] = receipt
+                    if len(terminal) > 512:
+                        terminal.pop(next(iter(terminal)))
+                session["_host_user_inputs"] = [
+                    {**item, **receipt} if item.get("message_id") == receipt.get("message_id") else item
+                    for item in (session.get("_host_user_inputs") or [])
+                ]
     return write_json(message)
 
 
@@ -2874,6 +2895,30 @@ def _submit_prompt_to_compute_host(
         if image_paths is None:
             session["attached_images"] = []
     return _ok(rid, {"status": "streaming", "turn_isolation": True})
+
+
+def _route_user_input_to_compute_host(rid, params: dict, session: dict, route_name: str) -> dict | None:
+    if not _session_uses_compute_host(session):
+        return None
+    sid = str(params.get("session_id") or "")
+    with session["history_lock"]:
+        generation = (session.get("inflight_turn") or {}).get("turn_id")
+    try:
+        ack = _get_compute_host_supervisor().control(sid, route_name=route_name, payload={"params": params})
+    except Exception:
+        return _err(rid, 5000, "Compute-host input receipt unavailable; delivery is unknown")
+    response = ack.get("rpc_response")
+    if not isinstance(response, dict):
+        return _err(rid, 5000, "Compute-host input receipt unavailable; delivery is unknown")
+    with session["history_lock"]:
+        if (session.get("inflight_turn") or {}).get("turn_id") == generation:
+            terminal = session.get("_host_input_receipts") or {}
+            session["_host_user_inputs"] = [
+                {**item, **terminal.get(item.get("message_id"), {})}
+                for item in (ack.get("user_inputs") or [])
+            ]
+            session["_host_input_turn_id"] = ack.get("turn_id")
+    return {**response, "id": rid}
 
 
 def _send_compute_host_control(
@@ -7915,6 +7960,14 @@ def _attach_todo_state(payload: dict, session: dict) -> dict:
     state = _session_todo_state(session)
     if state is not None:
         payload["todo_state"] = state
+    inbox = _session_user_input_inbox(session)
+    recovered = inbox.recovered_inputs() if inbox else []
+    if recovered:
+        inflight = dict(payload.get("inflight") or {"user": "", "assistant": "", "streaming": False})
+        existing = inflight.get("user_inputs") or []
+        ids = {item.get("message_id") for item in existing}
+        inflight["user_inputs"] = existing + [i for i in recovered if i["message_id"] not in ids]
+        payload["inflight"] = inflight
     return payload
 
 
@@ -9900,9 +9953,72 @@ def _inflight_text(value: Any) -> str:
     return _content_display_text(value).strip()
 
 
+def _session_user_input_inbox(session: dict):
+    """Profile-scoped durable acceptance, never automatic replay after restart."""
+    from agent.pending_user_input import UserInputInbox
+    import hashlib
+    inbox = session.get("user_input_inbox")
+    read_only = _session_uses_compute_host(session)
+    # The parent may project the child's durable receipts after cold resume,
+    # but only the process owning the active turn may mutate the journal.
+    if inbox is not None and inbox.read_only == read_only:
+        return inbox
+    key = str(session.get("session_key") or "")
+    if not key:
+        return None
+    home = Path(session.get("profile_home") or get_hermes_home())
+    # Only compression continuations share a receipt journal. Explicit forks
+    # and delegated children must never inherit their parent's pending input.
+    if (home / 'state.db').is_file():
+        with _session_db(session) as db:
+            seen = set()
+            for _ in range(100):
+                if key in seen:
+                    raise ValueError('Cyclic steering session lineage')
+                seen.add(key)
+                row = db.get_session(key) if db is not None else None
+                if not isinstance(row, dict):
+                    break
+                config = row.get('model_config') or {}
+                if isinstance(config, str):
+                    config = json.loads(config)
+                if isinstance(config, dict) and config.get('_branched_from'):
+                    break
+                parent_id = row.get('parent_session_id')
+                if not isinstance(parent_id, str) or not parent_id or db is None:
+                    break
+                parent = db.get_session(parent_id)
+                if not isinstance(parent, dict) or parent.get('end_reason') != 'compression' or not row.get('source') or parent.get('source') != row.get('source'):
+                    break
+                key = parent_id
+    filename = hashlib.sha256(key.encode("utf-8")).hexdigest() + ".json"
+    inbox = UserInputInbox(journal_path=home / "pending-input" / filename,
+                           history=session.get("history") or [], read_only=read_only)
+    session["user_input_inbox"] = inbox
+    return inbox
+
+
+def _bind_turn_user_input(sid: str, session: dict, agent) -> None:
+    """Adopt the build-window inbox; keep generation stable through compaction."""
+    inbox = session.get("user_input_inbox")
+    if inbox is not None and hasattr(agent, "submit_user_input"):
+        agent._user_input_inbox = inbox
+        agent._relay_pending_turn_id = inbox.turn_id
+        agent.user_input_callback = lambda receipt: _emit("message.input", sid, receipt)
+
+
 def _start_inflight_turn(session: dict, text: Any) -> None:
+    from agent.pending_user_input import UserInputInbox
+    inbox = _session_user_input_inbox(session)
+    if inbox is None:
+        inbox = session.setdefault("user_input_inbox", UserInputInbox())
+    inbox.begin(uuid.uuid4().hex)
+    session.pop("_host_input_turn_id", None)
+    session.pop("_host_user_inputs", None)
+    session.pop("_host_input_receipts", None)
     now = time.time()
     session["inflight_turn"] = {
+        "turn_id": inbox.turn_id,
         "assistant": "",
         "started_at": now,
         "streaming": True,
@@ -9936,6 +10052,13 @@ def _record_inflight_correction(session: dict, text: Any) -> None:
     correction = _inflight_text(text)
     if not correction:
         return
+    inbox = session.get("user_input_inbox")
+    if inbox is not None and inbox is getattr(session.get("agent"), "_user_input_inbox", None):
+        if any(_inflight_text(item["content"]) == correction for item in inbox.snapshot()):
+            # v1 RPC / Goals callers also use the typed runtime now. Their
+            # receipt is the authoritative live projection; don't mirror it
+            # again as an unidentifiable legacy correction bubble.
+            return
     turn = session.get("inflight_turn")
     if not isinstance(turn, dict):
         return
@@ -10620,7 +10743,9 @@ def _inflight_snapshot(session: dict) -> dict | None:
     error = str(turn.get("error") or "").strip()
     if not user and not assistant and not streaming and not error:
         return None
+    inbox = session.get("user_input_inbox")
     snapshot = {
+        **({"turn_id": turn["turn_id"], "user_inputs": inbox.snapshot()} if inbox and turn.get("turn_id") else {}),
         "assistant": assistant,
         "streaming": streaming,
         "user": user,
@@ -10652,6 +10777,9 @@ def _inflight_snapshot(session: dict) -> dict | None:
         surface = turn.get("error_surface")
         if isinstance(surface, dict) and surface:
             snapshot["error_surface"] = surface
+    if session.get("_host_input_turn_id"):
+        snapshot["turn_id"] = session["_host_input_turn_id"]
+        snapshot["user_inputs"] = list(session.get("_host_user_inputs") or [])
     return snapshot
 
 
@@ -13473,6 +13601,8 @@ def _run_prompt_submit(
             )
             _usage_stop, _usage_thread = _start_usage_ticker(sid, agent)
             try:
+                with session["history_lock"]:
+                    _bind_turn_user_input(sid, session, agent)
                 result = agent.run_conversation(run_message, **run_kwargs)
             finally:
                 # Stop AND join before anything below emits: an in-flight tick
@@ -14617,7 +14747,7 @@ def _enrich_with_attached_images(user_text: str, image_paths: list[str]) -> str:
     return text or "What do you see in this image?"
 
 
-def _redirect_payload_with_images(agent: Any, text: str, images: list[str]) -> Any:
+def _redirect_payload_with_images(agent: Any, text: str, images: list[str], *, strict: bool = False) -> Any:
     """Build a redirect correction that carries images.
 
     Mirrors the decision a normal turn makes (see the image-routing block in
@@ -14661,6 +14791,8 @@ def _redirect_payload_with_images(agent: Any, text: str, images: list[str]) -> A
     try:
         parts, skipped = build_native_content_parts(text, images)
         if skipped:
+            if strict:
+                raise ValueError("Unreadable steering image")
             print(
                 f"[tui_gateway] redirect skipped {len(skipped)} unreadable image(s)",
                 file=sys.stderr,
@@ -14670,6 +14802,8 @@ def _redirect_payload_with_images(agent: Any, text: str, images: list[str]) -> A
         if any(p.get("type") == "image_url" for p in parts):
             return parts
     except Exception as exc:
+        if strict:
+            raise
         print(
             f"[tui_gateway] redirect native attach failed, using text: {exc}",
             file=sys.stderr,

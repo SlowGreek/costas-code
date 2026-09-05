@@ -6,6 +6,7 @@ import { coerceGatewayText, coerceThinkingText } from '@/lib/chat-runtime'
 import { playCompletionSound } from '@/lib/completion-sound'
 import { parseErrorSurface } from '@/lib/error-surface'
 import { triggerHaptic } from '@/lib/haptics'
+import { mergeSteeringReceipt, parseSteeringReceipt } from '@/lib/steering-input'
 import { billingCtaLabel, clearBillingBlock, runBillingRecovery, setBillingBlock } from '@/store/billing-block'
 import { clearClarifyRequest } from '@/store/clarify'
 import { setSessionCompacting } from '@/store/compaction'
@@ -79,6 +80,24 @@ export function handleMessageStreamEvent(ctx: GatewayEventContext): boolean {
     sessionStateByRuntimeIdRef,
     updateSessionState
   } = deps
+
+  if (event.type === 'message.input') {
+    const receipt = parseSteeringReceipt(payload)
+
+    if (sessionId && receipt) {
+      updateSessionState(sessionId, state => ({
+        ...state,
+        messages: state.messages.map(message =>
+          message.id === receipt.message_id &&
+          (!message.steering?.turn_id || message.steering.turn_id === receipt.turn_id)
+            ? { ...message, steering: mergeSteeringReceipt(message.steering, receipt) }
+            : message
+        )
+      }))
+    }
+
+    return true
+  }
 
   if (event.type === 'message.start') {
     if (!sessionId) {

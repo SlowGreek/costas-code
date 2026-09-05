@@ -2,6 +2,7 @@ import { skillInvocationText } from '@hermes/shared'
 
 import { extractImageRefs } from '@/lib/embedded-images'
 import { dedupeGeneratedImageEchoesInParts } from '@/lib/generated-images'
+import { parseSteeringReceipt } from '@/lib/steering-input'
 import type { MessageReaction, SessionMessage } from '@/types/hermes'
 
 import { assistantTextPart, chatMessageText, dedupeRepeatedTextInParts, reasoningPart, textPart } from './parts'
@@ -348,13 +349,20 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
       return
     }
 
+    const steering =
+      displayRole === 'user'
+        ? parseSteeringReceipt(parseDisplayMetadata(message.display_metadata)?.steering)
+        : undefined
+
     result.push({
+      ...(steering ? { steering } : {}),
       // A voice turn's opening bubble keys off the semantic turn id so live
       // streaming and rehydration agree on identity across continuations.
       id:
-        displayRole === 'assistant' && normalizedSemanticTurnId && semanticIndex < 0
+        steering?.message_id ??
+        (displayRole === 'assistant' && normalizedSemanticTurnId && semanticIndex < 0
           ? `realtime-turn:${normalizedSemanticTurnId}`
-          : `${message.timestamp || Date.now()}-${index}-${displayRole}`,
+          : `${message.timestamp || Date.now()}-${index}-${displayRole}`),
       role: displayRole,
       parts,
       timestamp: earliestTimestamp(message.timestamp, ...parts.map(part => part.timestamp)),

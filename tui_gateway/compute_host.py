@@ -222,9 +222,11 @@ class ComputeHost:
         """
         self._closed.set()
         budget = max(0.0, wait)
-        deadline = time.monotonic() + budget - min(_FLUSH_RESERVE_SECS, budget / 2.0)
+        # Python 3.11's Windows monotonic clock has coarse tick resolution.
+        # Use the high-resolution monotonic counter for subsecond reserves.
+        deadline = time.perf_counter() + budget - min(_FLUSH_RESERVE_SECS, budget / 2.0)
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 break
             with self._turn_futures_lock:
@@ -277,7 +279,11 @@ class ComputeHost:
         elif kind == "reload_mcp":
             self._handle_reload_mcp(frame)
         elif kind == "control":
-            self._handle_control(frame)
+            if frame.get("route_name") == "session.input" and (frame.get("params") or {}).get("images"):
+                # Enrichment cannot block the control reader's Stop lane.
+                self._executor.submit(self._handle_control, frame)
+            else:
+                self._handle_control(frame)
         elif kind == "shutdown":
             self.emit({"type": "shutdown.ack", "request_id": frame.get("request_id")})
             # Explicit supervisor/test shutdown is a clean child-process close;
@@ -724,6 +730,16 @@ class ComputeHost:
                 return
             if route_name == "reload.mcp":
                 self._handle_reload_mcp({**frame, "type": "reload_mcp"})
+                return
+            if route_name in ("session.input", "session.input.status"):
+                response = server._methods[route_name](request_id, {**(frame.get("params") or {}), "session_id": sid})
+                inbox = session.get("user_input_inbox")
+                self.emit({
+                    "type": "control.ack", "sid": sid, "request_id": request_id,
+                    "route_name": route_name, "rpc_response": response,
+                    "user_inputs": inbox.snapshot() if inbox else [],
+                    "turn_id": inbox.turn_id if inbox else None,
+                })
                 return
             if route_name == "session.save":
                 response = server._methods["session.save"](

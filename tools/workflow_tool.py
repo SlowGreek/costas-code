@@ -151,7 +151,13 @@ def workflow(
                     )
                 return json.dumps(_result_payload(run), default=str)
 
-            return json.dumps(run.snapshot(), default=str)
+            snapshot = run.snapshot()
+            if action == "wait":
+                from agent.pending_user_input import has_pending_user_input
+                if has_pending_user_input():
+                    snapshot["wait_released_for"] = "user_input"
+                    snapshot["note"] = "Wait ended for pending user input; the workflow and its agents are still running."
+            return json.dumps(snapshot, default=str)
 
         if action == "resume":
             if not run_id:

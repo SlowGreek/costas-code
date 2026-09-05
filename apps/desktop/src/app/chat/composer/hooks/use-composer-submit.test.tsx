@@ -139,6 +139,24 @@ function renderSubmitHook({
 }
 
 describe('useComposerSubmit external request routing', () => {
+  it('reconciles an uncertain steer before submitting an idle draft as a new turn', async () => {
+    const key = JSON.stringify(['runtime-session', 'Correction', []])
+    localStorage.setItem(
+      'hermes.steering.attempts.v1',
+      JSON.stringify({
+        [key]: { session_id: 'runtime-session', message_id: 'm', turn_id: 'old', text: 'Correction', images: [] }
+      })
+    )
+    try {
+      const harness = renderSubmitHook({ text: 'Correction', busy: false })
+      act(() => harness.hook.result.current.submitDraft())
+      await waitFor(() => expect(harness.onSteer).toHaveBeenCalledWith('Correction', []))
+      expect(harness.onSubmit).not.toHaveBeenCalled()
+    } finally {
+      localStorage.removeItem('hermes.steering.attempts.v1')
+    }
+  })
+
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
@@ -287,7 +305,7 @@ describe('useComposerSubmit busy-turn routing', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it('queues a plain-text follow-up while the active turn is compacting', () => {
+  it('accepts a plain-text steer while the active turn is compacting', () => {
     const { hook, onCancel, onSteer, onSubmit, queueCurrentDraft } = renderSubmitHook({
       busy: true,
       compacting: true,
@@ -298,8 +316,8 @@ describe('useComposerSubmit busy-turn routing', () => {
       hook.result.current.submitDraft()
     })
 
-    expect(queueCurrentDraft).toHaveBeenCalledTimes(1)
-    expect(onSteer).not.toHaveBeenCalled()
+    expect(queueCurrentDraft).not.toHaveBeenCalled()
+    expect(onSteer).toHaveBeenCalledWith('wait for the summary', [])
     expect(onSubmit).not.toHaveBeenCalled()
     expect(onCancel).not.toHaveBeenCalled()
   })

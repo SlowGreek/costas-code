@@ -166,12 +166,12 @@ export function useRealtimeVoiceConversation({
   }, [missionRuntime, runtimeSessionId])
 
   const start = useCallback(async () => {
-    const gateway = $gateway.get()
-    const readiness = voiceStartReadiness({ hasGateway: !!gateway, sessionId: runtimeSessionId })
+    const readiness = voiceStartReadiness({ hasGateway: !!$gateway.get(), sessionId: runtimeSessionId })
     let targetSessionId = runtimeSessionId
 
     if (readiness.kind === 'wait-for-session') {
       const generation = startGenerationRef.current
+
       const resolution = await resolveVoiceRuntimeSession({
         ensureRuntimeSession,
         isCurrent: () => generation === startGenerationRef.current,
@@ -185,6 +185,7 @@ export function useRealtimeVoiceConversation({
           if (resolution.error) {
             notifyError(resolution.error, t.notifications.voice.couldNotStartSession)
           }
+
           onFatalError?.()
         }
 
@@ -193,6 +194,13 @@ export function useRealtimeVoiceConversation({
 
       targetSessionId = resolution.runtimeSessionId
     }
+
+    // Creating a fresh chat may activate another agent's backend. Capture its
+    // socket and identity together after creation, before the mic barrier can
+    // yield to another foreground switch. All callbacks stay on this owner.
+    const gateway = $gateway.get()
+    const connectionId = $connection.get()?.connectionId ?? null
+    const profile = $activeGatewayProfile.get()
 
     if (readiness.kind === 'fail' || !gateway || !targetSessionId) {
       const error = new Error(readiness.kind === 'fail' ? readiness.reason : 'Voice is unavailable')
@@ -222,7 +230,7 @@ export function useRealtimeVoiceConversation({
       startAbortRef.current = startAbort
 
       const connection = await startRealtimeVoiceConnection({
-        connectionId: $connection.get()?.connectionId ?? null,
+        connectionId,
         beforeToolCall: async () => {
           // Wait for the *specific* in-flight transcription events rather than
           // sleeping a fixed interval: a normal turn adds no latency, and a
@@ -298,7 +306,7 @@ export function useRealtimeVoiceConversation({
         },
         onUserSpeechEnded: missionRuntime.userSpeechEnded,
         onUserSpeechStarted: missionRuntime.userSpeechStarted,
-        profile: $activeGatewayProfile.get(),
+        profile,
         request: (method, params) => gateway.request(method, params),
         runtimeSessionId: targetSessionId,
         signal: startAbort.signal
@@ -354,6 +362,7 @@ export function useRealtimeVoiceConversation({
       if (startAbortRef.current?.signal.aborted) {
         startAbortRef.current = null
       }
+
       if (generation === startGenerationRef.current) {
         notifyError(error, t.notifications.voice.couldNotStartSession)
         setStatus('idle')

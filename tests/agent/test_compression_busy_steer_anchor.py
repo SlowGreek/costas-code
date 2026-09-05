@@ -43,7 +43,8 @@ def _tool_turns(start: int, count: int, *, steer_at: int | None = None) -> list[
         content = f"tool output {idx}"
         if steer_at == idx:
             content += format_steer_marker(STEER_B)
-        turns.append({"role": "tool", "tool_call_id": f"call-{idx}", "content": content})
+        turns.append({"role": "tool", "tool_call_id": f"call-{idx}", "content": content,
+                      **({"display_metadata": {"user_steer": STEER_B}} if steer_at == idx else {})})
     return turns
 
 
@@ -142,5 +143,6 @@ def test_compressed_steer_presence_only_counts_tool_rows(role):
     quoted = {"role": role, "content": f"{SUMMARY_PREFIX}\n{format_steer_marker(STEER_B)}"}
     assert _compressed_has_busy_steer([quoted]) is False
     assert STEER_MARKER_OPEN in quoted["content"]
-    live = {"role": "tool", "tool_call_id": "c", "content": f"ok{format_steer_marker(STEER_B)}"}
+    live = {"role": "tool", "tool_call_id": "c", "content": f"ok{format_steer_marker(STEER_B)}",
+            "display_metadata": {"user_steer": STEER_B}}
     assert _compressed_has_busy_steer([live]) is True

@@ -131,7 +131,7 @@ class UserInputInbox:
                 raise
             if native is not None:
                 try:
-                    item.status = 'accepted' if native(content) else 'stale'
+                    item.status = 'accepted' if native(content) else 'unknown'
                 except Exception:
                     item.status = 'unknown'  # Never resend an uncertain native write.
                 self._save()

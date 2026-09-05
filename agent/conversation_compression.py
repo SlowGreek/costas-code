@@ -2762,14 +2762,11 @@ def _message_contains_busy_steer(message: Any) -> bool:
 
 def _extract_steer_text_from_message(message: Any) -> Optional[str]:
     """Read historical Hermes steer markers, never lookalike tool prose."""
-    from agent.prompt_builder import STEER_MARKER_OPEN, STEER_MARKER_CLOSE
-    text = _message_text(message)
-    start = text.rfind(STEER_MARKER_OPEN)
-    if start < 0:
-        return None
-    start += len(STEER_MARKER_OPEN)
-    end = text.find(STEER_MARKER_CLOSE, start)
-    return text[start:end].strip() or None if end >= 0 else None
+    # Literal delimiters can originate in an untrusted tool/web response.
+    # Only out-of-band metadata written by the host can establish provenance.
+    metadata = message.get("display_metadata") if isinstance(message, dict) else None
+    value = metadata.get("user_steer") if isinstance(metadata, dict) else None
+    return value.strip() or None if isinstance(value, str) else None
 
 
 def _compressed_has_busy_steer(messages: list) -> bool:

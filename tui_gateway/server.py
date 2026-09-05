@@ -9958,12 +9958,43 @@ def _session_user_input_inbox(session: dict):
     from agent.pending_user_input import UserInputInbox
     import hashlib
     inbox = session.get("user_input_inbox")
+    if _session_uses_compute_host(session):
+        # The child owns acceptance and the journal. The parent is only a
+        # projection/router; never let its stale snapshot replace child data.
+        if inbox is None or inbox.journal_path is not None:
+            inbox = UserInputInbox()
+            session["user_input_inbox"] = inbox
+        return inbox
     if inbox is not None:
         return inbox
     key = str(session.get("session_key") or "")
     if not key:
         return None
     home = Path(session.get("profile_home") or get_hermes_home())
+    # Only compression continuations share a receipt journal. Explicit forks
+    # and delegated children must never inherit their parent's pending input.
+    if (home / 'state.db').is_file():
+        with _session_db(session) as db:
+            seen = set()
+            for _ in range(100):
+                if key in seen:
+                    raise ValueError('Cyclic steering session lineage')
+                seen.add(key)
+                row = db.get_session(key) if db is not None else None
+                if not isinstance(row, dict):
+                    break
+                config = row.get('model_config') or {}
+                if isinstance(config, str):
+                    config = json.loads(config)
+                if isinstance(config, dict) and config.get('_branched_from'):
+                    break
+                parent_id = row.get('parent_session_id')
+                if not isinstance(parent_id, str) or not parent_id or db is None:
+                    break
+                parent = db.get_session(parent_id)
+                if not isinstance(parent, dict) or parent.get('end_reason') != 'compression' or not row.get('source') or parent.get('source') != row.get('source'):
+                    break
+                key = parent_id
     filename = hashlib.sha256(key.encode("utf-8")).hexdigest() + ".json"
     inbox = UserInputInbox(journal_path=home / "pending-input" / filename,
                            history=session.get("history") or [])

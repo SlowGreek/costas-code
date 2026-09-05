@@ -139,6 +139,24 @@ function renderSubmitHook({
 }
 
 describe('useComposerSubmit external request routing', () => {
+  it('reconciles an uncertain steer before submitting an idle draft as a new turn', async () => {
+    const key = JSON.stringify(['runtime-session', 'Correction', []])
+    localStorage.setItem(
+      'hermes.steering.attempts.v1',
+      JSON.stringify({
+        [key]: { session_id: 'runtime-session', message_id: 'm', turn_id: 'old', text: 'Correction', images: [] }
+      })
+    )
+    try {
+      const harness = renderSubmitHook({ text: 'Correction', busy: false })
+      act(() => harness.hook.result.current.submitDraft())
+      await waitFor(() => expect(harness.onSteer).toHaveBeenCalledWith('Correction', []))
+      expect(harness.onSubmit).not.toHaveBeenCalled()
+    } finally {
+      localStorage.removeItem('hermes.steering.attempts.v1')
+    }
+  })
+
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()

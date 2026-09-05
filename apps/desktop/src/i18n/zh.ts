@@ -8,7 +8,7 @@ export const zh: Translations = {
     committed: '已加入模型上下文',
     accepted: '原生运行时已接受',
     cancelled: '已取消',
-    recoverable: '未发送 · 已保留以供恢复',
+    recoverable: '送达未确认 · 重试前请检查',
     unknown: '发送状态未知 · 草稿已保留'
   },
   common: {

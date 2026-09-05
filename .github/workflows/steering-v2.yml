@@ -49,6 +49,7 @@ jobs:
           tests/agent/test_steering_v2.py
           tests/agent/test_pending_user_input.py
           tests/agent/test_user_input_recovery.py
+          tests/agent/test_steering_v2_review.py
           tests/agent/test_steering_v2_compaction_images.py
           tests/agent/test_steer_followup_failure.py
           tests/agent/test_compression_busy_steer_anchor.py
@@ -77,3 +78,9 @@ jobs:
           src/app/session/hooks/use-prompt-actions/index.test.tsx
           src/app/session/hooks/use-message-stream/steer-arrival-order.test.tsx
       - run: npm exec --workspace apps/desktop -- tsc -p . --noEmit
+      - name: Build desktop and exercise real steering UI
+        working-directory: apps/desktop
+        run: |
+          node -e "require(require('node:path').join(require('node:path').dirname(require.resolve('electron/package.json')), 'install.js'))"
+          npm run build
+          npm exec -- playwright test e2e/steering-v2.spec.ts --workers=1 --reporter=line

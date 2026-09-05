@@ -8,7 +8,7 @@ export const en: Translations = {
     committed: 'In model context',
     accepted: 'Accepted by native runtime',
     cancelled: 'Cancelled',
-    recoverable: 'Not sent · retained for recovery',
+    recoverable: 'Delivery unconfirmed · review before retry',
     unknown: 'Delivery unknown · draft retained'
   },
   common: {

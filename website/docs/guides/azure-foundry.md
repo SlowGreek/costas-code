@@ -326,6 +326,78 @@ The 10 s preflight is a soft check. Choose "Save anyway and validate later" and 
 **401 on Anthropic-style endpoint with Entra ID.**
 Verify the same `Azure AI User` (or `Foundry User`) role is assigned on the Foundry resource (it covers both `/openai/v1` and `/anthropic` paths). If the OpenAI-style probe works during the wizard but `claude-*` requests fail at runtime, the most common cause is a stale `model.entra.scope` left over from an earlier wizard run — delete the `entra.scope` line from `config.yaml` so the runtime falls back to the default `https://ai.azure.com/.default` scope.
 
+## Cognitive Services bearer tokens via `key_cmd` (Peeps / az CLI)
+
+Some Azure OpenAI resources are reached with an **Entra bearer token** rather
+than an `api-key`. The standalone `scripts/cs_token.py` helper prints one for
+`key_cmd`. Install it outside the checkout first: branch switches and updates
+can remove files under `hermes-agent/scripts`.
+
+From the checkout, on macOS/Linux:
+
+```bash
+mkdir -p "${HERMES_HOME:-$HOME/.hermes}/bin"
+install -m 700 scripts/cs_token.py "${HERMES_HOME:-$HOME/.hermes}/bin/cs_token.py"
+```
+
+On Windows PowerShell:
+
+```powershell
+$profileHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $HOME '.hermes' }
+New-Item -ItemType Directory -Force (Join-Path $profileHome 'bin') | Out-Null
+Copy-Item scripts/cs_token.py (Join-Path $profileHome 'bin/cs_token.py') -Force
+```
+
+Set `providers.astra.key_cmd` using `hermes config set`, with the absolute
+installed path and an available Python executable. Quote paths containing
+spaces. Do not point it at the source checkout. For example:
+
+```yaml
+providers:
+  astra:
+    base_url: https://<resource>.cognitiveservices.azure.com/openai/v1
+    key_cmd: python3 /Users/yourname/.hermes/bin/cs_token.py
+    api_mode: codex_responses
+    default_model: gpt-6-astra
+```
+
+On Windows, the command can be `python "C:\Users\yourname\.hermes\bin\cs_token.py"`.
+Use the selected profile's home rather than the default profile if applicable.
+The installed copy must be refreshed deliberately when updating this helper.
+
+The script tries, in order:
+
+1. A cached token in `$HERMES_HOME/.cs-token.json`, while more than five
+   minutes from expiry.
+2. A Peeps bearer in `$HERMES_HOME/.peeps-token` (override the path with
+   `PEEPS_TOKEN_FILE`), exchanged at the Seastar
+   `token/getCognitiveServicesToken` endpoint.
+3. `az account get-access-token --resource https://cognitiveservices.azure.com`.
+
+`key_cmd` is evaluated as credentials are needed; the helper reuses a fresh
+Cognitive Services token and tries to renew it before expiry. Renewal still
+requires a valid Peeps bearer or working Azure CLI login. It does **not** sign
+in to Peeps or refresh the Peeps bearer automatically.
+
+The `https://peepsapp.azurewebsites.net/token.html?token=cs` page returns a
+**Cognitive Services token**, not the Peeps bearer expected in `.peeps-token`.
+Do not put that CS token in `.peeps-token`. That file is only for a Peeps
+access token used to authorize the exchange. Do not paste either token into
+chat, source control, or `config.yaml`.
+
+The helper is pure Python stdlib. On Windows, cache confidentiality relies on
+the profile directory's NTFS permissions; POSIX mode bits are not a Windows
+ACL guarantee. Windows uses its own Python/Azure CLI installation; no
+Windows-native auth validation is implied by macOS tests.
+
+### Choosing `api_mode`
+
+With reasoning enabled, `gpt-6-astra` rejects function tools on
+`/chat/completions` with `Function tools with reasoning_effort are not
+supported`. Set `api_mode: codex_responses` to keep reasoning and tool use
+together on `/openai/v1/responses`. Chat Completions can alternatively use
+`reasoning_effort: none`; disabling reasoning is not necessary with Responses.
+
 ## Related
 
 - [Environment variables](/reference/environment-variables)

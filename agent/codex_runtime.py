@@ -1116,6 +1116,20 @@ def _consume_codex_event_stream(
     # state at the terminal event so the tool call executes instead of being
     # silently dropped.
     pending_function_calls: Dict[str, Dict[str, Any]] = {}
+
+    def pending_arguments(event):
+        pending = pending_function_calls.get(str(_event_field(event, "item_id", "")))
+        if pending is not None:
+            return pending
+        # Argument events have no call_id. Within this response their
+        # output_index is stable even if Copilot re-encrypts item_id.
+        index = _event_field(event, "output_index", None)
+        if index is not None:
+            matches = [p for p in pending_function_calls.values() if p["output_index"] == index]
+            if len(matches) == 1:
+                return matches[0]
+        return None
+
     # First-observed (sequence, output_index) per announced item id, so items
     # confirmed later via output_item.done keep their announced stream
     # position when merged with settled pending calls.
@@ -1249,13 +1263,13 @@ def _consume_codex_event_stream(
             # done events can still be settled from accumulated state.
             if "delta" in event_type:
                 delta_args = _event_field(event, "delta", "")
-                pending = pending_function_calls.get(str(_event_field(event, "item_id", "")))
+                pending = pending_arguments(event)
                 if pending is not None and delta_args:
                     pending["arguments"] += delta_args
                 continue
             if event_type.endswith("function_call_arguments.done"):
                 done_args = _event_field(event, "arguments", None)
-                pending = pending_function_calls.get(str(_event_field(event, "item_id", "")))
+                pending = pending_arguments(event)
                 if pending is not None and done_args is not None:
                     # Per-item arguments.done is authoritative for the
                     # accumulated string when the item itself never lands.
@@ -1296,8 +1310,21 @@ def _consume_codex_event_stream(
                 # The .done event's own output_index wins when present, with
                 # the announced index as its fallback.
                 done_id = str(_item_field(done_item, "id", ""))
+                pending_id = done_id
+                if _item_field(done_item, "type", "") == "function_call":
+                    # Copilot rotates opaque item IDs between SSE events.
+                    # call_id is the stable execution identity: retire the
+                    # announcement even when the done item's id differs.
+                    done_call_id = _item_field(done_item, "call_id", None)
+                    if done_call_id:
+                        matches = [
+                            key for key, pending in pending_function_calls.items()
+                            if _item_field(pending["item"], "call_id", None) == done_call_id
+                        ]
+                        if len(matches) == 1:
+                            pending_id = matches[0]
                 announced_sequence, announced_index = announced_output_order.get(
-                    done_id, (None, None)
+                    pending_id, (None, None)
                 )
                 done_index = _event_field(event, "output_index", None)
                 if done_index is None:
@@ -1309,7 +1336,7 @@ def _consume_codex_event_stream(
                 collected_output_sequences.append(announced_sequence)
                 # Confirmed by the authoritative per-item done event; remove
                 # from pending so it is not settled twice.
-                pending_function_calls.pop(done_id, None)
+                pending_function_calls.pop(pending_id, None)
                 done_phase = _item_field(done_item, "phase", None)
                 done_phase = done_phase.strip().lower() if isinstance(done_phase, str) else None
                 if done_phase == "commentary" and on_commentary_message is not None:

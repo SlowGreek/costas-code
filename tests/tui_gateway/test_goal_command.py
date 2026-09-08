@@ -863,9 +863,9 @@ def test_goal_active_in_db_fail_closed_on_bad_key(server):
 # ── Fix 1: foreground tool evidence reaches the verifier (TUI source shape) ──
 
 
-def test_tui_result_tool_evidence_reaches_verifier(server, session, hermes_home):
+def test_tui_result_tool_evidence_reaches_judge(server, session, hermes_home):
     """The TUI feeds real tool/test results from the turn's agent result
-    (``result["messages"]``) into the second-stage verifier. Proven at the
+    (``result["messages"]``) into the goal judge. Proven at the
     goals seam using the exact evidence source _run_prompt_submit uses (that
     function drives a full turn and isn't unit-testable, so we assert the data
     flow it now performs)."""
@@ -890,13 +890,13 @@ def test_tui_result_tool_evidence_reaches_verifier(server, session, hermes_home)
 
     captured = {}
 
-    def _verifier(**kwargs):
+    def _judge(**kwargs):
         captured["user"] = " ".join(
             m.get("content", "") for m in kwargs.get("messages", []) if m.get("role") == "user"
         )
 
         class _M:
-            content = '{"confirmed": true, "reason": "17 passed shown"}'
+            content = '{"verdict": "done", "reason": "17 passed shown"}'
 
         class _C:
             message = _M()
@@ -906,14 +906,12 @@ def test_tui_result_tool_evidence_reaches_verifier(server, session, hermes_home)
 
         return _R()
 
-    from hermes_cli import goals as _goals
-
-    with patch.object(_goals, "judge_goal", return_value=("done", "looks done", False, None, False)), patch(
-        "agent.auxiliary_client.call_llm", side_effect=_verifier
+    with patch(
+        "agent.auxiliary_client.call_llm", side_effect=_judge
     ):
         decision = mgr.evaluate_after_turn(result["final_response"], recent_evidence=evidence)
 
-    assert "17 passed" in (captured.get("user") or ""), "tool evidence must reach the verifier"
+    assert "17 passed" in (captured.get("user") or ""), "tool evidence must reach the judge"
     assert decision["verdict"] == "done"
 
 

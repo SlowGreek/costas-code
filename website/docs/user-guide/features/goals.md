@@ -181,22 +181,23 @@ After every turn, Hermes calls an auxiliary model with:
 
 - The standing goal text
 - The agent's most recent final response (last ~4 KB of text), **fenced as untrusted data** — the judge is explicitly told never to follow any instruction inside the response or background-process output, so a task can't prompt-inject the judge into a false "done".
+- Recent tool/command results, bounded and fenced as untrusted evidence.
 - Any live background processes, also fenced as untrusted.
 - A system prompt telling the judge to reply with strict one-line JSON and one of four verdicts: `{"verdict": "done" | "blocked" | "continue" | "wait", "reason": "<one-sentence rationale>"}` (wait verdicts add `wait_on_session` / `wait_on_pid` / `wait_for_seconds`; the legacy `{"done": <bool>, "reason": "..."}` shape is still accepted)
 
-The judge is deliberately conservative: it marks a goal `done` only when the response shows **concrete evidence** the goal is complete (a command result, file contents, a test/benchmark output) — not a bare "looks done" claim. If the agent is stuck needing you (missing input, a decision, credentials) or the goal is unachievable, the judge returns **`blocked`** instead — an honest "not achieved, needs you" state, never dressed up as success. The judge is also given explicit **test-theater** guidance: it rejects hardcoded expectations, mocking the unit under test, assertions fitted to after-the-fact output, and skipped/ignored tests dressed up as passing (honest fakes at a real environment boundary are fine).
+The judge follows upstream free-form completion semantics while checking any supplied tool evidence. A completion claim contradicted by tool results is not success. Contracts and additional criteria require their specified proof. If the goal is genuinely blocked or unachievable, the judge returns **`blocked`**, never `done`.
 
 ### Blocked ≠ achieved
 
 A `blocked` goal is a durable, honest control state: the loop stops (like paused) but the UX is truthful — you'll see `🚧 Goal blocked — needs you: <reason>`, never `✓ Goal achieved`. Reply with what it needs, then `/goal resume` to unblock and continue. Blocked goals are recoverable; `done` and `cleared` goals are **terminal** — `/goal resume` and `/goal pause` refuse them, and a fresh session never resurrects a completed or cleared goal.
 
-### Second-stage completion verification
+### Single-judge completion and feedback
 
-A single "I'm done" from the model is not proof. When the first-stage judge returns `done`, Hermes runs a cheap, cache-safe **second-stage verifier** over the *actual* evidence available this session — recent tool/command results and background-process output — before accepting completion. It **fails closed**: if the evidence doesn't corroborate the claim (or the verifier itself can't run), the goal is **not** marked done and the loop keeps working. For a goal with a concrete `verification` requirement, unshown proof means "not done"; for a pure free-form/prose goal with nothing to independently check, the verifier steps aside (it never fabricates evidence that doesn't exist). Turn it off with `goals.verify_completion: false` to trust the first-stage judge alone.
+Like upstream Hermes, one judge owns the completion decision. A free-form goal can finish when the response explicitly confirms completion or shows the final deliverable; the deliverable must actually exist. Contracts and subgoals still require their stated evidence, and quality gates must pass before judging. Recent tool results are provided to the same judge, not a second model that can veto its answer.
 
-### No-progress detection
+A `continue` verdict sends the judge's reason back to the agent as advisory feedback, so it can address a concrete gap or explain a mistaken objection using evidence. The judge evaluates the user's goal, not its own previous objection: it must not invent release or latest-remote-head requirements. Repeated rejection is bounded by `goals.max_turns`, independent of how the judge phrases its reasons.
 
-If the judge returns `continue` with the *same gap* turn after turn — the agent is spinning, not closing the hole — Hermes auto-pauses and escalates instead of grinding the whole budget on one stuck step. The prior turn's gap is fed back into the next judge call so it can tell real progress from a reworded repeat, and repeats are matched by a normalized fingerprint (not a brittle exact-string compare). Tune the threshold with `goals.max_no_progress` (default 4).
+The former fork-only `goals.verify_completion` and `goals.max_no_progress` settings are retired and ignored. Existing goal rows remain readable; obsolete verifier/gap counters no longer affect evaluation. Desktop controls, steering, wait/wake, and terminal-state protection remain intact.
 
 ### Fail-open semantics
 
@@ -238,17 +239,10 @@ goals:
   # /goal resume. Default 20. Lower this if you want tighter loops;
   # raise it for long-running refactors.
   max_turns: 20
-  # Run a cheap second-stage verifier over real tool/command evidence
-  # before accepting a "done" verdict (fails closed). Set false to trust
-  # the first-stage judge alone. Default true.
-  verify_completion: true
   # Hard ceiling (seconds) on how long ANY /goal wait barrier parks the
   # loop before it is force-released, so a wait that never fires can't
   # wedge the goal. Default 1800 (30 min).
   max_park_seconds: 1800
-  # Auto-pause after this many turns in a row with no observable progress
-  # on the same gap. Default 4.
-  max_no_progress: 4
 ```
 
 ### Choosing the judge model

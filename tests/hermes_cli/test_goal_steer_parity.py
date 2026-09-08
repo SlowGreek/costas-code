@@ -137,26 +137,20 @@ class TestSteersReachEveryConsumer:
         assert "keep the public API stable" in seen["goal"]
         assert "rewrite the parser" in seen["goal"]
 
-    def test_verifier_sees_the_steered_goal(self, hermes_home, monkeypatch):
+    def test_completion_judge_sees_the_steered_goal(self, hermes_home, monkeypatch):
         import hermes_cli.goals as goals
 
         seen = {}
 
         def fake_judge(goal, last_response, **kw):
-            return "done", "looks complete", False, None, False
-
-        def fake_verify(goal, last_response, **kw):
             seen["goal"] = goal
-            return True, "corroborated", False
+            return "done", "complete", False, None, False
 
         monkeypatch.setattr(goals, "judge_goal", fake_judge)
-        monkeypatch.setattr(goals, "verify_completion", fake_verify)
-
-        mgr = goals.GoalManager(session_id="steer-verify")
+        mgr = goals.GoalManager(session_id="steer-complete")
         mgr.set("ship the feature")
         mgr.add_steer("tests must run offline")
-        mgr.evaluate_after_turn("all done")
-
+        assert mgr.evaluate_after_turn("all done")["status"] == "done"
         assert "tests must run offline" in seen["goal"]
 
     def test_unsteered_judge_input_is_the_bare_goal(self, hermes_home, monkeypatch):

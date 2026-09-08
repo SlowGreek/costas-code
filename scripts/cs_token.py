@@ -80,7 +80,7 @@ def cache_path() -> Path:
 
 def read_cache() -> str:
     try:
-        return str(json.loads(cache_path().read_text()).get("token") or "")
+        return str(json.loads(cache_path().read_text(encoding="utf-8")).get("token") or "")
     except Exception:
         return ""
 
@@ -137,7 +137,7 @@ def from_peeps() -> str:
         os.environ.get("PEEPS_TOKEN_FILE") or (hermes_home() / ".peeps-token")
     )
     try:
-        peeps = peeps_file.read_text().strip()
+        peeps = peeps_file.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeError):
         return ""
     if token_expiry(peeps, audience="https://peeps.asgprototype.com/api") <= time.time():

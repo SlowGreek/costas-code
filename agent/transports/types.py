@@ -56,6 +56,12 @@ class ToolCall:
         """Codex call_id from provider_data, accessed via getattr by _build_assistant_message."""
         return (self.provider_data or {}).get("call_id")
 
+    @call_id.setter
+    def call_id(self, value: str | None) -> None:
+        # ID collision repair writes the compatibility property. Keep its
+        # canonical metadata in sync without mutating a shared provider dict.
+        self.provider_data = {**(self.provider_data or {}), "call_id": value}
+
     @property
     def response_item_id(self) -> str | None:
         """Codex response_item_id from provider_data."""

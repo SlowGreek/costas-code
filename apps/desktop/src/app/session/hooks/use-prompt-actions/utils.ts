@@ -5,6 +5,8 @@ import type { ChatMessage } from '@/lib/chat-messages'
 import { type CommandsCatalogLike, filterDesktopCommandsCatalog } from '@/lib/desktop-slash-commands'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import type { ComposerAttachment } from '@/store/composer'
+import { requestForSessionProfile, type SessionOwnerScope } from '@/store/session-request-router'
+import { runtimeSessionOwners } from '@/store/session-runtime-owner'
 
 import { registerRecoveredRuntime, singleFlightSessionResume, takeRecoveredRuntime } from './single-flight-resume'
 
@@ -72,6 +74,8 @@ export class SessionRecoveryAborted extends Error {
 }
 
 export interface SessionRecoveryDeps {
+  /** Exact owner captured before the original RPC; also owns recovery/cache identity. */
+  owner?: SessionOwnerScope
   requestGateway: GatewayRequest
   /**
    * Owning profile for a stored session. A resume without it lands on
@@ -83,7 +87,7 @@ export interface SessionRecoveryDeps {
    * `resolveStoredSession` → `getSession()`, a real fetch that makes any unit
    * test of this helper depend on leftover `$sessions` / `$profiles` state.
    */
-  resolveProfile?: (storedSessionId: string) => Promise<string | undefined>
+  resolveProfile?: (storedSessionId: string) => Promise<SessionOwnerScope>
   /**
    * Publish the fresh live id. Implementations must update BOTH the hot ref
    * and the `$activeSessionId` atom — a ref-only write leaves the atom
@@ -99,11 +103,11 @@ export interface SessionRecoveryDeps {
   driftReason?: () => null | string
 }
 
-async function defaultResolveProfile(storedSessionId: string): Promise<string | undefined> {
+async function defaultResolveProfile(storedSessionId: string): Promise<SessionOwnerScope> {
   // Lazy so utils.ts has no init-time cycle with use-session-actions.
-  const { resolveSessionProfile } = await import('../use-session-actions/utils')
+  const { resolveSessionActionOwner: resolveSessionOwner } = await import('../use-session-actions/utils')
 
-  return resolveSessionProfile(storedSessionId)
+  return resolveSessionOwner(storedSessionId)
 }
 
 /**
@@ -119,17 +123,27 @@ export async function resumeStoredRuntimeSession(
   // same dead runtime at once, and each independent session.resume mints a new
   // runtime — every loser is an orphan for the reaper. Sharing one in-flight
   // promise makes concurrent recoveries converge on ONE runtime.
-  const resumed = await singleFlightSessionResume(storedSessionId, async () => {
-    const resolveProfile = deps.resolveProfile ?? defaultResolveProfile
-    const profile = await resolveProfile(storedSessionId)
+  const resolveProfile = deps.resolveProfile ?? defaultResolveProfile
+  const owner = deps.owner ?? (await resolveProfile(storedSessionId))
+  const profile = typeof owner === 'string' ? owner : owner?.targetProfile || owner?.profile
 
-    return deps.requestGateway<{ session_id: string }>('session.resume', {
-      session_id: storedSessionId,
-      source: 'desktop',
-      omit_messages: true,
-      ...(profile ? { profile } : {})
-    })
-  })
+  const resumed = await singleFlightSessionResume(
+    storedSessionId,
+    async () => {
+      return requestForSessionProfile<{ session_id: string }>(
+        typeof owner === 'object' ? owner : undefined,
+        deps.requestGateway,
+        'session.resume',
+        {
+          session_id: storedSessionId,
+          source: 'desktop',
+          omit_messages: true,
+          ...(profile ? { profile } : {})
+        }
+      )
+    },
+    owner
+  )
 
   return resumed?.session_id ?? null
 }
@@ -158,6 +172,8 @@ export async function withSessionNotFoundResume<T>(
   deps: SessionRecoveryDeps,
   options?: { alsoTimeout?: boolean }
 ): Promise<{ recovered: boolean; result: T; sessionId: string }> {
+  const capturedOwner = deps.owner ?? runtimeSessionOwners.get(sessionId)
+
   try {
     return { recovered: false, result: await call(sessionId), sessionId }
   } catch (err) {
@@ -174,14 +190,22 @@ export async function withSessionNotFoundResume<T>(
     // A previous recovery for this stored session already minted a runtime
     // that its caller drift-aborted away from. Reuse it before resuming
     // again — re-minting would strand yet another runtime for the reaper.
-    const cachedRecoveredId = takeRecoveredRuntime(storedSessionId, sessionId)
+    let recoveryProfile: SessionOwnerScope
+
+    try {
+      recoveryProfile = capturedOwner ?? (await (deps.resolveProfile ?? defaultResolveProfile)(storedSessionId))
+    } catch {
+      throw err
+    }
+
+    const cachedRecoveredId = takeRecoveredRuntime(storedSessionId, sessionId, recoveryProfile)
 
     if (cachedRecoveredId) {
       const cachedDrift = deps.driftReason?.()
 
       if (cachedDrift) {
         // Still drifted: keep the runtime findable for whoever acts next.
-        registerRecoveredRuntime(storedSessionId, cachedRecoveredId)
+        registerRecoveredRuntime(storedSessionId, cachedRecoveredId, recoveryProfile)
         throw new SessionRecoveryAborted(cachedDrift, cachedRecoveredId)
       }
 
@@ -201,7 +225,11 @@ export async function withSessionNotFoundResume<T>(
     let recoveredId: null | string
 
     try {
-      recoveredId = await resumeStoredRuntimeSession(storedSessionId, deps)
+      recoveredId = await resumeStoredRuntimeSession(storedSessionId, {
+        ...deps,
+        owner: recoveryProfile,
+        resolveProfile: async () => recoveryProfile
+      })
     } catch {
       throw err
     }
@@ -217,7 +245,7 @@ export async function withSessionNotFoundResume<T>(
       // (the user moved on), so record it in the stored->runtime recovery
       // cache. The next action targeting this stored session reuses it
       // instead of minting another orphan (#91276).
-      registerRecoveredRuntime(storedSessionId, recoveredId)
+      registerRecoveredRuntime(storedSessionId, recoveredId, recoveryProfile)
       throw new SessionRecoveryAborted(drift, recoveredId)
     }
 

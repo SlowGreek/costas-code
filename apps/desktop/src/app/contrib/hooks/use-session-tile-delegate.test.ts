@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as HermesModule from '@/hermes'
 import { setSessionOwnerHint, setSessions } from '@/store/session'
+import { runtimeSessionOwners } from '@/store/session-runtime-owner'
 import { $sessionTiles, sessionTileDelegate } from '@/store/session-states'
 import type { SessionInfo } from '@/types/hermes'
 
@@ -178,6 +179,19 @@ describe('useSessionTileDelegate resumeTile', () => {
       profile: 'backend-oxcoder'
     })
     expect(ambientRequest).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('rejects another profile runtime even with refreshTranscript=%s', async refreshTranscript => {
+    setSessions([row({ id: 'stored-copied', profile: 'bot' })])
+    const original = { busy: true, messages: [{ id: 'm1' }], storedSessionId: 'stored-copied' }
+    runtimeSessionOwners.set('runtime-original-copy', 'default')
+    const runtimeIdByStoredSessionIdRef = { current: new Map([['stored-copied', 'runtime-original-copy']]) }
+    const sessionStateByRuntimeIdRef = { current: new Map([['runtime-original-copy', original]]) }
+    vi.mocked(requestGatewayForProfile).mockResolvedValueOnce({ session_id: 'runtime-bot-copy' } as never)
+    renderTile(vi.fn(async () => ({})) as never, { runtimeIdByStoredSessionIdRef, sessionStateByRuntimeIdRef })
+    expect(await sessionTileDelegate()!.resumeTile('stored-copied', { refreshTranscript })).toBe('runtime-bot-copy')
+    expect(sessionStateByRuntimeIdRef.current.get('runtime-original-copy')).toBe(original)
+    runtimeSessionOwners.clear()
   })
 
   it('reuses a warm binding that still carries a transcript', async () => {

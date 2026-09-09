@@ -35,6 +35,27 @@ describe('singleFlightSessionResume', () => {
     expect(requestGateway).toHaveBeenCalledTimes(1)
   })
 
+  it('does not share a copied stored id across owners or connections', async () => {
+    const owners = [
+      { connectionId: 'local', profile: 'default' },
+      { connectionId: 'local', profile: 'catalyst-voice' },
+      { connectionId: 'remote', profile: 'catalyst-voice' }
+    ]
+
+    const runs = owners.map((_, index) => vi.fn(async () => ({ session_id: `runtime-${index}` })))
+
+    const results = await Promise.all(
+      owners.map((owner, index) => singleFlightSessionResume('copied', runs[index]!, owner))
+    )
+
+    expect(results.map(result => result.session_id)).toEqual(['runtime-0', 'runtime-1', 'runtime-2'])
+    runs.forEach(run => expect(run).toHaveBeenCalledTimes(1))
+    owners.forEach((owner, index) => registerRecoveredRuntime('copied', `recovered-${index}`, owner))
+    expect(takeRecoveredRuntime('copied', null, owners[1])).toBe('recovered-1')
+    expect(takeRecoveredRuntime('copied', null, owners[0])).toBe('recovered-0')
+    expect(takeRecoveredRuntime('copied', null, owners[2])).toBe('recovered-2')
+  })
+
   it('different stored ids still resume independently', async () => {
     const requestGateway = vi.fn(async (_method: string, params?: Record<string, unknown>) => {
       await new Promise(resolve => setTimeout(resolve, 5))
@@ -60,8 +81,8 @@ describe('singleFlightSessionResume', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ session_id: 'rt-second' })
 
-    await expect(singleFlightSessionResume('stored-a', run)).rejects.toThrow('boom')
-    await expect(singleFlightSessionResume('stored-a', run)).resolves.toEqual({ session_id: 'rt-second' })
+    await expect(singleFlightSessionResume('stored-a', run, undefined)).rejects.toThrow('boom')
+    await expect(singleFlightSessionResume('stored-a', run, undefined)).resolves.toEqual({ session_id: 'rt-second' })
     expect(run).toHaveBeenCalledTimes(2)
   })
 })
@@ -93,13 +114,13 @@ describe('drift-abort recovered-runtime cache', () => {
     ).rejects.toThrow(SessionRecoveryAborted)
 
     // The freshly-minted runtime is NOT abandoned: the next action reuses it.
-    expect(takeRecoveredRuntime('stored-a')).toBe('rt-recovered')
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBe('rt-recovered')
     // Take-semantics: consumed exactly once.
-    expect(takeRecoveredRuntime('stored-a')).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBeUndefined()
   })
 
   it('a later non-drifted recovery adopts the cached runtime instead of resuming again', async () => {
-    registerRecoveredRuntime('stored-a', 'rt-cached')
+    registerRecoveredRuntime('stored-a', 'rt-cached', undefined)
 
     const requestGateway = vi.fn(async () => {
       throw new Error('session.resume must not be called when a cached runtime exists')
@@ -127,9 +148,9 @@ describe('drift-abort recovered-runtime cache', () => {
   })
 
   it('takeRecoveredRuntime skips a cached id the caller already knows is dead', () => {
-    registerRecoveredRuntime('stored-a', 'rt-dead')
+    registerRecoveredRuntime('stored-a', 'rt-dead', undefined)
 
-    expect(takeRecoveredRuntime('stored-a', 'rt-dead')).toBeUndefined()
-    expect(takeRecoveredRuntime('stored-a')).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', 'rt-dead', undefined)).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBeUndefined()
   })
 })

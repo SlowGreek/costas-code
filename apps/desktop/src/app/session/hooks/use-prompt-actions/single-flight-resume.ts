@@ -13,10 +13,21 @@
  * `session_id`); joiners receive whatever the winning call returns.
  */
 
+import type { SessionOwnerScope } from '@/store/session-request-router'
+import { sessionOwnerScopeKey } from '@/store/session-runtime-owner'
+
+const scopeKey = (storedSessionId: string, owner: SessionOwnerScope) =>
+  JSON.stringify([sessionOwnerScopeKey(owner), storedSessionId])
+
 const _inFlightResumeByStoredSessionId = new Map<string, Promise<unknown>>()
 
-export function singleFlightSessionResume<T>(storedSessionId: string, run: () => Promise<T>): Promise<T> {
-  const existing = _inFlightResumeByStoredSessionId.get(storedSessionId)
+export function singleFlightSessionResume<T>(
+  storedSessionId: string,
+  run: () => Promise<T>,
+  owner: SessionOwnerScope
+): Promise<T> {
+  const key = scopeKey(storedSessionId, owner)
+  const existing = _inFlightResumeByStoredSessionId.get(key)
 
   if (existing) {
     return existing as Promise<T>
@@ -28,12 +39,12 @@ export function singleFlightSessionResume<T>(storedSessionId: string, run: () =>
   const flight = Promise.resolve()
     .then(run)
     .finally(() => {
-      if (_inFlightResumeByStoredSessionId.get(storedSessionId) === flight) {
-        _inFlightResumeByStoredSessionId.delete(storedSessionId)
+      if (_inFlightResumeByStoredSessionId.get(key) === flight) {
+        _inFlightResumeByStoredSessionId.delete(key)
       }
     })
 
-  _inFlightResumeByStoredSessionId.set(storedSessionId, flight)
+  _inFlightResumeByStoredSessionId.set(key, flight)
 
   return flight
 }
@@ -51,9 +62,9 @@ export function singleFlightSessionResume<T>(storedSessionId: string, run: () =>
  */
 const _recoveredRuntimeByStoredSessionId = new Map<string, string>()
 
-export function registerRecoveredRuntime(storedSessionId: string, runtimeId: string): void {
+export function registerRecoveredRuntime(storedSessionId: string, runtimeId: string, owner: SessionOwnerScope): void {
   if (storedSessionId && runtimeId) {
-    _recoveredRuntimeByStoredSessionId.set(storedSessionId, runtimeId)
+    _recoveredRuntimeByStoredSessionId.set(scopeKey(storedSessionId, owner), runtimeId)
   }
 }
 
@@ -63,14 +74,19 @@ export function registerRecoveredRuntime(storedSessionId: string, runtimeId: str
  * bounded retry, never a loop. `deadRuntimeId` skips (and drops) the entry
  * when the caller already knows that exact runtime is dead.
  */
-export function takeRecoveredRuntime(storedSessionId: string, deadRuntimeId?: null | string): string | undefined {
-  const cached = _recoveredRuntimeByStoredSessionId.get(storedSessionId)
+export function takeRecoveredRuntime(
+  storedSessionId: string,
+  deadRuntimeId: null | string | undefined,
+  owner: SessionOwnerScope
+): string | undefined {
+  const key = scopeKey(storedSessionId, owner)
+  const cached = _recoveredRuntimeByStoredSessionId.get(key)
 
   if (cached === undefined) {
     return undefined
   }
 
-  _recoveredRuntimeByStoredSessionId.delete(storedSessionId)
+  _recoveredRuntimeByStoredSessionId.delete(key)
 
   return deadRuntimeId && cached === deadRuntimeId ? undefined : cached
 }

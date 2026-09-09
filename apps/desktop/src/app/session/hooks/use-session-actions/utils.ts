@@ -39,6 +39,7 @@ import type { SessionProfileRoute } from '@/store/session-request-router'
 // it from here; the canonical definition lives in @/store/session.
 export { sessionMatchesStoredId }
 import { sessionOwnerRouteFromRow, type SessionOwnerScope } from '@/store/session-request-router'
+import { knownOwnerForSession } from '@/store/session-states'
 import { reportBackendContract, reportInstallMethodWarning } from '@/store/updates'
 import type {
   SessionCreateResponse,
@@ -1677,6 +1678,11 @@ export async function resolveSessionOwner(storedSessionId: null | string): Promi
   const row = await resolveStoredSession(storedSessionId)
 
   return sessionOwnerRouteFromRow(row) ?? (row?.profile?.trim() || undefined)
+}
+
+/** Capture the complete action route before awaiting the row/probe fallback. */
+export async function resolveSessionActionOwner(storedSessionId: null | string): Promise<SessionOwnerScope> {
+  return knownOwnerForSession(storedSessionId) ?? (await resolveSessionOwner(storedSessionId))
 }
 
 type SessionRuntimeStatePatch = Partial<

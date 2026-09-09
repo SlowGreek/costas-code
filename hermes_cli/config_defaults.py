@@ -2278,20 +2278,10 @@ DEFAULT_CONFIG = {
         # negatives (goal actually done but judge says continue) and
         # unbounded model spend on fuzzy / unachievable goals.
         "max_turns": 20,
-        # Second-stage completion verifier. When the first-stage judge returns
-        # DONE, Hermes runs one cheap, cache-safe corroboration pass over the
-        # actual tool/command evidence before accepting completion (fails
-        # closed on a broken verifier). Set false to trust the first-stage
-        # judge alone.
-        "verify_completion": True,
         # Bounded max park (seconds): the hard ceiling on how long ANY /goal
         # wait barrier (pid / session / time) parks the loop before it is
         # force-released, so a wait that never fires can't wedge the goal.
         "max_park_seconds": 1800,
-        # After this many turns in a row with no observable progress on the
-        # same gap (fingerprinted, not exact-string), Hermes auto-pauses the
-        # goal and escalates instead of spinning the whole budget.
-        "max_no_progress": 4,
     },
 
 

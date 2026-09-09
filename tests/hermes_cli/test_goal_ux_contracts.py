@@ -1,7 +1,7 @@
-"""Goal-loop UX contracts: autonomy, judging visibility, and verifier posture.
+"""Goal-loop UX contracts: autonomy and judging visibility.
 
-Three compounding causes of a clunky `/goal`, each pinned by the tests below.
-All three are behavior contracts, never snapshots of prompt wording — they
+Two compounding causes of a clunky `/goal`, each pinned by the tests below.
+Both are behavior contracts, never snapshots of prompt wording — they
 assert what the loop must *do*, so the prompts stay editable.
 
 1. AUTONOMY. Every continuation template ended with "If you are blocked and
@@ -13,15 +13,9 @@ assert what the loop must *do*, so the prompts stay editable.
    ("awaiting user decision", "whether to merge", "whether to commit and
    push"). Reversible, in-scope decisions must be made, not escalated.
 
-2. JUDGING VISIBILITY. The judge (and, on DONE, the verifier) run AFTER
-   `message.complete` is emitted. The UI paints "finished" while one or two
-   auxiliary LLM round-trips are still running, so the app looks idle when it
-   isn't. The loop must announce that it is judging.
+2. JUDGING VISIBILITY. The judge runs AFTER `message.complete` is emitted.
+   The loop must announce this auxiliary call so the app does not look idle.
 
-3. VERIFIER POSTURE. `verify_completion` fails closed: an unverified DONE is
-   downgraded to CONTINUE. That is correct for a bare claim, but it must not
-   silently veto forever — a repeatedly-verified-then-downgraded goal is
-   indistinguishable from a hang.
 """
 
 from __future__ import annotations
@@ -112,8 +106,7 @@ def test_status_callback_announces_judging_before_the_judge_call(monkeypatch):
     """`evaluate_after_turn` must announce that it is judging.
 
     The gateway emits `message.complete` before calling this, so without a
-    status signal the UI shows an idle app through one or two auxiliary LLM
-    round-trips (judge, then verifier on DONE).
+    status signal the UI shows an idle app through the auxiliary judge call.
     """
     seen: list[tuple[str, str | None]] = []
 
@@ -174,84 +167,3 @@ def test_status_callback_is_optional(monkeypatch):
     decision = mgr.evaluate_after_turn("did some work")
 
     assert decision["verdict"] == "continue"
-
-
-# ── 3. Verifier posture ──────────────────────────────────────────────
-
-
-def test_repeated_verifier_downgrade_does_not_loop_forever(monkeypatch):
-    """A fail-closed verifier must not veto the same DONE indefinitely.
-
-    Failing closed is right — an unverified claim is not proof. But if the
-    judge keeps saying DONE and the verifier keeps downgrading it, the goal
-    burns its whole budget invisibly and looks hung. After a bounded number of
-    downgrades the loop must surface the disagreement to the user instead of
-    silently continuing.
-    """
-    monkeypatch.setattr(
-        goals,
-        "judge_goal",
-        lambda *a, **k: ("done", "looks done", False, None, False),
-    )
-    monkeypatch.setattr(
-        goals,
-        "verify_completion",
-        # (confirmed, reason, infra_failed)
-        lambda *a, **k: (False, "no concrete evidence shown", False),
-    )
-
-    mgr = goals.GoalManager(session_id="verifier-loop-sid")
-    mgr.set("ship it")
-
-    decisions = []
-    for _ in range(goals.MAX_VERIFY_DOWNGRADES + 2):
-        decision = mgr.evaluate_after_turn("all done, trust me")
-        decisions.append(decision)
-        if not decision.get("should_continue"):
-            break
-
-    last = decisions[-1]
-    # The verdict field stays "continue" (the judge's DONE was downgraded);
-    # what must change is that the LOOP stops and the goal parks visibly.
-    assert not last["should_continue"], (
-        "a repeatedly-downgraded DONE must stop the loop rather than "
-        f"continuing forever; ran {len(decisions)} rounds"
-    )
-    assert last["status"] == "paused", (
-        f"the standoff must park the goal visibly; got status={last['status']}"
-    )
-    assert len(decisions) <= goals.MAX_VERIFY_DOWNGRADES, (
-        f"must stop within MAX_VERIFY_DOWNGRADES rounds; took {len(decisions)}"
-    )
-    # The user needs to know WHY, and what to do about it.
-    assert "corroborat" in last["message"].lower()
-    assert mgr.state.paused_reason and "corroborat" in mgr.state.paused_reason
-
-
-def test_a_verified_done_resets_the_downgrade_counter(monkeypatch):
-    """The counter tracks a *consecutive* standoff, not lifetime downgrades.
-
-    A goal that stumbles once and then genuinely completes must not carry that
-    strike forward into a later goal on the same session.
-    """
-    outcomes = iter([
-        (False, "no evidence yet", False),
-        (True, "tests shown passing", False),
-    ])
-    monkeypatch.setattr(
-        goals,
-        "judge_goal",
-        lambda *a, **k: ("done", "looks done", False, None, False),
-    )
-    monkeypatch.setattr(goals, "verify_completion", lambda *a, **k: next(outcomes))
-
-    mgr = goals.GoalManager(session_id="verifier-reset-sid")
-    mgr.set("ship it")
-
-    first = mgr.evaluate_after_turn("done, trust me")
-    assert first["should_continue"], "an unverified claim must keep working"
-    assert mgr.state.verify_downgrades == 1
-
-    second = mgr.evaluate_after_turn("done, here are the passing tests")
-    assert second["status"] == "done"
-    assert mgr.state.verify_downgrades == 0, "a verified DONE must clear the streak"

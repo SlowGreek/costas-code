@@ -327,9 +327,9 @@ async def test_post_turn_continuation_scopes_background_to_session(hermes_home, 
 
 
 @pytest.mark.asyncio
-async def test_foreground_tool_evidence_reaches_verifier(hermes_home):
+async def test_foreground_tool_evidence_reaches_judge(hermes_home):
     """Fix 1: the gateway must forward THIS turn's real tool/test results into
-    the second-stage completion verifier — otherwise a verified contract goal
+    the goal judge — otherwise a verified contract goal
     loops because its passing tests are invisible."""
     runner, adapter, session_entry, src = _make_runner_with_adapter()
 
@@ -351,14 +351,13 @@ async def test_foreground_tool_evidence_reaches_verifier(hermes_home):
 
     captured = {}
 
-    def _verifier(**kwargs):
-        # judge is patched out, so the only call_llm here is the verifier.
+    def _judge(**kwargs):
         captured["user"] = " ".join(
             m.get("content", "") for m in kwargs.get("messages", []) if m.get("role") == "user"
         )
 
         class _M:
-            content = '{"confirmed": true, "reason": "42 passed shown"}'
+            content = '{"verdict": "done", "reason": "42 passed shown"}'
 
         class _C:
             message = _M()
@@ -368,8 +367,8 @@ async def test_foreground_tool_evidence_reaches_verifier(hermes_home):
 
         return _R()
 
-    with patch("hermes_cli.goals.judge_goal", return_value=("done", "looks done", False, None, False)), patch(
-        "agent.auxiliary_client.call_llm", side_effect=_verifier
+    with patch(
+        "agent.auxiliary_client.call_llm", side_effect=_judge
     ):
         await runner._post_turn_goal_continuation(
             session_entry=session_entry,
@@ -379,5 +378,5 @@ async def test_foreground_tool_evidence_reaches_verifier(hermes_home):
         )
         await asyncio.sleep(0.05)
 
-    assert "42 passed" in (captured.get("user") or ""), "tool evidence must reach the verifier prompt"
+    assert "42 passed" in (captured.get("user") or ""), "tool evidence must reach the judge prompt"
     assert GoalManager(session_entry.session_id).state.status == "done"

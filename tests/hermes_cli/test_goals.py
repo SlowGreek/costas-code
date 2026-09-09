@@ -1120,9 +1120,9 @@ class TestInjectionFencing:
         assert "ignore rules" in out
 
     def test_system_prompts_forbid_following_embedded_instructions(self):
-        from hermes_cli.goals import JUDGE_SYSTEM_PROMPT, VERIFY_SYSTEM_PROMPT
+        from hermes_cli.goals import JUDGE_SYSTEM_PROMPT
 
-        for p in (JUDGE_SYSTEM_PROMPT, VERIFY_SYSTEM_PROMPT):
+        for p in (JUDGE_SYSTEM_PROMPT,):
             low = p.lower()
             assert "untrusted" in low
             assert "never follow" in low
@@ -1161,85 +1161,6 @@ class TestInjectionFencing:
         assert "do evil" in block  # content preserved
         # Only the template's own BACKGROUND close fence remains.
         assert block.count("BACKGROUND>>>") == 1
-
-
-class TestPriorGapAndNoProgress:
-    """Persisted prior-gap feedback + fingerprinted no-progress auto-pause."""
-
-    def test_prior_gap_fed_to_next_judge_call(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager
-
-        mgr = GoalManager(session_id="pg-1", default_max_turns=20)
-        mgr.set("g")
-
-        seen = []
-
-        def _judge(goal, resp, **kw):
-            seen.append(kw.get("prior_gap"))
-            # Distinct reason each turn so no-progress doesn't pause.
-            return ("continue", f"missing piece {len(seen)}", False, None, False)
-
-        with patch.object(goals, "judge_goal", side_effect=_judge):
-            mgr.evaluate_after_turn("r1")
-            mgr.evaluate_after_turn("r2")
-
-        assert seen[0] is None  # first turn has no prior gap
-        assert seen[1] == "missing piece 1"  # second turn is fed the first gap
-
-    def test_no_progress_auto_pauses_on_repeated_gap(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager, DEFAULT_MAX_NO_PROGRESS
-
-        mgr = GoalManager(session_id="np-1", default_max_turns=50)
-        mgr.set("g")
-
-        with patch.object(
-            goals, "judge_goal",
-            return_value=("continue", "the auth module still lacks a token refresh", False, None, False),
-        ):
-            paused_at = None
-            for i in range(1, DEFAULT_MAX_NO_PROGRESS + 1):
-                d = mgr.evaluate_after_turn("tried again")
-                if d["status"] == "paused":
-                    paused_at = i
-                    break
-        assert paused_at == DEFAULT_MAX_NO_PROGRESS
-        assert "progress" in (mgr.state.paused_reason or "").lower()
-
-    def test_no_progress_streak_resets_on_different_gap(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager
-
-        mgr = GoalManager(session_id="np-2", default_max_turns=50)
-        mgr.set("g")
-
-        reasons = iter([
-            "missing the login flow",
-            "missing the login flow",
-            "now the logout flow is broken",  # different gap → reset
-            "now the logout flow is broken",
-        ])
-
-        def _judge(*a, **k):
-            return ("continue", next(reasons), False, None, False)
-
-        with patch.object(goals, "judge_goal", side_effect=_judge):
-            for _ in range(4):
-                d = mgr.evaluate_after_turn("x")
-                assert d["should_continue"] is True  # never hits 4-in-a-row same gap
-        assert mgr.state.status == "active"
-
-    def test_fingerprint_is_order_and_filler_independent(self):
-        from hermes_cli.goals import _fingerprint_reason
-
-        a = _fingerprint_reason("parser drops commas")
-        b = _fingerprint_reason("commas drops parser")  # reordered
-        c = _fingerprint_reason("the parser now drops commas yet")  # + filler/stopwords
-        assert a == b
-        assert a == c
-        # A genuinely different gap differs.
-        assert _fingerprint_reason("network timeout on deploy") != a
 
 
 class TestBoundedMaxPark:
@@ -1364,126 +1285,6 @@ class TestScopedBackgroundProcesses:
         assert [p["session_id"] for p in out] == ["s1"]
 
 
-class TestSecondStageVerification:
-    """Completion is corroborated against real evidence before it is accepted."""
-
-    def test_freeform_goal_no_evidence_accepts_without_llm(self, hermes_home):
-        from hermes_cli.goals import verify_completion
-
-        # No LLM should be called for a pure free-form goal with no evidence.
-        with patch("agent.auxiliary_client.call_llm", side_effect=AssertionError("should not call")):
-            confirmed, reason, infra = verify_completion("write a haiku", "here it is")
-        assert confirmed is True
-        assert infra is False
-
-    def test_contract_verification_without_evidence_is_not_confirmed(self, hermes_home):
-        from hermes_cli.goals import verify_completion, GoalContract
-
-        with patch("agent.auxiliary_client.call_llm", side_effect=AssertionError("should not call")):
-            confirmed, reason, infra = verify_completion(
-                "ship it", "I'm confident it's done",
-                contract=GoalContract(verification="pytest -q passes"),
-            )
-        assert confirmed is False
-        assert infra is False
-
-    def test_evidence_corroborates_confirms(self, hermes_home):
-        from hermes_cli.goals import verify_completion, GoalContract
-
-        with patch(
-            "agent.auxiliary_client.call_llm",
-            return_value=_fake_llm_resp('{"confirmed": true, "reason": "tests really passed"}'),
-        ):
-            confirmed, reason, infra = verify_completion(
-                "ship it", "done",
-                contract=GoalContract(verification="pytest -q passes"),
-                recent_evidence=["[terminal] 30 passed, 0 failed in 2.1s"],
-            )
-        assert confirmed is True
-        assert infra is False
-
-    def test_verifier_infra_failure_fails_closed(self, hermes_home):
-        from hermes_cli.goals import verify_completion
-
-        with patch("agent.auxiliary_client.call_llm", side_effect=RuntimeError("boom")):
-            confirmed, reason, infra = verify_completion(
-                "ship it", "done",
-                recent_evidence=["[terminal] some output"],
-            )
-        assert confirmed is False
-        assert infra is True  # fail-closed on infra failure
-
-    def test_unparseable_verifier_reply_fails_closed(self, hermes_home):
-        from hermes_cli.goals import verify_completion
-
-        with patch(
-            "agent.auxiliary_client.call_llm",
-            return_value=_fake_llm_resp("I think so, probably"),
-        ):
-            confirmed, reason, infra = verify_completion(
-                "ship it", "done",
-                recent_evidence=["[terminal] output"],
-            )
-        assert confirmed is False
-        assert infra is True
-
-    def test_evaluate_downgrades_unverified_done_to_continue(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager, GoalContract
-
-        mgr = GoalManager(session_id="verify-1", default_max_turns=20)
-        mgr.set("ship it", contract=GoalContract(verification="pytest -q passes"))
-
-        # Judge says done, but there is NO evidence for the verification →
-        # second stage refuses to confirm → goal keeps working (not done).
-        with patch.object(
-            goals, "judge_goal",
-            return_value=("done", "the agent says it's finished", False, None, False),
-        ):
-            d = mgr.evaluate_after_turn("All set, everything works!")
-
-        assert d["verdict"] == "continue"
-        assert mgr.state.status == "active"
-        assert mgr.state.status != "done"
-
-    def test_evaluate_accepts_verified_done(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager, GoalContract
-
-        mgr = GoalManager(session_id="verify-2", default_max_turns=20)
-        mgr.set("ship it", contract=GoalContract(verification="pytest passes"))
-
-        with patch.object(
-            goals, "judge_goal",
-            return_value=("done", "looks done", False, None, False),
-        ), patch(
-            "agent.auxiliary_client.call_llm",
-            return_value=_fake_llm_resp('{"confirmed": true, "reason": "30 passed shown"}'),
-        ):
-            d = mgr.evaluate_after_turn(
-                "Done — see output.",
-                recent_evidence=["[terminal] 30 passed, 0 failed"],
-            )
-        assert d["verdict"] == "done"
-        assert mgr.state.status == "done"
-
-    def test_verify_can_be_disabled(self, hermes_home):
-        from hermes_cli import goals
-        from hermes_cli.goals import GoalManager, GoalContract
-
-        mgr = GoalManager(session_id="verify-3", default_max_turns=20)
-        mgr.set("ship it", contract=GoalContract(verification="pytest passes"))
-
-        with patch.object(goals, "_verify_enabled", return_value=False), patch.object(
-            goals, "judge_goal",
-            return_value=("done", "done", False, None, False),
-        ):
-            d = mgr.evaluate_after_turn("done, trust me")
-        # Verifier off → first-stage done is accepted as-is.
-        assert d["verdict"] == "done"
-        assert mgr.state.status == "done"
-
-
 class TestPreferSessionBackedWait:
     """A judge pid-wait is upgraded to a session-backed wait when the pid is a
     tracked process (session waits wake autonomously)."""
@@ -1557,13 +1358,12 @@ class TestExtractRecentToolEvidence:
         many = [{"role": "tool", "content": f"result {i}"} for i in range(20)]
         assert len(extract_recent_tool_evidence(many, max_items=3)) == 3
 
-    def test_recent_evidence_reaches_verifier_prompt(self, hermes_home):
+    def test_recent_evidence_reaches_judge_prompt(self, hermes_home):
         """End-to-end at the goals seam every surface shares: extracted tool
-        evidence must land in the second-stage verifier's prompt."""
-        from hermes_cli import goals
+        evidence must land in the goal judge's prompt."""
         from hermes_cli.goals import GoalManager, GoalContract, extract_recent_tool_evidence
 
-        mgr = GoalManager(session_id="ev-verifier", default_max_turns=20)
+        mgr = GoalManager(session_id="ev-judge", default_max_turns=20)
         mgr.set("ship it", contract=GoalContract(verification="pytest passes"))
 
         evidence = extract_recent_tool_evidence(
@@ -1571,18 +1371,18 @@ class TestExtractRecentToolEvidence:
         )
         captured = {}
 
-        def _verifier(**kwargs):
+        def _judge(**kwargs):
             captured["user"] = " ".join(
                 m.get("content", "") for m in kwargs.get("messages", []) if m.get("role") == "user"
             )
-            return _fake_llm_resp('{"confirmed": true, "reason": "99 passed shown"}')
+            return _fake_llm_resp('{"verdict": "done", "reason": "99 passed shown"}')
 
-        with patch.object(goals, "judge_goal", return_value=("done", "looks done", False, None, False)), patch(
-            "agent.auxiliary_client.call_llm", side_effect=_verifier
+        with patch(
+            "agent.auxiliary_client.call_llm", side_effect=_judge
         ):
             d = mgr.evaluate_after_turn("All green — done.", recent_evidence=evidence)
 
-        assert "99 passed" in (captured.get("user") or ""), "foreground evidence must reach the verifier"
+        assert "99 passed" in (captured.get("user") or ""), "foreground evidence must reach the judge"
         assert d["verdict"] == "done"
 
 

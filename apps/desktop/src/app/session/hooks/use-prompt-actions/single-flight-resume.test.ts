@@ -81,8 +81,8 @@ describe('singleFlightSessionResume', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ session_id: 'rt-second' })
 
-    await expect(singleFlightSessionResume('stored-a', run)).rejects.toThrow('boom')
-    await expect(singleFlightSessionResume('stored-a', run)).resolves.toEqual({ session_id: 'rt-second' })
+    await expect(singleFlightSessionResume('stored-a', run, undefined)).rejects.toThrow('boom')
+    await expect(singleFlightSessionResume('stored-a', run, undefined)).resolves.toEqual({ session_id: 'rt-second' })
     expect(run).toHaveBeenCalledTimes(2)
   })
 })
@@ -114,13 +114,13 @@ describe('drift-abort recovered-runtime cache', () => {
     ).rejects.toThrow(SessionRecoveryAborted)
 
     // The freshly-minted runtime is NOT abandoned: the next action reuses it.
-    expect(takeRecoveredRuntime('stored-a')).toBe('rt-recovered')
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBe('rt-recovered')
     // Take-semantics: consumed exactly once.
-    expect(takeRecoveredRuntime('stored-a')).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBeUndefined()
   })
 
   it('a later non-drifted recovery adopts the cached runtime instead of resuming again', async () => {
-    registerRecoveredRuntime('stored-a', 'rt-cached')
+    registerRecoveredRuntime('stored-a', 'rt-cached', undefined)
 
     const requestGateway = vi.fn(async () => {
       throw new Error('session.resume must not be called when a cached runtime exists')
@@ -148,9 +148,9 @@ describe('drift-abort recovered-runtime cache', () => {
   })
 
   it('takeRecoveredRuntime skips a cached id the caller already knows is dead', () => {
-    registerRecoveredRuntime('stored-a', 'rt-dead')
+    registerRecoveredRuntime('stored-a', 'rt-dead', undefined)
 
-    expect(takeRecoveredRuntime('stored-a', 'rt-dead')).toBeUndefined()
-    expect(takeRecoveredRuntime('stored-a')).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', 'rt-dead', undefined)).toBeUndefined()
+    expect(takeRecoveredRuntime('stored-a', null, undefined)).toBeUndefined()
   })
 })

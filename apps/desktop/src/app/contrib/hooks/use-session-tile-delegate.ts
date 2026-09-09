@@ -17,7 +17,7 @@ import {
 import { knownSessionOwner, ownerLookupSessionRows } from '@/store/session'
 import { assertSessionOwnerResolved } from '@/store/session-owner-resolution'
 import { requestForSessionProfile, type SessionOwnerScope } from '@/store/session-request-router'
-import { runtimeMatchesSessionOwner } from '@/store/session-runtime-owner'
+import { runtimeMatchesSessionOwner, runtimeSessionOwners } from '@/store/session-runtime-owner'
 import {
   $sessionTiles,
   publishSessionState,
@@ -183,15 +183,15 @@ export function useSessionTileDelegate({
       return owner
     }
 
-    const requestForStoredSession = async <T>(
-      storedSessionId: string,
-      method: string,
-      params: Record<string, unknown>,
-      timeoutMs?: number
-    ): Promise<T> => {
-      const owner = await ownerForStoredSession(storedSessionId)
+    const requesterForRuntime = async (runtimeId: string, storedSessionId: string | null) => {
+      const owner =
+        runtimeSessionOwners.get(runtimeId) ??
+        (storedSessionId ? await ownerForStoredSession(storedSessionId) : undefined)
 
-      return requestForSessionProfile<T>(owner, requestGateway, method, params, timeoutMs)
+      const request = <T>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number) =>
+        requestForSessionProfile<T>(owner, requestGateway, method, params, timeoutMs)
+
+      return { owner, request }
     }
 
     setSessionTileDelegate({
@@ -249,10 +249,7 @@ export function useSessionTileDelegate({
 
         const storedSessionId = storedSessionIdForRuntime(runtimeId)
 
-        const routedRequest = storedSessionId
-          ? <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number) =>
-              requestForStoredSession<T>(storedSessionId, method, params ?? {}, timeoutMs)
-          : requestGateway
+        const { owner, request: routedRequest } = await requesterForRuntime(runtimeId, storedSessionId)
 
         await withSessionNotFoundResume(
           runtimeId,
@@ -260,6 +257,7 @@ export function useSessionTileDelegate({
           liveId => routedRequest('session.interrupt', { session_id: liveId }),
           {
             requestGateway: routedRequest,
+            owner,
             onRecovered: recoveredId => {
               markSessionRecentlyInterrupted(recoveredId)
               rebindTileRuntime(runtimeId)(recoveredId)
@@ -434,16 +432,13 @@ export function useSessionTileDelegate({
 
         const storedSessionId = storedSessionIdForRuntime(runtimeId)
 
-        const routedRequest = storedSessionId
-          ? <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number) =>
-              requestForStoredSession<T>(storedSessionId, method, params ?? {}, timeoutMs)
-          : requestGateway
+        const { owner, request: routedRequest } = await requesterForRuntime(runtimeId, storedSessionId)
 
         await withSessionNotFoundResume(
           runtimeId,
           storedSessionId,
           liveId => routedRequest('prompt.submit', { session_id: liveId, text }, PROMPT_SUBMIT_REQUEST_TIMEOUT_MS),
-          { requestGateway: routedRequest, onRecovered: rebindTileRuntime(runtimeId) }
+          { requestGateway: routedRequest, owner, onRecovered: rebindTileRuntime(runtimeId) }
         )
       },
       updateSession: (runtimeId, updater) => updateSessionState(runtimeId, updater)

@@ -24,7 +24,7 @@ const _inFlightResumeByStoredSessionId = new Map<string, Promise<unknown>>()
 export function singleFlightSessionResume<T>(
   storedSessionId: string,
   run: () => Promise<T>,
-  owner?: SessionOwnerScope
+  owner: SessionOwnerScope
 ): Promise<T> {
   const key = scopeKey(storedSessionId, owner)
   const existing = _inFlightResumeByStoredSessionId.get(key)
@@ -62,7 +62,7 @@ export function singleFlightSessionResume<T>(
  */
 const _recoveredRuntimeByStoredSessionId = new Map<string, string>()
 
-export function registerRecoveredRuntime(storedSessionId: string, runtimeId: string, owner?: SessionOwnerScope): void {
+export function registerRecoveredRuntime(storedSessionId: string, runtimeId: string, owner: SessionOwnerScope): void {
   if (storedSessionId && runtimeId) {
     _recoveredRuntimeByStoredSessionId.set(scopeKey(storedSessionId, owner), runtimeId)
   }
@@ -76,8 +76,8 @@ export function registerRecoveredRuntime(storedSessionId: string, runtimeId: str
  */
 export function takeRecoveredRuntime(
   storedSessionId: string,
-  deadRuntimeId?: null | string,
-  owner?: SessionOwnerScope
+  deadRuntimeId: null | string | undefined,
+  owner: SessionOwnerScope
 ): string | undefined {
   const key = scopeKey(storedSessionId, owner)
   const cached = _recoveredRuntimeByStoredSessionId.get(key)

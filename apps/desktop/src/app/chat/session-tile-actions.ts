@@ -35,6 +35,7 @@ import {
   type SessionOwnerScope,
   type SessionProfileRoute
 } from '@/store/session-request-router'
+import { runtimeSessionOwners } from '@/store/session-runtime-owner'
 import {
   $sessionStates,
   isSessionRemote,
@@ -184,13 +185,18 @@ export function useSessionTileActions({ requestGateway, runtimeId, scope, stored
   // active gateway has moved to a same-named profile on another source.
   const requestSessionGateway = useCallback(
     <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number, signal?: AbortSignal) => {
+      const runtimeOwner = runtimeSessionOwners.get(
+        typeof params?.session_id === 'string' ? params.session_id : runtimeIdRef.current
+      )
+
       const knownOwner: SessionOwnerScope =
         sessionTileOwnerRoute(storedIdRef.current) ?? knownSessionOwner(ownerLookupSessionRows(), storedIdRef.current)
 
       // A bare profile is the legacy/unknown tile shape. Preserve its ambient
       // behavior; only a composite route is strong enough to retarget a tile
       // across same-named sources.
-      const owner: SessionOwnerScope = knownOwner && typeof knownOwner === 'object' ? knownOwner : undefined
+      const owner: SessionOwnerScope =
+        runtimeOwner ?? (knownOwner && typeof knownOwner === 'object' ? knownOwner : undefined)
 
       return requestForSessionProfile<T>(owner, requestGateway, method, params ?? {}, timeoutMs, signal)
     },
@@ -365,6 +371,10 @@ export function useSessionTileActions({ requestGateway, runtimeId, scope, stored
         liveId => requestSessionGateway('session.interrupt', { session_id: liveId }),
         {
           requestGateway: requestSessionGateway,
+          owner:
+            runtimeSessionOwners.get(sessionId) ??
+            sessionTileOwnerRoute(storedIdRef.current) ??
+            knownSessionOwner(ownerLookupSessionRows(), storedIdRef.current),
           onRecovered: bindRecoveredRuntime
         }
       )

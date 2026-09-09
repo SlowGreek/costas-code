@@ -238,7 +238,15 @@ export function requestForSessionProfile<T>(
   timeoutMs?: number,
   signal?: AbortSignal
 ): Promise<T> {
-  return dispatchForSessionProfile<T>(ownerProfile, ambientRequest, method, params, timeoutMs, signal).then(result => {
+  const request = dispatchForSessionProfile<T>(ownerProfile, ambientRequest, method, params, timeoutMs, signal)
+
+  // Do not add a promise hop to ordinary RPCs: gone-runtime pollers must
+  // observe rejection before a remount can schedule another request.
+  if (!ownerProfile || !['session.create', 'session.resume', 'session.activate'].includes(method)) {
+    return request
+  }
+
+  return request.then(result => {
     recordAdmittedSessionRuntime(ownerProfile, method, result)
 
     return result

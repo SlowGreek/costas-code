@@ -4,9 +4,13 @@ import type { SessionOwnerScope } from './session-request-router'
 export const runtimeSessionOwners = new Map<string, SessionOwnerScope>()
 
 export function sessionOwnerScopeKey(owner: SessionOwnerScope): string {
-  if (!owner) {return ''}
+  if (!owner) {
+    return ''
+  }
 
-  if (typeof owner === 'string') {return JSON.stringify(['profile', owner.trim() || 'default'])}
+  if (typeof owner === 'string') {
+    return JSON.stringify(['profile', owner.trim() || 'default'])
+  }
 
   return JSON.stringify([
     'connection',
@@ -24,10 +28,17 @@ export function runtimeMatchesSessionOwner(runtimeId: string, owner: SessionOwne
 }
 
 export function recordAdmittedSessionRuntime(owner: SessionOwnerScope, method: string, result: unknown): void {
-  if (!owner || !['session.create', 'session.resume', 'session.activate'].includes(method)) {return}
+  if (!owner || !['session.create', 'session.resume', 'session.activate'].includes(method)) {
+    return
+  }
 
-  if (!result || typeof result !== 'object' || !('session_id' in result)) {return}
+  if (!result || typeof result !== 'object' || !('session_id' in result)) {
+    return
+  }
+
   const runtimeId = result.session_id
 
-  if (typeof runtimeId === 'string' && runtimeId) {runtimeSessionOwners.set(runtimeId, owner)}
+  if (typeof runtimeId === 'string' && runtimeId) {
+    runtimeSessionOwners.set(runtimeId, owner)
+  }
 }

@@ -100,9 +100,17 @@ export function recordSessionEventScope(event: { connectionId?: string; profile?
 
   if (event.connectionId) {
     sessionScopeByRuntimeId.set(event.session_id, registryBackendScopeKey(event.connectionId, event.profile))
+    const previous = sessionOwnerByRuntimeId.get(event.session_id)
+    const profile = String(event.profile ?? '').trim() || 'default'
     sessionOwnerByRuntimeId.set(event.session_id, {
+      ...(previous &&
+      typeof previous === 'object' &&
+      previous.connectionId === event.connectionId &&
+      previous.profile === profile
+        ? previous
+        : {}),
       connectionId: event.connectionId,
-      profile: String(event.profile ?? '').trim() || 'default'
+      profile
     })
 
     return
@@ -1035,7 +1043,26 @@ export function knownOwnerForSession(sessionId: null | string | undefined): Sess
   // A proven runtime is owned by the backend that admitted it. A copied
   // durable id in another profile must not override that authority.
   if (storedSessionId !== sessionId && sessionOwnerByRuntimeId.has(sessionId)) {
-    return sessionOwnerByRuntimeId.get(sessionId)
+    const proven = sessionOwnerByRuntimeId.get(sessionId)
+
+    const metadata = [
+      sessionTileOwnerRoute(storedSessionId),
+      getSessionOwnerHint(storedSessionId),
+      knownSessionOwner(ownerLookupSessionRows(), storedSessionId)
+    ].find(
+      candidate =>
+        proven &&
+        typeof proven === 'object' &&
+        candidate &&
+        typeof candidate === 'object' &&
+        candidate.connectionId === proven.connectionId &&
+        candidate.profile === proven.profile &&
+        (!candidate.targetProfile || !proven.targetProfile || candidate.targetProfile === proven.targetProfile)
+    )
+
+    return proven && typeof proven === 'object' && metadata && typeof metadata === 'object'
+      ? { ...metadata, ...proven }
+      : proven
   }
 
   return (

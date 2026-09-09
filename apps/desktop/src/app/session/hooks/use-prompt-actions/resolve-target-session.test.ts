@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { resolveTargetSessionId } from './resolve-target-session'
 
 vi.mock('../use-session-actions/utils', () => ({
-  resolveSessionProfile: vi.fn(async () => 'work')
+  resolveSessionOwner: vi.fn(async () => 'work')
 }))
 
 const RECOVERED = 'rt-recovered'

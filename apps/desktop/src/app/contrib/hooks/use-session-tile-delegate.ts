@@ -17,6 +17,7 @@ import {
 import { knownSessionOwner, ownerLookupSessionRows } from '@/store/session'
 import { assertSessionOwnerResolved } from '@/store/session-owner-resolution'
 import { requestForSessionProfile, type SessionOwnerScope } from '@/store/session-request-router'
+import { runtimeMatchesSessionOwner } from '@/store/session-runtime-owner'
 import {
   $sessionTiles,
   publishSessionState,
@@ -267,6 +268,8 @@ export function useSessionTileDelegate({
         )
       },
       resumeTile: async (storedSessionId, options) => {
+        const owner = await ownerForStoredSession(storedSessionId)
+
         // A retained tile can still own its runtime after the primary view drops
         // its reverse lookup. Reconnect invalidates both bindings.
         const existing =
@@ -290,6 +293,7 @@ export function useSessionTileDelegate({
         if (
           existing &&
           cached?.storedSessionId === storedSessionId &&
+          runtimeMatchesSessionOwner(existing, owner) &&
           (cached.busy || cached.messages.length > 0) &&
           !refreshTranscript
         ) {
@@ -303,8 +307,6 @@ export function useSessionTileDelegate({
         // reading messages) without a profile lets the gateway fall back to the
         // launch-profile DB and fork the conversation into the wrong profile —
         // the same cross-profile bleed the recovery resumes had (#67603).
-        const owner = await ownerForStoredSession(storedSessionId)
-
         const restScope =
           owner && typeof owner === 'object'
             ? { connectionId: owner.connectionId, profile: owner.targetProfile || owner.profile }
@@ -312,7 +314,12 @@ export function useSessionTileDelegate({
 
         const prefetchPromise = getLatestSessionMessages(storedSessionId, restScope).catch(() => null)
 
-        if (existing && cached?.storedSessionId === storedSessionId && (cached.busy || cached.messages.length > 0)) {
+        if (
+          existing &&
+          cached?.storedSessionId === storedSessionId &&
+          runtimeMatchesSessionOwner(existing, owner) &&
+          (cached.busy || cached.messages.length > 0)
+        ) {
           const prefetch = await prefetchPromise
           // Deltas and completion may land while REST is in flight.
           updateSessionState(
@@ -338,13 +345,16 @@ export function useSessionTileDelegate({
           () => {
             assertSessionOwnerResolved(owner, { method: 'session.resume', sessionId: storedSessionId })
 
-            return singleFlightSessionResume(storedSessionId, () =>
-              requestForSessionProfile<SessionResumeResponse>(owner, requestGateway, 'session.resume', {
-                session_id: storedSessionId,
-                cols: 96,
-                omit_messages: true,
-                ...(owner ? { profile: typeof owner === 'string' ? owner : owner.profile } : {})
-              })
+            return singleFlightSessionResume(
+              storedSessionId,
+              () =>
+                requestForSessionProfile<SessionResumeResponse>(owner, requestGateway, 'session.resume', {
+                  session_id: storedSessionId,
+                  cols: 96,
+                  omit_messages: true,
+                  ...(owner ? { profile: typeof owner === 'string' ? owner : owner.profile } : {})
+                }),
+              owner
             )
           },
           async () => {

@@ -39,6 +39,7 @@ import { isSessionGoneForBackgroundPolling } from '@/store/runtime-gone'
 import { getSessionOwnerHint, knownSessionOwner, ownerLookupSessionRows, requestSessionResume } from '@/store/session'
 import { assertSessionOwnerResolved } from '@/store/session-owner-resolution'
 import { requestForSessionProfile, type SessionOwnerScope } from '@/store/session-request-router'
+import { runtimeSessionOwners } from '@/store/session-runtime-owner'
 import { $focusedStoredSessionId, sessionTileOwnerRoute, storedSessionIdForRuntimeId } from '@/store/session-states'
 
 import { findStoredIdForRuntimeId, resolveRoutingSessionId, resolveSessionRpcOwner } from './wiring-routing'
@@ -74,12 +75,14 @@ export function createSessionRpcDispatcher(deps: SessionRpcDispatcherDeps): Ambi
         undefined
     })
 
-    let owner: SessionOwnerScope = resolveSessionRpcOwner({
-      routingSessionId,
-      sessionOwnerHint: storedSessionId => getSessionOwnerHint(storedSessionId),
-      sessionRowOwner: storedSessionId => knownSessionOwner(ownerLookupSessionRows(), storedSessionId),
-      tileOwnerRoute: sessionTileOwnerRoute
-    })
+    let owner: SessionOwnerScope =
+      (paramSessionId && routingSessionId !== paramSessionId ? runtimeSessionOwners.get(paramSessionId) : undefined) ??
+      resolveSessionRpcOwner({
+        routingSessionId,
+        sessionOwnerHint: storedSessionId => getSessionOwnerHint(storedSessionId),
+        sessionRowOwner: storedSessionId => knownSessionOwner(ownerLookupSessionRows(), storedSessionId),
+        tileOwnerRoute: sessionTileOwnerRoute
+      })
 
     if (!owner && routingSessionId) {
       // Unknown owner for a REAL session: probe across profiles (REST, not the

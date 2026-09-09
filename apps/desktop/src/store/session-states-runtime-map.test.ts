@@ -113,6 +113,18 @@ describe('knownOwnerForSession / requestForOwnedSession', () => {
     expect(knownOwnerForSession('rt-main')).toBe('coder')
   })
 
+  it('keeps a known runtime on its minting owner when another profile has a copy of its stored id', () => {
+    const owner = { connectionId: 'local', profile: 'default' }
+    recordSessionEventScope({ ...owner, session_id: 'runtime-original' })
+    publishSessionState('runtime-original', createClientSessionState('copied-stored-id'))
+    $sessionTiles.set([
+      { storedSessionId: 'copied-stored-id', ownerRoute: { connectionId: 'local', profile: 'catalyst-voice' } }
+    ])
+
+    expect(knownOwnerForSession('runtime-original')).toEqual(owner)
+    expect(knownOwnerForSession('copied-stored-id')).toEqual({ connectionId: 'local', profile: 'catalyst-voice' })
+  })
+
   it('fails closed with an explicit owner-resolution error instead of the ambient socket', async () => {
     // Somewhere to misroute to: two profiles exist.
     $profiles.set([{ name: 'default' }, { name: 'omar' }] as never)

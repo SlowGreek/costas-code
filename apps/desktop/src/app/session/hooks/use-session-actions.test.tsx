@@ -67,6 +67,7 @@ import {
 } from '@/store/session'
 import { $removedSessionIds, $sessionMutationsInFlight } from '@/store/session-removal'
 import { requestForSessionProfile, type SessionProfileRoute } from '@/store/session-request-router'
+import { runtimeSessionOwners } from '@/store/session-runtime-owner'
 import { $sessionTiles, sessionTileOwnerRoute } from '@/store/session-states'
 import { $sessionSeenCounts, $unreadFinishedMarkers } from '@/store/session-unread'
 import {
@@ -2614,6 +2615,54 @@ describe('resumeSession drops a redundant tile when the session loads into main'
 const clientState = (storedSessionId: string | null): ClientSessionState => createClientSessionState(storedSessionId)
 
 describe('resumeSession warm-cache mapping integrity', () => {
+  it('cold-resumes a copied stored id for its requested owner without deleting the original runtime', async () => {
+    const storedId = 'cross-profile-copy'
+    const original = clientState(storedId)
+    const originalOwner = { connectionId: 'local', profile: 'default' }
+    const botOwner = { connectionId: 'local', profile: 'catalyst-voice' }
+    runtimeSessionOwners.set('copy-original-runtime', originalOwner)
+    const runtimeIdByStoredSessionIdRef = { current: new Map([[storedId, 'copy-original-runtime']]) }
+    const sessionStateByRuntimeIdRef = { current: new Map([['copy-original-runtime', original]]) }
+    vi.mocked(getSession).mockResolvedValue(storedSession({ id: storedId, profile: 'catalyst-voice' }))
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: storedId } as never)
+    vi.mocked(requestGatewayForAgent).mockImplementation(
+      async (_connection, _profile, method) =>
+        ({
+          session_id: method === 'session.resume' ? 'copy-bot-runtime' : 'copy-original-runtime',
+          session_key: storedId,
+          resumed: storedId,
+          messages: [],
+          info: {}
+        }) as never
+    )
+    let resume: null | ((id: string, replace?: boolean, owner?: SessionProfileRoute) => Promise<unknown>) = null
+    render(
+      <ResumeHarness
+        onReady={r => (resume = r)}
+        requestGateway={vi.fn(async () => ({})) as never}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!(storedId, true, botOwner)
+    expect(requestGatewayForAgent).toHaveBeenCalledWith(
+      'local',
+      'catalyst-voice',
+      'session.resume',
+      expect.objectContaining({ session_id: storedId })
+    )
+    expect(requestGatewayForAgent).not.toHaveBeenCalledWith(
+      'local',
+      'catalyst-voice',
+      'session.activate',
+      expect.objectContaining({ session_id: 'copy-original-runtime' })
+    )
+    expect(sessionStateByRuntimeIdRef.current.get('copy-original-runtime')).toBe(original)
+    expect($activeSessionId.get()).toBe('copy-bot-runtime')
+    runtimeSessionOwners.clear()
+  })
+
   beforeEach(() => {
     // Earlier describes (branchStoredSession) drive resumes through the
     // profile path on the SAME hoisted mock; drop their recorded calls so the

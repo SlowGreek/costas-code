@@ -607,20 +607,23 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
           // profile is live would fork the conversation into the wrong DB (#67603).
           // A runtime a previous drift-aborted recovery already minted for this
           // exact stored session is reused instead of resuming again.
-          const cachedRuntimeId = takeRecoveredRuntime(targetStoredSessionId)
+          const resumeProfile = await resolveSessionProfile(targetStoredSessionId)
+          const cachedRuntimeId = takeRecoveredRuntime(targetStoredSessionId, null, resumeProfile)
 
           const resumed = cachedRuntimeId
             ? { session_id: cachedRuntimeId }
-            : await singleFlightSessionResume(targetStoredSessionId, async () => {
-                const resumeProfile = await resolveSessionProfile(targetStoredSessionId)
-
-                return requestGateway<{ session_id: string }>('session.resume', {
-                  session_id: targetStoredSessionId,
-                  source: 'desktop',
-                  omit_messages: true,
-                  ...(resumeProfile ? { profile: resumeProfile } : {})
-                })
-              })
+            : await singleFlightSessionResume(
+                targetStoredSessionId,
+                async () => {
+                  return requestGateway<{ session_id: string }>('session.resume', {
+                    session_id: targetStoredSessionId,
+                    source: 'desktop',
+                    omit_messages: true,
+                    ...(resumeProfile ? { profile: resumeProfile } : {})
+                  })
+                },
+                resumeProfile
+              )
 
           const resumeDrift = sessionDriftReason()
 
@@ -630,7 +633,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
             // Keep the freshly-bound runtime findable for the next action on
             // this stored session instead of stranding it for the reaper.
             if (resumed?.session_id) {
-              registerRecoveredRuntime(targetStoredSessionId, resumed.session_id)
+              registerRecoveredRuntime(targetStoredSessionId, resumed.session_id, resumeProfile)
             }
 
             return abortForSessionSwitch(sessionId)

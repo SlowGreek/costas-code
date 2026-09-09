@@ -1,6 +1,7 @@
 import { requestGatewayForAgent, requestGatewayForProfile, retainGatewayForSessionTurn } from '@/store/gateway'
 
 import { resetBackgroundPollingGuardAfterRebind } from './session-gone-latch'
+import { recordAdmittedSessionRuntime } from './session-runtime-owner'
 
 /**
  * The ONE authoritative exact owner of a session: the registry connection whose
@@ -168,7 +169,7 @@ export function sessionRpcNeedsProfileRoute(ownerProfile: SessionOwnerScope | un
  * serves that profile (keeps the primary's reauth-aware reconnect path).
  * The route is decided at CALL time, not at swap time.
  */
-export function requestForSessionProfile<T>(
+function dispatchForSessionProfile<T>(
   ownerProfile: SessionOwnerScope | undefined,
   ambientRequest: <R>(
     method: string,
@@ -222,4 +223,24 @@ export function requestForSessionProfile<T>(
   return withRoutedTurnLease(null, profile, method, params, () =>
     requestGatewayForProfile<T>(profile, method, params, timeoutMs, signal)
   )
+}
+
+export function requestForSessionProfile<T>(
+  ownerProfile: SessionOwnerScope,
+  ambientRequest: <R>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ) => Promise<R>,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeoutMs?: number,
+  signal?: AbortSignal
+): Promise<T> {
+  return dispatchForSessionProfile<T>(ownerProfile, ambientRequest, method, params, timeoutMs, signal).then(result => {
+    recordAdmittedSessionRuntime(ownerProfile, method, result)
+
+    return result
+  })
 }

@@ -35,6 +35,27 @@ describe('singleFlightSessionResume', () => {
     expect(requestGateway).toHaveBeenCalledTimes(1)
   })
 
+  it('does not share a copied stored id across owners or connections', async () => {
+    const owners = [
+      { connectionId: 'local', profile: 'default' },
+      { connectionId: 'local', profile: 'catalyst-voice' },
+      { connectionId: 'remote', profile: 'catalyst-voice' }
+    ]
+
+    const runs = owners.map((_, index) => vi.fn(async () => ({ session_id: `runtime-${index}` })))
+
+    const results = await Promise.all(
+      owners.map((owner, index) => singleFlightSessionResume('copied', runs[index]!, owner))
+    )
+
+    expect(results.map(result => result.session_id)).toEqual(['runtime-0', 'runtime-1', 'runtime-2'])
+    runs.forEach(run => expect(run).toHaveBeenCalledTimes(1))
+    owners.forEach((owner, index) => registerRecoveredRuntime('copied', `recovered-${index}`, owner))
+    expect(takeRecoveredRuntime('copied', null, owners[1])).toBe('recovered-1')
+    expect(takeRecoveredRuntime('copied', null, owners[0])).toBe('recovered-0')
+    expect(takeRecoveredRuntime('copied', null, owners[2])).toBe('recovered-2')
+  })
+
   it('different stored ids still resume independently', async () => {
     const requestGateway = vi.fn(async (_method: string, params?: Record<string, unknown>) => {
       await new Promise(resolve => setTimeout(resolve, 5))

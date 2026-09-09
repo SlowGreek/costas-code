@@ -64,6 +64,7 @@ import {
   type SessionOwnerScope,
   type SessionProfileRoute
 } from './session-request-router'
+import { runtimeSessionOwners as sessionOwnerByRuntimeId } from './session-runtime-owner'
 import { ackStoredSessionId, markSessionUnreadFinished } from './session-unread'
 import { isBrowserWindow, isSecondaryWindow } from './windows'
 
@@ -91,7 +92,6 @@ const sessionScopeByRuntimeId = new Map<string, string>()
 // event source already proved its owner can still route session-scoped RPCs
 // (approval.respond) when every durable binding (tile / hint / row) is absent
 // — while durable stored identity keeps outranking it (#97511).
-const sessionOwnerByRuntimeId = new Map<string, SessionOwnerScope>()
 
 export function recordSessionEventScope(event: { connectionId?: string; profile?: string; session_id?: string }): void {
   if (!event.session_id) {
@@ -1031,6 +1031,12 @@ export function knownOwnerForSession(sessionId: null | string | undefined): Sess
   }
 
   const storedSessionId = storedSessionIdForRuntimeId(sessionId) ?? sessionId
+
+  // A proven runtime is owned by the backend that admitted it. A copied
+  // durable id in another profile must not override that authority.
+  if (storedSessionId !== sessionId && sessionOwnerByRuntimeId.has(sessionId)) {
+    return sessionOwnerByRuntimeId.get(sessionId)
+  }
 
   return (
     sessionTileOwnerRoute(storedSessionId) ??

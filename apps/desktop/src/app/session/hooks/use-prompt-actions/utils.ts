@@ -119,17 +119,21 @@ export async function resumeStoredRuntimeSession(
   // same dead runtime at once, and each independent session.resume mints a new
   // runtime — every loser is an orphan for the reaper. Sharing one in-flight
   // promise makes concurrent recoveries converge on ONE runtime.
-  const resumed = await singleFlightSessionResume(storedSessionId, async () => {
-    const resolveProfile = deps.resolveProfile ?? defaultResolveProfile
-    const profile = await resolveProfile(storedSessionId)
+  const resolveProfile = deps.resolveProfile ?? defaultResolveProfile
+  const profile = await resolveProfile(storedSessionId)
 
-    return deps.requestGateway<{ session_id: string }>('session.resume', {
-      session_id: storedSessionId,
-      source: 'desktop',
-      omit_messages: true,
-      ...(profile ? { profile } : {})
-    })
-  })
+  const resumed = await singleFlightSessionResume(
+    storedSessionId,
+    async () => {
+      return deps.requestGateway<{ session_id: string }>('session.resume', {
+        session_id: storedSessionId,
+        source: 'desktop',
+        omit_messages: true,
+        ...(profile ? { profile } : {})
+      })
+    },
+    profile
+  )
 
   return resumed?.session_id ?? null
 }
@@ -174,14 +178,15 @@ export async function withSessionNotFoundResume<T>(
     // A previous recovery for this stored session already minted a runtime
     // that its caller drift-aborted away from. Reuse it before resuming
     // again — re-minting would strand yet another runtime for the reaper.
-    const cachedRecoveredId = takeRecoveredRuntime(storedSessionId, sessionId)
+    const recoveryProfile = await (deps.resolveProfile ?? defaultResolveProfile)(storedSessionId)
+    const cachedRecoveredId = takeRecoveredRuntime(storedSessionId, sessionId, recoveryProfile)
 
     if (cachedRecoveredId) {
       const cachedDrift = deps.driftReason?.()
 
       if (cachedDrift) {
         // Still drifted: keep the runtime findable for whoever acts next.
-        registerRecoveredRuntime(storedSessionId, cachedRecoveredId)
+        registerRecoveredRuntime(storedSessionId, cachedRecoveredId, recoveryProfile)
         throw new SessionRecoveryAborted(cachedDrift, cachedRecoveredId)
       }
 
@@ -201,7 +206,10 @@ export async function withSessionNotFoundResume<T>(
     let recoveredId: null | string
 
     try {
-      recoveredId = await resumeStoredRuntimeSession(storedSessionId, deps)
+      recoveredId = await resumeStoredRuntimeSession(storedSessionId, {
+        ...deps,
+        resolveProfile: async () => recoveryProfile
+      })
     } catch {
       throw err
     }
@@ -217,7 +225,7 @@ export async function withSessionNotFoundResume<T>(
       // (the user moved on), so record it in the stored->runtime recovery
       // cache. The next action targeting this stored session reuses it
       // instead of minting another orphan (#91276).
-      registerRecoveredRuntime(storedSessionId, recoveredId)
+      registerRecoveredRuntime(storedSessionId, recoveredId, recoveryProfile)
       throw new SessionRecoveryAborted(drift, recoveredId)
     }
 

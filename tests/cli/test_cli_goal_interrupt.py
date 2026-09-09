@@ -173,9 +173,18 @@ class TestScopedBackgroundEvidence:
 
         captured = {}
 
-        def _fake_gather(task_id=None, session_key=None):
-            captured["session_key"] = session_key
-            return []
+        from hermes_cli.goals import gather_background_processes as real_gather
+
+        def _fake_gather(task_id=None, session_key=None, *, owner_task_id=None):
+            captured["owner_task_id"] = owner_task_id
+            rows = [
+                {"session_id": "own", "owner_task_id": sid, "status": "running"},
+                {"session_id": "foreign", "owner_task_id": "other-session", "status": "running"},
+            ]
+            with patch("tools.process_registry.process_registry.list_sessions", return_value=rows):
+                captured["processes"] = real_gather(
+                    task_id=task_id, session_key=session_key, owner_task_id=owner_task_id)
+            return captured["processes"]
 
         with patch("hermes_cli.goals.gather_background_processes", side_effect=_fake_gather), patch(
             "hermes_cli.goals.judge_goal",
@@ -183,7 +192,8 @@ class TestScopedBackgroundEvidence:
         ):
             cli._maybe_continue_goal_after_turn()
 
-        assert captured.get("session_key") == sid
+        assert captured.get("owner_task_id") == sid
+        assert [p["session_id"] for p in captured["processes"]] == ["own"]
 
 
 class TestAutonomousWakeCLI:

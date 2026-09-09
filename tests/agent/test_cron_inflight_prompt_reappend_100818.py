@@ -331,3 +331,29 @@ def test_flagged_scaffolding_row_is_never_the_inflight_task():
     found = ContextCompressor._find_inflight_user_task(msgs)
     assert found is not None
     assert JOB_SENTINEL in str(found.get("content"))
+
+
+def test_repeated_merged_multimodal_replay_preserves_pixels_and_steering():
+    from agent.context_compressor import _INFLIGHT_TASK_REPLAY_HEADER
+    compressor = _make_compressor()
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,cGl4ZWxz"}}
+    steering = {"id": "steer-authority", "source": "user"}
+    inflight = {
+        "role": "user",
+        "content": [{"type": "text", "text": JOB_SENTINEL}, image],
+        "display_metadata": {"steering": steering},
+        "api_content": "stale wire content",
+    }
+    for _ in range(3):
+        summary = {"role": "user", "content": SUMMARY_PREFIX + "\nSummary\n" + _SUMMARY_END_MARKER}
+        rows = compressor._reappend_inflight_user_task([summary], inflight)
+        assert len(rows) == 1
+        carrier = rows[0]
+        assert carrier["_inflight_replay_merged"]
+        assert isinstance(carrier["content"], list)
+        assert sum(part == image for part in carrier["content"]) == 1
+        assert str(carrier["content"]).count(JOB_SENTINEL) == 1
+        assert str(carrier["content"]).count(_INFLIGHT_TASK_REPLAY_HEADER) == 1
+        assert carrier["display_metadata"]["steering"] == steering
+        assert "api_content" not in carrier
+        inflight = carrier

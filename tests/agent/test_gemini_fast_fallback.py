@@ -42,7 +42,8 @@ def test_conversation_loop_resolves_pool_helper_through_run_agent_module():
     production wrappers that patch run_agent) will not propagate into the
     extracted loop; older code also hit NameError in this branch.
     """
-    source = inspect.getsource(conversation_loop._run_conversation_inner)
+    from agent import turn_recovery
+    source = inspect.getsource(turn_recovery.route_classified_error)
 
     assert "_ra()._pool_may_recover_from_rate_limit(" in source
     assert "pool_may_recover = _pool_may_recover_from_rate_limit(" not in source

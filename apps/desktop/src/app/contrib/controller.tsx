@@ -35,6 +35,7 @@ import {
   toggleTargetZoneTabStrip,
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
+import { $workspaceOwnerLabels, workspaceOwnerTitle } from '@/components/pane-shell/workspace-scope'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { onGatewayEvent } from '@/contrib/events'
 import { discoverBundledPlugins } from '@/contrib/plugins'
@@ -73,7 +74,7 @@ import {
 } from '@/store/review'
 import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
-import { $focusedRuntimeId } from '@/store/session-states'
+import { $botChatScopes, $focusedRuntimeId } from '@/store/session-states'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isBrowserWindow, isHudWindow } from '@/store/windows'
@@ -95,6 +96,7 @@ import { startSessionDrag } from '../chat/session-drag'
 import {
   SessionTileCloseConfirm,
   stackSessionTilesIntoMain,
+  startUnrestoredTileTitleBackfill,
   watchSessionTiles,
   WorkspaceTabMenu
 } from '../chat/session-tile'
@@ -472,6 +474,7 @@ watchContributedPanes()
 // into the transparent overlay).
 if (!isBrowserWindow() && !isHudWindow()) {
   watchSessionTiles()
+  startUnrestoredTileTitleBackfill()
   watchRouteTiles()
   watchPreviewTiles()
 }
@@ -505,7 +508,12 @@ const syncWorkspaceTitle = () => {
     area: 'panes',
     // The placeholder, not the draft's live name — `tabTitle` below renders
     // that. Keeping it here would re-register the pane on every keystroke.
-    title: stored ? storedSessionTitle(stored) : NEW_SESSION_TITLE,
+    // A bot chat reads as its BOT: every canonical Bot Chat is stored under
+    // the same name, which told two open bots apart by nothing (#99152).
+    title: workspaceOwnerTitle(
+      stored ? storedSessionTitle(stored) : NEW_SESSION_TITLE,
+      selected ? $botChatScopes.get()[selected] : undefined
+    ),
     data: {
       // The tab's status dot — the SAME primitive the sidebar row and session
       // tiles render, so the main tab never disagrees with its sidebar row. A
@@ -530,6 +538,8 @@ const syncWorkspaceTitle = () => {
 
 $selectedStoredSessionId.listen(syncWorkspaceTitle)
 $sessions.listen(syncWorkspaceTitle)
+$botChatScopes.listen(syncWorkspaceTitle)
+$workspaceOwnerLabels.listen(syncWorkspaceTitle)
 $workspaceIsPage.listen(syncWorkspaceTitle)
 
 // Layout reset collapses every session tile into main as a tab (after the
@@ -691,13 +701,7 @@ const syncWorkbenchPane = (active: boolean) => {
  */
 const watchWorkbenchArtifacts = () =>
   onGatewayEvent('artifact.updated', event => {
-    if (
-      !acceptWorkbenchEvent(
-        event.session_id,
-        $focusedRuntimeId.get(),
-        $workbenchArtifact.get() !== null
-      )
-    ) {
+    if (!acceptWorkbenchEvent(event.session_id, $focusedRuntimeId.get(), $workbenchArtifact.get() !== null)) {
       return
     }
 
@@ -717,13 +721,7 @@ watchWorkbenchArtifacts()
  */
 const watchWorkbenchDrawing = () =>
   onGatewayEvent('artifact.visualizing', event => {
-    if (
-      !acceptWorkbenchEvent(
-        event.session_id,
-        $focusedRuntimeId.get(),
-        $workbenchArtifact.get() !== null
-      )
-    ) {
+    if (!acceptWorkbenchEvent(event.session_id, $focusedRuntimeId.get(), $workbenchArtifact.get() !== null)) {
       return
     }
 

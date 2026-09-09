@@ -1,8 +1,15 @@
-from hermes_state import SCHEMA_VERSION, SessionDB
+from hermes_state import SessionDB
+from hermes_state_common import SCHEMA_VERSION
 
 
-def test_realtime_transcript_schema_version_is_current():
-    assert SCHEMA_VERSION == 27
+def test_realtime_transcript_schema_version_is_current(tmp_path):
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        assert db._conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+        indexes = db._conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='messages'").fetchall()
+        assert any("realtime" in (row[0] or "") and "UNIQUE" in (row[0] or "").upper() for row in indexes)
+    finally:
+        db.close()
 
 
 def test_realtime_transcript_is_persisted_once_by_item_id(tmp_path):

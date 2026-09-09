@@ -175,7 +175,7 @@ class TestCatalogWiring:
     """The Accounts card must offer an in-app flow, not a terminal errand."""
 
     def test_copilot_card_is_device_code(self):
-        from hermes_cli.web_server import _OAUTH_PROVIDER_CATALOG
+        from hermes_cli.web_server_oauth import _OAUTH_PROVIDER_CATALOG
 
         entry = next(p for p in _OAUTH_PROVIDER_CATALOG if p["id"] == "copilot")
         # `external` means read-only in the UI — the whole bug being fixed.
@@ -183,7 +183,7 @@ class TestCatalogWiring:
 
     def test_copilot_acp_remains_external(self):
         """The ACP card delegates to the Copilot CLI and must stay read-only."""
-        from hermes_cli.web_server import _OAUTH_PROVIDER_CATALOG
+        from hermes_cli.web_server_oauth import _OAUTH_PROVIDER_CATALOG
 
         entry = next(
             p for p in _OAUTH_PROVIDER_CATALOG if p["id"] == "copilot-acp"

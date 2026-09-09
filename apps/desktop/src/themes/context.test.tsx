@@ -97,12 +97,12 @@ describe('ThemeProvider ← backend skin sync', () => {
       </ThemeProvider>
     )
 
-    // gateway.ready seeds the skin without applying. The stored pick must still
-    // be remembered, so this seed alone repaints it.
+    // The unresolved pick paints the default until the gateway seeds it.
+    expect(cssVar('--theme-background-seed')).not.toBe('#000000')
     act(() => ingestBackendSkin(bloomberg('#ff9f0a'), { apply: false }))
-
     expect(cssVar('--theme-foreground')).toBe('#ff9f0a')
     expect(cssVar('--theme-background-seed')).toBe('#000000')
+    expect(skinPref.resolve('default')).toBe('bloomberg')
   })
 })
 

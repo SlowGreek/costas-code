@@ -307,9 +307,18 @@ async def test_post_turn_continuation_scopes_background_to_session(hermes_home, 
 
     captured = {}
 
-    def _fake_gather(task_id=None, session_key=None):
-        captured["session_key"] = session_key
-        return []
+    from hermes_cli.goals import gather_background_processes as real_gather
+
+    def _fake_gather(task_id=None, session_key=None, *, owner_task_id=None):
+        captured["owner_task_id"] = owner_task_id
+        rows = [
+            {"session_id": "own", "owner_task_id": session_entry.session_id, "status": "running"},
+            {"session_id": "foreign", "owner_task_id": "other-session", "status": "running"},
+        ]
+        with patch("tools.process_registry.process_registry.list_sessions", return_value=rows):
+            captured["processes"] = real_gather(
+                task_id=task_id, session_key=session_key, owner_task_id=owner_task_id)
+        return captured["processes"]
 
     monkeypatch.setattr("hermes_cli.goals.gather_background_processes", _fake_gather)
 
@@ -321,9 +330,10 @@ async def test_post_turn_continuation_scopes_background_to_session(hermes_home, 
         )
         await asyncio.sleep(0.05)
 
-    from gateway.session import build_session_key
-
-    assert captured.get("session_key") == build_session_key(src)
+    # The turn runner stamps process owner_task_id with the durable session id,
+    # not the messaging route key shared by the adapter.
+    assert captured.get("owner_task_id") == session_entry.session_id
+    assert [p["session_id"] for p in captured["processes"]] == ["own"]
 
 
 @pytest.mark.asyncio
@@ -380,3 +390,31 @@ async def test_foreground_tool_evidence_reaches_judge(hermes_home):
 
     assert "42 passed" in (captured.get("user") or ""), "tool evidence must reach the judge prompt"
     assert GoalManager(session_entry.session_id).state.status == "done"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_streamed_delivery_retains_real_result_for_goal_hook(hermes_home, monkeypatch, failed):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from hermes_cli.goals import GoalManager
+
+    runner, _adapter, entry, source = _make_runner_with_adapter()
+    runner._async_session_store = SimpleNamespace(
+        _store=runner.session_store, get_or_create_session=AsyncMock(return_value=entry))
+    GoalManager(entry.session_id).set("ship it")
+    evidence = [{"role": "tool", "name": "terminal", "content": "7 passed", "tool_call_id": "call-test"}]
+    event = SimpleNamespace(_streamed_final_response="Delivered once", _goal_agent_result={
+        "final_response": "Delivered once", "messages": evidence, "failed": failed})
+    seen = []
+    def evaluate(self, text, **kwargs):
+        seen.append((text, kwargs))
+        return {"should_continue": False}
+    monkeypatch.setattr(GoalManager, "evaluate_after_turn", evaluate)
+    monkeypatch.setattr(runner, "_post_turn_loop_completion", AsyncMock())
+    await runner._run_post_turn_hooks(agent_result=None, source=source, is_internal=False, event=event)
+    if failed:
+        assert seen == []
+    else:
+        assert seen[0][0] == "Delivered once"
+        assert any("7 passed" in item for item in seen[0][1]["recent_evidence"])
+    runner._post_turn_loop_completion.assert_awaited_once()

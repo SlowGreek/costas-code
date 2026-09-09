@@ -175,18 +175,58 @@ class TestSteersReachEveryConsumer:
 class TestDriverParity:
     """Both drivers must dispatch the verb, not just the model support it."""
 
-    def test_cli_dispatches_goal_steer(self, hermes_home):
+    def test_cli_dispatches_goal_steer(self, hermes_home, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
         from hermes_cli.cli_commands_mixin import CLICommandsMixin
+        from hermes_cli.goals import GoalManager
+        import hermes_cli.cli_commands_mixin as commands
 
-        src = inspect.getsource(CLICommandsMixin._handle_goal_command)
-        assert "steer" in src
-        assert "add_steer" in src
+        mgr = GoalManager(session_id="cli-steer-driver")
+        mgr.set("ship the parser")
+        agent = SimpleNamespace(steer=Mock(return_value=True))
+        cli = SimpleNamespace(
+            _get_goal_manager=lambda: mgr,
+            _session_manager=lambda load, label: load(),
+            _agent_running=True, agent=agent, conversation_history=[],
+        )
+        monkeypatch.setattr(commands, "_cp", lambda *a, **kw: None)
+        CLICommandsMixin._handle_goal_command(cli, "/goal steer keep the public API stable")
 
-    def test_gateway_dispatches_goal_steer(self, hermes_home):
-        import tui_gateway.methods_tools as mt
+        reloaded = GoalManager(session_id=mgr.session_id)
+        assert reloaded.state.goal == "ship the parser"
+        assert reloaded.state.steers == ["keep the public API stable"]
+        assert "keep the public API stable" in reloaded.next_continuation_prompt()
+        agent.steer.assert_called_once_with("keep the public API stable")
 
-        src = inspect.getsource(mt)
-        assert "add_steer" in src
+    def test_gateway_dispatches_goal_steer(self, hermes_home, monkeypatch):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from hermes_cli.goals import GoalManager
+        import tui_gateway.server as server
+
+        key, sid = "tui-steer-durable", "tui-steer-ui"
+        mgr = GoalManager(session_id=key)
+        mgr.set("ship the parser")
+        agent = SimpleNamespace(steer=Mock(return_value=True))
+        session = {"session_key": key, "running": True, "agent": agent,
+                   "history": [], "history_lock": threading.Lock(),
+                   "profile_home": str(hermes_home)}
+        monkeypatch.setitem(server._sessions, sid, session)
+        monkeypatch.setattr(server, "_load_cfg", lambda: {})
+        response = server._methods["command.dispatch"](
+            1, {"session_id": sid, "name": "goal", "arg": "steer keep the public API stable"})
+
+        assert "error" not in response
+        assert response["result"]["type"] == "exec"
+        assert "running turn" in response["result"]["output"]
+        reloaded = GoalManager(session_id=key)
+        assert reloaded.state.goal == "ship the parser"
+        assert reloaded.state.steers == ["keep the public API stable"]
+        assert "keep the public API stable" in reloaded.next_continuation_prompt()
+        assert not session.get("pending_goal")
+        agent.steer.assert_called_once_with("keep the public API stable")
 
     def test_both_drivers_wire_poll_wake(self, hermes_home):
         """The original defect: only one driver called poll_wake()."""

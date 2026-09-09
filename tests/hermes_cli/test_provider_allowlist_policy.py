@@ -156,7 +156,7 @@ def test_cli_provider_flag_choices_follow_allowlist(monkeypatch):
 
 
 def test_desktop_env_catalog_hides_non_allowlisted_provider_keys(monkeypatch):
-    from hermes_cli import web_server
+    from hermes_cli.web_routers import config_env as web_server
 
     provider_info = {
         "category": "provider",
@@ -203,7 +203,7 @@ def test_profile_model_writes_reject_provider_outside_allowlist(tmp_path):
     import yaml
 
     from hermes_cli.auth import AuthError
-    from hermes_cli.web_server import _write_profile_model
+    from hermes_cli.web_routers.profiles import _write_profile_model
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -231,7 +231,7 @@ def test_model_assignment_api_rejects_provider_outside_allowlist(
     import yaml
 
     from hermes_cli.auth import AuthError
-    from hermes_cli.web_server import _apply_model_assignment_sync
+    from hermes_cli.web_server_config import _apply_model_assignment_sync
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     (tmp_path / "config.yaml").write_text(

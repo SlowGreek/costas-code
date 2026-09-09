@@ -13,22 +13,20 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from hermes_cli.main import cmd_update
 
 
-@contextmanager
-def _isolated_update_host():
-    """Keep config-prompt unit tests away from the developer's live gateway."""
-    with patch(
-        "hermes_cli.update_cmd._restart_macos_launchd_gateways"
-    ), patch(
-        "hermes_cli.update_inventory.collect_runtime_inventory",
-        return_value=SimpleNamespace(runtimes=[]),
-    ), patch(
-        "hermes_cli.update_receipt.collect_fleet_versions",
-        return_value=[],
-    ):
-        yield
+@pytest.fixture(autouse=True)
+def _isolate_update(isolated_update_runtime, monkeypatch):
+    import shutil
+    from hermes_cli import managed_uv, update_cmd
+
+    monkeypatch.setattr(managed_uv, "resolve_uv", lambda **kw: shutil.which("uv"))
+    monkeypatch.setattr(managed_uv, "ensure_uv", lambda **kw: shutil.which("uv"))
+    monkeypatch.setattr(managed_uv, "update_managed_uv", lambda **kw: None)
+    monkeypatch.setattr(update_cmd, "_post_update_sqlite_runtime_status", lambda: (True, None))
 
 
 def _make_run_side_effect(
@@ -266,3 +264,18 @@ class TestUnicodeDecodeErrorInUpdatePrompts:
             _sync_with_upstream_if_needed(["git"], tmp_path)  # must not raise
 
         mock_add.assert_not_called()
+
+
+@contextmanager
+def _isolated_update_host():
+    """Keep config-prompt unit tests away from the developer's live gateway."""
+    with patch(
+        "hermes_cli.update_cmd._restart_macos_launchd_gateways"
+    ), patch(
+        "hermes_cli.update_inventory.collect_runtime_inventory",
+        return_value=SimpleNamespace(runtimes=[]),
+    ), patch(
+        "hermes_cli.update_receipt.collect_fleet_versions",
+        return_value=[],
+    ):
+        yield

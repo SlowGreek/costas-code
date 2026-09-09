@@ -12,10 +12,19 @@ import {
   reconcileBackgroundProcesses,
   reconcileGoalStatus,
   refreshBackgroundProcesses,
+  refreshGoalStatus,
   resetBackgroundPollingGuard,
-  setGoalJudging
+  setGoalJudging,
+  stopBackgroundProcess
 } from './composer-status'
 import { $gateway } from './gateway'
+import * as GatewayModule from './gateway'
+import { markSessionGone } from './runtime-gone'
+import { setSessions } from './session'
+import { $sessionStates } from './session-states'
+
+vi.mock('./notifications', () => ({ notifyError: vi.fn() }))
+import { notifyError } from './notifications'
 
 const SID = 'sess-1'
 
@@ -427,6 +436,52 @@ describe('refreshBackgroundProcesses dead-session guard', () => {
 
     expect(request).toHaveBeenCalledTimes(2)
   })
+
+  it('dismisses a stale process row when Stop is clicked after the runtime is gone', async () => {
+    reconcileBackgroundProcesses(SID, [running('stale')])
+    markSessionGone(SID)
+    $gateway.set({ request: vi.fn() } as never)
+
+    await stopBackgroundProcess(SID, 'stale')
+
+    expect(items()).toEqual([])
+  })
+
+  it('dismisses a stale process row while the gateway is disconnected', async () => {
+    reconcileBackgroundProcesses(SID, [running('disconnected')])
+    markSessionGone(SID)
+    $gateway.set(null as never)
+
+    await stopBackgroundProcess(SID, 'disconnected')
+
+    expect(items()).toEqual([])
+  })
+
+  it('keeps the row and reports failure when the gateway is disconnected', async () => {
+    reconcileBackgroundProcesses(SID, [running('unreachable')])
+    $gateway.set(null as never)
+    vi.mocked(notifyError).mockClear()
+
+    await stopBackgroundProcess(SID, 'unreachable')
+
+    expect(items()).toEqual([expect.objectContaining({ id: 'unreachable', state: 'running' })])
+    expect(notifyError).toHaveBeenCalledWith(expect.any(Error), 'Could not stop the process')
+  })
+
+  it('dismisses and latches when Stop discovers the runtime is gone', async () => {
+    const request = vi.fn(async () => {
+      throw new Error('session not found')
+    })
+
+    reconcileBackgroundProcesses(SID, [running('rejected')])
+    $gateway.set({ request } as never)
+
+    await stopBackgroundProcess(SID, 'rejected')
+    await stopBackgroundProcess(SID, 'rejected')
+
+    expect(items()).toEqual([])
+    expect(request).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ── Review-thread hardenings on the guard (#94950) ───────────────────────────
@@ -478,5 +533,32 @@ describe('refreshBackgroundProcesses dead-session guard hardenings', () => {
     await refreshBackgroundProcesses('sess-2')
 
     expect(request).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('native goal status routing', () => {
+  afterEach(() => {
+    setSessions([])
+    vi.restoreAllMocks()
+    $gateway.set(null as never)
+    $sessionStates.set({})
+    $goalStatusBySession.set({})
+    resetBackgroundPollingGuard()
+  })
+
+  it('uses the runtime owner instead of the foreground gateway', async () => {
+    const owner = vi
+      .fn()
+      .mockResolvedValue({ goal: { goal: 'Owned goal', status: 'active', max_turns: 999, turns_used: 1 } })
+
+    const ambient = vi.fn().mockResolvedValue({ goal: null })
+    $gateway.set({ request: ambient } as never)
+    vi.spyOn(GatewayModule, 'requestGatewayForAgent').mockImplementation(owner)
+    setSessions([{ id: 'durable-owner', profile: 'worker', connection_id: 'remote-owner' }] as never)
+    $sessionStates.set({ 'owned-runtime': { storedSessionId: 'durable-owner' } } as never)
+    await refreshGoalStatus('owned-runtime')
+    expect(owner).toHaveBeenCalledWith('remote-owner', 'worker', 'goal.status', { session_id: 'owned-runtime' })
+    expect(ambient).not.toHaveBeenCalled()
+    expect($goalStatusBySession.get()['owned-runtime']?.goal).toBe('Owned goal')
   })
 })

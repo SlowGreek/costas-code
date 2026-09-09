@@ -22,12 +22,14 @@ import { cn } from '@/lib/utils'
 import { confirm } from '@/store/confirm'
 import { notify, notifyError } from '@/store/notifications'
 import { $desktopOnboarding, startManualProviderOAuth } from '@/store/onboarding'
+import { $settingsRequestProfile } from '@/store/settings-scope'
 import type { EnvVarInfo, OAuthProvider } from '@/types/hermes'
 
 import { isKeyVar, ProviderKeyRows } from './credential-key-ui'
 import { SettingsCategoryHeading, useEnvCredentials } from './env-credentials'
 import { providerGroup, providerMeta, providerPriority } from './helpers'
 import { SettingsContent, SettingsSkeleton } from './primitives'
+import { SettingsProfileScope } from './profile-scope'
 
 // The embedded terminal (and thus the "run disconnect command" path) only
 // exists in the Electron desktop shell, not the web dashboard.
@@ -121,40 +123,39 @@ function buildProviderKeyGroups(vars: Record<string, EnvVarInfo>): ProviderKeyGr
 
 // Deliberately a near-1:1 replica of the first-run onboarding picker
 // (`Picker` in desktop-onboarding-overlay): same recommended card, same
-// Fireworks #2 quick-key row, same provider rows, same "Other providers"
-// disclosure, same OpenRouter quick-key row, and the same bottom-right
-// "I have an API key" affordance. The leaf cards are the exact shared
-// components, so the two surfaces stay visually identical. Selecting a
-// provider hands off to the shared onboarding overlay, which runs that
-// provider's real sign-in flow; the key affordances open the API-key
-// catalog below.
+// always-visible Local models row, same provider rows, same "Other
+// providers" disclosure (Fireworks and OpenRouter quick-key rows live
+// inside it on both surfaces), and the same bottom-right "I have an API
+// key" affordance. The leaf cards are the exact shared components, so
+// the two surfaces stay visually identical. Selecting a provider hands
+// off to the shared onboarding overlay, which runs that provider's real
+// sign-in flow; the key affordances open the API-key catalog below.
 function OAuthPicker({
   disconnecting,
   onDisconnect,
   onTerminalDisconnect,
   onWantApiKey,
-  providers
+  providers,
+  profile
 }: {
   disconnecting: null | string
   onDisconnect: (provider: OAuthProvider) => void
   onTerminalDisconnect: (provider: OAuthProvider) => void
   onWantApiKey: () => void
   providers: OAuthProvider[]
+  profile?: string
 }) {
   const { t } = useI18n()
   const p = t.settings.providers
   const [showAll, setShowAll] = useState(false)
 
-  const ordered = useMemo(
-    () => sortProviders(catalystProviders(providers)),
-    [providers]
-  )
+  const ordered = useMemo(() => sortProviders(catalystProviders(providers)), [providers])
 
   if (ordered.length === 0) {
     return null
   }
 
-  const select = (p: OAuthProvider) => startManualProviderOAuth(p.id)
+  const select = (p: OAuthProvider) => startManualProviderOAuth(p.id, profile)
 
   const featured = ordered.find(p => p.id === FEATURED_ID && !p.status?.logged_in) ?? null
   const rest = featured ? ordered.filter(p => p.id !== FEATURED_ID) : ordered
@@ -307,13 +308,10 @@ function NoProviderKeys() {
   )
 }
 
-export function ProvidersSettings({
-  onClose,
-  onViewChange,
-  view
-}: ProvidersSettingsProps) {
+export function ProvidersSettings({ onClose, onViewChange, view }: ProvidersSettingsProps) {
   const { t } = useI18n()
-  const { rowProps, vars } = useEnvCredentials()
+  const scopeProfile = useStore($settingsRequestProfile)
+  const { rowProps, vars } = useEnvCredentials(scopeProfile)
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([])
   const [openProvider, setOpenProvider] = useState<null | string>(null)
   const [disconnecting, setDisconnecting] = useState<null | string>(null)
@@ -326,9 +324,9 @@ export function ProvidersSettings({
 
   const refreshOAuthProviders = useCallback(async () => {
     // OAuth providers are best-effort — a failure here just hides the panel.
-    const { providers } = await listOAuthProviders()
+    const { providers } = await listOAuthProviders(scopeProfile)
     setOauthProviders(providers)
-  }, [])
+  }, [scopeProfile])
 
   useEffect(() => {
     let cancelled = false
@@ -339,7 +337,7 @@ export function ProvidersSettings({
       }
 
       try {
-        const { providers } = await listOAuthProviders()
+        const { providers } = await listOAuthProviders(scopeProfile)
 
         if (!cancelled) {
           setOauthProviders(providers)
@@ -350,7 +348,7 @@ export function ProvidersSettings({
     })()
 
     return () => void (cancelled = true)
-  }, [onboardingActive])
+  }, [onboardingActive, scopeProfile])
 
   // External (CLI-managed) providers can't be cleared via the API by design —
   // Hermes never deletes creds another tool owns behind a silent API call.
@@ -401,7 +399,7 @@ export function ProvidersSettings({
     setDisconnecting(provider.id)
 
     try {
-      await disconnectOAuthProvider(provider.id)
+      await disconnectOAuthProvider(provider.id, scopeProfile)
       notify({
         durationMs: 3_000,
         kind: 'success',
@@ -420,7 +418,7 @@ export function ProvidersSettings({
     return <SettingsSkeleton search sections={[{ rows: 6 }]} />
   }
 
-  const hasOauth = oauthProviders.length > 0
+  const hasOauth = catalystProviders(oauthProviders).length > 0
   // With no account flow available, fall back to the Copilot token view.
   const showApiKeys = view === 'keys' || !hasOauth
 
@@ -439,6 +437,7 @@ export function ProvidersSettings({
 
     return (
       <SettingsContent>
+        <SettingsProfileScope className="mb-5" />
         {keyGroups.length > 0 ? (
           <div className="grid gap-3">
             <SearchField
@@ -476,11 +475,13 @@ export function ProvidersSettings({
 
   return (
     <SettingsContent>
+      <SettingsProfileScope className="mb-5" />
       <OAuthPicker
         disconnecting={disconnecting}
         onDisconnect={provider => void handleDisconnect(provider)}
         onTerminalDisconnect={provider => void handleTerminalDisconnect(provider)}
         onWantApiKey={() => onViewChange('keys')}
+        profile={scopeProfile}
         providers={oauthProviders}
       />
     </SettingsContent>

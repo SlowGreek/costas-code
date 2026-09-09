@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ar } from './ar'
 import { en } from './en'
 import { ja } from './ja'
+import { ru } from './ru'
 import { zh } from './zh'
 import { zhHant } from './zh-hant'
 
@@ -27,7 +28,7 @@ const ALLOWED = [
   /hermes-agent/,
   /hermes_agent/,
   /HERMES_[A-Z_]+/,
-  /\bhermes\b/, // lowercase = the CLI binary / command, not the brand
+  /\bhermes\b/ // lowercase = the CLI binary / command, not the brand
 ]
 
 function stripAllowed(value: string): string {
@@ -67,7 +68,7 @@ function* strings(node: unknown, path = ''): Generator<[string, string]> {
   }
 }
 
-const CATALOGS = { en, zh, 'zh-hant': zhHant, ja, ar } as const
+const CATALOGS = { en, zh, 'zh-hant': zhHant, ja, ar, ru } as const
 
 describe('brand: user-facing copy says Catalyst, never Hermes', () => {
   for (const [locale, catalog] of Object.entries(CATALOGS)) {
@@ -75,7 +76,9 @@ describe('brand: user-facing copy says Catalyst, never Hermes', () => {
       const offenders: string[] = []
 
       for (const [path, value] of strings(catalog)) {
-        if (!/Hermes/i.test(value)) {continue}
+        if (!/Hermes/i.test(value)) {
+          continue
+        }
 
         // Key names may still say Hermes (updateHermes, sshHermesPathTitle) —
         // only the VALUE is user-visible, and that is what we check here.
@@ -96,10 +99,7 @@ describe('brand: user-facing copy says Catalyst, never Hermes', () => {
   it('the upstream product name never appears in any locale', () => {
     for (const [locale, catalog] of Object.entries(CATALOGS)) {
       for (const [path, value] of strings(catalog)) {
-        expect(
-          value,
-          `${locale}.${path} contains the upstream product name`
-        ).not.toMatch(/Hermes (Agent|Desktop)\b/)
+        expect(value, `${locale}.${path} contains the upstream product name`).not.toMatch(/Hermes (Agent|Desktop)\b/)
       }
     }
   })

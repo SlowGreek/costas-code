@@ -52,40 +52,10 @@ def test_repository_stage_relieves_eap_for_ssh_and_https_git_clone() -> None:
     )
 
 
-def test_uv_venv_and_dependency_installs_relax_eap() -> None:
+def test_dependency_installs_relax_eap() -> None:
     text = _install_ps1()
-    # Match the interpreter argument loosely for the same reason as the git
-    # clone above: this is a test about ErrorActionPreference, not about how
-    # the interpreter is spelled. The request is arch-qualified on Windows on
-    # ARM (Get-UvPythonRequest), and that shouldn't break an EAP guard.
-    _assert_relaxed_call(text, r"& \$UvCmd venv venv --python [^}\n]+")
     _assert_relaxed_call(text, r"& \$UvCmd sync --extra all --locked")
     _assert_relaxed_call(text, r"& \$UvCmd pip install -e \$tier\.Spec")
-
-
-def test_uv_venv_failure_is_not_swallowed_after_eap_relax() -> None:
-    """Relaxing EAP must not let a genuine `uv venv` failure pass as success.
-
-    Once EAP is relaxed, a real non-zero `uv venv` exit no longer aborts on its
-    own, so install.ps1 must capture $LASTEXITCODE right after the call and fail
-    fast — otherwise the `venv` stage falsely reports success (Invoke-Stage emits
-    ok=true) when no venv was created. Regression guard for the gap caught while
-    reviewing #48372 (the explicit check originally proposed in #48463).
-    """
-    text = _install_ps1()
-    # The uv-venv invocation, then an exit-code capture, then a throw — all
-    # within a small window after the relaxed call.
-    guard = re.search(
-        r"& \$UvCmd venv venv --python [^}\n]+[\s\S]{0,400}?"
-        r"\$LASTEXITCODE[\s\S]{0,200}?"
-        r"-ne 0[\s\S]{0,200}?throw",
-        text,
-    )
-    assert guard is not None, (
-        "install.ps1 must capture uv venv's exit code and throw on failure after "
-        "relaxing ErrorActionPreference, so a genuine venv-creation failure isn't "
-        "reported as a successful stage"
-    )
 
 
 def test_native_eap_helper_always_restores_previous_preference() -> None:
@@ -101,3 +71,10 @@ def test_native_eap_helper_always_restores_previous_preference() -> None:
     assert '$ErrorActionPreference = "Continue"' in body
     assert "finally" in body
     assert "$ErrorActionPreference = $prevEAP" in body
+
+
+def test_uv_venv_process_failure_is_not_swallowed() -> None:
+    """The extracted ProcessStartInfo path still fails the stage on nonzero exit."""
+    text = _install_ps1()
+    assert "$venvExitCode = $venvProcess.ExitCode" in text
+    assert re.search(r"if \(\$venvExitCode -ne 0\)[\s\S]{0,200}?throw", text)

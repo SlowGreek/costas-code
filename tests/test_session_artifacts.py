@@ -2,16 +2,18 @@
 
 import pytest
 
-from hermes_state import SCHEMA_VERSION, SessionDB
+from hermes_state import SessionDB
+from hermes_state_common import SCHEMA_VERSION
 from hermes_state_artifacts import MAX_GRAPH_NODES
 
 
 def test_artifact_table_advances_schema_version(tmp_path):
-    assert SCHEMA_VERSION == 27
     db = SessionDB(db_path=tmp_path / "state.db")
     try:
         stored = db._conn.execute("SELECT version FROM schema_version").fetchone()[0]
-        assert stored == 27
+        assert stored == SCHEMA_VERSION
+        tables = {row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"session_artifacts", "artifact_history"} <= tables
     finally:
         db.close()
 

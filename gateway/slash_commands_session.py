@@ -151,6 +151,10 @@ class GatewaySessionCommandsMixin:
 
     async def _handle_reset_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
         """Handle /new or /reset command."""
+        from gateway.session_bot_chat import bot_chat_route
+
+        if bot_chat_route(self.config, event.source) is not None:
+            return await self._handle_compress_command(event)
         source = event.source
         session_key = self._session_key_for_source(source)
         self._invalidate_session_run_generation(session_key, reason="session_reset")

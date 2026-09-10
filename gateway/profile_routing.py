@@ -58,6 +58,7 @@ class ProfileRoute:
     chat_id: Optional[str] = None
     thread_id: Optional[str] = None
     enabled: bool = True
+    bot_chat: bool = False
 
     @property
     def specificity(self) -> int:
@@ -124,6 +125,9 @@ def parse_profile_routes(raw: Optional[List[Dict[str, Any]]]) -> List[ProfileRou
         if not platform or not profile:
             logger.warning("Skipping profile route %s: missing platform or profile", name)
             continue
+        bot_chat = entry.get("bot_chat", False)
+        if not isinstance(bot_chat, bool) or (bot_chat and not entry.get("chat_id")):
+            raise ValueError(f"Profile route {name!r}: bot_chat requires a boolean and an explicit chat_id")
         # Validate profile name to prevent path traversal (lazy import: cycle).
         try:
             from hermes_cli.profiles import normalize_profile_name, validate_profile_name
@@ -139,6 +143,7 @@ def parse_profile_routes(raw: Optional[List[Dict[str, Any]]]) -> List[ProfileRou
             chat_id=_coerce_route_id(entry.get("chat_id")),
             thread_id=_coerce_route_id(entry.get("thread_id")),
             enabled=entry.get("enabled", True),
+            bot_chat=bot_chat,
         ))
     routes.sort(key=lambda r: r.specificity, reverse=True)
     logger.debug("Loaded %d profile routes (most-specific-first)", len(routes))

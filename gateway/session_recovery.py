@@ -213,6 +213,12 @@ class SessionRecoveryMixin:
         """Find and gate a recoverable row -> (entry or None, migrated_legacy). The legacy
         (pre-workspace) Slack key fallback lives here: exact-key lookup, claimed once per process;
         ``migrated_legacy`` tells the caller to rewrite the peer row to the scoped key."""
+        from gateway.session_bot_chat import resolve_bot_chat_row
+
+        canonical = resolve_bot_chat_row(self, source, session_key)
+        if canonical is not None:
+            return self._create_entry_from_recovered_row(
+                row=canonical, session_key=session_key, source=source, now=now), False
         legacy_key = self._legacy_slack_session_key(source)
         recovered = self._find_gateway_session_row(
             session_key=session_key, source=source, allow_peer_fallback=legacy_key is None,

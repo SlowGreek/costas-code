@@ -873,6 +873,12 @@ class GatewayBusySessionMixin:
         return EphemeralReply(t("gateway.stop.stopped"))
 
     async def _busy_new_command(self, event: MessageEvent, quick_key: str, source):
+        from gateway.session_bot_chat import bot_chat_route
+
+        if bot_chat_route(self.config, source) is not None:
+            return EphemeralReply(
+                "Bot Chat keeps one conversation. Let the current turn finish, then use /compact. "
+                "The current turn and queued messages were left untouched.")
         # /reset and /new bypass the running-agent guard (else they'd queue as user text and replay
         # into the same broken history); clear pending messages so the old text doesn't replay.
         from gateway.run import _INTERRUPT_REASON_RESET

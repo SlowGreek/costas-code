@@ -26,6 +26,7 @@ import type { RosterRow } from './types'
 // last_active watermark per source-qualified bot, seeded on first poll so a
 // fresh mount doesn't mark ancient history unread.
 let watermarksSeeded = false
+const refreshingBots = new Set<string>()
 
 /** User pref: toast on every new bot activity. Default OFF — a busy roster
  *  (cron runs, bot-to-bot chatter) turns the toasts into a firehose, and the
@@ -62,19 +63,26 @@ export function trackInboundActivity(roster: RosterRow[]) {
     const activity = botActivitySession(bot)
     const ts = activity?.last_active || 0
     const prev = rosterWatermarks.get(key) || 0
-    rosterWatermarks.set(key, Math.max(prev, ts))
 
     if (seeding || ts <= prev) {
+      rosterWatermarks.set(key, Math.max(prev, ts))
+
       continue
     }
 
     // Activity in the exact bot owner the user is currently looking at is
     // already visible — never badge the open chat or its same-named twin.
     if ($selectedBot.get() === key) {
-      refreshOpenBotChat(bot)
+      // A busy or failed refresh has not consumed this activity. The existing
+      // roster poll retries it after settle, even if no new message arrives.
+      refreshOpenBotChat(bot, {
+        onRefreshed: () => rosterWatermarks.set(key, Math.max(rosterWatermarks.get(key) || 0, ts))
+      })
 
       continue
     }
+
+    rosterWatermarks.set(key, Math.max(prev, ts))
 
     // Straight into core's unread store, keyed by the same canonical id the
     // row's SessionStatusDot reads — a parallel map here would be a second
@@ -116,18 +124,30 @@ export function trackInboundActivity(roster: RosterRow[]) {
  *  session — a group room or another tab owning the center must not be
  *  yanked away by background activity — and never mid-turn, when the
  *  activity is the turn itself, already streaming. */
-function refreshOpenBotChat(bot: RosterRow, { allowWhileBusy = false }: { allowWhileBusy?: boolean } = {}) {
+function refreshOpenBotChat(
+  bot: RosterRow,
+  { allowWhileBusy = false, onRefreshed }: { allowWhileBusy?: boolean; onRefreshed?: () => void } = {}
+) {
+  const key = botSelectionKey(bot)
   const canonicalIds = [bot.canonical_session?.id, bot.canonical_session?.resolved_id].filter(Boolean).map(String)
   const focused = String(host.state.focusedStoredSessionId?.get?.() || '')
 
-  if (!focused || !canonicalIds.includes(focused) || (!allowWhileBusy && host.state.busy.get())) {
+  if (!focused || !canonicalIds.includes(focused) || refreshingBots.has(key) || (!allowWhileBusy && host.state.busy.get())) {
     return
   }
 
   const generation = getBotOpenGeneration()
-  void openBotCanonicalChat(bot, () => generation === getBotOpenGeneration()).catch(() => {
-    /* the next click or reclaim event re-resolves it */
-  })
+  refreshingBots.add(key)
+  void openBotCanonicalChat(bot, () => generation === getBotOpenGeneration())
+    .then(opened => {
+      if (opened && generation === getBotOpenGeneration()) {
+        onRefreshed?.()
+      }
+    })
+    .catch(() => {
+      /* Leave the watermark pending for the next roster poll. */
+    })
+    .finally(() => refreshingBots.delete(key))
 }
 
 /** Front the bot's canonical Bot Chat when it is ALREADY open as a tab —

@@ -281,11 +281,19 @@ def admit_durable_turn_lease(
     agent._active_session_turn_lease_holder = holder
     agent._active_session_turn_lease_ttl_seconds = LEASE_TTL_SECONDS
     try:
-        if waited:
-            agent._emit_status("Session is free; loading the latest transcript...")
+        # A Bot Chat is shared across surfaces even when their turns never
+        # overlap. An uncontended lease does not prove the caller's cached
+        # transcript includes the other surface's last completed turn.
+        canonical = (db.get_session_by_title("Bot Chat")
+                     if callable(getattr(type(db), "get_session_by_title", None)) else None)
+        canonical_tip = db.get_compression_tip(canonical["id"]) if canonical else None
+        is_bot_chat = canonical is not None and session_id in {canonical["id"], canonical_tip}
+        if waited or is_bot_chat:
+            if waited:
+                agent._emit_status("Session is free; loading the latest transcript...")
             # The holder may have compressed/rotated the session while we waited: reload only
-            # AFTER admission; an immediate acquisition skips this (needless prompt-cache miss).
-            latest_session_id = db.resolve_resume_session_id(session_id)
+            # AFTER admission. Bot Chat follows compression, never an ordinary side branch.
+            latest_session_id = canonical_tip if is_bot_chat else db.resolve_resume_session_id(session_id)
             if latest_session_id:
                 agent.session_id = latest_session_id
                 task_context["session_id"] = latest_session_id

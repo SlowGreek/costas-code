@@ -888,6 +888,11 @@ class SessionStore(
         only ``_entries`` / ``_loaded`` mutations."""
         session_key = self._generate_session_key(source)
         now = _now()
+        from gateway.session_bot_chat import resolve_bot_chat_entry
+
+        bound = resolve_bot_chat_entry(self, source, session_key, now, touch_activity=touch_activity)
+        if bound is not None:
+            return bound
         if not force_new:
             self._adopt_legacy_slack_entry(source, session_key)
 
@@ -1066,7 +1071,14 @@ class SessionStore(
             return dict(entry.model_override) if entry and entry.model_override else None
 
     def reset_session(self, session_key: str, display_name: Optional[str] = None) -> Optional[SessionEntry]:
-        """Force reset a session, creating a new session ID."""
+        """Reset an ordinary session; explicitly bound Bot Chats retain identity."""
+        from gateway.session_bot_chat import bot_chat_route
+
+        existing = self.lookup_by_session_key(session_key)
+        if existing is not None and existing.origin is not None and bot_chat_route(self.config, existing.origin) is not None:
+            # Command handlers compact instead; direct callers cannot silently
+            # sever the explicit forever-chat binding either.
+            return self.get_or_create_session(existing.origin)
         with self._lock:
             old_entry = self._entry_locked(session_key)
             if old_entry is None:

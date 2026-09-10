@@ -164,4 +164,22 @@ describe('the open Bot Chat follows its session on the gateway', () => {
       $selectedStoredSessionId.set(null)
     }
   })
+
+  it('hydrates a Signal update after busy clears without requiring another Signal message', async () => {
+    $selectedBot.set('alpha')
+    $selectedStoredSessionId.set('bot-chat-tip')
+    const busy = vi.spyOn(host.state.busy, 'get').mockReturnValue(true)
+
+    try {
+      trackInboundActivity([activeBot(700)])
+      trackInboundActivity([activeBot(800)])
+      expect(openBotCanonicalChat).not.toHaveBeenCalled()
+      busy.mockReturnValue(false)
+      trackInboundActivity([activeBot(800)])
+      await vi.waitFor(() => expect(openBotCanonicalChat).toHaveBeenCalledTimes(1))
+    } finally {
+      busy.mockRestore()
+      $selectedStoredSessionId.set(null)
+    }
+  })
 })
